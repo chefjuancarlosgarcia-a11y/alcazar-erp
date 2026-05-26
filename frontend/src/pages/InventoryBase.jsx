@@ -36,11 +36,12 @@ const EMPTY_ITEM = {
 }
 
 const EMPTY_ADJUSTMENT = { itemId: "", areaId: "almacen", quantity: "", minimumQuantity: "", reason: "" }
-const MANAGER_ROLES = ["admin", "gerente_general"]
+const MANAGER_ROLES = ["admin", "gerente_general", "encargado_almacen"]
 
 function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
   const { user } = useAuth()
   const canManage = MANAGER_ROLES.includes(user?.role)
+  const canEditCatalog = canManage && section !== "movimientosInventario"
   const [items, setItems] = useState([])
   const [areas, setAreas] = useState([])
   const [movements, setMovements] = useState([])
@@ -297,7 +298,7 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
   const areaNames = Object.fromEntries(areas.map((area) => [area.id, area.name]))
 
   return (
-    <section className="inventory-base">
+    <section className={`inventory-base${canEditCatalog ? " has-mobile-create" : ""}`}>
       <header className="inventory-base-header">
         <div>
           <p className="inventory-base-eyebrow">Supabase Inventory</p>
@@ -307,10 +308,16 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
         <div className="inventory-base-actions">
           <span className={`inventory-live${realtimeActive ? " connected" : ""}`} title={stockRealtime.error || movementsRealtime.error || ""}><i />{realtimeActive ? "En vivo" : "Conectando..."}</span>
           <button type="button" className="secondary" onClick={refresh}>Actualizar</button>
-          {canManage && section !== "movimientosInventario" && <button type="button" className="secondary" onClick={() => setImportOpen(true)}>Importar Excel/CSV</button>}
-          {canManage && section !== "movimientosInventario" && <button type="button" className="primary" onClick={openCreate}>Nuevo producto</button>}
+          {canEditCatalog && <button type="button" className="secondary" onClick={() => setImportOpen(true)}>Importar Excel/CSV</button>}
+          {canEditCatalog && <button type="button" className="primary inventory-header-create" onClick={openCreate}>Nuevo producto</button>}
         </div>
       </header>
+
+      {!canManage && section !== "movimientosInventario" && (
+        <div className="inventory-readonly-note">
+          Modo consulta: sólo Administración, Gerencia General o el Encargado de Almacén puede crear productos y ajustar existencias.
+        </div>
+      )}
 
       {legacyItems.length > 0 && (
         <div className="inventory-base-warning">
@@ -344,6 +351,11 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
       {adjustment && <AdjustmentModal adjustment={adjustment} setAdjustment={setAdjustment} items={items} areas={areas} onSave={saveAdjustment} onClose={() => setAdjustment(null)} />}
       {legacyOpen && <LegacyModal items={legacyItems} canManage={canManage} onMigrate={migrateLegacyItem} onClose={() => setLegacyOpen(false)} />}
       {importOpen && <InventoryImportModal areas={areas} existingItems={items} onClose={() => setImportOpen(false)} onImported={refresh} />}
+      {canEditCatalog && (
+        <button type="button" className="inventory-mobile-create primary" onClick={openCreate}>
+          + Nuevo producto
+        </button>
+      )}
     </section>
   )
 }

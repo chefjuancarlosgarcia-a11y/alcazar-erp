@@ -210,6 +210,11 @@
   color: #7dd3fc;
 }
 
+.profiles-badge.role-encargado_almacen {
+  background: #07362f;
+  color: #99f6e4;
+}
+
 .profiles-badge.status-active {
   background: #052e2c;
   color: #5eead4;

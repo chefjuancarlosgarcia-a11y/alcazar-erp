@@ -1,6 +1,7 @@
 export const PROFILE_ROLES = [
   "admin",
   "gerente_general",
+  "encargado_almacen",
   "rrhh",
   "supervisor",
   "cajero",
@@ -36,4 +37,3 @@ export function canDeactivateUser(currentUser, targetUser) {
   if (currentUser.role === "admin") return true
   return currentUser.role === "gerente_general" && targetUser.role !== "admin"
 }
-

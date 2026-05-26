@@ -28,6 +28,7 @@ const EMPTY_FORM = {
 const ROLE_NAMES = {
   admin: "Admin",
   gerente_general: "Gerente General",
+  encargado_almacen: "Encargado de Almacén",
   rrhh: "RRHH",
   supervisor: "Supervisor",
   cajero: "Cajero",

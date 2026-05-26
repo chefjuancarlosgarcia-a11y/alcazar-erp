@@ -16,10 +16,10 @@ const navigationItems = [
 ]
 
 const inventorySubmenu = [
-  { roles: ["admin", "gerente", "gerente_general", "cocina", "cocinero"], to: "/inventory?section=inventario", label: "Productos" },
+  { roles: ["admin", "gerente", "gerente_general", "encargado_almacen", "cocina", "cocinero"], to: "/inventory?section=inventario", label: "Productos" },
   { roles: ["admin", "gerente", "gerente_general", "supervisor", "encargado_area", "cocina", "cocinero"], to: "/inventory?section=requisicion", label: "Requisiciones" },
-  { roles: ["admin", "gerente", "gerente_general", "cocina", "cocinero"], to: "/inventory?section=movimientosInventario", label: "Movimientos" },
-  { roles: ["admin", "gerente", "gerente_general", "cocina", "cocinero"], to: "/inventory?section=inventarioAreas", label: "Inventario por áreas" },
+  { roles: ["admin", "gerente", "gerente_general", "encargado_almacen", "cocina", "cocinero"], to: "/inventory?section=movimientosInventario", label: "Movimientos" },
+  { roles: ["admin", "gerente", "gerente_general", "encargado_almacen", "cocina", "cocinero"], to: "/inventory?section=inventarioAreas", label: "Inventario por áreas" },
   { roles: ["admin", "gerente", "gerente_general"], to: "/inventory?section=areas", label: "Administrar áreas" },
   { roles: ["admin", "gerente", "gerente_general"], to: "/inventory?section=ordenes", label: "Órdenes de compra" },
   { roles: ["admin", "gerente", "gerente_general"], to: "/inventory?section=proveedores", label: "Proveedores" },

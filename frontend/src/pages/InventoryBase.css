@@ -64,6 +64,15 @@
 }
 .inventory-base-success { border-color: #0f766e; background: #052e2c; color: #99f6e4; }
 .inventory-base-error { border-color: #991b1b; background: #3b1119; color: #fecaca; }
+.inventory-readonly-note {
+  padding: 11px 13px;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: #101b2d;
+  color: #94a3b8;
+  font-size: 13px;
+}
+.inventory-mobile-create { display: none; }
 
 .inventory-base-filters { display: grid; grid-template-columns: minmax(260px, 2fr) minmax(180px, 1fr); gap: 10px; max-width: 700px; }
 .inventory-base input, .inventory-base select, .inventory-base textarea {
@@ -298,4 +307,19 @@
 
 @media (max-width: 620px) {
   .inventory-base-filters, .inventory-form-grid { grid-template-columns: 1fr; }
+  .inventory-base.has-mobile-create { padding-bottom: 84px; }
+  .inventory-header-create { display: none; }
+  .inventory-mobile-create {
+    position: fixed;
+    right: 17px;
+    bottom: calc(18px + env(safe-area-inset-bottom));
+    z-index: 45;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 52px;
+    padding: 13px 18px !important;
+    border-radius: 999px !important;
+    box-shadow: 0 15px 30px rgba(2, 6, 23, .55);
+  }
 }
