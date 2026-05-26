@@ -7,6 +7,7 @@ import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
 import Sidebar from "./LegacySidebar"
 import Dashboard from "./LegacyDashboard"
+import InfoTooltip from "../components/InfoTooltip"
 import { BRANDING } from "../branding"
 import { useAuth } from "../context/AuthContext"
 import { supabase } from "../lib/supabase"
@@ -3639,6 +3640,15 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
       return
     }
 
+    const nombreNormalizado = nombre.trim().toLocaleLowerCase("es").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    const ingredienteDuplicado = ingredientes.find((ingrediente) => (
+      ingrediente.id !== editandoId &&
+      String(ingrediente.nombre || "").trim().toLocaleLowerCase("es").normalize("NFD").replace(/[\u0300-\u036f]/g, "") === nombreNormalizado
+    ))
+    if (ingredienteDuplicado && !confirm(`Ya existe el ingrediente "${ingredienteDuplicado.nombre}". ¿Deseas ingresarlo de igual manera?`)) {
+      return
+    }
+
     const totales = calcularTotales(cantidadComprada, unidadesPorEmpaque, unidadCompra)
 
     if (editandoId) {
@@ -3937,6 +3947,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
 
   function eliminarIngrediente(id) {
     const ingrediente = ingredientes.find((i) => i.id === id)
+    if (!ingrediente) return false
 
     const stockActualIngrediente = ingrediente.stockActual !== undefined && ingrediente.stockActual !== null
       ? ingrediente.stockActual
@@ -3946,9 +3957,10 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
       `⚠ ADVERTENCIA\n\nEstás a punto de eliminar:\n\n${ingrediente.nombre}\nCódigo: ${ingrediente.codigo}\nStock actual: ${stockActualIngrediente}\n\n¿Estás seguro?`
     )
 
-    if (!confirmar) return
+    if (!confirmar) return false
 
     setIngredientes(ingredientes.filter((i) => i.id !== id))
+    return true
   }
 
   async function iniciarSesion() {
@@ -8057,7 +8069,10 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
           </div>
         )}
 
-        <label style={fieldLabelStyle}>Unidad de compra</label>
+        <label style={fieldLabelStyle}>
+          Unidad de compra
+          <InfoTooltip text="Cómo compras este producto al proveedor." />
+        </label>
         <select value={unidadCompra} onChange={(e) => { setUnidadCompra(e.target.value); limpiarErrorCampoIngrediente("unidadCompra") }} style={camposIngredienteFaltantes.unidadCompra ? inputErrorStyle : inputStyle}>
           <option value="g">Gramos</option>
           <option value="kg">Kilogramos</option>
@@ -8075,11 +8090,17 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
         <input type="number" placeholder="Ej: 25" value={cantidadComprada} onChange={(e) => { setCantidadComprada(e.target.value); limpiarErrorCampoIngrediente("cantidadComprada") }} style={camposIngredienteFaltantes.cantidadComprada ? inputErrorStyle : inputStyle} />
         {camposIngredienteFaltantes.cantidadComprada && <p style={fieldErrorStyle}>Campo requerido.</p>}
 
-        <label style={fieldLabelStyle}>Unidades por caja / paquete</label>
+        <label style={fieldLabelStyle}>
+          Unidades por caja / paquete
+          <InfoTooltip text="Cuántas unidades base contiene la unidad de compra." />
+        </label>
         <input type="number" placeholder="Ej: 12" value={unidadesPorEmpaque} onChange={(e) => { setUnidadesPorEmpaque(e.target.value); limpiarErrorCampoIngrediente("unidadesPorEmpaque") }} style={camposIngredienteFaltantes.unidadesPorEmpaque ? inputErrorStyle : inputStyle} />
         {camposIngredienteFaltantes.unidadesPorEmpaque && <p style={fieldErrorStyle}>Campo requerido.</p>}
 
-        <label style={fieldLabelStyle}>Costo unitario</label>
+        <label style={fieldLabelStyle}>
+          Costo unitario
+          <InfoTooltip text="Costo automático de una unidad pequeña utilizada por recetas." />
+        </label>
         <input type="number" placeholder="Ej: 125.50" value={costoUnitario} onChange={(e) => { setCostoUnitario(e.target.value); limpiarErrorCampoIngrediente("costoUnitario") }} style={camposIngredienteFaltantes.costoUnitario ? inputErrorStyle : inputStyle} />
         {camposIngredienteFaltantes.costoUnitario && <p style={fieldErrorStyle}>Campo requerido.</p>}
 
@@ -8095,12 +8116,24 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
 
         <h3>Puntos de control</h3>
 
+        <label style={fieldLabelStyle}>
+          Punto mínimo
+          <InfoTooltip text="Cantidad mínima recomendada antes de alertar falta de stock." />
+        </label>
         <input type="number" placeholder="Punto mínimo" value={puntoMinimo} onChange={(e) => { setPuntoMinimo(e.target.value); limpiarErrorCampoIngrediente("puntoMinimo") }} style={camposIngredienteFaltantes.puntoMinimo ? inputErrorStyle : inputStyle} />
         {camposIngredienteFaltantes.puntoMinimo && <p style={fieldErrorStyle}>Campo requerido.</p>}
 
         <input type="number" placeholder="Mínimo operativo en Cocina" value={puntoMinimoCocina} onChange={(e) => setPuntoMinimoCocina(e.target.value)} style={inputStyle} />
+        <label style={fieldLabelStyle}>
+          Punto orden
+          <InfoTooltip text="Cantidad recomendada para volver a comprar." />
+        </label>
         <input type="number" placeholder="Punto de orden" value={puntoOrden} onChange={(e) => { setPuntoOrden(e.target.value); limpiarErrorCampoIngrediente("puntoOrden") }} style={camposIngredienteFaltantes.puntoOrden ? inputErrorStyle : inputStyle} />
         {camposIngredienteFaltantes.puntoOrden && <p style={fieldErrorStyle}>Campo requerido.</p>}
+        <label style={fieldLabelStyle}>
+          Punto máximo
+          <InfoTooltip text="Cantidad máxima recomendada en inventario." />
+        </label>
         <input type="number" placeholder="Punto máximo" value={puntoMaximo} onChange={(e) => { setPuntoMaximo(e.target.value); limpiarErrorCampoIngrediente("puntoMaximo") }} style={camposIngredienteFaltantes.puntoMaximo ? inputErrorStyle : inputStyle} />
         {camposIngredienteFaltantes.puntoMaximo && <p style={fieldErrorStyle}>Campo requerido.</p>}
 
@@ -8169,6 +8202,18 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
         >
           {editandoId ? "Guardar cambios" : "Agregar al inventario"}
         </button>
+
+        {editandoId && (
+          <button
+            type="button"
+            onClick={() => {
+              if (eliminarIngrediente(editandoId)) limpiarFormulario()
+            }}
+            style={deleteButtonStyle}
+          >
+            Eliminar producto del inventario
+          </button>
+        )}
 
         <button onClick={limpiarFormulario} style={cancelButtonStyle}>
           Cancelar

@@ -63,19 +63,23 @@ function InventoryImportModal({ areas, existingItems, onClose, onImported }) {
     index,
     areas,
     existingItems,
-    nameActions
+    nameActions,
+    rawRows.map((candidate) => extractRow(candidate, mapping))
   )), [areas, existingItems, mapping, nameActions, rawRows])
-  const validRows = preview.filter((row) => row.status !== "error" && row.ready)
-  const errorCount = preview.filter((row) => row.status === "error").length
+  const importableRows = preview.filter((row) => !row.critical)
+  const validRows = importableRows.filter((row) => row.ready)
+  const errorCount = preview.filter((row) => row.critical).length
   const pendingCount = preview.filter((row) => row.status === "warning" && !row.ready).length
+  const correctedCount = importableRows.filter((row) => row.corrected).length
 
-  async function importRows() {
-    if (!validRows.length || pendingCount > 0) return
+  async function importRows(ignoreMinorErrors = false) {
+    const rowsToImport = ignoreMinorErrors ? importableRows : validRows
+    if (!rowsToImport.length || (!ignoreMinorErrors && pendingCount > 0)) return
     setImporting(true)
     setParseError("")
     setResult(null)
-    setImportStatus(`Procesando ${validRows.length} filas en Supabase...`)
-    const rows = validRows.map((row) => {
+    setImportStatus(`Procesando ${rowsToImport.length} filas en Supabase...`)
+    const rows = rowsToImport.map((row) => {
       const matched = findMatch(row.data, existingItems, nameActions[row.index])
       return {
         ...row.data,
@@ -90,11 +94,13 @@ function InventoryImportModal({ areas, existingItems, onClose, onImported }) {
         return
       }
       const summary = {
+        imported: rowsToImport.length,
         created: Number(data?.created || 0),
         updated: Number(data?.updated || 0),
         stocks: Number(data?.stocks || 0),
         movements: Number(data?.movements || 0),
-        omitted: errorCount,
+        corrected: rowsToImport.filter((row) => row.corrected || (!row.ready && ignoreMinorErrors)).length,
+        omitted: preview.length - rowsToImport.length,
         runtimeErrors: []
       }
       setResult(summary)
@@ -135,7 +141,7 @@ function InventoryImportModal({ areas, existingItems, onClose, onImported }) {
               <div className="inventory-import-mapping">
                 {IMPORT_FIELDS.map((field) => (
                   <label className="inventory-field" key={field.id}>
-                    <span>{field.label}{["name", "base_unit"].includes(field.id) ? " *" : ""}</span>
+                    <span>{field.label}{["name", "category"].includes(field.id) ? " *" : ""}</span>
                     <select value={mapping[field.id] || ""} onChange={(event) => setMapping((current) => ({ ...current, [field.id]: event.target.value }))}>
                       <option value="">Sin columna</option>
                       {columns.map((column) => <option key={column} value={column}>{column}</option>)}
@@ -147,18 +153,18 @@ function InventoryImportModal({ areas, existingItems, onClose, onImported }) {
 
             <div className="inventory-import-summary">
               <span>Filas: <strong>{preview.length}</strong></span>
-              <span>Listas: <strong>{validRows.length}</strong></span>
-              <span>Errores: <strong>{errorCount}</strong></span>
-              <span>Por resolver: <strong>{pendingCount}</strong></span>
+              <span>Importables: <strong>{importableRows.length}</strong></span>
+              <span>Corregidas automáticamente: <strong>{correctedCount}</strong></span>
+              <span>Críticas omitidas: <strong>{errorCount}</strong></span>
             </div>
-            {!validRows.length && (
+            {!importableRows.length && (
               <div className="inventory-base-error">
-                No hay filas listas para importar. Revisa el mapeo de columnas obligatorias: Producto y Unidad base.
+                No hay filas importables. Revisa los campos obligatorios: Producto y Categoría, y los códigos duplicados.
               </div>
             )}
             {pendingCount > 0 && (
               <div className="inventory-base-warning">
-                Resuelve las coincidencias por nombre antes de importar.
+                Existen advertencias menores. Puedes resolverlas o importarlas aplicando correcciones automáticas.
               </div>
             )}
 
@@ -171,7 +177,7 @@ function InventoryImportModal({ areas, existingItems, onClose, onImported }) {
                   <span>{row.data.base_unit || "-"} · {row.areaName || row.data.area_id}</span>
                   <span>{row.data.quantity} / {row.data.minimum_quantity}</span>
                   <div>
-                    <strong className={`inventory-import-state ${row.status}`}>{row.status === "error" ? "Error" : row.ready ? "Listo" : "Advertencia"}</strong>
+                    <strong className={`inventory-import-state ${row.status}`}>{row.critical ? "Error crítico" : row.corrected ? "Corregido" : row.ready ? "Listo" : "Advertencia"}</strong>
                     <small>{row.messages.join(" ")}</small>
                     {row.needsNameDecision && (
                       <select value={nameActions[row.index] || ""} onChange={(event) => setNameActions((current) => ({ ...current, [row.index]: event.target.value }))}>
@@ -188,10 +194,18 @@ function InventoryImportModal({ areas, existingItems, onClose, onImported }) {
               <button type="button" className="secondary" onClick={onClose}>Cancelar</button>
               <button
                 type="button"
+                className="secondary"
+                disabled={importing || !importableRows.length}
+                onClick={() => importRows(true)}
+              >
+                {importing ? "Importando..." : "Importar ignorando errores menores"}
+              </button>
+              <button
+                type="button"
                 className="primary"
                 title={!validRows.length ? "No existen filas válidas. Revisa el mapeo." : pendingCount > 0 ? "Resuelve las advertencias pendientes." : ""}
                 disabled={importing || !validRows.length || pendingCount > 0}
-                onClick={importRows}
+                onClick={() => importRows(false)}
               >
                 {importing ? "Importando..." : "Importar filas válidas"}
               </button>
@@ -202,7 +216,8 @@ function InventoryImportModal({ areas, existingItems, onClose, onImported }) {
         {result && (
           <div className="inventory-import-result">
             <h3>Resultado de importación</h3>
-            <p>Productos creados: <strong>{result.created}</strong> · Actualizados: <strong>{result.updated}</strong> · Stocks actualizados: <strong>{result.stocks}</strong> · Movimientos: <strong>{result.movements}</strong> · Errores omitidos: <strong>{result.omitted}</strong></p>
+            <p>Importados: <strong>{result.imported}</strong> · Corregidos automáticamente: <strong>{result.corrected}</strong> · Omitidos: <strong>{result.omitted}</strong></p>
+            <p>Productos creados: <strong>{result.created}</strong> · Actualizados: <strong>{result.updated}</strong> · Stocks actualizados: <strong>{result.stocks}</strong> · Movimientos: <strong>{result.movements}</strong></p>
             {result.runtimeErrors.map((message) => <small key={message}>{message}</small>)}
           </div>
         )}
@@ -219,37 +234,56 @@ function extractRow(row, mapping) {
   return result
 }
 
-function validateRow(source, index, areas, existingItems, nameActions) {
-  const messages = []
+function validateRow(source, index, areas, existingItems, nameActions, sourceRows) {
+  const criticalErrors = []
+  const corrections = []
+  const defaultArea = areas.find((entry) => normalize(entry.id) === "almacen") || areas[0]
+  const purchaseUnit = source.purchase_unit || "Unidad/Pieza"
+  const baseUnit = source.base_unit || purchaseUnit
+  const quantity = normalizedNumber(source.quantity, 1, 0)
+  const minimumQuantity = normalizedNumber(source.minimum_quantity, 0, 0)
+  const conversionFactor = normalizedNumber(source.conversion_factor, 1, 0.0000001)
+  const cost = normalizedNumber(source.cost_per_base_unit, 0, 0, true)
   const data = {
     ...source,
-    area_id: source.area_id || "almacen",
-    quantity: numberOrDefault(source.quantity, 0),
-    minimum_quantity: numberOrDefault(source.minimum_quantity, 0),
-    conversion_factor: numberOrDefault(source.conversion_factor, 1),
-    cost_per_base_unit: numberOrDefault(source.cost_per_base_unit, 0)
+    purchase_unit: purchaseUnit,
+    base_unit: baseUnit,
+    area_id: defaultArea?.id || "almacen",
+    quantity: quantity.value,
+    minimum_quantity: minimumQuantity.value,
+    conversion_factor: conversionFactor.value,
+    cost_per_base_unit: cost.value
   }
-  if (!source.name) messages.push("Falta nombre.")
-  if (!source.base_unit) messages.push("Falta unidad base.")
-  if (!validNumber(source.quantity, 0)) messages.push("Cantidad inválida.")
-  if (!validNumber(source.minimum_quantity, 0)) messages.push("Mínimo inválido.")
-  if (!validNumber(source.cost_per_base_unit, 0)) messages.push("Costo inválido.")
-  if (!validNumber(source.conversion_factor, 0.0000001)) messages.push("Factor inválido.")
-  const area = areas.find((entry) => normalize(entry.id) === normalize(data.area_id) || normalize(entry.name) === normalize(data.area_id))
-  if (!area) messages.push("Área no existe.")
-  else data.area_id = area.id
+  if (!source.name) criticalErrors.push("Nombre vacío.")
+  if (!source.category) criticalErrors.push("Categoría vacía.")
+  if (!source.purchase_unit) corrections.push('Unidad de compra definida como "Unidad/Pieza".')
+  if (!source.base_unit) corrections.push(`Unidad base definida como "${baseUnit}".`)
+  if (!source.quantity || quantity.corrected) corrections.push("Cantidad definida automáticamente.")
+  if (minimumQuantity.corrected) corrections.push("Punto mínimo corregido a 0.")
+  if (conversionFactor.corrected) corrections.push("Unidades por empaque corregidas a 1.")
+  if (cost.corrected) corrections.push(`Costo normalizado a ${cost.value}.`)
+  const suppliedArea = source.area_id && areas.find((entry) => normalize(entry.id) === normalize(source.area_id) || normalize(entry.name) === normalize(source.area_id))
+  if (suppliedArea) data.area_id = suppliedArea.id
+  else if (source.area_id) corrections.push(`Área no reconocida; se usará ${defaultArea?.name || "almacén"}.`)
+  const duplicateSkuInFile = data.sku && sourceRows.some((row, rowIndex) => (
+    rowIndex !== index && normalize(row.sku) === normalize(data.sku)
+  ))
+  const existingBySku = data.sku && existingItems.find((item) => normalize(item.sku) === normalize(data.sku))
+  if (duplicateSkuInFile || existingBySku) criticalErrors.push(`Código duplicado: ${data.sku}.`)
   const existingByName = !data.sku && existingItems.find((item) => normalize(item.name) === normalize(data.name))
   const needsNameDecision = Boolean(existingByName)
-  if (needsNameDecision && !nameActions[index]) messages.push("Ya existe un producto con este nombre y sin SKU.")
-  const hardError = messages.some((message) => !message.startsWith("Ya existe"))
+  if (needsNameDecision && !nameActions[index]) corrections.push("Ya existe un producto con este nombre y sin SKU; se creará nuevo al ignorar errores menores.")
+  const messages = [...criticalErrors, ...corrections]
   return {
     index,
     data,
-    areaName: area?.name || "",
+    areaName: suppliedArea?.name || defaultArea?.name || "",
     messages: messages.length ? messages : ["Validación correcta."],
     needsNameDecision,
-    status: hardError ? "error" : needsNameDecision && !nameActions[index] ? "warning" : "ready",
-    ready: !hardError && (!needsNameDecision || Boolean(nameActions[index]))
+    critical: criticalErrors.length > 0,
+    corrected: corrections.length > 0,
+    status: criticalErrors.length ? "error" : needsNameDecision && !nameActions[index] ? "warning" : corrections.length ? "warning" : "ready",
+    ready: !criticalErrors.length && (!needsNameDecision || Boolean(nameActions[index]))
   }
 }
 
@@ -274,14 +308,20 @@ function canonicalKey(value) {
   return normalize(value).replace(/[^a-z0-9]/g, "")
 }
 
-function numberOrDefault(value, fallback) {
-  return String(value || "").trim() === "" ? fallback : Number(String(value).replace(",", "."))
-}
-
-function validNumber(value, minimum) {
-  if (String(value || "").trim() === "") return true
-  const number = numberOrDefault(value, minimum)
-  return Number.isFinite(number) && number >= minimum
+function normalizedNumber(value, fallback, minimum, currency = false) {
+  const original = String(value || "").trim()
+  if (!original) return { value: fallback, corrected: true }
+  let cleaned = original
+  if (currency) cleaned = cleaned.replace(/[Qq]/g, "").replace(/\s+/g, "")
+  if (cleaned.includes(",") && cleaned.includes(".")) {
+    const decimalMark = cleaned.lastIndexOf(",") > cleaned.lastIndexOf(".") ? "," : "."
+    cleaned = decimalMark === "," ? cleaned.replace(/\./g, "").replace(",", ".") : cleaned.replace(/,/g, "")
+  } else {
+    cleaned = cleaned.replace(",", ".")
+  }
+  const number = Number(cleaned)
+  if (!Number.isFinite(number) || number < minimum) return { value: fallback, corrected: true }
+  return { value: number, corrected: currency && cleaned !== original }
 }
 
 export default InventoryImportModal

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useAuth } from "../context/AuthContext"
 import useSupabaseRealtime from "../hooks/useSupabaseRealtime"
+import InfoTooltip from "../components/InfoTooltip"
 import InventoryImportModal from "../components/InventoryImportModal"
 import { getActiveAreas } from "../services/areasService"
 import {
@@ -16,13 +17,32 @@ import {
 } from "../services/inventoryService"
 import "./InventoryBase.css"
 
+const DEFAULT_INVENTORY_UNIT = "Unidad/Pieza"
+const INVENTORY_UNITS = [
+  DEFAULT_INVENTORY_UNIT,
+  "Gramos",
+  "Kilogramos",
+  "Libras",
+  "Onzas",
+  "Mililitros",
+  "Litros",
+  "Galón",
+  "Caja",
+  "Paquete",
+  "Bolsa",
+  "Lata",
+  "Botella",
+  "Quintal"
+]
+
 const EMPTY_ITEM = {
   name: "",
   sku: "",
   category: "",
-  purchase_unit: "",
-  base_unit: "g",
+  purchase_unit: DEFAULT_INVENTORY_UNIT,
+  base_unit: DEFAULT_INVENTORY_UNIT,
   conversion_factor: "1",
+  purchase_price: "",
   cost_per_base_unit: "0",
   supplier: "",
   image_url: "",
@@ -118,9 +138,10 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
       name: item.name || "",
       sku: item.sku || "",
       category: item.category || "",
-      purchase_unit: item.purchase_unit || "",
-      base_unit: item.base_unit || "g",
+      purchase_unit: unitForForm(item.purchase_unit),
+      base_unit: unitForForm(item.base_unit),
       conversion_factor: String(item.conversion_factor || 1),
+      purchase_price: item.purchase_price == null ? "" : String(item.purchase_price),
       cost_per_base_unit: String(item.cost_per_base_unit || 0),
       supplier: item.supplier || "",
       image_url: item.image_url || "",
@@ -136,13 +157,34 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
   async function saveItem(event) {
     event.preventDefault()
     setError("")
-    if (!itemForm.name.trim() || !itemForm.base_unit.trim()) {
-      setError("Nombre y unidad base son obligatorios.")
+    if (!itemForm.name.trim() || !itemForm.purchase_unit.trim() || !itemForm.base_unit.trim()) {
+      setError("Nombre, unidad de compra y unidad base son obligatorios.")
       return
     }
+    const conversionFactor = Number(itemForm.conversion_factor)
+    const purchasePrice = itemForm.purchase_price === "" ? null : Number(itemForm.purchase_price)
+    if (!Number.isFinite(conversionFactor) || conversionFactor <= 0) {
+      setError("El factor de conversión debe ser mayor a 0.")
+      return
+    }
+    if (purchasePrice !== null && (!Number.isFinite(purchasePrice) || purchasePrice < 0)) {
+      setError("El precio de compra no puede ser negativo.")
+      return
+    }
+    const duplicateItem = items.find((item) => (
+      item.id !== editingItem?.id &&
+      normalizeItemName(item.name) === normalizeItemName(itemForm.name)
+    ))
+    if (duplicateItem && !window.confirm(`Ya existe el producto "${duplicateItem.name}". ¿Deseas ingresarlo de igual manera?`)) {
+      return
+    }
+    const itemToSave = {
+      ...itemForm,
+      cost_per_base_unit: String(calculatedBaseCost(itemForm))
+    }
     const result = editingItem
-      ? await updateInventoryItem(editingItem.id, itemForm)
-      : await createInventoryItem(itemForm)
+      ? await updateInventoryItem(editingItem.id, itemToSave)
+      : await createInventoryItem(itemToSave)
     if (result.error) {
       setError(result.error.message || "No se pudo guardar el producto inventariable.")
       return
@@ -205,6 +247,10 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
       return
     }
     setMessage("Producto desactivado.")
+    if (editingItem?.id === item.id) {
+      setShowItemForm(false)
+      setEditingItem(null)
+    }
     await refresh()
   }
 
@@ -250,50 +296,79 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
     await refresh()
   }
 
-  async function migrateLegacyItem(legacyItem) {
+  async function migrateLegacyItem(legacyItem, options = {}) {
+    const { announce = true, refreshAfter = true } = options
     const initialQuantity = Number(legacyItem?.stockByLocation?.almacen ?? legacyItem.stockActual ?? legacyItem.totalUnidades ?? 0)
     const minimumQuantity = Number(legacyItem?.minimumStockByLocation?.almacen ?? legacyItem.puntoMinimo ?? 0)
+    const legacyUnit = unitForForm(legacyItem.unidadCompra)
     const { data, error: createError } = await createInventoryItem({
       name: legacyItem.nombre || "Producto legacy",
       sku: legacyItem.codigo || legacyItem.codigoBarras || "",
       category: legacyItem.categoria || "",
-      purchase_unit: legacyItem.unidadCompra || "unidad",
-      base_unit: legacyItem.unidadCompra || "unidad",
+      purchase_unit: legacyUnit,
+      base_unit: legacyUnit,
       conversion_factor: 1,
       cost_per_base_unit: Number(legacyItem.costoUnitario || 0),
       supplier: legacyItem.proveedorNombre || "",
+      purchase_price: Number(legacyItem.costoUnitario || 0),
       notes: "Migrado manualmente desde inventario local.",
       active: true
     })
     if (createError) {
-      setError(createError.message || "No se pudo migrar el item local.")
-      return
+      const errorMessage = createError.message || "No se pudo migrar el item local."
+      if (announce) setError(errorMessage)
+      return { ok: false, message: errorMessage }
     }
     const stockResult = await adjustAreaInventory(
       data.id,
       "almacen",
       initialQuantity,
       minimumQuantity,
-      legacyItem.unidadCompra || "unidad",
+      legacyUnit,
       "Migración manual desde localStorage"
     )
     if (stockResult.error) {
-      setError("El item fue creado, pero falló la migración del stock inicial.")
-      return
+      const errorMessage = "El item fue creado, pero no se pudo registrar su stock inicial."
+      if (announce) setError(errorMessage)
+      return { ok: false, message: errorMessage }
     }
-    const nextLegacy = legacyItems.map((entry) => entry.id === legacyItem.id
-      ? { ...entry, migratedToSupabaseId: data.id, migratedAt: new Date().toISOString() }
-      : entry)
-    localStorage.setItem("ingredientes", JSON.stringify(nextLegacy))
-    setLegacyItems(nextLegacy)
-    setMessage(`${legacyItem.nombre || "Item"} migrado a Supabase.`)
+    setLegacyItems((current) => {
+      const nextLegacy = current.map((entry) => entry.id === legacyItem.id
+        ? { ...entry, migratedToSupabaseId: data.id, migratedAt: new Date().toISOString() }
+        : entry)
+      localStorage.setItem("ingredientes", JSON.stringify(nextLegacy))
+      return nextLegacy
+    })
+    if (announce) {
+      setError("")
+      setMessage(`${legacyItem.nombre || "Item"} migrado a Supabase.`)
+    }
+    if (refreshAfter) await refresh()
+    return { ok: true }
+  }
+
+  async function migrateSelectedLegacyItems(selectedIds) {
+    const selected = legacyItems.filter((item) => selectedIds.includes(String(item.id)) && !item.migratedToSupabaseId)
+    let migrated = 0
+    const failures = []
+
+    for (const legacyItem of selected) {
+      const result = await migrateLegacyItem(legacyItem, { announce: false, refreshAfter: false })
+      if (result.ok) migrated += 1
+      else failures.push(`${legacyItem.nombre || "Item"}: ${result.message}`)
+    }
+
     await refresh()
+    if (migrated) setMessage(`${migrated} producto(s) local(es) migrado(s) a Supabase.`)
+    setError(failures.length ? `No se migraron ${failures.length} producto(s). ${failures.join(" ")}` : "")
+    return { migrated, failed: failures.length }
   }
 
   const visibleItems = useMemo(() => items.filter((item) => {
     const text = `${item.name || ""} ${item.sku || ""} ${item.category || ""}`.toLowerCase()
     return (!query || text.includes(query.toLowerCase())) && (areaFilter === "todos" || item.active !== false)
   }), [areaFilter, items, query])
+  const pendingLegacyCount = legacyItems.filter((item) => !item.migratedToSupabaseId).length
   const movementItems = Object.fromEntries(items.map((item) => [item.id, item]))
   const areaNames = Object.fromEntries(areas.map((area) => [area.id, area.name]))
 
@@ -319,10 +394,10 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
         </div>
       )}
 
-      {legacyItems.length > 0 && (
+      {pendingLegacyCount > 0 && (
         <div className="inventory-base-warning">
-          Existen productos de inventario locales. Deben migrarse a Supabase.
-          {canManage && <button type="button" onClick={() => setLegacyOpen(true)}>Ver inventario local legacy</button>}
+          Existen {pendingLegacyCount} producto(s) de inventario local pendiente(s) de migrar a Supabase.
+          {canManage && <button type="button" onClick={() => setLegacyOpen(true)}>Seleccionar y migrar</button>}
         </div>
       )}
       {message && <div className="inventory-base-success">{message}</div>}
@@ -347,9 +422,9 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
       {section === "inventarioAreas" && <AreaStockDashboard items={items} areas={areas} canManage={canManage} onAdjust={openAdjustment} />}
       {section === "movimientosInventario" && <MovementsTable movements={movements} items={movementItems} areas={areaNames} loading={loading} />}
 
-      {showItemForm && <ItemModal form={itemForm} setForm={setItemForm} editing={Boolean(editingItem)} onSave={saveItem} onClose={() => setShowItemForm(false)} />}
+      {showItemForm && <ItemModal form={itemForm} setForm={setItemForm} editingItem={editingItem} onSave={saveItem} onDelete={deactivate} onClose={() => setShowItemForm(false)} />}
       {adjustment && <AdjustmentModal adjustment={adjustment} setAdjustment={setAdjustment} items={items} areas={areas} onSave={saveAdjustment} onClose={() => setAdjustment(null)} />}
-      {legacyOpen && <LegacyModal items={legacyItems} canManage={canManage} onMigrate={migrateLegacyItem} onClose={() => setLegacyOpen(false)} />}
+      {legacyOpen && <LegacyModal items={legacyItems} canManage={canManage} onMigrate={migrateLegacyItem} onMigrateSelected={migrateSelectedLegacyItems} onClose={() => setLegacyOpen(false)} />}
       {importOpen && <InventoryImportModal areas={areas} existingItems={items} onClose={() => setImportOpen(false)} onImported={refresh} />}
       {canEditCatalog && (
         <button type="button" className="inventory-mobile-create primary" onClick={openCreate}>
@@ -361,6 +436,9 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
 }
 
 function InventoryCatalog({ loading, items, areas, query, setQuery, areaFilter, setAreaFilter, canManage, onEdit, onDeactivate, onAdjust }) {
+  const totalInvestment = items.reduce((total, item) => (
+    total + Number(item.totalQuantity || 0) * Number(item.cost_per_base_unit || 0)
+  ), 0)
   return (
     <>
       <div className="inventory-base-filters">
@@ -370,20 +448,26 @@ function InventoryCatalog({ loading, items, areas, query, setQuery, areaFilter, 
           {areas.map((area) => <option value={area.id} key={area.id}>{area.name}</option>)}
         </select>
       </div>
+      <div className="inventory-investment-summary">
+        <span>Valor total invertido en inventario</span>
+        <strong>{quetzales(totalInvestment)}</strong>
+      </div>
       <div className="inventory-table">
-        <div className="inventory-table-head"><span>Producto</span><span>Unidad</span><span>Stock área</span><span>Stock total</span><span>Mínimo</span><span>Estado</span><span>Acciones</span></div>
+        <div className="inventory-table-head"><span>Producto</span><span>Unidad</span><span>Stock área</span><span>Stock total</span><span>Valor</span><span>Mínimo</span><span>Estado</span><span>Acciones</span></div>
         {loading ? <p className="inventory-empty">Cargando inventario...</p> : items.map((item) => {
           const areaStock = areaFilter === "todos" ? item.totalQuantity : stockOf(item, areaFilter)
           const minimum = areaFilter === "todos" ? minimumOf(item, "almacen") : minimumOf(item, areaFilter)
+          const investment = Number(item.totalQuantity || 0) * Number(item.cost_per_base_unit || 0)
           return (
             <article className="inventory-row" key={item.id}>
               <div className="inventory-product-cell">
                 <ProductImage item={item} />
                 <span><strong>{item.name}</strong><small>{item.category || "Sin categoría"} · {item.sku || "Sin SKU"}</small></span>
               </div>
-              <span>{item.base_unit}</span>
+              <span>{unitForForm(item.base_unit)}</span>
               <strong>{areaStock}</strong>
               <strong>{item.totalQuantity}</strong>
+              <strong>{quetzales(investment)}</strong>
               <span>{minimum}</span>
               <StockBadge quantity={areaStock} minimum={minimum} active={item.active} />
               <div className="inventory-row-actions">
@@ -408,7 +492,7 @@ function AreaStockDashboard({ items, areas, canManage, onAdjust }) {
     return <article className="inventory-area-card" key={area.id}>
       <h2>{area.name}</h2>
       <div className="inventory-area-metrics"><span>Productos<strong>{areaItems.length}</strong></span><span>Bajos<strong>{low}</strong></span><span>Agotados<strong>{empty}</strong></span></div>
-      {areaItems.slice(0, 6).map((item) => <div className="inventory-area-line" key={item.id}><ProductImage item={item} small /><span>{item.name}</span><strong>{stockOf(item, area.id)} {item.base_unit}</strong>{canManage && <button type="button" onClick={() => onAdjust(item, area.id)}>Ajustar</button>}</div>)}
+      {areaItems.slice(0, 6).map((item) => <div className="inventory-area-line" key={item.id}><ProductImage item={item} small /><span>{item.name}</span><strong>{stockOf(item, area.id)} {unitForForm(item.base_unit)}</strong>{canManage && <button type="button" onClick={() => onAdjust(item, area.id)}>Ajustar</button>}</div>)}
     </article>
   })}</div>
 }
@@ -429,7 +513,8 @@ function MovementsTable({ movements, items, areas, loading }) {
   </div>
 }
 
-function ItemModal({ form, setForm, editing, onSave, onClose }) {
+function ItemModal({ form, setForm, editingItem, onSave, onDelete, onClose }) {
+  const editing = Boolean(editingItem)
   const [imageError, setImageError] = useState("")
   const update = (field, value) => setForm((current) => ({ ...current, [field]: value }))
   function selectImage(event) {
@@ -467,12 +552,18 @@ function ItemModal({ form, setForm, editing, onSave, onClose }) {
       <Field label="SKU"><input value={form.sku} onChange={(event) => update("sku", event.target.value)} /></Field>
       <Field label="Categoría"><input value={form.category} onChange={(event) => update("category", event.target.value)} /></Field>
       <Field label="Proveedor"><input value={form.supplier} onChange={(event) => update("supplier", event.target.value)} /></Field>
-      <Field label="Unidad de compra"><input value={form.purchase_unit} onChange={(event) => update("purchase_unit", event.target.value)} placeholder="kg, caja, botella" /></Field>
-      <Field label="Unidad base"><input required value={form.base_unit} onChange={(event) => update("base_unit", event.target.value)} placeholder="g, ml, unidad" /></Field>
-      <Field label="Factor conversión"><input min="0.0001" step="any" type="number" value={form.conversion_factor} onChange={(event) => update("conversion_factor", event.target.value)} /></Field>
-      <Field label="Costo por unidad base"><input min="0" step="any" type="number" value={form.cost_per_base_unit} onChange={(event) => update("cost_per_base_unit", event.target.value)} /></Field>
+      <Field label="Unidad de compra" tooltip="Cómo compras este producto al proveedor."><InventoryUnitSelect required value={form.purchase_unit} onChange={(value) => update("purchase_unit", value)} /></Field>
+      <Field label="Unidad base" tooltip="Cómo el sistema consume este producto en recetas e inventario."><InventoryUnitSelect required value={form.base_unit} onChange={(value) => update("base_unit", value)} /></Field>
+      <Field label="Factor conversión" tooltip="Cuántas unidades base contiene la unidad de compra."><input min="0.0001" step="any" type="number" value={form.conversion_factor} onChange={(event) => update("conversion_factor", event.target.value)} /></Field>
+      <Field label="Precio de compra" tooltip="Costo total de la unidad como la compras al proveedor.">
+        <div className="inventory-currency-input"><span>Q</span><input min="0" step="0.01" type="number" placeholder="0.00" value={form.purchase_price} onChange={(event) => update("purchase_price", event.target.value)} /></div>
+      </Field>
+      <Field label="Costo por unidad base" tooltip="Costo automático de una unidad pequeña utilizada por recetas.">
+        <input readOnly value={calculatedBaseCost(form)} />
+        {form.purchase_price === "" && editing && <small className="inventory-base-muted">Conserva el costo registrado previamente hasta indicar un precio de compra.</small>}
+      </Field>
       {!editing && <Field label="Stock inicial almacén"><input min="0" step="any" type="number" value={form.initialQuantity} onChange={(event) => update("initialQuantity", event.target.value)} /></Field>}
-      {!editing && <Field label="Mínimo almacén"><input min="0" step="any" type="number" value={form.minimumQuantity} onChange={(event) => update("minimumQuantity", event.target.value)} /></Field>}
+      {!editing && <Field label="Punto mínimo" tooltip="Cantidad mínima recomendada antes de alertar falta de stock."><input min="0" step="any" type="number" value={form.minimumQuantity} onChange={(event) => update("minimumQuantity", event.target.value)} /></Field>}
     </div>
     <Field label="Imagen del producto">
       <div className="inventory-image-actions">
@@ -495,8 +586,21 @@ function ItemModal({ form, setForm, editing, onSave, onClose }) {
       </div>
     ) : <p className="inventory-base-muted">Sin imagen seleccionada.</p>}
     <Field label="Notas"><textarea value={form.notes} onChange={(event) => update("notes", event.target.value)} /></Field>
-    <div className="inventory-modal-actions"><button type="button" className="secondary" onClick={onClose}>Cancelar</button><button type="submit" className="primary">Guardar</button></div>
+    <div className="inventory-modal-actions">
+      {editingItem?.active !== false && <button type="button" className="danger inventory-delete-action" onClick={() => onDelete(editingItem)}>Eliminar producto</button>}
+      <button type="button" className="secondary" onClick={onClose}>Cancelar</button>
+      <button type="submit" className="primary">Guardar</button>
+    </div>
   </form></div>
+}
+
+function InventoryUnitSelect({ value, onChange, required = false }) {
+  const legacyValue = value && !INVENTORY_UNITS.includes(value) ? value : ""
+  return <select required={required} value={value} onChange={(event) => onChange(event.target.value)}>
+    <option value="">Seleccionar unidad</option>
+    {legacyValue && <option value={legacyValue}>Otra: {legacyValue}</option>}
+    {INVENTORY_UNITS.map((unit) => <option key={unit} value={unit}>{unit}</option>)}
+  </select>
 }
 
 function AdjustmentModal({ adjustment, setAdjustment, items, areas, onSave, onClose }) {
@@ -507,25 +611,56 @@ function AdjustmentModal({ adjustment, setAdjustment, items, areas, onSave, onCl
     <p className="inventory-base-muted">{item?.name}</p>
     <Field label="Área"><select value={adjustment.areaId} onChange={(event) => update("areaId", event.target.value)}>{areas.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}</select></Field>
     <Field label="Nueva cantidad"><input type="number" step="any" min="0" required value={adjustment.quantity} onChange={(event) => update("quantity", event.target.value)} /></Field>
-    <Field label="Mínimo del área"><input type="number" step="any" min="0" required value={adjustment.minimumQuantity} onChange={(event) => update("minimumQuantity", event.target.value)} /></Field>
+    <Field label="Punto mínimo" tooltip="Cantidad mínima recomendada antes de alertar falta de stock."><input type="number" step="any" min="0" required value={adjustment.minimumQuantity} onChange={(event) => update("minimumQuantity", event.target.value)} /></Field>
     <Field label="Motivo del ajuste"><textarea value={adjustment.reason} onChange={(event) => update("reason", event.target.value)} placeholder="Obligatorio si cambia la existencia" /></Field>
     <div className="inventory-modal-actions"><button type="button" className="secondary" onClick={onClose}>Cancelar</button><button type="submit" className="primary">Registrar ajuste</button></div>
   </form></div>
 }
 
-function LegacyModal({ items, canManage, onMigrate, onClose }) {
+function LegacyModal({ items, canManage, onMigrate, onMigrateSelected, onClose }) {
+  const pendingItems = items.filter((item) => !item.migratedToSupabaseId)
+  const [selectedIds, setSelectedIds] = useState([])
+  const [migrating, setMigrating] = useState(false)
+  const allSelected = pendingItems.length > 0 && pendingItems.every((item) => selectedIds.includes(String(item.id)))
+
+  function toggleSelected(itemId) {
+    const id = String(itemId)
+    setSelectedIds((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id])
+  }
+
+  function toggleAll() {
+    setSelectedIds(allSelected ? [] : pendingItems.map((item) => String(item.id)))
+  }
+
+  async function migrateSelected() {
+    if (!selectedIds.length) return
+    setMigrating(true)
+    await onMigrateSelected(selectedIds)
+    setSelectedIds([])
+    setMigrating(false)
+  }
+
   return <div className="inventory-modal-backdrop"><section className="inventory-modal legacy">
     <header><div><p className="inventory-base-eyebrow">Importación temporal</p><h2>Inventario local legacy</h2></div><button type="button" onClick={onClose}>Cerrar</button></header>
-    <p className="inventory-base-muted">Estos registros no alimentan el inventario oficial hasta migrarlos individualmente.</p>
+    <p className="inventory-base-muted">Estos registros no alimentan el inventario oficial hasta migrarlos a Supabase.</p>
+    {canManage && pendingItems.length > 0 && (
+      <div className="legacy-bulk-actions">
+        <label><input type="checkbox" checked={allSelected} onChange={toggleAll} /> Seleccionar todos pendientes</label>
+        <button type="button" className="primary" disabled={!selectedIds.length || migrating} onClick={migrateSelected}>
+          {migrating ? "Migrando..." : `Migrar seleccionados (${selectedIds.length})`}
+        </button>
+      </div>
+    )}
     {items.map((item) => <article className="legacy-item" key={item.id || item.nombre}>
+      {canManage && !item.migratedToSupabaseId && <input type="checkbox" checked={selectedIds.includes(String(item.id))} onChange={() => toggleSelected(item.id)} aria-label={`Seleccionar ${item.nombre || "producto"}`} />}
       <div><strong>{item.nombre || "Sin nombre"}</strong><small>{item.codigo || "Sin código"} · Almacén: {item.stockByLocation?.almacen ?? item.stockActual ?? 0}</small></div>
-      {item.migratedToSupabaseId ? <span className="migrated">Migrado</span> : canManage && <button type="button" onClick={() => onMigrate(item)}>Migrar item local a Supabase</button>}
+      {item.migratedToSupabaseId ? <span className="migrated">Migrado</span> : canManage && <button type="button" disabled={migrating} onClick={() => onMigrate(item)}>Migrar individual</button>}
     </article>)}
   </section></div>
 }
 
-function Field({ label, children }) {
-  return <label className="inventory-field"><span>{label}</span>{children}</label>
+function Field({ label, tooltip, children }) {
+  return <label className="inventory-field"><span>{label}{tooltip && <InfoTooltip text={tooltip} />}</span>{children}</label>
 }
 
 function ProductImage({ item, small = false }) {
@@ -549,6 +684,37 @@ function minimumOf(item, areaId) {
 
 function initials(name) {
   return String(name || "P").split(/\s+/).slice(0, 2).map((part) => part.charAt(0).toUpperCase()).join("")
+}
+
+function normalizeItemName(name) {
+  return String(name || "")
+    .trim()
+    .toLocaleLowerCase("es")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+}
+
+function unitForForm(value) {
+  const unit = String(value || "").trim()
+  if (!unit || ["unidad", "pieza", "unidad/pieza"].includes(unit.toLocaleLowerCase("es"))) {
+    return DEFAULT_INVENTORY_UNIT
+  }
+  return unit
+}
+
+function calculatedBaseCost(item) {
+  const purchasePrice = item.purchase_price === "" || item.purchase_price == null
+    ? null
+    : Number(item.purchase_price)
+  const factor = Number(item.conversion_factor)
+  if (purchasePrice !== null && Number.isFinite(purchasePrice) && Number.isFinite(factor) && factor > 0) {
+    return purchasePrice / factor
+  }
+  return Number(item.cost_per_base_unit || 0)
+}
+
+function quetzales(value) {
+  return `Q${Number(value || 0).toFixed(2)}`
 }
 
 function storagePathFromUrl(url) {

@@ -1,0 +1,92 @@
+.info-tooltip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.info-tooltip-trigger {
+  width: 18px;
+  height: 18px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid #475569;
+  border-radius: 999px;
+  background: #101b2d;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color .15s ease, color .15s ease, background .15s ease;
+}
+
+.info-tooltip-trigger:hover,
+.info-tooltip-trigger:focus {
+  outline: none;
+  border-color: #2dd4bf;
+  background: #12363c;
+  color: #99f6e4;
+}
+
+.info-tooltip-content {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 10px);
+  z-index: 70;
+  width: max-content;
+  max-width: min(260px, calc(100vw - 42px));
+  padding: 9px 11px;
+  border: 1px solid #334155;
+  border-radius: 9px;
+  background: #101b2d;
+  box-shadow: 0 12px 25px rgba(2, 6, 23, .46);
+  color: #e2e8f0;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.42;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 4px);
+  transition: opacity .14s ease, transform .14s ease;
+}
+
+.info-tooltip-content::after {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  border-right: 1px solid #334155;
+  border-bottom: 1px solid #334155;
+  background: #101b2d;
+  content: "";
+  transform: translate(-50%, -4px) rotate(45deg);
+}
+
+.info-tooltip.is-open .info-tooltip-content,
+.info-tooltip:hover .info-tooltip-content,
+.info-tooltip:focus-within .info-tooltip-content {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+@media (max-width: 620px) {
+  .info-tooltip-content {
+    left: auto;
+    right: -12px;
+    transform: translate(0, 4px);
+  }
+
+  .info-tooltip.is-open .info-tooltip-content,
+  .info-tooltip:hover .info-tooltip-content,
+  .info-tooltip:focus-within .info-tooltip-content {
+    transform: translate(0, 0);
+  }
+
+  .info-tooltip-content::after {
+    left: auto;
+    right: 14px;
+  }
+}

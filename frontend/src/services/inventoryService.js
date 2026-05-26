@@ -23,6 +23,9 @@ function itemPayload(item) {
     purchase_unit: item.purchase_unit?.trim() || null,
     base_unit: item.base_unit?.trim(),
     conversion_factor: Number(item.conversion_factor || 1),
+    purchase_price: item.purchase_price === "" || item.purchase_price == null
+      ? null
+      : Number(item.purchase_price),
     cost_per_base_unit: Number(item.cost_per_base_unit || 0),
     supplier: item.supplier?.trim() || null,
     image_url: item.image_url?.trim() || null,
