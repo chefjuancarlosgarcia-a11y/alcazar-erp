@@ -1,0 +1,10 @@
+@media (max-width: 720px) {
+  .account-shell {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .account-panel {
+    min-height: 0 !important;
+    padding: 18px !important;
+  }
+}

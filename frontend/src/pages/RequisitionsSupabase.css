@@ -1,0 +1,268 @@
+.requisitions-page {
+  min-height: 100%;
+  padding: 28px;
+  box-sizing: border-box;
+  display: grid;
+  align-content: start;
+  gap: 18px;
+  background: #071023;
+  color: #e5edf8;
+}
+
+.requisitions-header, .requisitions-actions, .requisitions-modal header, .requisitions-modal-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.requisitions-page h1 { margin: 3px 0 6px; color: #f8fafc; }
+.requisitions-page h2 { margin: 4px 0 0; }
+.requisitions-eyebrow { margin: 0; color: #2dd4bf; font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+.requisitions-muted { margin: 0; color: #94a3b8; }
+
+.requisitions-page button {
+  border: 1px solid #334155;
+  border-radius: 9px;
+  padding: 10px 13px;
+  color: #e2e8f0;
+  background: #101b2d;
+  cursor: pointer;
+  font-weight: 700;
+}
+.requisitions-page button.primary { border-color: #0f766e; background: #0ea5a4; color: #022c2c; }
+.requisitions-page button.danger { color: #fca5a5; border-color: #7f1d1d; }
+.requisitions-page button:disabled { opacity: .55; cursor: wait; }
+
+.requisitions-warning, .requisitions-success, .requisitions-error {
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid #92400e;
+  background: #361806;
+  color: #fde68a;
+}
+.requisitions-success { border-color: #0f766e; background: #052e2c; color: #99f6e4; }
+.requisitions-error { border-color: #991b1b; background: #3b1119; color: #fecaca; }
+
+.requisitions-tabs {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+}
+.requisitions-tabs button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  white-space: nowrap;
+}
+.requisitions-tabs button.active { border-color: #0f766e; color: #99f6e4; background: #073234; }
+.requisitions-tabs strong {
+  min-width: 20px;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: #1f2937;
+  text-align: center;
+  font-size: 12px;
+}
+
+.requisitions-filters {
+  display: grid;
+  grid-template-columns: minmax(230px, 2fr) repeat(4, minmax(145px, 1fr));
+  gap: 10px;
+}
+
+.requisitions-page input, .requisitions-page select, .requisitions-page textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 11px 12px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #081425;
+  color: #e6eef8;
+  font: inherit;
+}
+
+.requisitions-list {
+  display: grid;
+  gap: 12px;
+}
+.requisitions-empty {
+  margin: 0;
+  padding: 22px;
+  color: #94a3b8;
+}
+.requisition-card {
+  border: 1px solid #24344a;
+  border-radius: 14px;
+  background: #0f172a;
+  padding: 16px;
+  display: grid;
+  gap: 13px;
+}
+.requisition-summary, .requisition-route, .requisition-meta, .requisition-buttons {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.requisition-summary > strong { font-size: 18px; margin-right: 5px; }
+.requisition-route {
+  font-size: 16px;
+  color: #cbd5e1;
+}
+.requisition-route b { color: #2dd4bf; }
+.requisition-meta { color: #94a3b8; font-size: 13px; gap: 18px; }
+.requisition-meta strong { color: #e2e8f0; }
+.requisition-buttons button { padding: 8px 10px; font-size: 13px; }
+
+.req-badge {
+  border-radius: 999px;
+  padding: 5px 9px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.status-draft { color: #cbd5e1; background: #1e293b; }
+.status-pending { color: #93c5fd; background: #10284b; }
+.status-approved { color: #fcd34d; background: #422006; }
+.status-completed { color: #86efac; background: #052e24; }
+.status-rejected, .status-cancelled { color: #fca5a5; background: #3b1119; }
+.priority-low { color: #cbd5e1; background: #1e293b; }
+.priority-normal { color: #93c5fd; background: #10284b; }
+.priority-high { color: #fdba74; background: #431407; }
+.priority-urgent { color: #fca5a5; background: #3b1119; }
+
+.requisitions-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(2, 6, 23, .78);
+}
+.requisitions-modal {
+  width: min(1040px, 100%);
+  max-height: 92vh;
+  overflow: auto;
+  padding: 20px;
+  border: 1px solid #334155;
+  border-radius: 16px;
+  background: #0f172a;
+  display: grid;
+  gap: 17px;
+}
+.requisitions-modal.detail { width: min(940px, 100%); }
+.requisitions-modal.approval { width: min(570px, 100%); }
+.requisition-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+.requisition-field {
+  display: grid;
+  gap: 6px;
+  color: #cbd5e1;
+  font-size: 13px;
+  font-weight: 700;
+}
+.requisition-picker {
+  display: grid;
+  grid-template-columns: 2fr 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 13px;
+  border-radius: 11px;
+  background: #101b2d;
+  color: #94a3b8;
+}
+.requisition-picker strong { color: #f8fafc; }
+.requisition-items {
+  border: 1px solid #24344a;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.requisition-items-head, .requisition-item-row {
+  display: grid;
+  grid-template-columns: 1.45fr 1.2fr .7fr 1.1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+}
+.requisition-items-head {
+  color: #94a3b8;
+  background: #101b2d;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.requisition-item-row { border-top: 1px solid #1d2b40; }
+.requisition-item-row span { color: #94a3b8; font-size: 13px; }
+.requisition-item-row button { padding: 8px; }
+
+.requisition-detail-meta {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 9px;
+}
+.requisition-detail-meta span {
+  padding: 11px;
+  border-radius: 9px;
+  background: #101b2d;
+  display: grid;
+  gap: 6px;
+  color: #94a3b8;
+  font-size: 13px;
+}
+.requisition-detail-meta strong { color: #e2e8f0; }
+.requisition-note {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid #24344a;
+  border-radius: 9px;
+  color: #cbd5e1;
+}
+.requisition-detail-table {
+  border: 1px solid #24344a;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.requisition-detail-table > div {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 1.15fr 1.15fr;
+  gap: 10px;
+  padding: 12px;
+}
+.requisition-detail-table > div:first-child {
+  background: #101b2d;
+  color: #94a3b8;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+.requisition-detail-table > div:not(:first-child) { border-top: 1px solid #1d2b40; }
+.requisition-detail-table .insufficient { color: #fecaca; background: #28121c; }
+.requisition-detail-table small { grid-column: 1 / -1; color: #fca5a5; }
+
+.approval-line {
+  display: grid;
+  grid-template-columns: 1fr 140px;
+  align-items: center;
+  gap: 12px;
+  color: #e2e8f0;
+  font-weight: 700;
+}
+.approval-line span { display: grid; gap: 4px; }
+.approval-line small { color: #94a3b8; font-weight: 400; }
+
+@media (max-width: 1000px) {
+  .requisitions-page { padding: 16px; }
+  .requisitions-filters { grid-template-columns: repeat(2, 1fr); }
+  .requisition-items-head { display: none; }
+  .requisition-item-row { grid-template-columns: 1fr 1fr; }
+  .requisition-item-row strong, .requisition-item-row span { grid-column: 1 / -1; }
+}
+
+@media (max-width: 650px) {
+  .requisitions-filters, .requisition-form-grid, .requisition-picker, .requisition-detail-meta { grid-template-columns: 1fr; }
+  .requisition-detail-table > div { grid-template-columns: 1fr; }
+}

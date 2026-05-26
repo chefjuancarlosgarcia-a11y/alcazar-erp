@@ -1,0 +1,497 @@
+.kds-page {
+  display: grid;
+  gap: 18px;
+  min-height: 100%;
+  padding: 8px;
+  color: #e5edf8;
+  background: radial-gradient(circle at top, #0d1a31 0, #071023 42%);
+}
+
+.kds-page:fullscreen {
+  padding: 24px;
+  overflow: auto;
+}
+
+.kds-header,
+.kds-header-actions,
+.kds-history-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.kds-header {
+  padding: 12px 14px;
+  border: 1px solid #1c2c43;
+  border-radius: 16px;
+  background: rgba(11, 20, 38, .82);
+}
+
+.kds-header h1,
+.kds-unassigned h1 {
+  margin: 3px 0 5px;
+  color: #f8fafc;
+  font-size: 36px;
+}
+
+.kds-eyebrow {
+  margin: 0;
+  color: #2dd4bf;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+
+.kds-muted {
+  color: #94a3b8;
+}
+
+.kds-session {
+  margin-top: 7px;
+  color: #5eead4;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.kds-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 7px;
+  color: #94a3b8;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.kds-live i {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: #64748b;
+}
+
+.kds-live.connected { color: #86efac; }
+.kds-live.connected i { background: #22c55e; box-shadow: 0 0 9px #22c55e; }
+.kds-feedback.live-notice { border-color: #22c55e; color: #bbf7d0; }
+
+.kds-select-label {
+  display: grid;
+  gap: 5px;
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.kds-select-label select,
+.kds-modal select,
+.kds-modal textarea {
+  min-width: 190px;
+  padding: 12px;
+  border: 1px solid #334155;
+  border-radius: 9px;
+  background: #0f172a;
+  color: #f8fafc;
+  font: inherit;
+}
+
+.kds-fullscreen,
+.kds-actions button,
+.kds-modal button {
+  min-height: 47px;
+  padding: 12px 16px;
+  border: 1px solid #0f766e;
+  border-radius: 10px;
+  background: #0f766e;
+  color: #f0fdfa;
+  font: inherit;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.kds-feedback {
+  padding: 12px 15px;
+  border: 1px solid #0f766e;
+  border-radius: 11px;
+  background: #082f2e;
+  color: #99f6e4;
+  font-weight: 700;
+}
+
+.kds-metrics {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(135px, 1fr));
+  gap: 10px;
+}
+
+.kds-metric {
+  display: grid;
+  gap: 8px;
+  padding: 13px 15px;
+  border: 1px solid #25364d;
+  border-radius: 12px;
+  background: #0f172a;
+}
+
+.kds-metric.new { border-color: #64748b; }
+.kds-metric.working { border-color: #f97316; }
+.kds-metric.ready { border-color: #14b8a6; background: #082f2e; }
+.kds-metric.ready strong { color: #5eead4; }
+
+.kds-metric span {
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.kds-metric strong {
+  color: #f8fafc;
+  font-size: 27px;
+}
+
+.kds-metric.late {
+  border-color: #7f1d1d;
+}
+
+.kds-metric.late strong {
+  color: #f87171;
+}
+
+.kds-board {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(235px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.kds-column {
+  display: grid;
+  gap: 11px;
+  min-height: 310px;
+  padding: 12px;
+  border: 1px solid #1c2c43;
+  border-radius: 14px;
+  background: #0b1426;
+}
+
+.kds-column.pending { border-top: 4px solid #94a3b8; }
+.kds-column.in_production { border-top: 4px solid #f97316; }
+.kds-column.ready { border-top: 4px solid #14b8a6; background: #081d25; }
+.kds-column.problem { border-top: 4px solid #ef4444; }
+
+.kds-column > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.kds-column h2 {
+  margin: 0;
+  color: #e2e8f0;
+  font-size: 18px;
+}
+
+.kds-column > header span {
+  min-width: 26px;
+  padding: 3px 7px;
+  border-radius: 99px;
+  background: #17263a;
+  text-align: center;
+  font-weight: 800;
+}
+
+.kds-ticket {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 2px solid #475569;
+  border-radius: 13px;
+  background: #111b2d;
+  box-shadow: 0 10px 22px rgba(2, 6, 23, .32);
+}
+
+.kds-ticket.status-in_production {
+  border-color: #f97316;
+  background: #21170f;
+}
+
+.kds-ticket.status-ready {
+  border-color: #14b8a6;
+  background: #082f2e;
+}
+
+.kds-ticket.status-problem {
+  border-color: #ef4444;
+}
+
+.kds-ticket.warning {
+  border-color: #a16207;
+  background: #211c0d;
+}
+
+.kds-ticket.late,
+.kds-ticket.urgent {
+  border-color: #b91c1c;
+  background: #250f16;
+}
+
+.kds-ticket > header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.kds-ticket h3 {
+  margin: 0 0 4px;
+  color: #f8fafc;
+  font-size: 22px;
+}
+
+.kds-ticket-ref {
+  display: block;
+  margin-bottom: 5px;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .1em;
+}
+
+.kds-ticket header p {
+  color: #a7b7ca;
+  font-size: 13px;
+}
+
+.kds-time {
+  color: #f8fafc;
+  white-space: nowrap;
+  padding: 7px 9px;
+  border-radius: 9px;
+  background: #17263a;
+  font-size: 21px;
+}
+
+.kds-badges {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.kds-badges span {
+  padding: 4px 8px;
+  border-radius: 99px;
+  background: #17263a;
+  color: #cbd5e1;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.kds-badges .state.pending {
+  background: #1e3a8a;
+  color: #dbeafe;
+}
+
+.kds-badges .state.in_production {
+  background: #075985;
+  color: #e0f2fe;
+}
+
+.kds-badges .state.ready {
+  background: #065f46;
+  color: #d1fae5;
+}
+
+.kds-badges .state.problem,
+.kds-badges .priority.urgent {
+  background: #7f1d1d;
+  color: #fee2e2;
+}
+
+.kds-ticket-items {
+  display: grid;
+  gap: 8px;
+}
+
+.kds-ticket-items div {
+  padding: 9px;
+  border-radius: 9px;
+  background: rgba(15, 23, 42, .72);
+  font-size: 17px;
+}
+
+.kds-ticket-items p {
+  margin-top: 5px;
+  color: #fcd34d;
+  font-size: 13px;
+}
+
+.kds-problem-detail,
+.kds-request {
+  padding: 9px;
+  border-radius: 8px;
+  background: #451a1a;
+  color: #fecaca;
+  font-size: 13px;
+}
+
+.kds-request {
+  background: #422006;
+  color: #fde68a;
+}
+
+.kds-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.kds-actions button {
+  flex: 1 1 104px;
+  min-height: 53px;
+}
+
+.kds-ticket.status-ready .kds-actions button:first-child {
+  border-color: #059669;
+  background: #059669;
+  color: #ecfdf5;
+}
+
+.kds-actions .warning {
+  border-color: #a16207;
+  background: #854d0e;
+  color: #fef3c7;
+}
+
+.kds-actions .danger {
+  border-color: #991b1b;
+  background: #7f1d1d;
+  color: #fee2e2;
+}
+
+.kds-empty {
+  padding: 10px;
+  color: #64748b;
+  font-size: 14px;
+}
+
+.kds-history {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #1c2c43;
+  border-radius: 14px;
+  background: #0b1426;
+}
+
+.kds-history h2 {
+  margin: 0;
+  color: #f1f5f9;
+  font-size: 20px;
+}
+
+.kds-history-title span {
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.kds-history-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 8px;
+}
+
+.kds-history-card {
+  display: grid;
+  gap: 4px;
+  padding: 11px;
+  border-radius: 9px;
+  background: #101c30;
+}
+
+.kds-history-card span,
+.kds-history-card small {
+  color: #94a3b8;
+}
+
+.kds-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(2, 6, 23, .76);
+}
+
+.kds-modal {
+  display: grid;
+  gap: 13px;
+  width: min(470px, 100%);
+  padding: 22px;
+  border: 1px solid #334155;
+  border-radius: 16px;
+  background: #0f172a;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, .42);
+}
+
+.kds-modal h2 {
+  margin: 0;
+  color: #f8fafc;
+}
+
+.kds-modal label {
+  display: grid;
+  gap: 6px;
+  color: #b9c6d7;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.kds-modal textarea {
+  min-height: 90px;
+  resize: vertical;
+}
+
+.kds-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+}
+
+.kds-modal .secondary {
+  border-color: #334155;
+  background: #1f2937;
+}
+
+.kds-unassigned {
+  display: grid;
+  gap: 10px;
+  max-width: 500px;
+  padding: 25px;
+  border: 1px solid #25364d;
+  border-radius: 15px;
+  background: #0f172a;
+}
+
+.kds-unassigned p {
+  color: #e2e8f0;
+  font-size: 18px;
+}
+
+.kds-unassigned small {
+  color: #94a3b8;
+}
+
+@media (max-width: 1320px) {
+  .kds-board {
+    grid-template-columns: repeat(2, minmax(260px, 1fr));
+  }
+}
+
+@media (max-width: 820px) {
+  .kds-metrics,
+  .kds-board {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Inventario recuperado</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 24px;
+        font-family: Arial, sans-serif;
+        background: #0f172a;
+        color: #e5e7eb;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 16px;
+        background: #111827;
+      }
+      th, td {
+        border: 1px solid #334155;
+        padding: 8px;
+        text-align: left;
+        font-size: 14px;
+      }
+      th {
+        background: #1f2937;
+      }
+      .muted {
+        color: #94a3b8;
+      }
+      pre {
+        white-space: pre-wrap;
+        background: #111827;
+        border: 1px solid #334155;
+        padding: 16px;
+        border-radius: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Inventario recuperado</h1>
+    <div id="app"></div>
+    <script>
+      const app = document.getElementById("app")
+      const raw = localStorage.getItem("ingredientes")
+
+      if (!raw) {
+        app.innerHTML = "<p>No hay inventario guardado en localStorage para este navegador/origen.</p>"
+      } else {
+        try {
+          const items = JSON.parse(raw)
+          const rows = items.map((item) => `
+            <tr>
+              <td>${item.codigo || ""}</td>
+              <td>${item.nombre || ""}</td>
+              <td>${item.categoria || ""}</td>
+              <td>${item.stockActual ?? item.totalUnidades ?? ""}</td>
+              <td>${item.unidadCompra || ""}</td>
+              <td>${item.puntoMinimo || ""}</td>
+              <td>${item.puntoOrden || ""}</td>
+              <td>${item.puntoMaximo || ""}</td>
+            </tr>
+          `).join("")
+
+          app.innerHTML = `
+            <p class="muted">Total de ingredientes: ${items.length}</p>
+            <table>
+              <thead>
+                <tr>
+                  <th>Código</th>
+                  <th>Nombre</th>
+                  <th>Categoría</th>
+                  <th>Stock</th>
+                  <th>Unidad</th>
+                  <th>Mínimo</th>
+                  <th>Orden</th>
+                  <th>Máximo</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+            <h2>JSON completo</h2>
+            <pre>${JSON.stringify(items, null, 2)}</pre>
+          `
+        } catch (error) {
+          app.innerHTML = `<p>No se pudo leer el inventario.</p><pre>${raw}</pre>`
+        }
+      }
+    </script>
+  </body>
+</html>

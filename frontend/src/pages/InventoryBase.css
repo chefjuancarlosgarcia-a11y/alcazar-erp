@@ -1,0 +1,301 @@
+.inventory-base {
+  min-height: 100%;
+  display: grid;
+  align-content: start;
+  gap: 18px;
+  padding: 28px;
+  box-sizing: border-box;
+  background: #071023;
+  color: #e5edf8;
+}
+
+.inventory-base-header, .inventory-base-actions, .inventory-modal header, .inventory-modal-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.inventory-base h1 { margin: 3px 0 6px; color: #f8fafc; }
+.inventory-base-eyebrow { margin: 0; color: #2dd4bf; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .12em; }
+.inventory-base-muted { color: #94a3b8; margin: 0; }
+.inventory-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  align-self: center;
+  color: #94a3b8;
+  font-size: 13px;
+  font-weight: 700;
+}
+.inventory-live i {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: #64748b;
+}
+.inventory-live.connected { color: #86efac; }
+.inventory-live.connected i { background: #22c55e; box-shadow: 0 0 9px #22c55e; }
+
+.inventory-base button {
+  border: 1px solid #334155;
+  border-radius: 9px;
+  padding: 10px 13px;
+  color: #e2e8f0;
+  background: #101b2d;
+  cursor: pointer;
+  font-weight: 700;
+}
+.inventory-base button.primary { border-color: #0f766e; background: #0ea5a4; color: #022c2c; }
+.inventory-base button.danger { color: #fca5a5; border-color: #7f1d1d; }
+.inventory-row-actions button { font-size: 12px; padding: 7px 9px; }
+
+.inventory-base-warning, .inventory-base-success, .inventory-base-error {
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid #92400e;
+  background: #361806;
+  color: #fde68a;
+  display: flex;
+  gap: 15px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.inventory-base-success { border-color: #0f766e; background: #052e2c; color: #99f6e4; }
+.inventory-base-error { border-color: #991b1b; background: #3b1119; color: #fecaca; }
+
+.inventory-base-filters { display: grid; grid-template-columns: minmax(260px, 2fr) minmax(180px, 1fr); gap: 10px; max-width: 700px; }
+.inventory-base input, .inventory-base select, .inventory-base textarea {
+  width: 100%; box-sizing: border-box; padding: 11px 12px; border: 1px solid #334155; border-radius: 8px;
+  background: #081425; color: #e6eef8; font: inherit;
+}
+.inventory-base textarea { min-height: 80px; resize: vertical; }
+
+.inventory-table { border: 1px solid #24344a; border-radius: 14px; overflow: hidden; background: #0f172a; }
+.inventory-table-head, .inventory-row {
+  display: grid; grid-template-columns: 1.55fr .65fr .75fr .75fr .65fr .7fr 2fr;
+  gap: 12px; padding: 13px 15px; align-items: center;
+}
+.inventory-table-head { background: #101b2d; color: #94a3b8; font-size: 12px; font-weight: 700; text-transform: uppercase; }
+.inventory-row { border-top: 1px solid #1d2b40; }
+.inventory-row div:first-child { display: grid; gap: 4px; }
+.inventory-row .inventory-product-cell {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+.inventory-product-cell span {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+.inventory-product-image,
+.inventory-product-placeholder {
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  object-fit: cover;
+  border: 1px solid #24344a;
+}
+.inventory-product-placeholder {
+  display: grid;
+  place-content: center;
+  background: #12363c;
+  color: #99f6e4;
+  font-weight: 800;
+  font-size: 13px;
+}
+.inventory-product-image.small,
+.inventory-product-placeholder.small {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  font-size: 11px;
+}
+.inventory-row small { color: #94a3b8; }
+.inventory-row-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.inventory-empty { padding: 22px; margin: 0; color: #94a3b8; }
+
+.inventory-stock-badge { justify-self: start; border-radius: 999px; padding: 4px 9px; font-size: 12px; font-weight: 700; }
+.inventory-stock-badge.ok { color: #86efac; background: #052e24; }
+.inventory-stock-badge.low { color: #fcd34d; background: #422006; }
+.inventory-stock-badge.empty, .inventory-stock-badge.inactive { color: #fca5a5; background: #3b1119; }
+
+.inventory-area-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 14px; }
+.inventory-area-card { padding: 17px; border: 1px solid #24344a; border-radius: 14px; background: #0f172a; }
+.inventory-area-card h2 { margin: 0 0 14px; font-size: 20px; }
+.inventory-area-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin-bottom: 15px; }
+.inventory-area-metrics span { padding: 8px; border-radius: 8px; background: #101b2d; color: #94a3b8; display: grid; gap: 4px; font-size: 12px; }
+.inventory-area-metrics strong { color: #f8fafc; font-size: 19px; }
+.inventory-area-line { border-top: 1px solid #1d2b40; padding: 9px 0; display: flex; gap: 8px; align-items: center; }
+.inventory-area-line span { flex: 1; }
+.inventory-area-line button { padding: 5px 8px; font-size: 11px; }
+
+.inventory-movements { display: grid; border: 1px solid #24344a; border-radius: 14px; overflow: hidden; background: #0f172a; }
+.inventory-movements article { display: grid; grid-template-columns: 1.3fr 1fr .7fr .7fr 1fr 1.5fr; gap: 12px; padding: 14px; border-bottom: 1px solid #1d2b40; align-items: center; }
+.inventory-movements article div { display: grid; gap: 4px; }
+.inventory-movements small { color: #94a3b8; }
+
+.inventory-modal-backdrop { position: fixed; inset: 0; z-index: 50; background: rgba(2, 6, 23, .76); display: grid; place-items: center; padding: 18px; }
+.inventory-modal { width: min(780px, 100%); max-height: 92vh; overflow: auto; background: #0f172a; border: 1px solid #334155; border-radius: 16px; padding: 20px; display: grid; gap: 16px; }
+.inventory-modal.compact { width: min(460px, 100%); }
+.inventory-modal.legacy { width: min(700px, 100%); }
+.inventory-modal.import { width: min(1180px, 100%); }
+.inventory-modal h2 { margin: 4px 0 0; }
+.inventory-form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.inventory-field { display: grid; gap: 6px; color: #cbd5e1; font-size: 13px; font-weight: 700; }
+.inventory-image-actions {
+  display: flex;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+.inventory-image-action {
+  padding: 10px 13px;
+  border: 1px solid #334155;
+  border-radius: 9px;
+  background: #101b2d;
+  color: #e2e8f0;
+  cursor: pointer;
+  font-weight: 700;
+}
+.inventory-image-action.camera {
+  border-color: #0f766e;
+  color: #99f6e4;
+}
+.inventory-image-action input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+}
+.inventory-image-help {
+  margin: -8px 0 0;
+  color: #94a3b8;
+  font-size: 12px;
+}
+.inventory-image-preview {
+  padding: 12px;
+  border: 1px solid #24344a;
+  border-radius: 12px;
+  background: #081425;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+.inventory-image-preview img {
+  width: 110px;
+  height: 110px;
+  border-radius: 12px;
+  object-fit: cover;
+  border: 1px solid #334155;
+}
+.legacy-item { border: 1px solid #24344a; border-radius: 10px; padding: 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.legacy-item div { display: grid; gap: 5px; }
+.legacy-item small { color: #94a3b8; }
+.legacy-item .migrated { color: #99f6e4; font-weight: 700; }
+
+.inventory-import-file {
+  display: grid;
+  gap: 8px;
+  padding: 15px;
+  border: 1px dashed #334155;
+  border-radius: 11px;
+  color: #cbd5e1;
+  font-weight: 700;
+}
+.inventory-import-file small { color: #5eead4; }
+.inventory-import-columns { display: flex; gap: 7px; flex-wrap: wrap; }
+.inventory-import-columns span {
+  padding: 5px 9px;
+  border-radius: 999px;
+  border: 1px solid #334155;
+  background: #101b2d;
+  color: #cbd5e1;
+  font-size: 12px;
+}
+.inventory-import-mapping {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(185px, 1fr));
+  gap: 10px;
+}
+.inventory-import-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.inventory-import-summary span {
+  padding: 9px 12px;
+  border-radius: 8px;
+  background: #101b2d;
+  color: #94a3b8;
+}
+.inventory-import-summary strong { color: #f8fafc; }
+.inventory-import-preview {
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid #24344a;
+  border-radius: 12px;
+}
+.inventory-import-head,
+.inventory-import-preview article {
+  display: grid;
+  grid-template-columns: 1.25fr 1.25fr 1fr .75fr 1.7fr;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+}
+.inventory-import-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #101b2d;
+  color: #94a3b8;
+  font-size: 12px;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+.inventory-import-preview article { border-top: 1px solid #1d2b40; }
+.inventory-import-preview article div {
+  display: grid;
+  justify-items: start;
+  gap: 5px;
+}
+.inventory-import-preview small { color: #94a3b8; }
+.inventory-import-preview select { padding: 6px 7px; font-size: 12px; }
+.inventory-import-state {
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 12px;
+}
+.inventory-import-state.ready { color: #86efac; background: #052e24; }
+.inventory-import-state.warning { color: #fcd34d; background: #422006; }
+.inventory-import-state.error { color: #fca5a5; background: #3b1119; }
+.inventory-import-result {
+  padding: 13px;
+  border: 1px solid #0f766e;
+  border-radius: 10px;
+  background: #052e2c;
+  color: #ccfbf1;
+}
+.inventory-import-result h3 { margin: 0 0 8px; }
+.inventory-import-result p { margin: 0; }
+.inventory-import-result small { display: block; color: #fca5a5; margin-top: 6px; }
+
+@media (max-width: 920px) {
+  .inventory-base { padding: 16px; }
+  .inventory-table-head { display: none; }
+  .inventory-row { grid-template-columns: repeat(2, 1fr); }
+  .inventory-row div:first-child, .inventory-row-actions { grid-column: 1 / -1; }
+  .inventory-movements article { grid-template-columns: 1fr 1fr; }
+  .inventory-import-head { display: none; }
+  .inventory-import-preview article { grid-template-columns: 1fr 1fr; }
+  .inventory-import-preview article div { grid-column: 1 / -1; }
+}
+
+@media (max-width: 620px) {
+  .inventory-base-filters, .inventory-form-grid { grid-template-columns: 1fr; }
+}

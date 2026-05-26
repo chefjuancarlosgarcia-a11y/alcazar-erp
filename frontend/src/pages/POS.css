@@ -1,0 +1,176 @@
+.pos-operation-header {
+  padding: 6px 0 2px;
+}
+
+.pos-operation-header h1 {
+  margin: 3px 0 4px;
+  color: #f8fafc;
+}
+
+.pos-operation-eyebrow {
+  margin: 0;
+  color: #2dd4bf;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+
+.pos-operation-subtitle {
+  margin: 0;
+  color: #94a3b8;
+}
+
+.pos-catalog-search input {
+  min-height: 50px;
+  font-size: 16px;
+}
+
+.pos-category-strip {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  padding: 8px 0;
+  background: #071023;
+}
+
+.pos-product-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 294px;
+  transition: transform .13s ease, border-color .13s ease, box-shadow .13s ease;
+}
+
+.pos-product-card:hover {
+  transform: translateY(-2px);
+  border-color: #0f766e !important;
+  box-shadow: 0 13px 30px rgba(2, 6, 23, .4);
+}
+
+.pos-product-card h3,
+.pos-product-card p {
+  margin: 0;
+}
+
+.pos-product-card button {
+  min-height: 48px;
+  margin-top: auto;
+}
+
+.pos-floor-panel {
+  box-shadow: inset 0 1px 0 rgba(148, 163, 184, .05);
+}
+
+.pos-floor-canvas {
+  box-shadow: inset 0 0 44px rgba(2, 6, 23, .35);
+}
+
+.pos-floor-table {
+  transition: filter .16s ease, transform .1s ease;
+}
+
+.pos-floor-table:not(.selected):hover {
+  filter: brightness(1.18);
+}
+
+.pos-current-order {
+  display: grid;
+  gap: 12px;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  scrollbar-color: #334155 transparent;
+}
+
+.pos-order-title {
+  order: 0;
+  margin: 0;
+  font-size: 21px;
+}
+
+.pos-table-summary {
+  order: 1;
+  margin-bottom: 0 !important;
+}
+
+.pos-next-action {
+  display: grid;
+  gap: 3px;
+  padding: 10px;
+  border: 1px solid #0f766e;
+  border-radius: 9px;
+  background: #082f2e;
+  color: #ccfbf1;
+}
+
+.pos-next-action small {
+  color: #5eead4;
+  font-weight: 800;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.pos-order-section {
+  order: 8;
+  margin-bottom: 0 !important;
+}
+
+.pos-order-section.section-ready {
+  border-color: #14b8a6 !important;
+  background: #042f2e !important;
+  box-shadow: 0 0 14px rgba(20, 184, 166, .12);
+}
+
+.pos-order-section.section-draft {
+  border-color: #a16207 !important;
+}
+
+.pos-order-section.section-production {
+  border-color: #c2410c !important;
+}
+
+.pos-order-footer {
+  order: 10;
+  z-index: 2;
+  border-top: 1px solid #253347;
+}
+
+.pos-service-activity {
+  order: 20;
+  margin-bottom: 0 !important;
+}
+
+.pos-previous-orders {
+  order: 21;
+  margin-bottom: 0 !important;
+}
+
+.pos-technical-audit {
+  order: 22;
+  margin-bottom: 0 !important;
+}
+
+@media (max-width: 1100px) {
+  .pos-operation-shell {
+    grid-template-columns: 1fr !important;
+  }
+
+  .pos-current-order {
+    position: static !important;
+    max-height: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .pos-menu-grid {
+    grid-template-columns: repeat(2, minmax(145px, 1fr)) !important;
+  }
+
+  .pos-product-card {
+    min-height: 250px;
+  }
+
+  .pos-floor-canvas {
+    min-height: 300px !important;
+  }
+}
