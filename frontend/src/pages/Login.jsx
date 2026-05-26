@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Navigate, useNavigate } from "react-router-dom"
+import { Link, Navigate, useNavigate } from "react-router-dom"
 import { BRANDING } from "../branding"
 import { useAuth } from "../context/AuthContext"
 import { supabase } from "../lib/supabase"
@@ -9,6 +9,7 @@ function Login() {
   const navigate = useNavigate()
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
+  const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState("")
   const [authError, setAuthError] = useState(null)
   const [submitting, setSubmitting] = useState(false)
@@ -89,7 +90,18 @@ function Login() {
 
             <label style={labelStyle}>
               Contraseña
-              <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Contraseña" type="password" style={inputStyle} autoComplete="current-password" required />
+              <span style={passwordFieldStyle}>
+                <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Contraseña" type={showPassword ? "text" : "password"} style={passwordInputStyle} autoComplete="current-password" required />
+                <button
+                  type="button"
+                  style={visibilityButtonStyle}
+                  aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                  aria-pressed={showPassword}
+                  onClick={() => setShowPassword((current) => !current)}
+                >
+                  {showPassword ? <EyeOffIcon /> : <EyeIcon />}
+                </button>
+              </span>
             </label>
 
             {(error || profileError) && <p style={errorStyle}>{error || profileError}</p>}
@@ -100,8 +112,10 @@ function Login() {
             <button type="submit" style={buttonStyle} disabled={submitting}>{submitting ? "Ingresando..." : "Ingresar"}</button>
 
             <div style={recoveryLinksStyle}>
-              <span style={hintStyle}>Acceso habilitado únicamente con correo mediante Supabase Auth.</span>
+              <Link to="/forgot-password" style={linkStyle}>Olvidé mi contraseña</Link>
+              <Link to="/forgot-user" style={linkStyle}>Olvidé mi usuario</Link>
             </div>
+            <span style={hintStyle}>Acceso habilitado únicamente con correo mediante Supabase Auth.</span>
             {isDevelopment && (
               <div style={debugPanelStyle}>
                 <button type="button" style={debugButtonStyle} onClick={debugSupabaseAuth} disabled={debugging}>
@@ -124,6 +138,26 @@ function Login() {
         )}
       </section>
     </main>
+  )
+}
+
+function EyeIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  )
+}
+
+function EyeOffIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M3 3 21 21" />
+      <path d="M10.6 5.2A11.1 11.1 0 0 1 12 5c6.4 0 10 7 10 7a16.5 16.5 0 0 1-3.2 3.8" />
+      <path d="M6.2 6.8C3.5 8.8 2 12 2 12s3.6 7 10 7c1.1 0 2.1-.2 3-.5" />
+      <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
+    </svg>
   )
 }
 
@@ -183,6 +217,32 @@ const inputStyle = {
   boxSizing: "border-box"
 }
 
+const passwordFieldStyle = {
+  position: "relative",
+  display: "block"
+}
+
+const passwordInputStyle = {
+  ...inputStyle,
+  paddingRight: "48px"
+}
+
+const visibilityButtonStyle = {
+  position: "absolute",
+  top: "50%",
+  right: "7px",
+  display: "grid",
+  placeItems: "center",
+  width: "38px",
+  height: "38px",
+  border: 0,
+  borderRadius: "7px",
+  transform: "translateY(-50%)",
+  background: "transparent",
+  color: "#94a3b8",
+  cursor: "pointer"
+}
+
 const errorStyle = {
   padding: "10px 12px",
   borderRadius: "8px",
@@ -220,6 +280,13 @@ const recoveryLinksStyle = {
   justifyContent: "space-between",
   gap: "12px",
   flexWrap: "wrap"
+}
+
+const linkStyle = {
+  color: "#5eead4",
+  fontSize: "0.92rem",
+  textDecoration: "none",
+  fontWeight: 600
 }
 
 const hintStyle = {

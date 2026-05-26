@@ -5,6 +5,9 @@ import Dashboard from "../pages/Dashboard"
 import HR from "../pages/HR"
 import Inventory from "../pages/Inventory"
 import Login from "../pages/Login"
+import ForgotPassword from "../pages/ForgotPassword"
+import ForgotUser from "../pages/ForgotUser"
+import UpdatePassword from "../pages/UpdatePassword"
 import POS from "../pages/POS"
 import Cashier from "../pages/Cashier"
 import Production from "../pages/Production"
@@ -25,6 +28,9 @@ function AppRoutes() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/forgot-user" element={<ForgotUser />} />
+        <Route path="/update-password" element={<UpdatePassword />} />
         <Route element={<MainLayout />}>
           <Route index element={<DefaultRedirect />} />
           <Route path="/dashboard" element={<ProtectedRoute module="dashboard"><Dashboard /></ProtectedRoute>} />

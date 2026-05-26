@@ -4,26 +4,50 @@ import Sidebar from "../components/Sidebar"
 import UserProfileDropdown from "../components/UserProfileDropdown"
 import MyProfilePanel from "../components/MyProfilePanel"
 import { useAuth } from "../context/AuthContext"
+import { useDevice } from "../context/DeviceContext"
+import "./MainLayout.css"
 
 function MainLayout() {
   const location = useLocation()
   const { user } = useAuth()
+  const device = useDevice()
   const [profilePanelView, setProfilePanelView] = useState("")
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const isLegacyModule = ["/inventory", "/hr"].includes(location.pathname)
+  const deviceClass = device.isMobile ? "device-mobile" : device.isTablet ? "device-tablet" : "device-desktop"
 
   return (
-    <div style={layoutStyle}>
-      <Sidebar />
-      <div style={contentStyle}>
+    <div className={`app-layout ${deviceClass} ${device.isTouchDevice ? "device-touch" : ""}`} style={layoutStyle}>
+      {!device.isMobile && <Sidebar compact={device.isTablet} />}
+      {device.isMobile && mobileMenuOpen && (
+        <>
+          <button type="button" className="mobile-nav-backdrop" aria-label="Cerrar menú" onClick={() => setMobileMenuOpen(false)} />
+          <Sidebar mobile onNavigate={() => setMobileMenuOpen(false)} />
+        </>
+      )}
+      <div className="app-content" style={contentStyle}>
         {user && (
-          <header style={accountHeaderStyle}>
+          <header className="app-account-header" style={accountHeaderStyle}>
+            {device.isMobile && (
+              <button
+                type="button"
+                className="mobile-menu-button"
+                aria-label="Abrir menú principal"
+                aria-expanded={mobileMenuOpen}
+                onClick={() => setMobileMenuOpen((current) => !current)}
+              >
+                <span aria-hidden="true">☰</span>
+                Menú
+              </button>
+            )}
             <UserProfileDropdown currentUser={user} onOpenProfile={setProfilePanelView} />
           </header>
         )}
-        <main style={isLegacyModule ? legacyMainStyle : mainStyle}>
+        <main className={`app-main ${isLegacyModule ? "app-main-legacy" : ""}`} style={isLegacyModule ? legacyMainStyle : mainStyle}>
           <Outlet />
         </main>
       </div>
+      {import.meta.env.DEV && <DeviceIndicator device={device} />}
       {user && profilePanelView && (
         <MyProfilePanel
           currentUser={user}
@@ -32,6 +56,18 @@ function MainLayout() {
         />
       )}
     </div>
+  )
+}
+
+function DeviceIndicator({ device }) {
+  const size = device.isMobile ? "Mobile" : device.isTablet ? "Tablet" : "Desktop"
+  const system = device.isAndroid ? "Android" : device.isIOS ? "iOS" : "Otro"
+  const orientation = device.orientation === "portrait" ? "Portrait" : "Landscape"
+
+  return (
+    <aside className="device-indicator" aria-label="Información de dispositivo">
+      {size} / {system} / {orientation}
+    </aside>
   )
 }
 

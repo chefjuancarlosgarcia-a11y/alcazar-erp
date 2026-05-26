@@ -1,13 +1,16 @@
 import AppRoutes from "./routes/AppRoutes"
 import LocalNetworkAccessBanner from "./components/LocalNetworkAccessBanner"
 import { AuthProvider } from "./context/AuthContext"
+import { DeviceProvider } from "./context/DeviceContext"
 
 function App() {
   return (
-    <AuthProvider>
-      <AppRoutes />
-      <LocalNetworkAccessBanner />
-    </AuthProvider>
+    <DeviceProvider>
+      <AuthProvider>
+        <AppRoutes />
+        <LocalNetworkAccessBanner />
+      </AuthProvider>
+    </DeviceProvider>
   )
 }
 

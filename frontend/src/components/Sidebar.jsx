@@ -39,7 +39,7 @@ const posSubmenu = [
   { roles: ["admin", "gerente", "gerente_general", "gerente_operaciones"], to: "/pos?section=croquis", label: "Croquis del restaurante" }
 ]
 
-function Sidebar() {
+function Sidebar({ compact = false, mobile = false, onNavigate }) {
   const { user, canAccess, logout } = useAuth()
   const location = useLocation()
   const [openSubmenu, setOpenSubmenu] = useState(location.pathname === "/inventory" ? "inventory" : location.pathname === "/hr" ? "hr" : location.pathname === "/pos" ? "pos" : null)
@@ -58,15 +58,21 @@ function Sidebar() {
     }
 
     if (!item.submenu) setOpenSubmenu(null)
+    onNavigate?.()
+  }
+
+  async function handleLogout() {
+    await logout()
+    onNavigate?.()
   }
 
   return (
-    <aside style={sidebarStyle}>
-      <div style={brandStyle}>
+    <aside style={{ ...sidebarStyle, ...(compact ? compactSidebarStyle : {}), ...(mobile ? mobileSidebarStyle : {}) }}>
+      <div style={{ ...brandStyle, ...(compact ? compactBrandStyle : {}) }}>
         <span style={brandIconStyle}>{BRANDING.logo}</span>
         <div>
           <strong>{BRANDING.appName}</strong>
-          <span style={brandSubtitleStyle}>{user?.name || BRANDING.tagline}</span>
+          {!compact && <span style={brandSubtitleStyle}>{user?.name || BRANDING.tagline}</span>}
         </div>
       </div>
 
@@ -92,6 +98,7 @@ function Sidebar() {
                   <NavLink
                     key={subitem.to}
                     to={subitem.to}
+                    onClick={onNavigate}
                     style={() => ({
                       ...submenuLinkStyle,
                       ...(location.pathname + location.search === subitem.to ? activeSubmenuLinkStyle : {})
@@ -109,6 +116,7 @@ function Sidebar() {
                   <NavLink
                     key={subitem.to}
                     to={subitem.to}
+                    onClick={onNavigate}
                     style={() => ({
                       ...submenuLinkStyle,
                       ...((location.pathname + location.search === subitem.to || (subitem.to === "/pos?section=pos" && location.pathname === "/pos" && !location.search)) ? activeSubmenuLinkStyle : {})
@@ -126,6 +134,7 @@ function Sidebar() {
                   <NavLink
                     key={subitem.to}
                     to={subitem.to}
+                    onClick={onNavigate}
                     style={() => ({
                       ...submenuLinkStyle,
                       ...(location.pathname + location.search === subitem.to ? activeSubmenuLinkStyle : {})
@@ -140,7 +149,7 @@ function Sidebar() {
         ))}
       </nav>
 
-      <button type="button" onClick={logout} style={logoutButtonStyle}>
+      <button type="button" onClick={handleLogout} style={logoutButtonStyle}>
         Cerrar sesión
       </button>
     </aside>
@@ -162,11 +171,32 @@ const sidebarStyle = {
   pointerEvents: "auto"
 }
 
+const compactSidebarStyle = {
+  width: "224px",
+  flexBasis: "224px",
+  padding: "15px"
+}
+
+const mobileSidebarStyle = {
+  position: "fixed",
+  top: 0,
+  left: 0,
+  bottom: 0,
+  zIndex: 70,
+  width: "min(300px, 86vw)",
+  minHeight: "100svh",
+  boxShadow: "18px 0 42px rgba(0, 0, 0, .42)"
+}
+
 const brandStyle = {
   display: "flex",
   alignItems: "center",
   gap: "12px",
   marginBottom: "28px"
+}
+
+const compactBrandStyle = {
+  marginBottom: "18px"
 }
 
 const brandIconStyle = {

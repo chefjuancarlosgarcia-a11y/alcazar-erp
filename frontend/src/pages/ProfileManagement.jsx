@@ -203,7 +203,7 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
     }
     setResettingId(profile.id)
     const { error: resetError } = await supabase.auth.resetPasswordForEmail(profile.email, {
-      redirectTo: window.location.origin
+      redirectTo: `${window.location.origin}/update-password`
     })
     setResettingId("")
     if (resetError) {
