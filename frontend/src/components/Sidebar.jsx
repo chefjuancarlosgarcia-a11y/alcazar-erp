@@ -28,6 +28,7 @@ const inventorySubmenu = [
 
 const hrSubmenu = [
   { roles: ["admin", "gerente", "gerente_general", "rrhh"], to: "/hr?section=usuarios", label: "Colaboradores" },
+  { roles: ["admin", "gerente", "gerente_general", "rrhh", "supervisor", "cajero", "mesero", "cocina", "cocinero", "barista", "bartender", "pizzero", "repostero", "panadero", "colaborador"], to: "/hr?section=horarios", label: "Horarios" },
   { roles: ["admin", "gerente", "gerente_general", "rrhh", "mesero", "cocina", "cocinero"], to: "/hr?section=asistencia", label: "Marcaje de asistencia" },
   { roles: ["admin", "gerente", "gerente_general", "rrhh"], to: "/hr?section=reportesAsistencia", label: "Reportes de asistencia" }
 ]

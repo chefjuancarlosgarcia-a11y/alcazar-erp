@@ -19,7 +19,7 @@ const MODULES = {
 const ROLE_PERMISSIONS = {
   admin: ["dashboard", "inventory", "pos", "cash", "production", "hr", "tasks", "reports", "settings"],
   gerente_general: ["dashboard", "inventory", "pos", "cash", "production", "hr", "tasks", "reports", "settings"],
-  gerente: ["dashboard", "inventory", "tasks", "reports"],
+  gerente: ["dashboard", "inventory", "hr", "tasks", "reports"],
   encargado_almacen: ["inventory"],
   rrhh: ["hr", "tasks", "reports"],
   supervisor: ["pos", "cash", "production", "hr", "tasks", "inventory", "reports"],

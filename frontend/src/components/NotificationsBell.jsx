@@ -50,6 +50,8 @@ function NotificationsBell({ currentUser }) {
     setOpen(false)
     if (notification.entity_type === "purchase_order") {
       navigate(`/inventory?section=ordenes&view=history&order=${encodeURIComponent(notification.entity_id || "")}`)
+    } else if (["employee_schedule", "schedule_week"].includes(notification.entity_type)) {
+      navigate("/hr?section=horarios")
     }
   }
 
@@ -90,6 +92,7 @@ function NotificationsBell({ currentUser }) {
                 <small>{new Date(notification.created_at).toLocaleString("es-GT")}</small>
                 <div className="notifications-actions">
                   {notification.entity_type === "purchase_order" && <button type="button" onClick={() => viewEntity(notification)}>Ver orden</button>}
+                  {["employee_schedule", "schedule_week"].includes(notification.entity_type) && <button type="button" onClick={() => viewEntity(notification)}>Ver horario</button>}
                   {notification.entity_type === "purchase_order" && notification.type === "purchase_order_pending" && APPROVAL_ROLES.includes(currentUser?.role) && (
                     <>
                       <button type="button" className="approve" onClick={() => processOrder(notification, "approve")}>Aprobar</button>

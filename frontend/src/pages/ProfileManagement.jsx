@@ -9,6 +9,7 @@ import {
   canAssignUserRole,
   canDeactivateUser,
   canEditUserRole,
+  canManageAttendancePin,
   canManageUsers
 } from "../utils/profilePermissions"
 import "./ProfileManagement.css"
@@ -22,6 +23,7 @@ const EMPTY_FORM = {
   area_name: "",
   employee_id: "",
   avatar_url: "",
+  hourly_rate: "",
   attendance_pin: "",
   authorized_attendance_device: "",
   phone: "",
@@ -62,9 +64,12 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
   const [showCreateHelp, setShowCreateHelp] = useState(false)
   const [resettingId, setResettingId] = useState("")
   const [pinConfigured, setPinConfigured] = useState({})
+  const [showAttendancePin, setShowAttendancePin] = useState(false)
+  const [pinActionMessage, setPinActionMessage] = useState("")
 
   const canManage = canManageUsers(user)
   const canEditBasic = canManage
+  const canManagePin = canManageAttendancePin(user)
   const ownRrhhProfile = user?.role === "rrhh" && String(editingProfile?.id) === String(user?.id)
 
   useEffect(() => {
@@ -109,6 +114,8 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
 
   function openEdit(profile) {
     setEditingProfile(profile)
+    setShowAttendancePin(false)
+    setPinActionMessage("")
     setForm({
       ...EMPTY_FORM,
       ...profile,
@@ -118,6 +125,7 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
       area_name: profile.area_name || "",
       employee_id: profile.employee_id || "",
       avatar_url: profile.avatar_url || "",
+      hourly_rate: profile.hourly_rate ?? "",
       attendance_pin: "",
       authorized_attendance_device: profile.authorized_attendance_device || ""
     })
@@ -139,7 +147,26 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
   }
 
   function generateAttendancePin() {
+    if (editingProfile && pinConfigured[editingProfile.id]) {
+      const confirmed = window.confirm("Este colaborador ya tiene un PIN configurado. Al guardar el nuevo PIN, el anterior dejará de funcionar. ¿Deseas continuar?")
+      if (!confirmed) return
+    }
     updateField("attendance_pin", String(Math.floor(1000 + Math.random() * 9000)))
+    setShowAttendancePin(true)
+    setPinActionMessage(pinConfigured[editingProfile?.id]
+      ? "Nuevo PIN generado. Compártelo con el colaborador y guarda los cambios para invalidar el PIN anterior."
+      : "PIN generado. Compártelo con el colaborador antes de guardar.")
+  }
+
+  async function copyAttendancePin() {
+    if (!form.attendance_pin) return
+    try {
+      await navigator.clipboard.writeText(form.attendance_pin)
+      setPinActionMessage("PIN copiado. Entrégalo únicamente al colaborador correspondiente.")
+    } catch {
+      setPinActionMessage("No se pudo copiar automáticamente. Puedes seleccionar y copiar el PIN visible.")
+      setShowAttendancePin(true)
+    }
   }
 
   async function saveProfile(event) {
@@ -165,6 +192,14 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
       setError("El PIN de marcaje debe tener entre 4 y 6 dígitos.")
       return
     }
+    if (form.hourly_rate !== "" && Number(form.hourly_rate) < 0) {
+      setError("El salario por hora no puede ser negativo.")
+      return
+    }
+    if ((form.attendance_pin || form.authorized_attendance_device !== (editingProfile.authorized_attendance_device || "")) && !canManagePin) {
+      setError("No tienes permiso para configurar el PIN o dispositivo de marcaje.")
+      return
+    }
 
     const changes = {
       full_name: form.full_name.trim(),
@@ -174,6 +209,7 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
       area_name: form.area_name.trim() || null,
       employee_id: form.employee_id.trim() || null,
       avatar_url: form.avatar_url.trim() || null,
+      hourly_rate: form.hourly_rate === "" ? null : Number(form.hourly_rate),
       phone: form.phone.trim() || null
     }
     if (canEditUserRole(user, editingProfile)) changes.role = form.role
@@ -189,14 +225,14 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
       setError(updateError.message || "No se pudo guardar el profile.")
       return
     }
-    if (form.attendance_pin) {
+    if (canManagePin && form.attendance_pin) {
       const { error: pinError } = await setAttendancePin(data.id, form.attendance_pin, form.authorized_attendance_device.trim())
       if (pinError) {
         setError(pinError.message || "No se pudo guardar el PIN de marcaje.")
         return
       }
       setPinConfigured((current) => ({ ...current, [data.id]: true }))
-    } else if ((form.authorized_attendance_device || "") !== (editingProfile.authorized_attendance_device || "")) {
+    } else if (canManagePin && (form.authorized_attendance_device || "") !== (editingProfile.authorized_attendance_device || "")) {
       const { error: deviceError } = await setAttendanceDevice(data.id, form.authorized_attendance_device.trim())
       if (deviceError) {
         setError(deviceError.message || "No se pudo actualizar el dispositivo autorizado.")
@@ -207,7 +243,9 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
     setProfiles((current) => current.map((profile) => profile.id === data.id ? savedProfile : profile))
     if (data.id === user.id) await refreshProfile()
     setEditingProfile(null)
-    setMessage("Profile actualizado correctamente.")
+    setMessage(form.attendance_pin
+      ? "PIN de marcaje guardado correctamente. Cualquier PIN anterior dejó de funcionar."
+      : "Profile actualizado correctamente.")
     setError("")
   }
 
@@ -306,7 +344,11 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
                 {profile.avatar_url ? <img src={profile.avatar_url} alt="" /> : <span>{initials(profile.full_name)}</span>}
                 <div><strong>{profile.full_name || "Sin nombre"}</strong><small>@{profile.username || "sin-usuario"}</small></div>
               </div>
-              <div><Badge type="role" value={profile.role} /><small>{profile.area_name || "Sin área"}</small></div>
+              <div>
+                <Badge type="role" value={profile.role} />
+                <small>{profile.area_name || "Sin área"}</small>
+                {canManagePin && <span className={`profiles-pin-status ${pinConfigured[profile.id] ? "configured" : ""}`}>{pinConfigured[profile.id] ? "PIN configurado" : "Sin PIN de marcaje"}</span>}
+              </div>
               <div><span>{profile.email || "Sin correo"}</span><small>{profile.phone || "Sin teléfono"}</small></div>
               <div><Badge type="status" value={profile.status} /></div>
               <div><small>Alta: {formatDate(profile.created_at)}</small><small>Editado: {formatDate(profile.updated_at)}</small></div>
@@ -331,6 +373,56 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
         <div className="profiles-modal-overlay">
           <form className="profiles-modal" onSubmit={saveProfile}>
             <header><div><p className="profiles-eyebrow">Editar Profile</p><h2>{editingProfile.full_name || "Usuario"}</h2></div><button type="button" onClick={() => setEditingProfile(null)}>Cerrar</button></header>
+            {canManagePin && (
+              <section className="profiles-attendance-panel">
+                <div>
+                  <p className="profiles-eyebrow">Asistencia</p>
+                  <h3>PIN de marcaje</h3>
+                  <p className="profiles-attendance-help">Genera o escribe un PIN y entrégaselo al colaborador para usar la terminal. Después de guardarlo no podrá consultarse; solo podrá reemplazarse.</p>
+                </div>
+                <div className="profiles-attendance-fields">
+                  <Field label="Nuevo PIN de marcaje">
+                    <div className="profiles-pin-field">
+                      <input
+                        type={showAttendancePin ? "text" : "password"}
+                        inputMode="numeric"
+                        maxLength={6}
+                        value={form.attendance_pin}
+                        onChange={(event) => {
+                          updateField("attendance_pin", event.target.value.replace(/\D/g, "").slice(0, 6))
+                          setPinActionMessage("")
+                        }}
+                        placeholder={pinConfigured[editingProfile.id] ? "PIN configurado" : "4 a 6 dígitos"}
+                      />
+                      <button type="button" className="profiles-secondary" onClick={generateAttendancePin}>
+                        {pinConfigured[editingProfile.id] ? "Generar PIN nuevo" : "Generar PIN"}
+                      </button>
+                    </div>
+                    <div className="profiles-pin-actions">
+                      <button type="button" className="profiles-text-action" onClick={() => setShowAttendancePin((visible) => !visible)} disabled={!form.attendance_pin}>
+                        {showAttendancePin ? "Ocultar PIN" : "Mostrar PIN"}
+                      </button>
+                      <button type="button" className="profiles-text-action" onClick={copyAttendancePin} disabled={!form.attendance_pin}>Copiar PIN</button>
+                    </div>
+                  </Field>
+                  <Field label="Dispositivo autorizado (opcional)">
+                    <input
+                      value={form.authorized_attendance_device}
+                      onChange={(event) => updateField("authorized_attendance_device", event.target.value)}
+                      placeholder="Ej. terminal-recepcion-01"
+                    />
+                  </Field>
+                </div>
+                {pinActionMessage && <p className="profiles-pin-feedback" role="status">{pinActionMessage}</p>}
+                {form.attendance_pin && (
+                  <div className="profiles-pin-save-row">
+                    <span>Este PIN aún no está activo. Debes guardar para que funcione en la terminal.</span>
+                    <button type="submit" className="profiles-primary">Guardar y activar PIN</button>
+                  </div>
+                )}
+                {pinConfigured[editingProfile.id] && !form.attendance_pin && <p className="profiles-note">Este colaborador ya tiene PIN. Si lo perdió, presiona <strong>Generar PIN nuevo</strong>; al guardar, el PIN anterior dejará de funcionar.</p>}
+              </section>
+            )}
             <div className="profiles-form-grid">
               <Field label="Nombre completo"><input value={form.full_name} onChange={(event) => updateField("full_name", event.target.value)} disabled={ownRrhhProfile} required /></Field>
               <Field label="Username"><input value={form.username} onChange={(event) => updateField("username", event.target.value)} disabled={ownRrhhProfile} required /></Field>
@@ -344,26 +436,7 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
               </Field>
               <Field label="Employee ID"><input value={form.employee_id} onChange={(event) => updateField("employee_id", event.target.value)} disabled={ownRrhhProfile} /></Field>
               <Field label="Avatar URL"><input value={form.avatar_url} onChange={(event) => updateField("avatar_url", event.target.value)} /></Field>
-              <Field label="PIN de marcaje">
-                <div className="profiles-pin-field">
-                  <input
-                    type="password"
-                    inputMode="numeric"
-                    maxLength={6}
-                    value={form.attendance_pin}
-                    onChange={(event) => updateField("attendance_pin", event.target.value.replace(/\D/g, "").slice(0, 6))}
-                    placeholder={pinConfigured[editingProfile.id] ? "PIN configurado" : "4 a 6 dígitos"}
-                  />
-                  <button type="button" className="profiles-secondary" onClick={generateAttendancePin}>Generar PIN</button>
-                </div>
-              </Field>
-              <Field label="Dispositivo autorizado">
-                <input
-                  value={form.authorized_attendance_device}
-                  onChange={(event) => updateField("authorized_attendance_device", event.target.value)}
-                  placeholder="Opcional, ej. terminal-recepcion-01"
-                />
-              </Field>
+              <Field label="Salario por hora (Q)"><input type="number" min="0" step="0.01" value={form.hourly_rate} onChange={(event) => updateField("hourly_rate", event.target.value)} placeholder="Opcional" disabled={ownRrhhProfile} /></Field>
               <Field label="Rol">
                 <select value={form.role} onChange={(event) => updateField("role", event.target.value)} disabled={!canEditUserRole(user, editingProfile)}>
                   {PROFILE_ROLES.map((role) => <option key={role} value={role} disabled={!canAssignUserRole(user, editingProfile, role)}>{ROLE_NAMES[role]}</option>)}
@@ -376,7 +449,6 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
               </Field>
             </div>
             {user.role === "rrhh" && <p className="profiles-note">RRHH puede editar datos básicos. Los roles y estados son administrados por Admin o Gerente General.</p>}
-            {pinConfigured[editingProfile.id] && !form.attendance_pin && <p className="profiles-note">Este colaborador ya tiene PIN. Por seguridad no se muestra; ingresa uno nuevo solamente para reemplazarlo.</p>}
             <div className="profiles-modal-actions">
               <button type="button" className="profiles-secondary" onClick={() => setEditingProfile(null)}>Cancelar</button>
               <button type="submit" className="profiles-primary">Guardar cambios</button>

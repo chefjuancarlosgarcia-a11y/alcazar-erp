@@ -1147,6 +1147,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
   const [asistenciaRecoveryMessage, setAsistenciaRecoveryMessage] = useState("")
   const [colaboradorMarcaje, setColaboradorMarcaje] = useState(null)
   const [asistenciaCamaraActiva, setAsistenciaCamaraActiva] = useState(false)
+  const [asistenciaCountdown, setAsistenciaCountdown] = useState(0)
   const [asistenciaTipoPendiente, setAsistenciaTipoPendiente] = useState("")
   const [mensajeAsistencia, setMensajeAsistencia] = useState("")
   const [asistenciaPerfiles, setAsistenciaPerfiles] = useState([])
@@ -1233,8 +1234,32 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
 
   useEffect(() => {
     if (!asistenciaCamaraActiva || !asistenciaVideoRef.current || !asistenciaStreamRef.current) return
-    asistenciaVideoRef.current.srcObject = asistenciaStreamRef.current
-    asistenciaVideoRef.current.play().catch(() => setMensajeAsistencia("Se requiere foto para registrar asistencia."))
+    let cancelled = false
+    let timerId
+    const video = asistenciaVideoRef.current
+    video.srcObject = asistenciaStreamRef.current
+    video.play()
+      .then(() => {
+        if (cancelled) return
+        let seconds = 3
+        setAsistenciaCountdown(seconds)
+        const tick = () => {
+          if (cancelled) return
+          seconds -= 1
+          setAsistenciaCountdown(seconds)
+          if (seconds === 0) {
+            tomarFotoYGuardarMarcaje()
+            return
+          }
+          timerId = window.setTimeout(tick, 1000)
+        }
+        timerId = window.setTimeout(tick, 1000)
+      })
+      .catch(() => setMensajeAsistencia("Se requiere foto para registrar asistencia."))
+    return () => {
+      cancelled = true
+      window.clearTimeout(timerId)
+    }
   }, [asistenciaCamaraActiva])
 
   useEffect(() => {
@@ -2077,8 +2102,12 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
       return
     }
     const { data: validPin, error: pinError } = await verifyAttendancePin(colaboradorMarcaje.id, asistenciaPin)
-    if (pinError || !validPin) {
-      setAsistenciaLoginError("PIN incorrecto. No se puede iniciar el marcaje.")
+    if (pinError) {
+      setAsistenciaLoginError(`No se pudo validar el PIN en Supabase: ${pinError.message}. Verifica que la migración 019 esté aplicada.`)
+      return
+    }
+    if (!validPin) {
+      setAsistenciaLoginError("PIN incorrecto. Si te asignaron un PIN nuevo, confirma con Administración o RRHH que fue guardado y activado.")
       return
     }
     setAsistenciaTipoPendiente(tipo)
@@ -2093,13 +2122,8 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
       cerrarCamaraAsistencia()
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false })
       asistenciaStreamRef.current = stream
-      if (asistenciaVideoRef.current) {
-        asistenciaVideoRef.current.srcObject = stream
-        asistenciaVideoRef.current.muted = true
-        asistenciaVideoRef.current.playsInline = true
-        await asistenciaVideoRef.current.play()
-      }
       setAsistenciaCamaraActiva(true)
+      setMensajeAsistencia("Mira a la cámara. La foto se tomará automáticamente en 3 segundos.")
     } catch {
       setMensajeAsistencia("Se requiere foto para registrar asistencia.")
       setAsistenciaCamaraActiva(false)
@@ -2112,6 +2136,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
       asistenciaStreamRef.current = null
     }
     setAsistenciaCamaraActiva(false)
+    setAsistenciaCountdown(0)
   }
 
   function getAttendanceDevice() {
@@ -2151,7 +2176,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
       deviceName: terminal.name
     })
     if (error) {
-      setAsistenciaLoginError(error.message?.includes("PIN") ? "PIN incorrecto. No se registró el marcaje." : "No se pudo registrar el marcaje.")
+      setAsistenciaLoginError(error.message?.includes("PIN") ? "PIN incorrecto. No se registró el marcaje." : `No se pudo registrar el marcaje: ${error.message}`)
       setAsistenciaGuardando(false)
       cerrarCamaraAsistencia()
       return
@@ -7782,11 +7807,20 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
 
                         {asistenciaCamaraActiva && (
                           <div style={attendanceCameraBoxStyle}>
-                            <video ref={asistenciaVideoRef} autoPlay playsInline muted style={barcodeVideoStyle} />
+                            <div style={attendanceCameraPreviewStyle}>
+                              <video ref={asistenciaVideoRef} autoPlay playsInline muted style={barcodeVideoStyle} />
+                              {asistenciaCountdown > 0 && (
+                                <div style={attendanceCountdownStyle}>
+                                  <strong style={attendanceCountdownNumberStyle}>{asistenciaCountdown}</strong>
+                                  <span>Prepárate para la foto</span>
+                                </div>
+                              )}
+                              {asistenciaGuardando && <div style={attendanceSavingOverlayStyle}>Guardando marcaje...</div>}
+                            </div>
                             <canvas ref={asistenciaCanvasRef} style={{ display: "none" }} />
                             <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-                              <button type="button" onClick={tomarFotoYGuardarMarcaje} disabled={asistenciaGuardando} style={buttonStyle}>{asistenciaGuardando ? "Guardando..." : "Tomar foto y guardar marcaje"}</button>
-                              <button type="button" onClick={cerrarCamaraAsistencia} style={cancelButtonStyle}>Cerrar cámara</button>
+                              <span style={attendanceAutoCaptureTextStyle}>La foto y la hora se guardarán automáticamente.</span>
+                              <button type="button" onClick={cerrarCamaraAsistencia} disabled={asistenciaGuardando} style={cancelButtonStyle}>Cancelar</button>
                             </div>
                           </div>
                         )}
@@ -9684,6 +9718,44 @@ const attendanceCameraBoxStyle = {
   display: "grid",
   gap: "12px",
   padding: "0 16px 16px"
+}
+
+const attendanceCameraPreviewStyle = {
+  position: "relative",
+  overflow: "hidden",
+  borderRadius: "12px"
+}
+
+const attendanceCountdownStyle = {
+  position: "absolute",
+  inset: 0,
+  display: "grid",
+  placeContent: "center",
+  gap: "8px",
+  backgroundColor: "rgba(2, 6, 23, .42)",
+  color: "#f8fafc",
+  textAlign: "center"
+}
+
+const attendanceCountdownNumberStyle = {
+  fontSize: "4rem"
+}
+
+const attendanceSavingOverlayStyle = {
+  position: "absolute",
+  inset: 0,
+  display: "grid",
+  placeContent: "center",
+  backgroundColor: "rgba(2, 6, 23, .7)",
+  color: "#99f6e4",
+  fontWeight: 700
+}
+
+const attendanceAutoCaptureTextStyle = {
+  flex: 1,
+  color: "#99f6e4",
+  fontSize: "13px",
+  alignSelf: "center"
 }
 
 const attendancePhotoThumbStyle = {

@@ -22,6 +22,10 @@ export function canManageUsers(currentUser) {
   return ["admin", "gerente_general", "rrhh"].includes(currentUser?.role)
 }
 
+export function canManageAttendancePin(currentUser) {
+  return ["admin", "gerente_general", "rrhh"].includes(currentUser?.role)
+}
+
 export function canEditUserRole(currentUser, targetUser) {
   if (currentUser?.role === "admin") return true
   return currentUser?.role === "gerente_general" && targetUser?.role !== "admin"

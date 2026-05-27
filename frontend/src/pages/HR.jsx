@@ -1,5 +1,6 @@
 import LegacyInventoryApp from "../modules/LegacyInventoryApp"
 import ProfileManagement from "./ProfileManagement"
+import ScheduleManagement from "./ScheduleManagement"
 import { useLocation } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
 
@@ -15,6 +16,10 @@ function HR() {
 
   if (selectedSection === "usuarios") {
     return <ProfileManagement requestedProfileId={profileId} editRequested={editProfile} />
+  }
+
+  if (selectedSection === "horarios") {
+    return <ScheduleManagement />
   }
 
   return <LegacyInventoryApp initialSeccion={selectedSection} hideLegacyNavigation focusEmployeeId={profileId} editFocusedEmployee={editProfile} />
