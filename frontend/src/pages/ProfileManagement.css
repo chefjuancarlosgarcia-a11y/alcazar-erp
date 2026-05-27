@@ -289,6 +289,19 @@
   opacity: .6;
 }
 
+.profiles-pin-field {
+  display: flex;
+  gap: 8px;
+}
+
+.profiles-pin-field input {
+  min-width: 0;
+}
+
+.profiles-pin-field button {
+  flex-shrink: 0;
+}
+
 .profiles-note {
   margin: 0;
   padding: 10px 12px;

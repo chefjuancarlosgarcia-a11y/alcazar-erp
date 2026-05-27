@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react"
 import { supabase } from "../lib/supabase"
 import { useAuth } from "../context/AuthContext"
 import { getActiveAreas } from "../services/areasService"
+import { getAttendanceTerminalProfiles, setAttendanceDevice, setAttendancePin } from "../services/attendanceService"
 import {
   PROFILE_ROLES,
   PROFILE_STATUSES,
@@ -21,6 +22,8 @@ const EMPTY_FORM = {
   area_name: "",
   employee_id: "",
   avatar_url: "",
+  attendance_pin: "",
+  authorized_attendance_device: "",
   phone: "",
   status: "active"
 }
@@ -58,6 +61,7 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
   const [form, setForm] = useState(EMPTY_FORM)
   const [showCreateHelp, setShowCreateHelp] = useState(false)
   const [resettingId, setResettingId] = useState("")
+  const [pinConfigured, setPinConfigured] = useState({})
 
   const canManage = canManageUsers(user)
   const canEditBasic = canManage
@@ -88,6 +92,8 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
       setProfiles(data || [])
       setMessage("Lista de usuarios actualizada.")
     }
+    const { data: terminalProfiles } = await getAttendanceTerminalProfiles()
+    setPinConfigured(Object.fromEntries((terminalProfiles || []).map((profile) => [profile.id, profile.pin_configured])))
     setLoading(false)
   }
 
@@ -111,7 +117,9 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
       area_id: profile.area_id || "",
       area_name: profile.area_name || "",
       employee_id: profile.employee_id || "",
-      avatar_url: profile.avatar_url || ""
+      avatar_url: profile.avatar_url || "",
+      attendance_pin: "",
+      authorized_attendance_device: profile.authorized_attendance_device || ""
     })
     setError("")
     setMessage("")
@@ -128,6 +136,10 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
       area_id: area?.id || "",
       area_name: area?.name || ""
     }))
+  }
+
+  function generateAttendancePin() {
+    updateField("attendance_pin", String(Math.floor(1000 + Math.random() * 9000)))
   }
 
   async function saveProfile(event) {
@@ -147,6 +159,10 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
     }
     if (form.status !== editingProfile.status && !canDeactivateUser(user, editingProfile)) {
       setError("No puedes cambiar tu propio estado ni administrar el estado de este usuario.")
+      return
+    }
+    if (form.attendance_pin && !/^\d{4,6}$/.test(form.attendance_pin)) {
+      setError("El PIN de marcaje debe tener entre 4 y 6 dígitos.")
       return
     }
 
@@ -173,7 +189,22 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
       setError(updateError.message || "No se pudo guardar el profile.")
       return
     }
-    setProfiles((current) => current.map((profile) => profile.id === data.id ? data : profile))
+    if (form.attendance_pin) {
+      const { error: pinError } = await setAttendancePin(data.id, form.attendance_pin, form.authorized_attendance_device.trim())
+      if (pinError) {
+        setError(pinError.message || "No se pudo guardar el PIN de marcaje.")
+        return
+      }
+      setPinConfigured((current) => ({ ...current, [data.id]: true }))
+    } else if ((form.authorized_attendance_device || "") !== (editingProfile.authorized_attendance_device || "")) {
+      const { error: deviceError } = await setAttendanceDevice(data.id, form.authorized_attendance_device.trim())
+      if (deviceError) {
+        setError(deviceError.message || "No se pudo actualizar el dispositivo autorizado.")
+        return
+      }
+    }
+    const savedProfile = { ...data, authorized_attendance_device: form.authorized_attendance_device.trim() || null }
+    setProfiles((current) => current.map((profile) => profile.id === data.id ? savedProfile : profile))
     if (data.id === user.id) await refreshProfile()
     setEditingProfile(null)
     setMessage("Profile actualizado correctamente.")
@@ -313,6 +344,26 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
               </Field>
               <Field label="Employee ID"><input value={form.employee_id} onChange={(event) => updateField("employee_id", event.target.value)} disabled={ownRrhhProfile} /></Field>
               <Field label="Avatar URL"><input value={form.avatar_url} onChange={(event) => updateField("avatar_url", event.target.value)} /></Field>
+              <Field label="PIN de marcaje">
+                <div className="profiles-pin-field">
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    maxLength={6}
+                    value={form.attendance_pin}
+                    onChange={(event) => updateField("attendance_pin", event.target.value.replace(/\D/g, "").slice(0, 6))}
+                    placeholder={pinConfigured[editingProfile.id] ? "PIN configurado" : "4 a 6 dígitos"}
+                  />
+                  <button type="button" className="profiles-secondary" onClick={generateAttendancePin}>Generar PIN</button>
+                </div>
+              </Field>
+              <Field label="Dispositivo autorizado">
+                <input
+                  value={form.authorized_attendance_device}
+                  onChange={(event) => updateField("authorized_attendance_device", event.target.value)}
+                  placeholder="Opcional, ej. terminal-recepcion-01"
+                />
+              </Field>
               <Field label="Rol">
                 <select value={form.role} onChange={(event) => updateField("role", event.target.value)} disabled={!canEditUserRole(user, editingProfile)}>
                   {PROFILE_ROLES.map((role) => <option key={role} value={role} disabled={!canAssignUserRole(user, editingProfile, role)}>{ROLE_NAMES[role]}</option>)}
@@ -325,6 +376,7 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
               </Field>
             </div>
             {user.role === "rrhh" && <p className="profiles-note">RRHH puede editar datos básicos. Los roles y estados son administrados por Admin o Gerente General.</p>}
+            {pinConfigured[editingProfile.id] && !form.attendance_pin && <p className="profiles-note">Este colaborador ya tiene PIN. Por seguridad no se muestra; ingresa uno nuevo solamente para reemplazarlo.</p>}
             <div className="profiles-modal-actions">
               <button type="button" className="profiles-secondary" onClick={() => setEditingProfile(null)}>Cancelar</button>
               <button type="submit" className="profiles-primary">Guardar cambios</button>
