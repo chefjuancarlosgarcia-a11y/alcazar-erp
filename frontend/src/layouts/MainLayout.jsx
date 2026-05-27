@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { Outlet, useLocation } from "react-router-dom"
 import Sidebar from "../components/Sidebar"
+import NotificationsBell from "../components/NotificationsBell"
 import UserProfileDropdown from "../components/UserProfileDropdown"
 import MyProfilePanel from "../components/MyProfilePanel"
 import { useAuth } from "../context/AuthContext"
@@ -40,6 +41,7 @@ function MainLayout() {
                 Menú
               </button>
             )}
+            <NotificationsBell currentUser={user} />
             <UserProfileDropdown currentUser={user} onOpenProfile={setProfilePanelView} />
           </header>
         )}

@@ -19,6 +19,8 @@ function Inventory() {
   const [searchParams] = useSearchParams()
   const section = searchParams.get("section") || "inventario"
   const areaId = searchParams.get("area") || "todos"
+  const orderView = searchParams.get("view") || ""
+  const orderId = searchParams.get("order") || ""
   const initialSeccion = allowedSections.has(section) ? section : "inventario"
 
   if (["inventario", "inventarioAreas", "movimientosInventario"].includes(initialSeccion)) {
@@ -33,7 +35,7 @@ function Inventory() {
     return <RecipesSupabase />
   }
 
-  return <LegacyInventoryApp initialSeccion={initialSeccion} hideLegacyNavigation />
+  return <LegacyInventoryApp initialSeccion={initialSeccion} initialPurchaseOrderView={orderView} initialPurchaseOrderId={orderId} hideLegacyNavigation />
 }
 
 export default Inventory

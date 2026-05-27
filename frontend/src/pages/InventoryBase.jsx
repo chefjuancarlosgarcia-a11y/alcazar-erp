@@ -15,6 +15,7 @@ import {
   uploadInventoryImage,
   updateInventoryItem
 } from "../services/inventoryService"
+import { notifyRoles } from "../services/notificationsService"
 import "./InventoryBase.css"
 
 const DEFAULT_INVENTORY_UNIT = "Unidad/Pieza"
@@ -233,6 +234,19 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
         }
       }
     }
+    if (editingItem && Number(editingItem.purchase_price ?? 0) !== Number(purchasePrice ?? 0)) {
+      try {
+        await notifyRoles(["admin", "gerente_general"], {
+          type: "inventory_purchase_price_changed",
+          title: "Precio de compra modificado",
+          message: `El precio de compra de ${result.data.name} fue actualizado a Q${Number(purchasePrice || 0).toFixed(2)}.`,
+          entityType: "inventory_item",
+          entityId: result.data.id
+        })
+      } catch (notificationError) {
+        console.error("No se pudo registrar la notificación del precio de compra.", notificationError)
+      }
+    }
     setShowItemForm(false)
     setEditingItem(null)
     setMessage(editingItem ? "Producto actualizado correctamente." : "Producto creado en Supabase.")
@@ -290,6 +304,19 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
     if (stockResult.error) {
       setError(stockResult.error.message || "No se pudo actualizar el stock.")
       return
+    }
+    if (adjustment.areaId === "almacen" && (nextQuantity <= 0 || (minimum > 0 && nextQuantity <= minimum))) {
+      try {
+        await notifyRoles(["encargado_almacen"], {
+          type: nextQuantity <= 0 ? "inventory_out_of_stock" : "inventory_low_stock",
+          title: nextQuantity <= 0 ? "Producto agotado" : "Producto bajo mínimo",
+          message: `${item.name} tiene ${nextQuantity} ${item.base_unit} en Almacén.`,
+          entityType: "inventory_item",
+          entityId: item.id
+        })
+      } catch (notificationError) {
+        console.error("No se pudo registrar la notificación de existencias.", notificationError)
+      }
     }
     setAdjustment(null)
     setMessage(nextQuantity === previousQuantity ? "Mínimo actualizado." : "Ajuste registrado en el kardex.")
@@ -419,7 +446,7 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
           onAdjust={openAdjustment}
         />
       )}
-      {section === "inventarioAreas" && <AreaStockDashboard items={items} areas={areas} canManage={canManage} onAdjust={openAdjustment} />}
+      {section === "inventarioAreas" && <AreaStockDashboard items={items} areas={areas} initialAreaId={initialAreaId} canManage={canManage} onAdjust={openAdjustment} />}
       {section === "movimientosInventario" && <MovementsTable movements={movements} items={movementItems} areas={areaNames} loading={loading} />}
 
       {showItemForm && <ItemModal form={itemForm} setForm={setItemForm} editingItem={editingItem} onSave={saveItem} onDelete={deactivate} onClose={() => setShowItemForm(false)} />}
@@ -484,17 +511,104 @@ function InventoryCatalog({ loading, items, areas, query, setQuery, areaFilter, 
   )
 }
 
-function AreaStockDashboard({ items, areas, canManage, onAdjust }) {
-  return <div className="inventory-area-grid">{areas.map((area) => {
-    const areaItems = items.filter((item) => item.active !== false)
-    const low = areaItems.filter((item) => stockOf(item, area.id) <= minimumOf(item, area.id) && minimumOf(item, area.id) > 0).length
-    const empty = areaItems.filter((item) => stockOf(item, area.id) === 0).length
-    return <article className="inventory-area-card" key={area.id}>
-      <h2>{area.name}</h2>
-      <div className="inventory-area-metrics"><span>Productos<strong>{areaItems.length}</strong></span><span>Bajos<strong>{low}</strong></span><span>Agotados<strong>{empty}</strong></span></div>
-      {areaItems.slice(0, 6).map((item) => <div className="inventory-area-line" key={item.id}><ProductImage item={item} small /><span>{item.name}</span><strong>{stockOf(item, area.id)} {unitForForm(item.base_unit)}</strong>{canManage && <button type="button" onClick={() => onAdjust(item, area.id)}>Ajustar</button>}</div>)}
-    </article>
-  })}</div>
+function AreaStockDashboard({ items, areas, initialAreaId, canManage, onAdjust }) {
+  const defaultAreaId = initialAreaId && initialAreaId !== "todos" ? initialAreaId : "almacen"
+  const [selectedAreaId, setSelectedAreaId] = useState(defaultAreaId)
+  const [search, setSearch] = useState("")
+  const [statusFilter, setStatusFilter] = useState("todos")
+  const [showWithoutStock, setShowWithoutStock] = useState(false)
+  const [previewItem, setPreviewItem] = useState(null)
+
+  const selectedArea = areas.find((area) => area.id === selectedAreaId)
+    || areas.find((area) => area.id === "almacen")
+    || areas[0]
+  if (!selectedArea) return <p className="inventory-empty">No hay áreas activas registradas.</p>
+
+  const isWarehouse = selectedArea.id === "almacen"
+  const activeItems = items.filter((item) => item.active !== false)
+  const visibleItems = activeItems.filter((item) => {
+    const quantity = stockOf(item, selectedArea.id)
+    const minimum = minimumOf(item, selectedArea.id)
+    const matchesText = !search || `${item.name} ${item.sku || ""} ${item.category || ""}`.toLocaleLowerCase("es").includes(search.toLocaleLowerCase("es"))
+    const hasOperationalStock = isWarehouse || showWithoutStock || quantity > 0
+    const matchesStatus = statusFilter === "todos"
+      || (statusFilter === "bajo" && minimum > 0 && quantity <= minimum)
+      || (statusFilter === "agotados" && quantity <= 0)
+    return matchesText && hasOperationalStock && matchesStatus
+  })
+  const stockedCount = activeItems.filter((item) => stockOf(item, selectedArea.id) > 0).length
+  const lowCount = activeItems.filter((item) => stockOf(item, selectedArea.id) > 0 && minimumOf(item, selectedArea.id) > 0 && stockOf(item, selectedArea.id) <= minimumOf(item, selectedArea.id)).length
+  const emptyCount = activeItems.filter((item) => stockOf(item, selectedArea.id) <= 0).length
+
+  return <div className="inventory-area-view">
+    <nav className="inventory-area-tabs" aria-label="Seleccionar área">
+      {areas.map((area) => (
+        <button type="button" className={area.id === selectedArea.id ? "active" : ""} key={area.id} onClick={() => setSelectedAreaId(area.id)}>
+          {area.name}
+        </button>
+      ))}
+    </nav>
+    <div className="inventory-area-controls">
+      <select aria-label="Área seleccionada" value={selectedArea.id} onChange={(event) => setSelectedAreaId(event.target.value)}>
+        {areas.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}
+      </select>
+      <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar producto, SKU o categoría..." />
+      <select aria-label="Filtrar estado" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+        <option value="todos">Todos</option>
+        <option value="bajo">Bajo mínimo</option>
+        <option value="agotados">Agotados</option>
+      </select>
+      <label className="inventory-area-checkbox">
+        <input type="checkbox" checked={showWithoutStock} onChange={(event) => setShowWithoutStock(event.target.checked)} />
+        Mostrar productos sin stock
+      </label>
+    </div>
+    <section className="inventory-area-selected">
+      <header>
+        <div>
+          <h2>{selectedArea.name}</h2>
+          <p className="inventory-base-muted">{isWarehouse ? "Catálogo completo y existencias centrales." : "Sólo existencias transferidas a esta área."}</p>
+        </div>
+        <div className="inventory-area-metrics">
+          <span>Con stock<strong>{stockedCount}</strong></span>
+          <span>Bajos<strong>{lowCount}</strong></span>
+          <span>Agotados<strong>{emptyCount}</strong></span>
+        </div>
+      </header>
+      <div className="inventory-area-list">
+        {visibleItems.map((item) => (
+          <article className="inventory-area-line" key={item.id}>
+            <button type="button" className="inventory-area-image-button" onClick={() => setPreviewItem(item)} aria-label={`Ampliar imagen de ${item.name}`}>
+              <ProductImage item={item} />
+            </button>
+            <span><strong>{item.name}</strong><small>{item.category || "Sin categoría"} · {item.sku || "Sin SKU"}</small></span>
+            <strong>{stockOf(item, selectedArea.id)} {unitForForm(item.base_unit)}</strong>
+            <StockBadge quantity={stockOf(item, selectedArea.id)} minimum={minimumOf(item, selectedArea.id)} active={item.active} />
+            {canManage && <button type="button" onClick={() => onAdjust(item, selectedArea.id)}>Ajustar</button>}
+          </article>
+        ))}
+        {!visibleItems.length && (
+          <p className="inventory-empty">
+            {!isWarehouse && !showWithoutStock
+              ? "Esta área aún no tiene productos con stock transferido."
+              : "No hay productos para los filtros seleccionados."}
+          </p>
+        )}
+      </div>
+    </section>
+    {previewItem && (
+      <div className="inventory-image-lightbox" role="presentation" onClick={() => setPreviewItem(null)}>
+        <article role="dialog" aria-label={`Imagen de ${previewItem.name}`} onClick={(event) => event.stopPropagation()}>
+          <button type="button" className="inventory-lightbox-close" onClick={() => setPreviewItem(null)}>Cerrar</button>
+          <ProductImage item={previewItem} large />
+          <div>
+            <strong>{previewItem.name}</strong>
+            <small>{previewItem.category || "Sin categoría"} · {previewItem.sku || "Sin SKU"}</small>
+          </div>
+        </article>
+      </div>
+    )}
+  </div>
 }
 
 function MovementsTable({ movements, items, areas, loading }) {
@@ -663,9 +777,10 @@ function Field({ label, tooltip, children }) {
   return <label className="inventory-field"><span>{label}{tooltip && <InfoTooltip text={tooltip} />}</span>{children}</label>
 }
 
-function ProductImage({ item, small = false }) {
-  if (item.image_url) return <img className={`inventory-product-image${small ? " small" : ""}`} src={item.image_url} alt="" />
-  return <span className={`inventory-product-placeholder${small ? " small" : ""}`}>{initials(item.name)}</span>
+function ProductImage({ item, small = false, large = false }) {
+  const sizeClass = small ? " small" : large ? " large" : ""
+  if (item.image_url) return <img className={`inventory-product-image${sizeClass}`} src={item.image_url} alt="" />
+  return <span className={`inventory-product-placeholder${sizeClass}`}>{initials(item.name)}</span>
 }
 
 function StockBadge({ quantity, minimum, active = true }) {

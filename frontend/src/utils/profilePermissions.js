@@ -1,6 +1,7 @@
 export const PROFILE_ROLES = [
   "admin",
   "gerente_general",
+  "gerente",
   "encargado_almacen",
   "rrhh",
   "supervisor",

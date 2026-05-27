@@ -237,7 +237,7 @@ function extractRow(row, mapping) {
 function validateRow(source, index, areas, existingItems, nameActions, sourceRows) {
   const criticalErrors = []
   const corrections = []
-  const defaultArea = areas.find((entry) => normalize(entry.id) === "almacen") || areas[0]
+  const warehouseArea = areas.find((entry) => normalize(entry.id) === "almacen") || areas[0]
   const purchaseUnit = source.purchase_unit || "Unidad/Pieza"
   const baseUnit = source.base_unit || purchaseUnit
   const quantity = normalizedNumber(source.quantity, 1, 0)
@@ -248,7 +248,7 @@ function validateRow(source, index, areas, existingItems, nameActions, sourceRow
     ...source,
     purchase_unit: purchaseUnit,
     base_unit: baseUnit,
-    area_id: defaultArea?.id || "almacen",
+    area_id: warehouseArea?.id || "almacen",
     quantity: quantity.value,
     minimum_quantity: minimumQuantity.value,
     conversion_factor: conversionFactor.value,
@@ -262,9 +262,9 @@ function validateRow(source, index, areas, existingItems, nameActions, sourceRow
   if (minimumQuantity.corrected) corrections.push("Punto mínimo corregido a 0.")
   if (conversionFactor.corrected) corrections.push("Unidades por empaque corregidas a 1.")
   if (cost.corrected) corrections.push(`Costo normalizado a ${cost.value}.`)
-  const suppliedArea = source.area_id && areas.find((entry) => normalize(entry.id) === normalize(source.area_id) || normalize(entry.name) === normalize(source.area_id))
-  if (suppliedArea) data.area_id = suppliedArea.id
-  else if (source.area_id) corrections.push(`Área no reconocida; se usará ${defaultArea?.name || "almacén"}.`)
+  if (source.area_id && normalize(source.area_id) !== "almacen" && normalize(source.area_id) !== normalize(warehouseArea?.name)) {
+    corrections.push(`El inventario inicial se cargará en ${warehouseArea?.name || "Almacén"}.`)
+  }
   const duplicateSkuInFile = data.sku && sourceRows.some((row, rowIndex) => (
     rowIndex !== index && normalize(row.sku) === normalize(data.sku)
   ))
@@ -277,7 +277,7 @@ function validateRow(source, index, areas, existingItems, nameActions, sourceRow
   return {
     index,
     data,
-    areaName: suppliedArea?.name || defaultArea?.name || "",
+    areaName: warehouseArea?.name || "Almacén",
     messages: messages.length ? messages : ["Validación correcta."],
     needsNameDecision,
     critical: criticalErrors.length > 0,

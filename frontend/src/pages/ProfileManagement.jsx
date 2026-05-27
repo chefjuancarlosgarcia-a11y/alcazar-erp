@@ -28,6 +28,7 @@ const EMPTY_FORM = {
 const ROLE_NAMES = {
   admin: "Admin",
   gerente_general: "Gerente General",
+  gerente: "Gerente",
   encargado_almacen: "Encargado de Almacén",
   rrhh: "RRHH",
   supervisor: "Supervisor",
@@ -57,7 +58,6 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
   const [form, setForm] = useState(EMPTY_FORM)
   const [showCreateHelp, setShowCreateHelp] = useState(false)
   const [resettingId, setResettingId] = useState("")
-  const localUsersCount = readLocalUsersCount()
 
   const canManage = canManageUsers(user)
   const canEditBasic = canManage
@@ -245,11 +245,6 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
         </div>
       </header>
 
-      {localUsersCount > 0 && (
-        <div className="profiles-warning">
-          Estos usuarios son locales y deben migrarse a Supabase. Se detectaron {localUsersCount} registro(s) en almacenamiento local.
-        </div>
-      )}
       {message && <div className="profiles-success" role="status">{message}</div>}
       {error && <div className="profiles-error" role="alert">{error}</div>}
 
@@ -370,15 +365,6 @@ function initials(name) {
 function formatDate(value) {
   if (!value) return "Sin información"
   return new Intl.DateTimeFormat("es-GT", { dateStyle: "medium" }).format(new Date(value))
-}
-
-function readLocalUsersCount() {
-  try {
-    const users = JSON.parse(localStorage.getItem("users") || "[]")
-    return Array.isArray(users) ? users.length : 0
-  } catch {
-    return 0
-  }
 }
 
 export default ProfileManagement

@@ -11,6 +11,8 @@ import InfoTooltip from "../components/InfoTooltip"
 import { BRANDING } from "../branding"
 import { useAuth } from "../context/AuthContext"
 import { supabase } from "../lib/supabase"
+import { createNotification, notifyRoles } from "../services/notificationsService"
+import { getPurchaseOrders, savePurchaseOrder } from "../services/purchaseOrdersService"
 import {
   createArea as createSupabaseArea,
   deactivateArea as deactivateSupabaseArea,
@@ -252,6 +254,25 @@ function normalizeInventoryItem(item) {
 
 function normalizeInventory(items) {
   return Array.isArray(items) ? items.map(normalizeInventoryItem) : []
+}
+
+function getPurchaseProductDetails(item) {
+  const unitPurchase = item?.unidadCompra || item?.purchase_unit || "Unidad/Pieza"
+  const unitBase = item?.unidadBase || item?.base_unit || item?.unidad || unitPurchase
+  const factorValue = Number(item?.unidadesPorEmpaque ?? item?.conversion_factor ?? 1)
+  const priceValue = Number(item?.precioCompra ?? item?.purchase_price ?? item?.costoUnitario ?? 0)
+
+  return {
+    productoId: item?.id,
+    nombre: item?.nombre || item?.name || "",
+    sku: item?.codigo || item?.sku || item?.codigoBarras || "",
+    categoria: item?.categoria || item?.category || "Sin categoria",
+    unidadCompra: unitPurchase,
+    unidadBase: unitBase,
+    factorConversion: factorValue > 0 ? factorValue : 1,
+    precioCompra: priceValue >= 0 ? priceValue : 0,
+    proveedor: item?.proveedorNombre || item?.supplier || ""
+  }
 }
 
 function getLocationStock(item, location) {
@@ -638,6 +659,27 @@ function canManageUsers(currentUser) {
   return role === "admin" || role === "administrador" || role === "gerente_general"
 }
 
+const PURCHASE_ORDER_CREATOR_ROLES = ["admin", "gerente_general", "gerente", "encargado_almacen"]
+const PURCHASE_ORDER_APPROVER_ROLES = ["admin", "gerente_general"]
+
+function getPurchaseOrderStatusLabel(status) {
+  const labels = {
+    borrador: "Borrador",
+    pendiente: "Pendiente de aprobación",
+    pendiente_aprobacion: "Pendiente de aprobación",
+    aprobada: "Aprobada",
+    rechazada: "Rechazada",
+    enviada_proveedor: "Enviada a proveedor",
+    "en tránsito": "Enviada a proveedor",
+    parcialCompletada: "Recibida parcial",
+    recibida_parcial: "Recibida parcial",
+    recibida: "Recibida completa",
+    recibida_completa: "Recibida completa",
+    cancelada: "Cancelada"
+  }
+  return labels[status] || status
+}
+
 function generateUsernameFromName(name) {
   const base = String(name || "usuario")
     .trim()
@@ -677,7 +719,7 @@ function generateTemporaryPassword() {
 }
 
 
-function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation = false, focusEmployeeId = "", editFocusedEmployee = false }) {
+function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrderView = "", initialPurchaseOrderId = "", hideLegacyNavigation = false, focusEmployeeId = "", editFocusedEmployee = false }) {
   const { user: authenticatedUser } = useAuth()
   const [busqueda, setBusqueda] = useState("")
   const [mostrarSugerenciasIngredientes, setMostrarSugerenciasIngredientes] = useState(false)
@@ -713,6 +755,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
   const [camposIngredienteFaltantes, setCamposIngredienteFaltantes] = useState({})
   const [ingredienteOriginal, setIngredienteOriginal] = useState(null)
   const [ordenCompra, setOrdenCompra] = useState([])
+  const [purchaseOrderView, setPurchaseOrderView] = useState("automatic")
   const [ordenesCompraManual, setOrdenesCompraManual] = useState(() => {
     const datos = localStorage.getItem("ordenesCompraManual")
     return datos ? JSON.parse(datos) : []
@@ -723,7 +766,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
   const [manualOrdenItems, setManualOrdenItems] = useState([])
   const [manualIssueDate, setManualIssueDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [manualExpectedDate, setManualExpectedDate] = useState("")
-  const [manualStatus, setManualStatus] = useState("pendiente")
+  const [manualStatus, setManualStatus] = useState("pendiente_aprobacion")
   const [manualProveedorId, setManualProveedorId] = useState(null)
   const [manualProveedorNombre, setManualProveedorNombre] = useState("")
   const [manualProveedorContacto, setManualProveedorContacto] = useState("")
@@ -781,7 +824,6 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
   const [areasLoading, setAreasLoading] = useState(true)
   const [areasError, setAreasError] = useState("")
   const [areaProfiles, setAreaProfiles] = useState([])
-  const legacyAreasDetected = parseStoredArray(INVENTORY_AREAS_KEY).length > 0
   const [areaForm, setAreaForm] = useState({
     id: "",
     name: "",
@@ -946,6 +988,20 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
   useEffect(() => {
     localStorage.setItem("ordenesCompraManual", JSON.stringify(ordenesCompraManual))
   }, [ordenesCompraManual])
+
+  useEffect(() => {
+    let active = true
+    getPurchaseOrders().then(({ data, error }) => {
+      if (!active || error || !data?.length) return
+      setOrdenesCompraManual((localOrders) => {
+        const remoteIds = new Set(data.map((order) => String(order.id)))
+        return [...data, ...localOrders.filter((order) => !remoteIds.has(String(order.id)))]
+      })
+    })
+    return () => {
+      active = false
+    }
+  }, [])
 
   useEffect(() => {
     localStorage.setItem("proveedores", JSON.stringify(proveedores))
@@ -1193,6 +1249,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
   const rolesDisponibles = [
     "Administrador",
     "Gerente General",
+    "Gerente",
     "Recursos Humanos",
     "Supervisor",
     "Encargado de Almacén",
@@ -2993,7 +3050,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
     { key: "movimientosInventario", label: "Movimientos", icon: "↔", roles: ["Administrador", "Gerente General", "Supervisor", "Encargado de Cocina", "Recursos Humanos"] },
     { key: "inventarioAreas", label: "Inventario por áreas", icon: "▦", roles: ["Administrador", "Gerente General", "Supervisor", "Encargado de Cocina", "FOH", "Recursos Humanos"] },
     { key: "areas", label: "Administrar áreas", icon: "⚙", roles: ["Administrador", "Gerente General"] },
-    { key: "ordenes", label: "Órdenes de compra", icon: "📋", roles: ["Administrador", "Gerente General", "Supervisor", "Encargado de Cocina", "FOH", "Recursos Humanos"] },
+    { key: "ordenes", label: "Órdenes de compra", icon: "📋", roles: ["Administrador", "Gerente General", "Gerente", "Encargado de Almacén"] },
     { key: "puntoVenta", label: "Punto de Venta", icon: "💳", roles: ["Administrador", "Gerente General", "Supervisor", "FOH"] },
     { key: "asistencia", label: "Marcaje de asistencia", icon: "📷", roles: ["Administrador", "Gerente General", "Supervisor", "Encargado de Cocina", "FOH", "BOH", "Cocina", "Servicio", "Recursos Humanos"] },
     { key: "reportesAsistencia", label: "Reportes de asistencia", icon: "📊", roles: ["Administrador", "Gerente General", "Recursos Humanos"] },
@@ -3452,10 +3509,59 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
   const ordenManualSeleccionada = ordenesCompraManual.find(
     (orden) => orden.id === manualPedidoSeleccionadoId
   )
+  const purchaseOrderRole = authenticatedUser?.role || normalizeAccessRole(usuarioActual)
+  const puedeCrearOrdenCompra = PURCHASE_ORDER_CREATOR_ROLES.includes(purchaseOrderRole)
+  const puedeAprobarOrdenCompra = PURCHASE_ORDER_APPROVER_ROLES.includes(purchaseOrderRole)
+  const puedeRecibirOrdenCompra = ["admin", "gerente_general", "encargado_almacen"].includes(purchaseOrderRole)
+  const requiereAprobacionOrdenCompra = ["gerente", "encargado_almacen"].includes(purchaseOrderRole)
+
+  useEffect(() => {
+    if (initialSeccion !== "ordenes") return
+    if (["automatic", "manual", "history"].includes(initialPurchaseOrderView)) {
+      setPurchaseOrderView(initialPurchaseOrderView)
+    }
+    if (!initialPurchaseOrderId) return
+    getPurchaseOrders().then(({ data, error }) => {
+      if (error) return
+      setOrdenesCompraManual((localOrders) => {
+        const remoteIds = new Set((data || []).map((order) => String(order.id)))
+        return [...(data || []), ...localOrders.filter((order) => !remoteIds.has(String(order.id)))]
+      })
+      if ((data || []).some((orden) => String(orden.id) === String(initialPurchaseOrderId))) {
+        setManualPedidoSeleccionadoId(Number(initialPurchaseOrderId) || initialPurchaseOrderId)
+      }
+    })
+  }, [initialPurchaseOrderId, initialPurchaseOrderView, initialSeccion])
+
+  useEffect(() => {
+    function processNotificationAction(event) {
+      const action = event?.detail || JSON.parse(window.sessionStorage.getItem("purchase-order-notification-action") || "null")
+      if (!action?.id || !puedeAprobarOrdenCompra) return
+      if (!ordenesCompraManual.some((orden) => String(orden.id) === String(action.id))) return
+      window.sessionStorage.removeItem("purchase-order-notification-action")
+      setPurchaseOrderView("history")
+      setManualPedidoSeleccionadoId(Number(action.id) || action.id)
+      if (action.action === "approve") aprobarOrdenManual(action.id)
+      if (action.action === "reject") rechazarOrdenManual(action.id)
+    }
+    processNotificationAction()
+    window.addEventListener("purchase-order-action", processNotificationAction)
+    return () => window.removeEventListener("purchase-order-action", processNotificationAction)
+  }, [puedeAprobarOrdenCompra, ordenesCompraManual])
 
   const manualIngredienteSeleccionado = ingredientes.find(
     (ingrediente) => ingrediente.id === manualIngredienteSeleccionadoId
   )
+  const manualProductoCompra = manualIngredienteSeleccionado
+    ? getPurchaseProductDetails(manualIngredienteSeleccionado)
+    : null
+  const manualCantidadCompraNumero = Number(manualCantidadComprar || 0)
+  const manualSubtotal = manualProductoCompra
+    ? manualCantidadCompraNumero * manualProductoCompra.precioCompra
+    : 0
+  const manualCantidadBaseTotal = manualProductoCompra
+    ? manualCantidadCompraNumero * manualProductoCompra.factorConversion
+    : 0
 
   const nuevasNotificacionesCount = notificaciones.filter((item) => !item.leida).length
 
@@ -3503,7 +3609,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
         .map((ingrediente) => {
           const texto = manualBusqueda.toLowerCase()
           const nombre = String(ingrediente.nombre || "").toLowerCase()
-          const codigo = String(ingrediente.codigo || "").toLowerCase()
+          const codigo = String(ingrediente.codigo || ingrediente.sku || ingrediente.codigoBarras || "").toLowerCase()
           let score = 0
 
           if (nombre.startsWith(texto)) score += 15
@@ -3570,17 +3676,17 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
     : []
 
   function completarProveedorDesdeIngrediente(ingrediente) {
-    if (!ingrediente || !ingrediente.proveedorId) return
-    const proveedor = proveedores.find((p) => p.id === ingrediente.proveedorId)
-    if (!proveedor) return
+    const proveedor = ingrediente?.proveedorId
+      ? proveedores.find((item) => item.id === ingrediente.proveedorId)
+      : null
 
-    setManualProveedorId(proveedor.id)
-    setManualProveedorNombre(proveedor.nombreComercial || "")
-    setManualProveedorContacto(proveedor.telefono || "")
-    setManualProveedorCorreo(proveedor.correo || "")
-    setManualProveedorWhatsApp(proveedor.whatsapp || "")
-    setManualProveedorEncargado(proveedor.encargado || "")
-    setManualMetodoCompra(obtenerMetodoPagoPreferido(proveedor))
+    setManualProveedorId(proveedor?.id || null)
+    setManualProveedorNombre(proveedor?.nombreComercial || ingrediente?.proveedorNombre || ingrediente?.supplier || "")
+    setManualProveedorContacto(proveedor?.telefono || "")
+    setManualProveedorCorreo(proveedor?.correo || "")
+    setManualProveedorWhatsApp(proveedor?.whatsapp || "")
+    setManualProveedorEncargado(proveedor?.encargado || "")
+    setManualMetodoCompra(proveedor ? obtenerMetodoPagoPreferido(proveedor) : "banco")
   }
 
   function limpiarFormulario() {
@@ -4087,7 +4193,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
       if (!orden.fechaEsperadaEntrega) return
       const fechaEsperada = new Date(orden.fechaEsperadaEntrega)
       const ahora = new Date()
-      if (fechaEsperada < ahora && orden.status !== "recibida") {
+      if (fechaEsperada < ahora && !["recibida", "recibida_completa", "cancelada", "rechazada"].includes(orden.status)) {
         agregarNotificacion(
           `orden-vencida-${orden.id}`,
           "orden",
@@ -4794,6 +4900,13 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
     setOrdenCompra([])
   }
 
+  function seleccionarIngredienteOrdenManual(ingrediente) {
+    setManualIngredienteSeleccionadoId(ingrediente.id)
+    setManualBusqueda("")
+    setManualCantidadComprar("")
+    completarProveedorDesdeIngrediente(ingrediente)
+  }
+
   function agregarIngredienteOrdenManual() {
     if (!manualIngredienteSeleccionado) {
       alert("Selecciona un ingrediente válido para la orden manual.")
@@ -4806,33 +4919,50 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
       return
     }
 
-    const existeItem = manualOrdenItems.find((item) => item.id === manualIngredienteSeleccionado.id)
+    const detalle = getPurchaseProductDetails(manualIngredienteSeleccionado)
+    const existeItem = manualOrdenItems.find((item) => (item.producto_id || item.id) === detalle.productoId)
+    const nuevoItem = {
+      id: detalle.productoId,
+      producto_id: detalle.productoId,
+      nombre: detalle.nombre,
+      sku: detalle.sku,
+      codigo: detalle.sku,
+      cantidad_compra: cantidad,
+      cantidadComprar: cantidad,
+      unidad_compra: detalle.unidadCompra,
+      unidadCompra: detalle.unidadCompra,
+      precio_unitario_compra: detalle.precioCompra,
+      costoUnitario: detalle.precioCompra,
+      subtotal: cantidad * detalle.precioCompra,
+      factor_conversion: detalle.factorConversion,
+      unidad_base: detalle.unidadBase,
+      cantidad_base_total: cantidad * detalle.factorConversion,
+      imagen: manualIngredienteSeleccionado.imagen || ""
+    }
 
     if (existeItem) {
-      setManualOrdenItems(
-        manualOrdenItems.map((item) => {
-          if (item.id === manualIngredienteSeleccionado.id) {
+      const debeSumarse = window.confirm(
+        `"${detalle.nombre}" ya está incluido en la orden. ¿Deseas sumar ${cantidad} ${detalle.unidadCompra} a la cantidad existente?`
+      )
+      if (!debeSumarse) return
+      setManualOrdenItems((items) =>
+        items.map((item) => {
+          if ((item.producto_id || item.id) === detalle.productoId) {
+            const cantidadActualizada = Number(item.cantidad_compra ?? item.cantidadComprar ?? 0) + cantidad
             return {
               ...item,
-              cantidadComprar: item.cantidadComprar + cantidad
+              ...nuevoItem,
+              cantidad_compra: cantidadActualizada,
+              cantidadComprar: cantidadActualizada,
+              subtotal: cantidadActualizada * detalle.precioCompra,
+              cantidad_base_total: cantidadActualizada * detalle.factorConversion
             }
           }
           return item
         })
       )
     } else {
-      setManualOrdenItems([
-        ...manualOrdenItems,
-        {
-          id: manualIngredienteSeleccionado.id,
-          codigo: manualIngredienteSeleccionado.codigo,
-          nombre: manualIngredienteSeleccionado.nombre,
-          unidadCompra: manualIngredienteSeleccionado.unidadCompra,
-          cantidadComprar: cantidad,
-          costoUnitario: Number(manualIngredienteSeleccionado.costoUnitario || 0),
-          imagen: manualIngredienteSeleccionado.imagen || ""
-        }
-      ])
+      setManualOrdenItems((items) => [...items, nuevoItem])
     }
 
     setManualBusqueda("")
@@ -4847,7 +4977,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
     setManualOrdenItems([])
     setManualIssueDate(new Date().toISOString().slice(0, 10))
     setManualExpectedDate("")
-    setManualStatus("pendiente")
+    setManualStatus("pendiente_aprobacion")
     setManualProveedorId(null)
     setManualProveedorNombre("")
     setManualProveedorContacto("")
@@ -4866,7 +4996,43 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
     setManualRecepcionImagen("")
   }
 
-  function crearOrdenCompraManual() {
+  async function publicarNotificacionOrden(destinatarios, notification) {
+    try {
+      if (Array.isArray(destinatarios)) {
+        await notifyRoles(destinatarios, notification)
+      } else {
+        await createNotification({ ...notification, userId: destinatarios })
+      }
+    } catch (error) {
+      console.error("No se pudo registrar la notificación de orden de compra.", error)
+    }
+  }
+
+  async function notificarCreadorOrden(orden, title, message, type) {
+    if (orden.creadoPorId) {
+      await publicarNotificacionOrden(orden.creadoPorId, {
+        type,
+        title,
+        message,
+        entityType: "purchase_order",
+        entityId: orden.id
+      })
+    } else if (orden.creadoPorRol === "gerente" || orden.creadoPorRol === "encargado_almacen") {
+      await publicarNotificacionOrden([orden.creadoPorRol], {
+        type,
+        title,
+        message,
+        entityType: "purchase_order",
+        entityId: orden.id
+      })
+    }
+  }
+
+  async function crearOrdenCompraManual() {
+    if (!puedeCrearOrdenCompra) {
+      alert("No tienes permiso para crear órdenes de compra.")
+      return
+    }
     if (manualOrdenItems.length === 0) {
       alert("Agrega al menos un ingrediente a la orden de compra manual.")
       return
@@ -4887,12 +5053,15 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
       return
     }
 
+    const estadoInicial = requiereAprobacionOrdenCompra ? "pendiente_aprobacion" : manualStatus
     const nuevaOrden = {
       id: Date.now(),
       numeroOrden: generarNumeroOrdenManual(ordenesCompraManual.length),
       fechaEmision: manualIssueDate,
       fechaEsperadaEntrega: manualExpectedDate,
-      status: manualStatus,
+      status: estadoInicial,
+      creadoPorId: authenticatedUser?.id || null,
+      creadoPorRol: purchaseOrderRole,
       proveedorId: manualProveedorId,
       proveedor: {
         nombre: manualProveedorNombre,
@@ -4911,8 +5080,40 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
       recepcion: null
     }
 
+    const saveResult = await savePurchaseOrder(nuevaOrden)
+    if (saveResult.error) {
+      alert("No se pudo guardar la orden en Supabase. Verifica que la migración de órdenes y notificaciones esté aplicada.")
+      return
+    }
     setOrdenesCompraManual([nuevaOrden, ...ordenesCompraManual])
     limpiarFormularioOrdenManual()
+    setPurchaseOrderView("history")
+    if (estadoInicial === "pendiente_aprobacion") {
+      await publicarNotificacionOrden(["admin", "gerente_general"], {
+        type: "purchase_order_pending",
+        title: "Nueva orden pendiente de aprobación",
+        message: `${nuevaOrden.numeroOrden} fue creada por ${authenticatedUser?.name || manualRequester} y requiere aprobación.`,
+        entityType: "purchase_order",
+        entityId: nuevaOrden.id
+      })
+    }
+    if (estadoInicial === "aprobada") {
+      await publicarNotificacionOrden(["encargado_almacen"], {
+        type: "purchase_order_approved",
+        title: "Orden aprobada",
+        message: `${nuevaOrden.numeroOrden} fue creada aprobada y puede continuar a recepción de almacén.`,
+        entityType: "purchase_order",
+        entityId: nuevaOrden.id
+      })
+    }
+    if (purchaseOrderRole === "gerente") {
+      await notificarCreadorOrden(
+        nuevaOrden,
+        "Orden creada correctamente",
+        `${nuevaOrden.numeroOrden} fue registrada con estado ${getPurchaseOrderStatusLabel(estadoInicial)}.`,
+        "purchase_order_created"
+      )
+    }
     alert("Orden de compra manual creada.")
   }
 
@@ -4922,6 +5123,102 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
     setManualRecepcionEstado("bueno")
     setManualRecepcionNombre("")
     setManualRecepcionImagen("")
+  }
+
+  async function cancelarOrdenManual(id) {
+    const orden = ordenesCompraManual.find((item) => item.id === id)
+    if (!orden || !window.confirm(`¿Cancelar la orden ${orden.numeroOrden}?`)) return
+    const ordenCancelada = { ...orden, status: "cancelada" }
+    const saveResult = await savePurchaseOrder(ordenCancelada)
+    if (saveResult.error) {
+      alert("No se pudo cancelar la orden en Supabase.")
+      return
+    }
+    setOrdenesCompraManual((actuales) => actuales.map((item) => (
+      item.id === id ? ordenCancelada : item
+    )))
+    if (manualPedidoSeleccionadoId === id) setManualPedidoSeleccionadoId(null)
+    await publicarNotificacionOrden(["admin", "gerente_general"], {
+      type: "purchase_order_cancelled",
+      title: "Orden cancelada",
+      message: `La orden ${orden.numeroOrden} fue cancelada.`,
+      entityType: "purchase_order",
+      entityId: orden.id
+    })
+    if (orden.creadoPorRol === "gerente") {
+      await notificarCreadorOrden(orden, "Orden cancelada", `${orden.numeroOrden} fue cancelada.`, "purchase_order_cancelled")
+    }
+  }
+
+  async function aprobarOrdenManual(id) {
+    const orden = ordenesCompraManual.find((item) => String(item.id) === String(id))
+    if (!orden || !puedeAprobarOrdenCompra) {
+      alert("Solo Admin o Gerente General pueden aprobar órdenes.")
+      return
+    }
+    if (!["pendiente", "pendiente_aprobacion", "borrador"].includes(orden.status)) return
+    const ordenAprobada = { ...orden, status: "aprobada", aprobadoPor: authenticatedUser?.name || "Administración", aprobadoEn: new Date().toLocaleString() }
+    const saveResult = await savePurchaseOrder(ordenAprobada)
+    if (saveResult.error) {
+      alert("No se pudo aprobar la orden en Supabase.")
+      return
+    }
+    setOrdenesCompraManual((actuales) => actuales.map((item) => (
+      String(item.id) === String(id)
+        ? ordenAprobada
+        : item
+    )))
+    await publicarNotificacionOrden(["encargado_almacen"], {
+      type: "purchase_order_approved",
+      title: "Orden aprobada",
+      message: `${orden.numeroOrden} fue aprobada y puede continuar a recepción de almacén.`,
+      entityType: "purchase_order",
+      entityId: orden.id
+    })
+    await notificarCreadorOrden(orden, "Orden aprobada", `${orden.numeroOrden} fue aprobada y está lista para enviarse al proveedor.`, "purchase_order_approved")
+  }
+
+  async function rechazarOrdenManual(id) {
+    const orden = ordenesCompraManual.find((item) => String(item.id) === String(id))
+    if (!orden || !puedeAprobarOrdenCompra) {
+      alert("Solo Admin o Gerente General pueden rechazar órdenes.")
+      return
+    }
+    if (!["pendiente", "pendiente_aprobacion", "borrador"].includes(orden.status)) return
+    const ordenRechazada = { ...orden, status: "rechazada", rechazadoPor: authenticatedUser?.name || "Administración", rechazadoEn: new Date().toLocaleString() }
+    const saveResult = await savePurchaseOrder(ordenRechazada)
+    if (saveResult.error) {
+      alert("No se pudo rechazar la orden en Supabase.")
+      return
+    }
+    setOrdenesCompraManual((actuales) => actuales.map((item) => (
+      String(item.id) === String(id)
+        ? ordenRechazada
+        : item
+    )))
+    await notificarCreadorOrden(orden, "Orden rechazada", `${orden.numeroOrden} fue rechazada por administración.`, "purchase_order_rejected")
+  }
+
+  async function enviarOrdenProveedor(id) {
+    const orden = ordenesCompraManual.find((item) => String(item.id) === String(id))
+    if (!orden || orden.status !== "aprobada") return
+    const ordenEnviada = { ...orden, status: "enviada_proveedor" }
+    const saveResult = await savePurchaseOrder(ordenEnviada)
+    if (saveResult.error) {
+      alert("No se pudo registrar el envío al proveedor.")
+      return
+    }
+    setOrdenesCompraManual((actuales) => actuales.map((item) => (
+      String(item.id) === String(id) ? ordenEnviada : item
+    )))
+    await publicarNotificacionOrden(["encargado_almacen"], {
+      type: "purchase_order_ready_to_receive",
+      title: "Orden lista para recibir",
+      message: `${orden.numeroOrden} fue enviada al proveedor y está lista para recepción.`,
+      entityType: "purchase_order",
+      entityId: orden.id
+    })
+    await notificarCreadorOrden(orden, "Orden lista para recibir", `${orden.numeroOrden} fue enviada al proveedor y puede recibirse en almacén.`, "purchase_order_ready_to_receive")
   }
 
   function cargarImagenRecepcion(event) {
@@ -4940,7 +5237,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
     lector.readAsDataURL(archivo)
   }
 
-  function recibirOrdenManual() {
+  async function recibirOrdenManual() {
     if (!ordenManualSeleccionada) {
       alert("Selecciona una orden para recibir.")
       return
@@ -4961,8 +5258,8 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
       if (orden.id !== ordenManualSeleccionada.id) return orden
 
       const nuevoStatus = manualRecepcionEstado === "bueno"
-        ? "recibida"
-        : "parcialCompletada"
+        ? "recibida_completa"
+        : "recibida_parcial"
 
       return {
         ...orden,
@@ -4977,7 +5274,29 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
       }
     })
 
+    const ordenRecibida = ordenActualizada.find((orden) => orden.id === ordenManualSeleccionada.id)
+    const saveResult = await savePurchaseOrder(ordenRecibida)
+    if (saveResult.error) {
+      alert("No se pudo registrar la recepción en Supabase.")
+      return
+    }
     setOrdenesCompraManual(ordenActualizada)
+    const recepcionCompleta = manualRecepcionEstado === "bueno"
+    await publicarNotificacionOrden(["admin", "gerente_general"], {
+      type: recepcionCompleta ? "purchase_order_received" : "purchase_order_partially_received",
+      title: recepcionCompleta ? "Orden recibida completamente" : "Orden recibida parcialmente",
+      message: `${ordenManualSeleccionada.numeroOrden} fue registrada como ${recepcionCompleta ? "recibida completa" : "recibida parcial"}.`,
+      entityType: "purchase_order",
+      entityId: ordenManualSeleccionada.id
+    })
+    if (ordenManualSeleccionada.creadoPorRol === "gerente") {
+      await notificarCreadorOrden(
+        ordenManualSeleccionada,
+        recepcionCompleta ? "Orden recibida completamente" : "Orden recibida parcialmente",
+        `${ordenManualSeleccionada.numeroOrden} cambió a ${recepcionCompleta ? "recibida completa" : "recibida parcial"}.`,
+        recepcionCompleta ? "purchase_order_received" : "purchase_order_partially_received"
+      )
+    }
 
     if (manualRecepcionEstado === "bueno") {
       const inventarioActualizado = ingredientes.map((ingrediente) => {
@@ -6790,7 +7109,33 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
         <>
           {seccionActiva === "ordenes" && (
             <>
-              <div style={cardStyle}>
+              <div style={purchaseOrdersNavigationStyle}>
+                <div style={purchaseOrdersIntroStyle}>
+                  <div>
+                    <h2 style={{ margin: "0 0 6px" }}>Órdenes de compra</h2>
+                    <p style={{ margin: 0, color: "#cbd5e1" }}>Genera propuestas por mínimos o registra compras directas a proveedor.</p>
+                  </div>
+                  <div style={purchaseOrdersPrimaryActionsStyle}>
+                    {puedeCrearOrdenCompra && (
+                      <>
+                        <button type="button" onClick={() => { generarOrdenCompra(); setPurchaseOrderView("automatic") }} style={purchaseOrderAutomaticButtonStyle}>
+                          Generar orden automática
+                        </button>
+                        <button type="button" onClick={() => setPurchaseOrderView("manual")} style={purchaseOrderManualButtonStyle}>
+                          Crear orden manual
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <nav style={purchaseOrdersTabsStyle} aria-label="Vistas de órdenes de compra">
+                  <button type="button" onClick={() => setPurchaseOrderView("automatic")} style={purchaseOrderView === "automatic" ? purchaseOrdersActiveTabStyle : purchaseOrdersTabStyle}>Automática</button>
+                  {puedeCrearOrdenCompra && <button type="button" onClick={() => setPurchaseOrderView("manual")} style={purchaseOrderView === "manual" ? purchaseOrdersActiveTabStyle : purchaseOrdersTabStyle}>Orden manual</button>}
+                  <button type="button" onClick={() => setPurchaseOrderView("history")} style={purchaseOrderView === "history" ? purchaseOrdersActiveTabStyle : purchaseOrdersTabStyle}>Historial y recepción</button>
+                </nav>
+              </div>
+
+              {purchaseOrderView === "automatic" && <div style={purchaseOrderPanelStyle}>
                 <h2>Orden de compra automática</h2>
 
                 <p>
@@ -6798,17 +7143,17 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
                   para llegar al punto máximo.
                 </p>
 
-                <button onClick={generarOrdenCompra} style={purchaseButtonStyle}>
-                  Generar orden de compra
-                </button>
-
-                <button onClick={descargarOrdenPDF} style={pdfButtonStyle}>
-                  Descargar PDF
-                </button>
-
-                <button onClick={limpiarOrdenCompra} style={cancelButtonStyle}>
-                  Limpiar orden
-                </button>
+                <div style={purchaseOrderToolbarStyle}>
+                  <button type="button" onClick={generarOrdenCompra} style={{ ...purchaseButtonStyle, marginRight: 0 }}>
+                    Actualizar propuesta
+                  </button>
+                  <button type="button" onClick={descargarOrdenPDF} style={{ ...pdfButtonStyle, marginRight: 0 }}>
+                    Descargar PDF
+                  </button>
+                  <button type="button" onClick={limpiarOrdenCompra} style={{ ...cancelButtonStyle, marginRight: 0 }}>
+                    Cancelar propuesta
+                  </button>
+                </div>
 
                 {ordenCompra.length > 0 && (
                   <div style={orderBoxStyle}>
@@ -6830,101 +7175,23 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
                     <h3>Total estimado: Q{totalOrdenCompra.toFixed(2)}</h3>
                   </div>
                 )}
-              </div>
+              </div>}
 
-              <div style={cardStyle}>
+              {purchaseOrderView === "manual" && puedeCrearOrdenCompra && <div style={purchaseOrderPanelStyle}>
                 <h2>Orden de compra manual</h2>
                 <p>Completa los datos de la orden y selecciona ingredientes con el buscador.</p>
 
                 <p><strong>Número de orden:</strong> {generarNumeroOrdenManual(ordenesCompraManual.length)}</p>
 
-                <label style={fieldLabelStyle}>Fecha de emisión</label>
-                <input
-                  type="date"
-                  value={manualIssueDate}
-                  onChange={(e) => setManualIssueDate(e.target.value)}
-                  style={inputStyle}
-                />
-
-                <label style={fieldLabelStyle}>Fecha esperada de entrega</label>
-                <input
-                  type="date"
-                  value={manualExpectedDate}
-                  onChange={(e) => setManualExpectedDate(e.target.value)}
-                  style={inputStyle}
-                />
-
-                <label style={fieldLabelStyle}>Estado de la orden</label>
-                <select
-                  value={manualStatus}
-                  onChange={(e) => setManualStatus(e.target.value)}
-                  style={inputStyle}
-                >
-                  <option value="pendiente">Pendiente</option>
-                  <option value="aprobada">Aprobada</option>
-                  <option value="en tránsito">En tránsito</option>
-                  <option value="recibida">Recibida</option>
-                  <option value="parcialCompletada">Parcial completada</option>
-                  <option value="cancelada">Cancelada</option>
-                </select>
-
-                <h3>Proveedor</h3>
-                <input
-                  type="text"
-                  placeholder="Nombre del proveedor"
-                  value={manualProveedorNombre}
-                  onChange={(e) => setManualProveedorNombre(e.target.value)}
-                  style={inputStyle}
-                />
-                <input
-                  type="text"
-                  placeholder="Número de contacto"
-                  value={manualProveedorContacto}
-                  onChange={(e) => setManualProveedorContacto(e.target.value)}
-                  style={inputStyle}
-                />
-                <input
-                  type="email"
-                  placeholder="Correo electrónico"
-                  value={manualProveedorCorreo}
-                  onChange={(e) => setManualProveedorCorreo(e.target.value)}
-                  style={inputStyle}
-                />
-                <input
-                  type="text"
-                  placeholder="WhatsApp"
-                  value={manualProveedorWhatsApp}
-                  onChange={(e) => setManualProveedorWhatsApp(e.target.value)}
-                  style={inputStyle}
-                />
-                <input
-                  type="text"
-                  placeholder="Nombre del encargado"
-                  value={manualProveedorEncargado}
-                  onChange={(e) => setManualProveedorEncargado(e.target.value)}
-                  style={inputStyle}
-                />
-
-                <label style={fieldLabelStyle}>Método de compra</label>
-                <select
-                  value={manualMetodoCompra}
-                  onChange={(e) => setManualMetodoCompra(e.target.value)}
-                  style={inputStyle}
-                >
-                  <option value="banco">Banco</option>
-                  <option value="transferencia">Transferencia</option>
-                  <option value="tarjeta">Tarjeta</option>
-                  <option value="efectivo">Efectivo</option>
-                </select>
-
                 <label style={fieldLabelStyle}>Buscar ingrediente</label>
                 <input
                   type="text"
-                  placeholder="Escribe nombre o código..."
+                  placeholder={manualProductoCompra ? "Buscar otro ingrediente..." : "Escribe nombre o código..."}
                   value={manualBusqueda}
                   onChange={(e) => {
                     setManualBusqueda(e.target.value)
                     setManualIngredienteSeleccionadoId(null)
+                    setManualCantidadComprar("")
                   }}
                   style={inputStyle}
                 />
@@ -6935,11 +7202,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
                         <button
                           key={ingrediente.id}
                           type="button"
-                          onClick={() => {
-                            setManualIngredienteSeleccionadoId(ingrediente.id)
-                            setManualBusqueda(ingrediente.nombre)
-                            completarProveedorDesdeIngrediente(ingrediente)
-                          }}
+                          onClick={() => seleccionarIngredienteOrdenManual(ingrediente)}
                           style={suggestionItemStyle}
                         >
                           {ingrediente.imagen ? (
@@ -6956,7 +7219,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
                           <div>
                             <div style={{ fontWeight: 600 }}>{ingrediente.nombre}</div>
                             <div style={{ color: "#9ca3af", fontSize: "0.9rem" }}>
-                              {ingrediente.codigo}
+                              {ingrediente.codigo || ingrediente.sku || ingrediente.codigoBarras || "Sin código"}
                             </div>
                           </div>
                         </button>
@@ -6967,38 +7230,77 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
                   </div>
                 )}
 
-                {manualIngredienteSeleccionado && (
-                  <div style={infoBoxStyle}>
-                    <p><strong>{manualIngredienteSeleccionado.nombre}</strong></p>
-                    <p><strong>Código:</strong> {manualIngredienteSeleccionado.codigo}</p>
-                    <p><strong>Disponible:</strong> {manualIngredienteSeleccionado.totalUnidades} {manualIngredienteSeleccionado.unidadCompra}</p>
-                    <p><strong>Categoria:</strong> {manualIngredienteSeleccionado.categoria}</p>
+                {manualProductoCompra && (
+                  <div style={manualSelectedProductStyle}>
+                    <div style={manualSelectedProductHeaderStyle}>
+                      <div>
+                        <p style={manualSelectedProductLabelStyle}>Producto seleccionado</p>
+                        <h3 style={manualSelectedProductTitleStyle}>{manualProductoCompra.nombre}</h3>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setManualIngredienteSeleccionadoId(null)
+                          setManualCantidadComprar("")
+                          setManualBusqueda("")
+                        }}
+                        style={purchaseOrderSecondaryActionStyle}
+                      >
+                        Cambiar producto
+                      </button>
+                    </div>
+                    <div style={manualProductDetailsGridStyle}>
+                      <div style={manualProductMetricStyle}><span>Código / SKU</span><strong>{manualProductoCompra.sku || "Sin código"}</strong></div>
+                      <div style={manualProductMetricStyle}><span>Categoría</span><strong>{manualProductoCompra.categoria}</strong></div>
+                      <div style={manualProductMetricStyle}><span>Unidad de compra</span><strong>{manualProductoCompra.unidadCompra}</strong></div>
+                      <div style={manualProductMetricStyle}><span>Unidad base</span><strong>{manualProductoCompra.unidadBase}</strong></div>
+                      <div style={manualProductMetricStyle}><span>Factor conversión</span><strong>{manualProductoCompra.factorConversion}</strong></div>
+                      <div style={manualProductMetricStyle}><span>Precio de compra</span><strong>Q{manualProductoCompra.precioCompra.toFixed(2)}</strong></div>
+                      <div style={manualProductMetricStyle}><span>Proveedor sugerido</span><strong>{manualProductoCompra.proveedor || manualProveedorNombre || "Sin proveedor asignado"}</strong></div>
+                      <div style={manualProductMetricStyle}><span>Disponible</span><strong>{manualIngredienteSeleccionado.totalUnidades || 0} {manualProductoCompra.unidadCompra}</strong></div>
+                    </div>
                     {manualIngredienteSeleccionado.imagen ? (
                       <img src={manualIngredienteSeleccionado.imagen} alt="Ingrediente" style={previewImageStyle} />
-                    ) : (
-                      <p style={{ color: "#9ca3af" }}>No hay imagen del ingrediente.</p>
-                    )}
+                    ) : null}
+
+                    <label style={fieldLabelStyle}>Cantidad a comprar</label>
+                    <div style={purchaseQuantityRowStyle}>
+                      <input
+                        type="number"
+                        min="0.01"
+                        step="any"
+                        placeholder="0"
+                        value={manualCantidadComprar}
+                        onChange={(e) => setManualCantidadComprar(e.target.value)}
+                        style={{ ...inputStyle, margin: 0, flex: "1 1 190px" }}
+                      />
+                      <span style={purchaseQuantityUnitStyle}>{manualProductoCompra.unidadCompra}</span>
+                    </div>
+                    <div style={purchaseCalculatedSummaryStyle}>
+                      <div style={purchaseCalculatedMetricStyle}>
+                        <span>Subtotal</span>
+                        <strong>Q{manualSubtotal.toFixed(2)}</strong>
+                      </div>
+                      <div style={purchaseCalculatedMetricStyle}>
+                        <span>Unidades base adquiridas</span>
+                        <strong>{manualCantidadBaseTotal.toLocaleString("es-GT")} {manualProductoCompra.unidadBase}</strong>
+                      </div>
+                    </div>
+                    <button onClick={agregarIngredienteOrdenManual} style={{ ...purchaseButtonStyle, marginTop: "16px" }}>
+                      Agregar producto a la orden
+                    </button>
                   </div>
                 )}
 
-                <input
-                  type="number"
-                  placeholder="Cantidad a comprar"
-                  value={manualCantidadComprar}
-                  onChange={(e) => setManualCantidadComprar(e.target.value)}
-                  style={inputStyle}
-                />
-                <button onClick={agregarIngredienteOrdenManual} style={buttonStyle}>
-                  Agregar ingrediente
-                </button>
-
                 {manualOrdenItems.length > 0 && (
                   <div style={orderBoxStyle}>
-                    <h3>Ingredientes de la orden</h3>
+                    <h3>Productos de la orden</h3>
                     {manualOrdenItems.map((item) => (
                       <div key={item.id} style={orderItemStyle}>
-                        <p><strong>{item.nombre}</strong> ({item.codigo})</p>
-                        <p>Cantidad: {item.cantidadComprar} {item.unidadCompra}</p>
+                        <p><strong>{item.nombre}</strong> ({item.sku || item.codigo || "Sin código"})</p>
+                        <p>Cantidad: {item.cantidad_compra ?? item.cantidadComprar} {item.unidad_compra || item.unidadCompra}</p>
+                        <p>Subtotal: <strong>Q{Number(item.subtotal ?? Number(item.costoUnitario || 0) * Number(item.cantidadComprar || 0)).toFixed(2)}</strong></p>
+                        <p>Base adquirida: {Number(item.cantidad_base_total ?? item.cantidadComprar ?? 0).toLocaleString("es-GT")} {item.unidad_base || item.unidadCompra}</p>
                         <button
                           onClick={() => setManualOrdenItems(manualOrdenItems.filter((ordenItem) => ordenItem.id !== item.id))}
                           style={deleteButtonStyle}
@@ -7009,6 +7311,99 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
                     ))}
                   </div>
                 )}
+
+                {(manualProductoCompra || manualOrdenItems.length > 0) && (
+                  <div style={manualSupplierSectionStyle}>
+                    <div>
+                      <h3 style={{ margin: "0 0 5px" }}>Proveedor</h3>
+                      <p style={manualSupplierHelpStyle}>Información cargada desde el ingrediente seleccionado. Puedes completarla o corregirla antes de crear la orden.</p>
+                    </div>
+                    <div style={manualSupplierFieldsGridStyle}>
+                      <input
+                        type="text"
+                        placeholder="Nombre del proveedor"
+                        value={manualProveedorNombre}
+                        onChange={(e) => setManualProveedorNombre(e.target.value)}
+                        style={{ ...inputStyle, margin: 0 }}
+                      />
+                      <input
+                        type="text"
+                        placeholder="Número de contacto"
+                        value={manualProveedorContacto}
+                        onChange={(e) => setManualProveedorContacto(e.target.value)}
+                        style={{ ...inputStyle, margin: 0 }}
+                      />
+                      <input
+                        type="email"
+                        placeholder="Correo electrónico"
+                        value={manualProveedorCorreo}
+                        onChange={(e) => setManualProveedorCorreo(e.target.value)}
+                        style={{ ...inputStyle, margin: 0 }}
+                      />
+                      <input
+                        type="text"
+                        placeholder="WhatsApp"
+                        value={manualProveedorWhatsApp}
+                        onChange={(e) => setManualProveedorWhatsApp(e.target.value)}
+                        style={{ ...inputStyle, margin: 0 }}
+                      />
+                      <input
+                        type="text"
+                        placeholder="Nombre del encargado"
+                        value={manualProveedorEncargado}
+                        onChange={(e) => setManualProveedorEncargado(e.target.value)}
+                        style={{ ...inputStyle, margin: 0 }}
+                      />
+                      <select
+                        aria-label="Método de compra"
+                        value={manualMetodoCompra}
+                        onChange={(e) => setManualMetodoCompra(e.target.value)}
+                        style={{ ...inputStyle, margin: 0 }}
+                      >
+                        <option value="banco">Método: Banco</option>
+                        <option value="transferencia">Método: Transferencia</option>
+                        <option value="tarjeta">Método: Tarjeta</option>
+                        <option value="efectivo">Método: Efectivo</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+
+                <h3 style={purchaseOrderDataTitleStyle}>Datos de la orden</h3>
+                <div style={purchaseOrderDataGridStyle}>
+                  <div>
+                    <label style={fieldLabelStyle}>Fecha de emisión</label>
+                    <input
+                      type="date"
+                      value={manualIssueDate}
+                      onChange={(e) => setManualIssueDate(e.target.value)}
+                      style={inputStyle}
+                    />
+                  </div>
+                  <div>
+                    <label style={fieldLabelStyle}>Fecha esperada de entrega</label>
+                    <input
+                      type="date"
+                      value={manualExpectedDate}
+                      onChange={(e) => setManualExpectedDate(e.target.value)}
+                      style={inputStyle}
+                    />
+                  </div>
+                  <div>
+                    <label style={fieldLabelStyle}>Estado de la orden</label>
+                    <select
+                      value={manualStatus}
+                      onChange={(e) => setManualStatus(e.target.value)}
+                      style={inputStyle}
+                      disabled={requiereAprobacionOrdenCompra}
+                    >
+                      <option value="borrador">Borrador</option>
+                      <option value="pendiente_aprobacion">Pendiente de aprobación</option>
+                      <option value="aprobada">Aprobada</option>
+                    </select>
+                    {requiereAprobacionOrdenCompra && <p style={manualSupplierHelpStyle}>Tu orden será enviada a aprobación de Admin o Gerente General.</p>}
+                  </div>
+                </div>
 
                 <label style={fieldLabelStyle}>Solicitante</label>
                 <input
@@ -7046,16 +7441,21 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
                   style={{ ...inputStyle, backgroundColor: "#111827" }}
                 />
 
-                <button onClick={crearOrdenCompraManual} style={purchaseButtonStyle}>
-                  Crear orden de compra manual
-                </button>
-                <button onClick={limpiarFormularioOrdenManual} style={cancelButtonStyle}>
-                  Limpiar formulario
-                </button>
-              </div>
+                <div style={purchaseOrderFooterActionsStyle}>
+                  <button type="button" onClick={crearOrdenCompraManual} style={{ ...purchaseButtonStyle, marginRight: 0 }}>
+                    Crear orden
+                  </button>
+                  <button type="button" onClick={() => { limpiarFormularioOrdenManual(); setPurchaseOrderView("automatic") }} style={cancelButtonStyle}>
+                    Cancelar
+                  </button>
+                </div>
+              </div>}
 
-              <div style={cardStyle}>
+              {purchaseOrderView === "history" && <div style={purchaseOrderPanelStyle}>
                 <h2>Órdenes de compra manual registradas</h2>
+                <div style={purchaseOrderToolbarStyle}>
+                  {puedeCrearOrdenCompra && <button type="button" onClick={() => setPurchaseOrderView("manual")} style={purchaseOrderManualButtonStyle}>Nueva orden manual</button>}
+                </div>
                 {ordenesCompraManual.length === 0 ? (
                   <p>No hay órdenes manuales registradas.</p>
                 ) : (
@@ -7063,12 +7463,30 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
                     <div key={orden.id} style={orderItemStyle}>
                       <p><strong>{orden.numeroOrden}</strong></p>
                       <p><strong>Proveedor:</strong> {orden.proveedor.nombre}</p>
-                      <p><strong>Estado:</strong> {orden.status}</p>
+                      <p><strong>Estado:</strong> {getPurchaseOrderStatusLabel(orden.status)}</p>
                       <p><strong>Fecha emisión:</strong> {orden.fechaEmision}</p>
                       <p><strong>Fecha esperada:</strong> {orden.fechaEsperadaEntrega}</p>
-                      <button onClick={() => seleccionarOrdenManual(orden.id)} style={editButtonStyle}>
-                        Ver / recibir orden
-                      </button>
+                      <div style={purchaseOrderHistoryActionsStyle}>
+                        {orden.status !== "cancelada" && (
+                          <button type="button" onClick={() => seleccionarOrdenManual(orden.id)} style={registeredAreaInventoryButtonStyle}>
+                            Ver / recibir
+                          </button>
+                        )}
+                        {puedeAprobarOrdenCompra && ["pendiente", "pendiente_aprobacion", "borrador"].includes(orden.status) && (
+                          <>
+                            <button type="button" onClick={() => aprobarOrdenManual(orden.id)} style={registeredAreaInventoryButtonStyle}>Aprobar</button>
+                            <button type="button" onClick={() => rechazarOrdenManual(orden.id)} style={registeredAreaDeactivateButtonStyle}>Rechazar</button>
+                          </>
+                        )}
+                        {puedeCrearOrdenCompra && orden.status === "aprobada" && (
+                          <button type="button" onClick={() => enviarOrdenProveedor(orden.id)} style={registeredAreaInventoryButtonStyle}>Enviar a proveedor</button>
+                        )}
+                        {!["cancelada", "rechazada", "recibida", "recibida_completa"].includes(orden.status) && (
+                          <button type="button" onClick={() => cancelarOrdenManual(orden.id)} style={registeredAreaDeactivateButtonStyle}>
+                            Cancelar orden
+                          </button>
+                        )}
+                      </div>
                     </div>
                   ))
                 )}
@@ -7087,8 +7505,9 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
                     <h4>Ingredientes pedidos</h4>
                     {ordenManualSeleccionada.items.map((item) => (
                       <div key={item.id} style={{ marginBottom: "10px" }}>
-                        <p><strong>{item.nombre}</strong> ({item.codigo})</p>
-                        <p>Cantidad pedida: {item.cantidadComprar} {item.unidadCompra}</p>
+                        <p><strong>{item.nombre}</strong> ({item.sku || item.codigo || "Sin código"})</p>
+                        <p>Cantidad pedida: {item.cantidad_compra ?? item.cantidadComprar} {item.unidad_compra || item.unidadCompra}</p>
+                        {item.subtotal != null && <p>Subtotal: Q{Number(item.subtotal).toFixed(2)}</p>}
                       </div>
                     ))}
 
@@ -7136,12 +7555,14 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
                       </div>
                     )}
 
-                    <button onClick={recibirOrdenManual} style={purchaseButtonStyle}>
-                      Registrar recepción
-                    </button>
+                    {puedeRecibirOrdenCompra && ["aprobada", "enviada_proveedor"].includes(ordenManualSeleccionada.status) && (
+                      <button onClick={recibirOrdenManual} style={purchaseButtonStyle}>
+                        Registrar recepción
+                      </button>
+                    )}
                   </div>
                 )}
-              </div>
+              </div>}
             </>
           )}
 
@@ -7649,7 +8070,6 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
             <>
               <div style={cardStyle}>
                 <h2>Administrar áreas</h2>
-                {legacyAreasDetected && <p style={attendanceWarningStyle}>Existen áreas locales antiguas. Deben migrarse a Supabase.</p>}
                 {areasError && <p style={attendanceWarningStyle}>{areasError}</p>}
                 <div style={hrFilterGridStyle}>
                   <input value={areaForm.name} onChange={(e) => setAreaForm((actual) => ({ ...actual, name: e.target.value }))} placeholder="Nombre del área" style={inputStyle} />
@@ -7681,19 +8101,21 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", hideLegacyNavigation
               <div style={cardStyle}>
                 <h2>Áreas registradas</h2>
                 {areasLoading && <p>Cargando áreas desde Supabase...</p>}
-                <div style={areaDashboardGridStyle}>
+                <div style={registeredAreasGridStyle}>
                   {areas.map((area) => (
-                    <div key={area.id} style={areaDashboardCardStyle}>
-                      <h3 style={{ marginTop: 0 }}>{area.name}</h3>
-                      <p><strong>Tipo:</strong> {area.type}</p>
-                      <p><strong>Estado:</strong> {area.active ? "Activa" : "Inactiva"}</p>
-                      <p><strong>Requisiciones:</strong> {area.canRequestInventory ? "Permitidas" : "No permitidas"}</p>
-                      <p><strong>Producción:</strong> {area.isProductionArea ? "Sí" : "No"}</p>
-                      <p><strong>Responsable:</strong> {areaProfiles.find((profile) => profile.id === area.responsibleUserId)?.full_name || "Sin asignar"}</p>
-                      <div style={buttonRowStyle}>
-                        <button type="button" onClick={() => editarArea(area)} style={editButtonStyle}>Editar</button>
-                        <button type="button" onClick={() => window.location.assign(`/inventory?section=inventario&area=${encodeURIComponent(area.id)}`)} style={buttonStyle}>Ver inventario</button>
-                        {area.id !== "almacen" && area.active && <button type="button" onClick={() => desactivarArea(area)} style={deleteButtonStyle}>Desactivar</button>}
+                    <div key={area.id} style={registeredAreaCardStyle}>
+                      <div style={registeredAreaContentStyle}>
+                        <h3 style={registeredAreaTitleStyle}>{area.name}</h3>
+                        <p><strong>Tipo:</strong> {area.type}</p>
+                        <p><strong>Estado:</strong> {area.active ? "Activa" : "Inactiva"}</p>
+                        <p><strong>Requisiciones:</strong> {area.canRequestInventory ? "Permitidas" : "No permitidas"}</p>
+                        <p><strong>Producción:</strong> {area.isProductionArea ? "Sí" : "No"}</p>
+                        <p><strong>Responsable:</strong> {areaProfiles.find((profile) => profile.id === area.responsibleUserId)?.full_name || "Sin asignar"}</p>
+                      </div>
+                      <div style={registeredAreaActionsStyle}>
+                        <button type="button" onClick={() => editarArea(area)} style={registeredAreaEditButtonStyle}>Editar</button>
+                        <button type="button" onClick={() => window.location.assign(`/inventory?section=inventarioAreas&area=${encodeURIComponent(area.id)}`)} style={registeredAreaInventoryButtonStyle}>Ver inventario</button>
+                        {area.id !== "almacen" && area.active && <button type="button" onClick={() => desactivarArea(area)} style={registeredAreaDeactivateButtonStyle}>Desactivar</button>}
                       </div>
                     </div>
                   ))}
@@ -8394,6 +8816,242 @@ const cardStyle = {
   marginTop: "20px",
   width: "100%",
   boxSizing: "border-box"
+}
+
+const purchaseOrdersNavigationStyle = {
+  ...cardStyle,
+  display: "grid",
+  gap: "18px",
+  border: "1px solid #334155",
+  backgroundColor: "#111b2c"
+}
+
+const purchaseOrdersIntroStyle = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  flexWrap: "wrap",
+  gap: "18px"
+}
+
+const purchaseOrdersPrimaryActionsStyle = {
+  display: "flex",
+  alignItems: "center",
+  flexWrap: "wrap",
+  gap: "10px"
+}
+
+const purchaseOrderActionBaseStyle = {
+  minHeight: "46px",
+  padding: "12px 18px",
+  border: "1px solid transparent",
+  borderRadius: "10px",
+  color: "#ffffff",
+  cursor: "pointer",
+  fontWeight: 700,
+  fontSize: "14px"
+}
+
+const purchaseOrderAutomaticButtonStyle = {
+  ...purchaseOrderActionBaseStyle,
+  backgroundColor: "#15803d",
+  borderColor: "#22c55e"
+}
+
+const purchaseOrderManualButtonStyle = {
+  ...purchaseOrderActionBaseStyle,
+  backgroundColor: "#0f766e",
+  borderColor: "#14b8a6"
+}
+
+const purchaseOrdersTabsStyle = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: "8px",
+  paddingTop: "4px",
+  borderTop: "1px solid #273449"
+}
+
+const purchaseOrdersTabStyle = {
+  minHeight: "43px",
+  padding: "10px 16px",
+  border: "1px solid #334155",
+  borderRadius: "9px",
+  backgroundColor: "#0f172a",
+  color: "#cbd5e1",
+  cursor: "pointer",
+  fontWeight: 700
+}
+
+const purchaseOrdersActiveTabStyle = {
+  ...purchaseOrdersTabStyle,
+  borderColor: "#14b8a6",
+  backgroundColor: "#073234",
+  color: "#99f6e4"
+}
+
+const purchaseOrderPanelStyle = {
+  ...cardStyle,
+  maxWidth: "1180px",
+  border: "1px solid #293548",
+  backgroundColor: "#182334"
+}
+
+const purchaseOrderToolbarStyle = {
+  display: "flex",
+  flexWrap: "wrap",
+  alignItems: "center",
+  gap: "10px",
+  margin: "18px 0"
+}
+
+const purchaseOrderFooterActionsStyle = {
+  display: "flex",
+  flexWrap: "wrap",
+  alignItems: "center",
+  gap: "10px",
+  paddingTop: "18px",
+  marginTop: "20px",
+  borderTop: "1px solid #334155"
+}
+
+const purchaseOrderHistoryActionsStyle = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: "8px",
+  marginTop: "12px"
+}
+
+const manualSelectedProductStyle = {
+  display: "grid",
+  gap: "16px",
+  margin: "14px 0 20px",
+  padding: "18px",
+  borderRadius: "12px",
+  border: "1px solid #1f766e",
+  backgroundColor: "#0f172a"
+}
+
+const manualSelectedProductHeaderStyle = {
+  display: "flex",
+  flexWrap: "wrap",
+  alignItems: "flex-start",
+  justifyContent: "space-between",
+  gap: "12px"
+}
+
+const manualSelectedProductLabelStyle = {
+  margin: "0 0 5px",
+  color: "#5eead4",
+  fontSize: "12px",
+  fontWeight: 700,
+  letterSpacing: "0.08em",
+  textTransform: "uppercase"
+}
+
+const manualSelectedProductTitleStyle = {
+  margin: 0,
+  color: "#f8fafc",
+  fontSize: "20px"
+}
+
+const purchaseOrderSecondaryActionStyle = {
+  minHeight: "40px",
+  padding: "9px 13px",
+  border: "1px solid #475569",
+  borderRadius: "9px",
+  backgroundColor: "#1e293b",
+  color: "#e2e8f0",
+  fontWeight: 700,
+  cursor: "pointer"
+}
+
+const manualProductDetailsGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(165px, 1fr))",
+  gap: "9px"
+}
+
+const manualProductMetricStyle = {
+  display: "grid",
+  gap: "5px",
+  padding: "10px 12px",
+  border: "1px solid #263449",
+  borderRadius: "9px",
+  backgroundColor: "#111c2d",
+  color: "#94a3b8",
+  fontSize: "12px"
+}
+
+const purchaseQuantityRowStyle = {
+  display: "flex",
+  flexWrap: "wrap",
+  alignItems: "center",
+  gap: "10px"
+}
+
+const purchaseQuantityUnitStyle = {
+  minWidth: "120px",
+  minHeight: "43px",
+  display: "inline-flex",
+  alignItems: "center",
+  padding: "0 14px",
+  borderRadius: "9px",
+  border: "1px solid #334155",
+  backgroundColor: "#111c2d",
+  color: "#e2e8f0",
+  fontWeight: 700
+}
+
+const purchaseCalculatedSummaryStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
+  gap: "10px"
+}
+
+const purchaseCalculatedMetricStyle = {
+  display: "grid",
+  gap: "5px",
+  padding: "13px 14px",
+  borderRadius: "10px",
+  backgroundColor: "#082f31",
+  border: "1px solid #0f766e",
+  color: "#99f6e4",
+  fontSize: "13px"
+}
+
+const manualSupplierSectionStyle = {
+  display: "grid",
+  gap: "14px",
+  margin: "18px 0",
+  padding: "18px",
+  borderRadius: "12px",
+  border: "1px solid #334155",
+  backgroundColor: "#111c2d"
+}
+
+const manualSupplierHelpStyle = {
+  margin: 0,
+  color: "#94a3b8",
+  fontSize: "13px"
+}
+
+const manualSupplierFieldsGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gap: "10px"
+}
+
+const purchaseOrderDataTitleStyle = {
+  margin: "22px 0 12px",
+  paddingTop: "16px",
+  borderTop: "1px solid #334155"
+}
+
+const purchaseOrderDataGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))",
+  gap: "12px"
 }
 
 const addIngredientToggleButtonStyle = {
@@ -10004,6 +10662,75 @@ const areaDashboardCardStyle = {
   borderRadius: "8px",
   border: "1px solid #334155",
   backgroundColor: "#0f172a"
+}
+
+const registeredAreasGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(290px, 1fr))",
+  gap: "14px",
+  marginTop: "16px"
+}
+
+const registeredAreaCardStyle = {
+  display: "flex",
+  flexDirection: "column",
+  minHeight: "292px",
+  padding: "18px",
+  borderRadius: "12px",
+  border: "1px solid #334155",
+  backgroundColor: "#0f172a",
+  boxShadow: "0 5px 14px rgba(2, 6, 23, 0.2)"
+}
+
+const registeredAreaContentStyle = {
+  display: "grid",
+  gap: "8px",
+  flex: 1
+}
+
+const registeredAreaTitleStyle = {
+  margin: "0 0 6px",
+  fontSize: "18px",
+  color: "#f8fafc"
+}
+
+const registeredAreaActionsStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+  gap: "8px",
+  paddingTop: "16px",
+  marginTop: "12px",
+  borderTop: "1px solid #1e293b"
+}
+
+const registeredAreaButtonBaseStyle = {
+  minHeight: "44px",
+  padding: "10px 12px",
+  border: "1px solid transparent",
+  borderRadius: "9px",
+  color: "#ffffff",
+  fontWeight: 700,
+  cursor: "pointer",
+  lineHeight: 1.25
+}
+
+const registeredAreaEditButtonStyle = {
+  ...registeredAreaButtonBaseStyle,
+  backgroundColor: "#b45309",
+  borderColor: "#d97706"
+}
+
+const registeredAreaInventoryButtonStyle = {
+  ...registeredAreaButtonBaseStyle,
+  backgroundColor: "#0f766e",
+  borderColor: "#14b8a6"
+}
+
+const registeredAreaDeactivateButtonStyle = {
+  ...registeredAreaButtonBaseStyle,
+  gridColumn: "1 / -1",
+  backgroundColor: "#991b1b",
+  borderColor: "#dc2626"
 }
 
 const areaDashboardHeaderStyle = {

@@ -198,10 +198,11 @@ export function deleteInventoryImage(path) {
 export async function ensureItemAreaRows(itemId) {
   const { data: areas, error: areasError } = await getActiveAreas()
   if (areasError) return { data: [], error: areasError }
-  if (!areas.length) return { data: [], error: null }
+  const warehouse = areas.find((area) => area.id === "almacen")
+  if (!warehouse) return { data: [], error: null }
   const { data, error } = await supabase
     .from("area_inventory")
-    .upsert(areas.map((area) => ({
+    .upsert([warehouse].map((area) => ({
       item_id: itemId,
       area_id: area.id,
       quantity: 0,

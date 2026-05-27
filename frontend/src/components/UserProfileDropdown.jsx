@@ -6,7 +6,7 @@ import "./UserProfileDropdown.css"
 
 const roleNames = {
   admin: "Administrador",
-  gerente: "Gerente General",
+  gerente: "Gerente",
   gerente_general: "Gerente General",
   encargado_almacen: "Encargado de Almacén",
   rrhh: "Recursos Humanos",
