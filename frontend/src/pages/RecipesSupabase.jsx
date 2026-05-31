@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
+import * as XLSX from "xlsx"
 import { useAuth } from "../context/AuthContext"
 import { getActiveAreas } from "../services/areasService"
 import { getActiveInventoryItems } from "../services/inventoryService"
@@ -56,11 +57,13 @@ function RecipesSupabase() {
   const [typeFilter, setTypeFilter] = useState("")
   const [form, setForm] = useState(null)
   const [detail, setDetail] = useState(null)
+  const [importDraft, setImportDraft] = useState(null)
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
   const [saving, setSaving] = useState(false)
+  const [importing, setImporting] = useState(false)
 
-  const manager = ["admin", "gerente_general"].includes(user?.role)
+  const manager = ["admin", "ceo", "gerente_general", "gerente"].includes(user?.role)
   const canCreate = manager || (user?.role === "supervisor" && Boolean(user?.areaId))
   const productionAreas = areas.filter((area) => area.isProductionArea)
   const localRecipesExist = readArray("recetas").length > 0
@@ -195,6 +198,98 @@ function RecipesSupabase() {
     }
   }
 
+  async function handleRecipeImportFile(file) {
+    if (!file) return
+    if (!file.name.toLowerCase().endsWith(".xlsx")) {
+      setError("Sube un archivo Excel .xlsx.")
+      return
+    }
+    try {
+      const rows = await readExcelRows(file)
+      const draft = buildRecipeImportDraft({
+        rows,
+        inventory,
+        recipes,
+        productionAreaId: user?.areaId || productionAreas[0]?.id || "",
+        defaultYieldUnit: "porción"
+      })
+      setImportDraft({ ...draft, duplicateMode: "skip", importErrors: [], importedCount: 0, skippedCount: 0 })
+      setError("")
+    } catch (caught) {
+      setError(caught?.message || "No se pudo leer el archivo Excel.")
+    }
+  }
+
+  function updateImportIngredient(recipeIndex, ingredientIndex, inventoryItemId) {
+    setImportDraft((current) => {
+      if (!current) return current
+      const nextRecipes = current.recipes.map((recipe, rIndex) => {
+        if (rIndex !== recipeIndex) return recipe
+        return {
+          ...recipe,
+          ingredients: recipe.ingredients.map((ingredient, iIndex) => {
+            if (iIndex !== ingredientIndex) return ingredient
+            const catalog = inventory.find((entry) => entry.id === inventoryItemId)
+            const normalized = normalizeRecipeIngredient({
+              ...ingredient,
+              inventoryItemId,
+              matched: Boolean(catalog),
+              matchName: catalog?.name || ""
+            }, catalog)
+            return { ...normalized, rawName: ingredient.rawName }
+          })
+        }
+      })
+      return { ...current, recipes: nextRecipes }
+    })
+  }
+
+  async function importRecipesFromDraft() {
+    if (!importDraft || importBlocked(importDraft)) return
+    setImporting(true)
+    const importErrors = []
+    let importedCount = 0
+    let skippedCount = 0
+    for (const recipe of importDraft.recipes) {
+      if (recipe.duplicateRecipeId && importDraft.duplicateMode === "skip") {
+        skippedCount += 1
+        continue
+      }
+      const payload = {
+        id: recipe.duplicateRecipeId || undefined,
+        name: recipe.name,
+        recipeType: recipe.recipeType,
+        posCategoryId: recipe.category,
+        productionAreaId: recipe.productionAreaId,
+        yieldQuantity: recipe.yieldQuantity,
+        yieldUnit: recipe.yieldUnit,
+        imageUrl: "",
+        preparationSteps: recipe.preparationSteps,
+        notes: "Importada desde Excel",
+        active: true,
+        ingredients: recipe.ingredients.map((ingredient) => {
+          const catalog = inventory.find((entry) => entry.id === ingredient.inventoryItemId)
+          return normalizeRecipeIngredient({ ...ingredient, wastePercentage: ingredient.wastePercentage || "0" }, catalog)
+        })
+      }
+      const validation = validateRecipe(payload, inventory)
+      if (validation) {
+        importErrors.push({ recipe: recipe.name, message: validation })
+        continue
+      }
+      const result = recipe.duplicateRecipeId
+        ? await updateRecipe(recipe.duplicateRecipeId, payload, payload.ingredients)
+        : await createRecipe(payload, payload.ingredients)
+      if (result.error) importErrors.push({ recipe: recipe.name, message: result.error.message })
+      else importedCount += 1
+    }
+    localStorage.setItem("recipeImportErrors", JSON.stringify(importErrors))
+    setImportDraft((current) => current ? { ...current, importErrors, importedCount, skippedCount } : current)
+    setImporting(false)
+    setMessage(`Importación finalizada: ${importedCount} receta(s) importadas, ${skippedCount} omitida(s), ${importErrors.length} error(es).`)
+    await refresh()
+  }
+
   return (
     <section className="recipes-page">
       <header className="recipes-header">
@@ -204,6 +299,12 @@ function RecipesSupabase() {
           <p className="recipes-muted">Ingredientes reales, costos y consumo por comanda POS.</p>
         </div>
         <div className="recipes-actions">
+          {canCreate && (
+            <label className="recipe-import-button">
+              Importar Excel
+              <input type="file" accept=".xlsx" onChange={(event) => handleRecipeImportFile(event.target.files?.[0])} />
+            </label>
+          )}
           {canCreate && <button type="button" className="primary" onClick={openNew}>Nueva receta</button>}
           <button type="button" onClick={refresh}>Actualizar</button>
         </div>
@@ -245,6 +346,7 @@ function RecipesSupabase() {
         })}
         {!loading && !filtered.length && <p className="recipes-empty">No hay recetas registradas para esta selección.</p>}
       </div>
+      {importDraft && <RecipeImportModal draft={importDraft} inventory={inventory} importing={importing} setDraft={setImportDraft} onIngredientChange={updateImportIngredient} onImport={importRecipesFromDraft} onClose={() => setImportDraft(null)} />}
       {form && <RecipeForm form={form} areas={productionAreas} inventory={inventory} posProducts={posProducts} saving={saving} onClose={() => setForm(null)} onSave={saveRecipe} />}
       {detail && <RecipeDetailV2 recipe={detail} areas={areas} onClose={() => setDetail(null)} />}
     </section>
@@ -413,6 +515,93 @@ function Field({ label, children }) {
   return <label className="recipe-field"><span>{label}</span>{children}</label>
 }
 
+function RecipeImportModal({ draft, inventory, importing, setDraft, onIngredientChange, onImport, onClose }) {
+  const unresolved = draft.recipes.reduce((total, recipe) => total + recipe.ingredients.filter((ingredient) => !ingredient.inventoryItemId).length, 0)
+  const duplicates = draft.recipes.filter((recipe) => recipe.duplicateRecipeId).length
+  const errors = draft.recipes.flatMap((recipe) => recipe.errors.map((message) => ({ recipe: recipe.name, message })))
+  return (
+    <div className="recipes-backdrop">
+      <section className="recipes-modal recipe-import-modal">
+        <header>
+          <div>
+            <p className="recipes-eyebrow">Importación masiva</p>
+            <h2>Validar recetas desde Excel</h2>
+            <p className="recipes-muted">{draft.recipes.length} receta(s), {unresolved} ingrediente(s) sin coincidencia, {duplicates} duplicado(s).</p>
+          </div>
+          <button type="button" onClick={onClose}>Cerrar</button>
+        </header>
+
+        <div className="recipe-import-options">
+          <label>Si la receta ya existe
+            <select value={draft.duplicateMode} onChange={(event) => setDraft({ ...draft, duplicateMode: event.target.value })}>
+              <option value="skip">Omitir existente</option>
+              <option value="update">Actualizar existente</option>
+            </select>
+          </label>
+          <div className={unresolved || errors.length ? "recipe-import-status danger" : "recipe-import-status ok"}>
+            {unresolved || errors.length ? "Revisa coincidencias y errores antes de importar." : "Listo para importar."}
+          </div>
+        </div>
+
+        {errors.length > 0 && (
+          <div className="recipe-import-errors">
+            <strong>Errores detectados</strong>
+            {errors.map((error, index) => <p key={`${error.recipe}-${index}`}>{error.recipe}: {error.message}</p>)}
+          </div>
+        )}
+
+        <div className="recipe-import-list">
+          {draft.recipes.map((recipe, recipeIndex) => (
+            <article className="recipe-import-card" key={recipe.id}>
+              <div className="recipe-import-card-head">
+                <div>
+                  <h3>{recipe.name}</h3>
+                  <p>{recipe.ingredients.length} ingrediente(s) · Rendimiento {recipe.yieldQuantity} {recipe.yieldUnit}</p>
+                </div>
+                {recipe.duplicateRecipeId && <span className="recipe-import-badge">Ya existe</span>}
+              </div>
+              <div className="recipe-import-table">
+                <div className="recipe-import-table-head"><span>Ingrediente Excel</span><span>Coincidencia inventario</span><span>Cantidad</span><span>Estado</span></div>
+                {recipe.ingredients.map((ingredient, ingredientIndex) => {
+                  const catalog = inventory.find((entry) => entry.id === ingredient.inventoryItemId)
+                  const normalized = normalizeRecipeIngredient(ingredient, catalog)
+                  return (
+                    <div className="recipe-import-row" key={`${ingredient.rawName}-${ingredientIndex}`}>
+                      <strong>{ingredient.rawName}</strong>
+                      <select value={ingredient.inventoryItemId || ""} onChange={(event) => onIngredientChange(recipeIndex, ingredientIndex, event.target.value)}>
+                        <option value="">Seleccionar producto</option>
+                        {inventory.map((item) => <option key={item.id} value={item.id}>{item.name} ({item.base_unit})</option>)}
+                      </select>
+                      <span>{ingredient.recipeQuantity} {ingredient.recipeUnit}</span>
+                      <span className={!ingredient.inventoryItemId || normalized.conversionError ? "recipe-conversion-error" : "recipe-conversion-ok"}>
+                        {!ingredient.inventoryItemId ? "No encontrado" : normalized.conversionError || `${formatRecipeNumber(normalized.inventoryQuantity)} ${normalized.inventoryUnit}`}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            </article>
+          ))}
+        </div>
+
+        {draft.importErrors.length > 0 && (
+          <div className="recipe-import-errors">
+            <strong>Registro de errores de importación</strong>
+            {draft.importErrors.map((error, index) => <p key={`${error.recipe}-${index}`}>{error.recipe}: {error.message}</p>)}
+          </div>
+        )}
+
+        <div className="recipes-modal-actions">
+          <button type="button" onClick={onClose}>Cancelar</button>
+          <button type="button" className="primary" disabled={importing || importBlocked(draft)} onClick={onImport}>
+            {importing ? "Importando..." : "Importar recetas validadas"}
+          </button>
+        </div>
+      </section>
+    </div>
+  )
+}
+
 function RecipeDetailV2({ recipe, areas, onClose }) {
   const steps = normalizePreparationSteps(recipe.preparationSteps || recipe.preparation_steps)
   return <div className="recipes-backdrop"><section className="recipes-modal compact">
@@ -455,6 +644,127 @@ function validateRecipe(recipe, inventory) {
   const emptyStep = normalizePreparationSteps(recipe.preparationSteps).some((step) => !step.text.trim())
   if (emptyStep) return "Completa o elimina los pasos de preparación vacíos."
   return ""
+}
+
+function importBlocked(draft) {
+  if (!draft?.recipes?.length) return true
+  return draft.recipes.some((recipe) => (
+    recipe.errors.length > 0 ||
+    recipe.ingredients.some((ingredient) => {
+      const catalog = draft.inventory?.find?.((item) => item.id === ingredient.inventoryItemId)
+      return !ingredient.inventoryItemId || normalizeRecipeIngredient(ingredient, catalog).conversionError
+    })
+  ))
+}
+
+function readExcelRows(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = (event) => {
+      try {
+        const workbook = XLSX.read(event.target.result, { type: "array" })
+        const rows = workbook.SheetNames.flatMap((sheetName) => (
+          XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: "" }).map((row) => ({ ...row, __sheet: sheetName }))
+        ))
+        if (!rows.length) reject(new Error("El archivo no contiene filas para importar."))
+        else resolve(rows)
+      } catch (caught) {
+        reject(caught)
+      }
+    }
+    reader.onerror = () => reject(new Error("No se pudo leer el archivo."))
+    reader.readAsArrayBuffer(file)
+  })
+}
+
+function buildRecipeImportDraft({ rows, inventory, recipes, productionAreaId, defaultYieldUnit }) {
+  const grouped = new Map()
+  const existingByName = new Map(recipes.map((recipe) => [normalizeText(recipe.name), recipe]))
+  let lastRecipeName = ""
+  rows.forEach((row, index) => {
+    const explicitRecipeName = valueFromRow(row, ["nombre receta", "receta", "recipe", "nombre"]).trim()
+    const recipeName = explicitRecipeName || lastRecipeName
+    const ingredientName = valueFromRow(row, ["ingrediente", "producto", "item", "insumo"]).trim()
+    const quantity = valueFromRow(row, ["cantidad", "qty", "cantidad ingrediente", "cantidad usada"])
+    const unit = normalizeRecipeUnit(valueFromRow(row, ["unidad", "unidad receta", "unit"]))
+    const yieldQuantity = valueFromRow(row, ["rendimiento", "yield", "porciones"]) || "1"
+    const yieldUnit = valueFromRow(row, ["unidad rendimiento", "yield unit"]) || defaultYieldUnit
+    const category = valueFromRow(row, ["categoria", "categoría", "category"]) || "importadas"
+    const type = valueFromRow(row, ["tipo", "type"])
+    const step = valueFromRow(row, ["paso", "proceso", "preparacion", "preparación"])
+    const errors = []
+    if (!recipeName) errors.push(`Fila ${index + 2}: falta nombre de receta.`)
+    if (!ingredientName) errors.push(`Fila ${index + 2}: falta ingrediente.`)
+    if (!Number(quantity)) errors.push(`Fila ${index + 2}: cantidad inválida.`)
+    if (!recipeName) return
+    lastRecipeName = recipeName
+    const existing = grouped.get(recipeName) || {
+      id: `${normalizeText(recipeName)}-${index}`,
+      name: recipeName,
+      category,
+      recipeType: normalizeText(type).includes("final") ? "final_product" : "subrecipe",
+      productionAreaId,
+      yieldQuantity: String(yieldQuantity || 1),
+      yieldUnit,
+      preparationSteps: [],
+      duplicateRecipeId: existingByName.get(normalizeText(recipeName))?.id || "",
+      ingredients: [],
+      errors: []
+    }
+    existing.errors.push(...errors)
+    if (step && !existing.preparationSteps.some((candidate) => candidate.text === step)) {
+      existing.preparationSteps.push({ id: existing.preparationSteps.length + 1, text: step })
+    }
+    if (ingredientName) {
+      const match = findInventoryMatch(ingredientName, inventory)
+      const catalog = match ? inventory.find((item) => item.id === match.id) : null
+      existing.ingredients.push(normalizeRecipeIngredient({
+        rawName: ingredientName,
+        inventoryItemId: match?.id || "",
+        matched: Boolean(match),
+        matchName: match?.name || "",
+        recipeQuantity: String(quantity || 0),
+        recipeUnit: unit,
+        wastePercentage: "0",
+        notes: `Importado desde Excel: ${ingredientName}`
+      }, catalog))
+    }
+    grouped.set(recipeName, existing)
+  })
+  return { recipes: [...grouped.values()], inventory }
+}
+
+function valueFromRow(row, aliases) {
+  const entries = Object.entries(row)
+  const normalizedAliases = aliases.map(normalizeText)
+  const found = entries.find(([key]) => normalizedAliases.includes(normalizeText(key)))
+  return String(found?.[1] ?? "")
+}
+
+function findInventoryMatch(name, inventory) {
+  const target = normalizeText(name)
+  const exact = inventory.find((item) => [item.name, item.sku, item.category].some((value) => normalizeText(value) === target))
+  if (exact) return exact
+  return inventory.find((item) => {
+    const itemName = normalizeText(item.name)
+    return itemName.includes(target) || target.includes(itemName)
+  })
+}
+
+function normalizeText(value) {
+  return String(value || "")
+    .trim()
+    .toLocaleLowerCase("es")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+}
+
+function normalizeRecipeUnit(unit) {
+  const normalized = normalizeUnit(unit)
+  const labels = { gramos: "Gramos", kilogramos: "Kilogramos", libras: "Libras", onzas: "Onzas", mililitros: "Mililitros", litros: "Litros", piezas: "Piezas", unidades: "Unidades" }
+  return labels[normalized.key] || unit || "Unidades"
 }
 
 function normalizePreparationSteps(steps) {
