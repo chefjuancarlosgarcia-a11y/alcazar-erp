@@ -15,6 +15,7 @@ import Reports from "../pages/Reports"
 import Settings from "../pages/Settings"
 import Account from "../pages/Account"
 import Tasks from "../pages/Tasks"
+import Kiosk from "../pages/Kiosk"
 import ProtectedRoute from "./ProtectedRoute"
 
 function DefaultRedirect() {
@@ -31,6 +32,7 @@ function AppRoutes() {
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/forgot-user" element={<ForgotUser />} />
         <Route path="/update-password" element={<UpdatePassword />} />
+        <Route path="/kiosk" element={<Kiosk />} />
         <Route element={<MainLayout />}>
           <Route index element={<DefaultRedirect />} />
           <Route path="/dashboard" element={<ProtectedRoute module="dashboard"><Dashboard /></ProtectedRoute>} />

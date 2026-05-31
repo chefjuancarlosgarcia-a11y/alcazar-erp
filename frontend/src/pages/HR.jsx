@@ -1,6 +1,7 @@
 import LegacyInventoryApp from "../modules/LegacyInventoryApp"
 import ProfileManagement from "./ProfileManagement"
 import ScheduleManagement from "./ScheduleManagement"
+import AttendanceTerminal from "../components/AttendanceTerminal"
 import { useLocation } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
 
@@ -20,6 +21,10 @@ function HR() {
 
   if (selectedSection === "horarios") {
     return <ScheduleManagement />
+  }
+
+  if (selectedSection === "asistencia") {
+    return <AttendanceTerminal />
   }
 
   return <LegacyInventoryApp initialSeccion={selectedSection} hideLegacyNavigation focusEmployeeId={profileId} editFocusedEmployee={editProfile} />

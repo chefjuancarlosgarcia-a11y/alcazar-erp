@@ -19,11 +19,17 @@ function normalizeRecipe(recipe) {
   const ingredients = (recipe?.recipe_ingredients || []).map((ingredient) => ({
     ...ingredient,
     item: ingredient.inventory_item,
-    cost: Number(ingredient.quantity || 0) * Number(ingredient.inventory_item?.cost_per_base_unit || 0)
+    recipe_quantity: ingredient.recipe_quantity ?? ingredient.quantity,
+    recipe_unit: ingredient.recipe_unit ?? ingredient.unit,
+    inventory_quantity: ingredient.inventory_quantity ?? ingredient.quantity,
+    inventory_unit: ingredient.inventory_unit ?? ingredient.unit,
+    conversion_factor: ingredient.conversion_factor ?? 1,
+    cost: Number(ingredient.inventory_quantity ?? ingredient.quantity ?? 0) * Number(ingredient.inventory_item?.cost_per_base_unit || 0)
   }))
   return recipe ? {
     ...recipe,
     ingredients,
+    preparationSteps: Array.isArray(recipe.preparation_steps) ? recipe.preparation_steps : [],
     links: recipe.pos_recipe_links || [],
     estimatedCost: Number(recipe.estimated_cost || 0),
     costPerPortion: Number(recipe.estimated_cost || 0) / Number(recipe.yield_quantity || 1)
@@ -39,6 +45,7 @@ function serializeRecipe(recipe) {
     yield_quantity: Number(recipe.yieldQuantity ?? recipe.yield_quantity ?? 1),
     yield_unit: recipe.yieldUnit || recipe.yield_unit || "",
     image_url: recipe.imageUrl || recipe.image_url || "",
+    preparation_steps: recipe.preparationSteps || recipe.preparation_steps || [],
     notes: recipe.notes || "",
     active: recipe.active !== false
   }
@@ -47,8 +54,13 @@ function serializeRecipe(recipe) {
 function serializeIngredients(ingredients) {
   return ingredients.map((ingredient) => ({
     inventory_item_id: ingredient.inventoryItemId || ingredient.inventory_item_id,
-    quantity: Number(ingredient.quantity || 0),
-    unit: ingredient.unit,
+    quantity: Number(ingredient.inventoryQuantity ?? ingredient.inventory_quantity ?? ingredient.quantity ?? 0),
+    unit: ingredient.inventoryUnit || ingredient.inventory_unit || ingredient.unit,
+    recipe_quantity: Number(ingredient.recipeQuantity ?? ingredient.recipe_quantity ?? ingredient.quantity ?? 0),
+    recipe_unit: ingredient.recipeUnit || ingredient.recipe_unit || ingredient.unit,
+    inventory_quantity: Number(ingredient.inventoryQuantity ?? ingredient.inventory_quantity ?? ingredient.quantity ?? 0),
+    inventory_unit: ingredient.inventoryUnit || ingredient.inventory_unit || ingredient.unit,
+    conversion_factor: Number(ingredient.conversionFactor ?? ingredient.conversion_factor ?? 1),
     waste_percentage: Number(ingredient.wastePercentage ?? ingredient.waste_percentage ?? 0),
     notes: ingredient.notes || ""
   }))

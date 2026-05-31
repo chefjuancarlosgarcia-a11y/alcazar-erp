@@ -18,11 +18,12 @@ const MODULES = {
 
 const ROLE_PERMISSIONS = {
   admin: ["dashboard", "inventory", "pos", "cash", "production", "hr", "tasks", "reports", "settings"],
+  ceo: ["dashboard", "inventory", "pos", "cash", "production", "hr", "tasks", "reports", "settings"],
   gerente_general: ["dashboard", "inventory", "pos", "cash", "production", "hr", "tasks", "reports", "settings"],
-  gerente: ["dashboard", "inventory", "hr", "tasks", "reports"],
+  gerente: ["dashboard", "inventory", "hr", "tasks"],
   encargado_almacen: ["inventory"],
-  rrhh: ["hr", "tasks", "reports"],
-  supervisor: ["pos", "cash", "production", "hr", "tasks", "inventory", "reports"],
+  rrhh: ["hr", "tasks"],
+  supervisor: ["pos", "cash", "production", "hr", "tasks", "inventory"],
   cajero: ["pos", "cash", "hr"],
   mesero: ["pos", "hr"],
   cocinero: ["inventory", "production", "hr"],
@@ -38,6 +39,7 @@ const ROLE_PERMISSIONS = {
 
 const LEGACY_ROLE_NAMES = {
   admin: "Administrador",
+  ceo: "CEO",
   gerente_general: "Gerente General",
   gerente: "Gerente",
   encargado_almacen: "Encargado de Almacén",

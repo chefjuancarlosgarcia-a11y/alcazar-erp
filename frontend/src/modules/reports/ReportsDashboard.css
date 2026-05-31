@@ -1,18 +1,36 @@
 .reports-page { display: grid; gap: 18px; color: #e6eef8; }
+.reports-page.executive { padding: 6px; }
 .reports-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.reports-header.hero { padding: 18px; border: 1px solid #24344a; border-radius: 16px; background: linear-gradient(180deg, #0f172a, #0b1324); }
 .reports-header h1 { margin: 4px 0; color: #f8fafc; font-size: 34px; }
 .reports-eyebrow { margin: 0; color: #2dd4bf; font-weight: 800; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; }
 .reports-muted { margin: 0; color: #94a3b8; }
 .reports-actions, .reports-tabs { display: flex; gap: 8px; flex-wrap: wrap; }
 .reports-actions button, .reports-tabs button { min-height: 43px; padding: 10px 15px; border: 1px solid #334155; border-radius: 10px; background: #111c30; color: #dbeafe; cursor: pointer; font-weight: 700; }
 .reports-actions .primary, .reports-tabs button.active { border-color: #0f766e; background: #0f766e; color: #f0fdfa; }
+.reports-actions button:disabled { opacity: .45; cursor: not-allowed; }
 .reports-tabs { padding-bottom: 6px; border-bottom: 1px solid #1e293b; }
+.executive-tabs { gap: 9px; }
 .reports-filters { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; padding: 14px; border: 1px solid #24344a; border-radius: 13px; background: #0f172a; }
 .reports-filters label { display: grid; gap: 6px; color: #94a3b8; font-size: 12px; font-weight: 800; text-transform: uppercase; }
 .reports-filters select, .reports-filters input { min-width: 150px; padding: 10px 12px; border: 1px solid #334155; border-radius: 8px; background: #111827; color: #f8fafc; }
 .reports-warning { padding: 12px 14px; border: 1px solid #f59e0b; border-radius: 11px; background: #451a03; color: #fde68a; }
 .reports-loading { padding: 30px; color: #94a3b8; text-align: center; }
 .reports-stack { display: grid; gap: 16px; }
+.executive-kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(190px, 1fr)); gap: 12px; }
+.executive-kpi {
+  position: relative; overflow: hidden; display: grid; gap: 8px; min-height: 122px; padding: 16px;
+  border: 1px solid #25364d; border-radius: 14px; background: #0f172a;
+}
+.executive-kpi::before {
+  content: ""; position: absolute; inset: 0 0 auto; height: 3px; background: #14b8a6;
+}
+.executive-kpi.down::before { background: #ef4444; }
+.executive-kpi span { color: #94a3b8; font-size: 12px; text-transform: uppercase; font-weight: 800; }
+.executive-kpi strong { color: #f8fafc; font-size: 28px; }
+.executive-kpi small { color: #94a3b8; }
+.executive-kpi em { width: fit-content; padding: 5px 8px; border-radius: 999px; background: #064e3b; color: #a7f3d0; font-style: normal; font-weight: 900; font-size: 12px; }
+.executive-kpi.down em { background: #7f1d1d; color: #fecaca; }
 .reports-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
 .report-kpi { display: grid; gap: 8px; padding: 16px; border: 1px solid #25364d; border-radius: 13px; background: #0f172a; }
 .report-kpi span { color: #94a3b8; font-size: 13px; }
@@ -33,10 +51,39 @@
 .reports-badge.pending, .reports-badge.medium, .reports-badge.acceptable, .reports-badge.horse { background: #78350f; color: #fde68a; }
 .reports-badge.critical, .reports-badge.high, .reports-badge.rejected, .reports-badge.dog { background: #7f1d1d; color: #fecaca; }
 .reports-badge.in_production, .reports-badge.puzzle { background: #075985; color: #bae6fd; }
+.stock-state { display: inline-flex; padding: 5px 9px; border-radius: 999px; font-size: 11px; font-weight: 900; }
+.stock-state.green { background: #064e3b; color: #a7f3d0; }
+.stock-state.yellow { background: #78350f; color: #fde68a; }
+.stock-state.red { background: #7f1d1d; color: #fecaca; }
+.bar-chart { display: grid; gap: 10px; }
+.bar-row { display: grid; grid-template-columns: minmax(90px, 1fr) 2.5fr minmax(84px, auto); gap: 10px; align-items: center; color: #cbd5e1; font-size: 13px; }
+.bar-row > div { height: 11px; border-radius: 999px; background: #1e293b; overflow: hidden; }
+.bar-row i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #14b8a6, #38bdf8); }
+.bar-row strong { color: #f8fafc; text-align: right; white-space: nowrap; }
+.pie-list { display: grid; grid-template-columns: 180px 1fr; gap: 15px; align-items: center; }
+.pie-visual { width: 160px; aspect-ratio: 1; border-radius: 999px; border: 1px solid #334155; box-shadow: inset 0 0 0 28px #0f172a; }
+.fixed-cost-form {
+  display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr auto auto; gap: 10px; align-items: center;
+  padding: 14px; border: 1px solid #24344a; border-radius: 14px; background: #0f172a;
+}
+.fixed-cost-form input, .fixed-cost-form select {
+  width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid #334155; border-radius: 8px; background: #111827; color: #f8fafc;
+}
+.fixed-cost-form label { display: flex; align-items: center; gap: 7px; color: #cbd5e1; white-space: nowrap; }
+.fixed-cost-form label input { width: auto; }
+.fixed-cost-form button { min-height: 41px; padding: 10px 14px; border: 1px solid #0f766e; border-radius: 10px; background: #0f766e; color: #f0fdfa; font-weight: 800; cursor: pointer; }
 .alerts-list { display: grid; gap: 9px; }
 .alert-card { display: flex; gap: 12px; align-items: center; padding: 11px; border: 1px solid #25364d; border-radius: 10px; background: #111c30; }
 .alert-card p { margin: 4px 0 0; color: #94a3b8; font-size: 13px; }
 .alert-card.critical, .alert-card.high { border-color: #7f1d1d; }
 .alert-card.medium { border-color: #a16207; }
 .reports-empty { padding: 22px; border: 1px dashed #334155; border-radius: 11px; color: #94a3b8; text-align: center; }
-@media (max-width: 920px) { .reports-grid { grid-template-columns: 1fr; } }
+@media (max-width: 1180px) {
+  .executive-kpi-grid { grid-template-columns: repeat(2, minmax(190px, 1fr)); }
+  .fixed-cost-form { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 920px) {
+  .reports-grid, .executive-kpi-grid, .pie-list, .fixed-cost-form { grid-template-columns: 1fr; }
+  .bar-row { grid-template-columns: 1fr; }
+  .bar-row strong { text-align: left; }
+}

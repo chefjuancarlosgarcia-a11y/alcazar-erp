@@ -19,6 +19,7 @@ const EMPTY_RECIPE = {
   yieldQuantity: "1",
   yieldUnit: "porción",
   imageUrl: "",
+  preparationSteps: [],
   notes: "",
   active: true,
   ingredients: [],
@@ -26,6 +27,17 @@ const EMPTY_RECIPE = {
   availableInPOS: false,
   salePrice: ""
 }
+
+const RECIPE_UNITS = [
+  "Gramos",
+  "Kilogramos",
+  "Libras",
+  "Onzas",
+  "Mililitros",
+  "Litros",
+  "Piezas",
+  "Unidades"
+]
 
 const DEBUG = import.meta.env.DEV
 
@@ -87,7 +99,8 @@ function RecipesSupabase() {
     setForm({
       ...EMPTY_RECIPE,
       productionAreaId: user?.areaId || productionAreas[0]?.id || "",
-      ingredients: []
+      ingredients: [],
+      preparationSteps: []
     })
   }
 
@@ -102,6 +115,7 @@ function RecipesSupabase() {
       yieldQuantity: String(recipe.yield_quantity || 1),
       yieldUnit: recipe.yield_unit || "",
       imageUrl: recipe.image_url || "",
+      preparationSteps: normalizePreparationSteps(recipe.preparationSteps || recipe.preparation_steps || []),
       notes: recipe.notes || "",
       active: recipe.active,
       posProductId: product?.id || "",
@@ -109,8 +123,11 @@ function RecipesSupabase() {
       salePrice: String(product?.price || ""),
       ingredients: recipe.ingredients.map((ingredient) => ({
         inventoryItemId: ingredient.inventory_item_id,
-        quantity: String(ingredient.quantity),
-        unit: ingredient.unit,
+        recipeQuantity: String(ingredient.recipe_quantity ?? ingredient.quantity),
+        recipeUnit: ingredient.recipe_unit || ingredient.unit,
+        inventoryQuantity: String(ingredient.inventory_quantity ?? ingredient.quantity),
+        inventoryUnit: ingredient.inventory_unit || ingredient.unit,
+        conversionFactor: Number(ingredient.conversion_factor || 1),
         wastePercentage: String(ingredient.waste_percentage || 0),
         notes: ingredient.notes || ""
       }))
@@ -229,7 +246,7 @@ function RecipesSupabase() {
         {!loading && !filtered.length && <p className="recipes-empty">No hay recetas registradas para esta selección.</p>}
       </div>
       {form && <RecipeForm form={form} areas={productionAreas} inventory={inventory} posProducts={posProducts} saving={saving} onClose={() => setForm(null)} onSave={saveRecipe} />}
-      {detail && <RecipeDetail recipe={detail} areas={areas} onClose={() => setDetail(null)} />}
+      {detail && <RecipeDetailV2 recipe={detail} areas={areas} onClose={() => setDetail(null)} />}
     </section>
   )
 }
@@ -240,16 +257,64 @@ function RecipeForm({ form: initialForm, areas, inventory, posProducts, saving, 
   const item = inventory.find((entry) => entry.id === itemId)
   const cost = form.ingredients.reduce((total, ingredient) => {
     const catalog = inventory.find((entry) => entry.id === ingredient.inventoryItemId)
-    return total + Number(ingredient.quantity || 0) * Number(catalog?.cost_per_base_unit || 0)
+    return total + Number(ingredient.inventoryQuantity || 0) * Number(catalog?.cost_per_base_unit || 0)
   }, 0)
 
   function addIngredient() {
     if (!item || form.ingredients.some((ingredient) => ingredient.inventoryItemId === item.id)) return
-    setForm({ ...form, ingredients: [...form.ingredients, { inventoryItemId: item.id, quantity: "1", unit: item.base_unit, wastePercentage: "0", notes: "" }] })
+    setForm({
+      ...form,
+      ingredients: [
+        ...form.ingredients,
+        normalizeRecipeIngredient({ inventoryItemId: item.id, recipeQuantity: "1", recipeUnit: item.base_unit, wastePercentage: "0", notes: "" }, item)
+      ]
+    })
   }
 
   function updateIngredient(id, updates) {
-    setForm({ ...form, ingredients: form.ingredients.map((ingredient) => ingredient.inventoryItemId === id ? { ...ingredient, ...updates } : ingredient) })
+    setForm({
+      ...form,
+      ingredients: form.ingredients.map((ingredient) => {
+        if (ingredient.inventoryItemId !== id) return ingredient
+        const catalog = inventory.find((entry) => entry.id === id)
+        return normalizeRecipeIngredient({ ...ingredient, ...updates }, catalog)
+      })
+    })
+  }
+
+  function handleImageUpload(event) {
+    const file = event.target.files?.[0]
+    if (!file) return
+    if (!file.type.startsWith("image/")) {
+      alert("Debes subir un archivo de imagen.")
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => setForm((current) => ({ ...current, imageUrl: reader.result || "" }))
+    reader.readAsDataURL(file)
+  }
+
+  function addStep() {
+    setForm({
+      ...form,
+      preparationSteps: [...normalizePreparationSteps(form.preparationSteps), { id: Date.now(), text: "" }]
+    })
+  }
+
+  function updateStep(index, text) {
+    setForm({
+      ...form,
+      preparationSteps: normalizePreparationSteps(form.preparationSteps).map((step, stepIndex) => (
+        stepIndex === index ? { ...step, text } : step
+      ))
+    })
+  }
+
+  function removeStep(index) {
+    setForm({
+      ...form,
+      preparationSteps: normalizePreparationSteps(form.preparationSteps).filter((_, stepIndex) => stepIndex !== index)
+    })
   }
 
   return (
@@ -263,25 +328,64 @@ function RecipeForm({ form: initialForm, areas, inventory, posProducts, saving, 
           <Field label="Categoría POS"><input value={form.posCategoryId} onChange={(event) => setForm({ ...form, posCategoryId: event.target.value })} placeholder="pizzas, barra..." /></Field>
           <Field label="Rendimiento"><input type="number" min="0.001" step="any" value={form.yieldQuantity} onChange={(event) => setForm({ ...form, yieldQuantity: event.target.value })} /></Field>
           <Field label="Unidad rendimiento"><input value={form.yieldUnit} onChange={(event) => setForm({ ...form, yieldUnit: event.target.value })} /></Field>
-          <Field label="URL de imagen"><input value={form.imageUrl} onChange={(event) => setForm({ ...form, imageUrl: event.target.value })} placeholder="https://..." /></Field>
+          <Field label="Imagen de receta">
+            <div className="recipe-image-upload">
+              {form.imageUrl ? <img src={form.imageUrl} alt="" /> : <span>Sin imagen</span>}
+              <div>
+                <label className="recipe-upload-button">
+                  Upload Image
+                  <input type="file" accept="image/*" onChange={handleImageUpload} />
+                </label>
+                {form.imageUrl && <button type="button" className="danger" onClick={() => setForm({ ...form, imageUrl: "" })}>Quitar imagen</button>}
+              </div>
+            </div>
+          </Field>
           {form.recipeType === "final_product" && <Field label="Producto POS existente"><select disabled={!form.availableInPOS} value={form.posProductId} onChange={(event) => setForm({ ...form, posProductId: event.target.value })}><option value="">Crear producto nuevo</option>{posProducts.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}</select></Field>}
           {form.recipeType === "final_product" && <Field label="Disponible en POS"><label className="recipe-checkbox"><input type="checkbox" checked={form.availableInPOS} onChange={(event) => setForm({ ...form, availableInPOS: event.target.checked })} />Crear o actualizar producto vendible</label></Field>}
           {form.recipeType === "final_product" && form.availableInPOS && <Field label="Precio de venta"><input type="number" min="0.01" step="0.01" value={form.salePrice} onChange={(event) => setForm({ ...form, salePrice: event.target.value })} /></Field>}
         </div>
         <Field label="Notas"><textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></Field>
+        <section className="recipe-steps-section">
+          <div className="recipe-section-heading">
+            <div>
+              <h3>Proceso de preparación</h3>
+              <p>Documenta los pasos en orden para mantener la receta estandarizada.</p>
+            </div>
+            <button type="button" className="primary" onClick={addStep}>Agregar paso</button>
+          </div>
+          <div className="recipe-steps-list">
+            {normalizePreparationSteps(form.preparationSteps).map((step, index) => (
+              <div className="recipe-step-row" key={step.id || index}>
+                <span>Paso {index + 1}</span>
+                <textarea value={step.text} onChange={(event) => updateStep(index, event.target.value)} placeholder="Describe este paso de la receta" />
+                <button type="button" className="danger" onClick={() => removeStep(index)}>Eliminar</button>
+              </div>
+            ))}
+            {!normalizePreparationSteps(form.preparationSteps).length && <p className="recipes-empty">Agrega los pasos de preparación de esta receta.</p>}
+          </div>
+        </section>
         <div className="recipe-picker">
           <select value={itemId} onChange={(event) => setItemId(event.target.value)}>{inventory.map((inventoryItem) => <option key={inventoryItem.id} value={inventoryItem.id}>{inventoryItem.name} ({inventoryItem.base_unit})</option>)}</select>
           <span>Costo base: <strong>Q{Number(item?.cost_per_base_unit || 0).toFixed(4)}</strong></span>
           <button type="button" className="primary" onClick={addIngredient}>Agregar ingrediente</button>
         </div>
         <div className="recipe-ingredients">
-          <div className="recipe-ingredients-head"><span>Ingrediente</span><span>Cantidad / unidad</span><span>Merma %</span><span>Subtotal</span><span /></div>
+          <div className="recipe-ingredients-head"><span>Ingrediente</span><span>Cantidad receta</span><span>Equivalente inventario</span><span>Merma %</span><span>Subtotal</span><span /></div>
           {form.ingredients.map((ingredient) => {
             const catalog = inventory.find((entry) => entry.id === ingredient.inventoryItemId)
-            const subtotal = Number(ingredient.quantity || 0) * Number(catalog?.cost_per_base_unit || 0)
+            const normalized = normalizeRecipeIngredient(ingredient, catalog)
+            const subtotal = Number(normalized.inventoryQuantity || 0) * Number(catalog?.cost_per_base_unit || 0)
             return <div className="recipe-ingredient-row" key={ingredient.inventoryItemId}>
               <strong>{catalog?.name || "Ingrediente"}</strong>
-              <span><input type="number" min="0.001" step="any" value={ingredient.quantity} onChange={(event) => updateIngredient(ingredient.inventoryItemId, { quantity: event.target.value })} /> {ingredient.unit}</span>
+              <span className="recipe-quantity-control">
+                <input type="number" min="0.001" step="any" value={normalized.recipeQuantity} onChange={(event) => updateIngredient(ingredient.inventoryItemId, { recipeQuantity: event.target.value })} />
+                <select value={normalized.recipeUnit} onChange={(event) => updateIngredient(ingredient.inventoryItemId, { recipeUnit: event.target.value })}>
+                  {unitOptionsFor(catalog).map((unit) => <option key={unit} value={unit}>{unit}</option>)}
+                </select>
+              </span>
+              <span className={normalized.conversionError ? "recipe-conversion-error" : "recipe-conversion-ok"}>
+                {normalized.conversionError || `${formatRecipeNumber(normalized.inventoryQuantity)} ${normalized.inventoryUnit || catalog?.base_unit || ""}`}
+              </span>
               <input type="number" min="0" max="100" step="any" value={ingredient.wastePercentage} onChange={(event) => updateIngredient(ingredient.inventoryItemId, { wastePercentage: event.target.value })} />
               <strong>Q{subtotal.toFixed(2)}</strong>
               <button type="button" className="danger" onClick={() => setForm({ ...form, ingredients: form.ingredients.filter((line) => line.inventoryItemId !== ingredient.inventoryItemId) })}>Quitar</button>
@@ -309,6 +413,33 @@ function Field({ label, children }) {
   return <label className="recipe-field"><span>{label}</span>{children}</label>
 }
 
+function RecipeDetailV2({ recipe, areas, onClose }) {
+  const steps = normalizePreparationSteps(recipe.preparationSteps || recipe.preparation_steps)
+  return <div className="recipes-backdrop"><section className="recipes-modal compact">
+    <header><div><p className="recipes-eyebrow">Ficha tecnica</p><h2>{recipe.name}</h2></div><button type="button" onClick={onClose}>Cerrar</button></header>
+    <p className="recipes-muted">{areaName(areas, recipe.production_area_id)} - Rendimiento {recipe.yield_quantity} {recipe.yield_unit || ""}</p>
+    {recipe.image_url && <img className="recipe-detail-image" src={recipe.image_url} alt="" />}
+    <div className="recipe-detail-items">{recipe.ingredients.map((ingredient) => {
+      const recipeQuantity = ingredient.recipe_quantity ?? ingredient.quantity
+      const recipeUnit = ingredient.recipe_unit ?? ingredient.unit
+      const inventoryQuantity = ingredient.inventory_quantity ?? ingredient.quantity
+      const inventoryUnit = ingredient.inventory_unit ?? ingredient.unit
+      return <div key={ingredient.id}>
+        <strong>{ingredient.ingredient_name}</strong>
+        <span>{recipeQuantity} {recipeUnit} receta</span>
+        <span>Equivale a {formatRecipeNumber(inventoryQuantity)} {inventoryUnit}</span>
+        <span>Merma: {ingredient.waste_percentage}%</span>
+        <span>Q{ingredient.cost.toFixed(2)}</span>
+      </div>
+    })}</div>
+    <section className="recipe-detail-steps">
+      <h3>Proceso de preparacion</h3>
+      {steps.length ? <ol>{steps.map((step, index) => <li key={step.id || index}>{step.text}</li>)}</ol> : <p className="recipes-muted">Sin pasos registrados.</p>}
+    </section>
+    <div className="recipe-total"><span>Costo total</span><strong>Q{recipe.estimatedCost.toFixed(2)}</strong><small>Q{recipe.costPerPortion.toFixed(2)} por porcion</small></div>
+  </section></div>
+}
+
 function validateRecipe(recipe, inventory) {
   if (!recipe.name.trim()) return "El nombre de la receta es obligatorio."
   if (!recipe.productionAreaId) return "Selecciona un área de producción."
@@ -316,10 +447,100 @@ function validateRecipe(recipe, inventory) {
   if (!recipe.ingredients.length) return "Agrega al menos un ingrediente."
   for (const ingredient of recipe.ingredients) {
     const item = inventory.find((entry) => entry.id === ingredient.inventoryItemId)
-    if (!item || item.base_unit !== ingredient.unit) return "Los ingredientes deben usar la unidad base del inventario."
-    if (Number(ingredient.quantity) <= 0) return "La cantidad de cada ingrediente debe ser mayor que cero."
+    const normalized = normalizeRecipeIngredient(ingredient, item)
+    if (!item) return "La receta contiene un ingrediente inactivo o inexistente."
+    if (Number(normalized.recipeQuantity) <= 0) return "La cantidad de cada ingrediente debe ser mayor que cero."
+    if (normalized.conversionError) return normalized.conversionError
   }
+  const emptyStep = normalizePreparationSteps(recipe.preparationSteps).some((step) => !step.text.trim())
+  if (emptyStep) return "Completa o elimina los pasos de preparación vacíos."
   return ""
+}
+
+function normalizePreparationSteps(steps) {
+  if (!Array.isArray(steps)) return []
+  return steps.map((step, index) => {
+    if (typeof step === "string") return { id: index + 1, text: step }
+    return { id: step.id || index + 1, text: step.text || step.description || "" }
+  })
+}
+
+function normalizeRecipeIngredient(ingredient, catalog) {
+  const recipeQuantity = ingredient.recipeQuantity ?? ingredient.recipe_quantity ?? ingredient.quantity ?? "1"
+  const recipeUnit = ingredient.recipeUnit || ingredient.recipe_unit || ingredient.unit || catalog?.base_unit || "Unidades"
+  const inventoryUnit = catalog?.base_unit || ingredient.inventoryUnit || ingredient.inventory_unit || ingredient.unit || recipeUnit
+  const conversion = convertRecipeQuantity(recipeQuantity, recipeUnit, inventoryUnit)
+  return {
+    ...ingredient,
+    recipeQuantity: String(recipeQuantity),
+    recipeUnit,
+    inventoryQuantity: conversion.value === null ? "" : String(conversion.value),
+    inventoryUnit,
+    conversionFactor: conversion.factor || 1,
+    conversionError: conversion.error
+  }
+}
+
+function unitOptionsFor(catalog) {
+  const baseUnit = catalog?.base_unit
+  return Array.from(new Set([baseUnit, ...RECIPE_UNITS].filter(Boolean)))
+}
+
+function convertRecipeQuantity(quantity, fromUnit, toUnit) {
+  const amount = Number(quantity || 0)
+  if (!Number.isFinite(amount) || amount <= 0) return { value: amount, factor: 1, error: "" }
+  const from = normalizeUnit(fromUnit)
+  const to = normalizeUnit(toUnit)
+  if (!from || !to || from.key === to.key) return { value: amount, factor: 1, error: "" }
+  if (from.family !== to.family) {
+    return {
+      value: null,
+      factor: 1,
+      error: `No se puede convertir ${fromUnit} a ${toUnit}. Ajusta la unidad base del ingrediente o usa una unidad compatible.`
+    }
+  }
+  const baseAmount = amount * from.toBase
+  const converted = baseAmount / to.toBase
+  return { value: converted, factor: converted / amount, error: "" }
+}
+
+function normalizeUnit(unit) {
+  const key = String(unit || "")
+    .trim()
+    .toLocaleLowerCase("es")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+  const units = {
+    g: { key: "gramos", family: "mass", toBase: 1 },
+    gramo: { key: "gramos", family: "mass", toBase: 1 },
+    gramos: { key: "gramos", family: "mass", toBase: 1 },
+    kg: { key: "kilogramos", family: "mass", toBase: 1000 },
+    kilogramo: { key: "kilogramos", family: "mass", toBase: 1000 },
+    kilogramos: { key: "kilogramos", family: "mass", toBase: 1000 },
+    lb: { key: "libras", family: "mass", toBase: 454 },
+    libra: { key: "libras", family: "mass", toBase: 454 },
+    libras: { key: "libras", family: "mass", toBase: 454 },
+    oz: { key: "onzas", family: "mass", toBase: 28.375 },
+    onza: { key: "onzas", family: "mass", toBase: 28.375 },
+    onzas: { key: "onzas", family: "mass", toBase: 28.375 },
+    ml: { key: "mililitros", family: "volume", toBase: 1 },
+    mililitro: { key: "mililitros", family: "volume", toBase: 1 },
+    mililitros: { key: "mililitros", family: "volume", toBase: 1 },
+    l: { key: "litros", family: "volume", toBase: 1000 },
+    litro: { key: "litros", family: "volume", toBase: 1000 },
+    litros: { key: "litros", family: "volume", toBase: 1000 },
+    pieza: { key: "piezas", family: "count", toBase: 1 },
+    piezas: { key: "piezas", family: "count", toBase: 1 },
+    unidad: { key: "unidades", family: "count", toBase: 1 },
+    unidades: { key: "unidades", family: "count", toBase: 1 },
+    "unidad/pieza": { key: "unidades", family: "count", toBase: 1 }
+  }
+  return units[key] || { key, family: "custom", toBase: 1 }
+}
+
+function formatRecipeNumber(value) {
+  const number = Number(value || 0)
+  return Number.isInteger(number) ? String(number) : number.toFixed(4).replace(/0+$/, "").replace(/\.$/, "")
 }
 
 function areaName(areas, areaId) {

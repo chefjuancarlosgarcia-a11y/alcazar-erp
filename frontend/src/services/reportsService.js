@@ -17,6 +17,17 @@ export function getReportDateRange(filters = {}) {
   const end = filters.end ? new Date(`${filters.end}T23:59:59.999`) : now
   let start
   if (filters.start) start = new Date(`${filters.start}T00:00:00`)
+  else if (filters.preset === "week") {
+    start = new Date(now)
+    const day = start.getDay() || 7
+    start.setDate(start.getDate() - day + 1)
+    start.setHours(0, 0, 0, 0)
+  } else if (filters.preset === "year") {
+    start = new Date(now.getFullYear(), 0, 1)
+  } else if (filters.preset === "custom") {
+    start = new Date(now)
+    start.setHours(0, 0, 0, 0)
+  }
   else if (filters.preset === "yesterday") {
     start = new Date(now)
     start.setDate(start.getDate() - 1)
@@ -36,6 +47,25 @@ export function getReportDateRange(filters = {}) {
   return { start: start.toISOString(), end: end.toISOString() }
 }
 
+function rangeForPreset(preset) {
+  return getReportDateRange({ preset })
+}
+
+function previousRange(range) {
+  const start = new Date(range.start)
+  const end = new Date(range.end)
+  const duration = end.getTime() - start.getTime()
+  const previousEnd = new Date(start.getTime() - 1)
+  const previousStart = new Date(previousEnd.getTime() - duration)
+  return { start: previousStart.toISOString(), end: previousEnd.toISOString() }
+}
+
+function growth(current, previous) {
+  if (!previous && !current) return 0
+  if (!previous) return current > 0 ? 100 : 0
+  return ((current - previous) / previous) * 100
+}
+
 function withDates(query, filters, column = "created_at") {
   const range = getReportDateRange(filters)
   return query.gte(column, range.start).lte(column, range.end)
@@ -51,6 +81,17 @@ async function fetchOrders(filters = {}) {
     filters
   )
   const { data, error } = await query.order("created_at", { ascending: false })
+  return { data: data || [], error }
+}
+
+async function fetchOrdersByRange(range) {
+  const { data, error } = await supabase
+    .from("pos_orders")
+    .select("*, items:pos_order_items(*)")
+    .neq("status", "cancelled")
+    .gte("created_at", range.start)
+    .lte("created_at", range.end)
+    .order("created_at", { ascending: false })
   return { data: data || [], error }
 }
 
@@ -85,6 +126,102 @@ export async function getExecutiveKPIs(filters = {}) {
     pendingRequisitions: (requisitions.data || []).length,
     range: getReportDateRange(filters)
   }, errors[0])
+}
+
+export async function getExecutiveDashboardReport() {
+  const ranges = {
+    day: rangeForPreset("today"),
+    week: rangeForPreset("week"),
+    month: rangeForPreset("month"),
+    year: rangeForPreset("year")
+  }
+  const [
+    dayOrders,
+    weekOrders,
+    monthOrders,
+    yearOrders,
+    prevDayOrders,
+    prevWeekOrders,
+    prevMonthOrders,
+    prevYearOrders
+  ] = await Promise.all([
+    fetchOrdersByRange(ranges.day),
+    fetchOrdersByRange(ranges.week),
+    fetchOrdersByRange(ranges.month),
+    fetchOrdersByRange(ranges.year),
+    fetchOrdersByRange(previousRange(ranges.day)),
+    fetchOrdersByRange(previousRange(ranges.week)),
+    fetchOrdersByRange(previousRange(ranges.month)),
+    fetchOrdersByRange(previousRange(ranges.year))
+  ])
+  const errors = [dayOrders, weekOrders, monthOrders, yearOrders, prevDayOrders, prevWeekOrders, prevMonthOrders, prevYearOrders].map((item) => item.error).filter(Boolean)
+  const summarize = (orders) => {
+    const total = orders.reduce((sum, order) => sum + number(order.total), 0)
+    return { total, orders: orders.length, averageTicket: orders.length ? total / orders.length : 0 }
+  }
+  const current = {
+    day: summarize(dayOrders.data),
+    week: summarize(weekOrders.data),
+    month: summarize(monthOrders.data),
+    year: summarize(yearOrders.data)
+  }
+  const previous = {
+    day: summarize(prevDayOrders.data),
+    week: summarize(prevWeekOrders.data),
+    month: summarize(prevMonthOrders.data),
+    year: summarize(prevYearOrders.data)
+  }
+  return empty({ current, previous, ranges }, errors[0])
+}
+
+export async function getSalesAnalyticsReport(filters = {}) {
+  const ordersResult = await fetchOrders(filters)
+  if (ordersResult.error) return empty({ summary: {}, byDay: [], byWeek: [], byMonth: [], byHour: [] }, ordersResult.error)
+  const orders = ordersResult.data || []
+  const totalSales = orders.reduce((sum, order) => sum + number(order.total), 0)
+  const byDay = groupOrdersBy(orders, (order) => dayKey(order.created_at), "date")
+  const byWeek = groupOrdersBy(orders, (order) => weekKey(order.created_at), "week")
+  const byMonth = groupOrdersBy(orders, (order) => monthKey(order.created_at), "month")
+  const byHour = groupOrdersBy(orders, (order) => `${new Date(order.created_at).getHours().toString().padStart(2, "0")}:00`, "hour")
+  const bestDay = [...byDay].sort((a, b) => b.sales - a.sales)[0]
+  const bestHour = [...byHour].sort((a, b) => b.sales - a.sales)[0]
+  return empty({
+    summary: {
+      totalSales,
+      orders: orders.length,
+      averageTicket: orders.length ? totalSales / orders.length : 0,
+      bestHour: bestHour?.hour || "-",
+      bestDay: bestDay?.date || "-"
+    },
+    byDay,
+    byWeek,
+    byMonth,
+    byHour
+  })
+}
+
+function groupOrdersBy(orders, getKey, keyName) {
+  const grouped = new Map()
+  orders.forEach((order) => {
+    const key = getKey(order)
+    const row = grouped.get(key) || { [keyName]: key, sales: 0, orders: 0, averageTicket: 0 }
+    row.sales += number(order.total)
+    row.orders += 1
+    row.averageTicket = row.orders ? row.sales / row.orders : 0
+    grouped.set(key, row)
+  })
+  return [...grouped.values()]
+}
+
+function weekKey(value) {
+  const date = new Date(value)
+  const first = new Date(date.getFullYear(), 0, 1)
+  const week = Math.ceil((((date - first) / 86400000) + first.getDay() + 1) / 7)
+  return `${date.getFullYear()}-S${String(week).padStart(2, "0")}`
+}
+
+function monthKey(value) {
+  return new Date(value).toLocaleDateString("es-GT", { month: "short", year: "numeric" })
 }
 
 export async function getSalesReport(filters = {}) {
@@ -134,7 +271,7 @@ export async function getSalesByWaiter(filters = {}) {
   const ordersResult = await fetchOrders(filters)
   if (ordersResult.error) return empty([], ordersResult.error)
   const grouped = new Map()
-  ordersResult.data.forEach((order) => {
+  ordersResult.data.filter((order) => matchesShift(order.created_at, filters.shift)).forEach((order) => {
     const waiter = order.waiter_name || "Sin asignar"
     const row = grouped.get(waiter) || { waiter, orders: 0, sales: 0, averageTicket: 0 }
     row.orders += 1
@@ -142,6 +279,114 @@ export async function getSalesByWaiter(filters = {}) {
     grouped.set(waiter, row)
   })
   return empty([...grouped.values()].map((row) => ({ ...row, averageTicket: row.orders ? row.sales / row.orders : 0 })).sort((a, b) => b.sales - a.sales))
+}
+
+function matchesShift(value, shift) {
+  if (!shift) return true
+  const hour = new Date(value).getHours()
+  if (shift === "am") return hour >= 5 && hour < 12
+  if (shift === "pm") return hour >= 12 && hour < 18
+  if (shift === "noche") return hour >= 18 || hour < 5
+  return true
+}
+
+export async function getPurchasesReport(filters = {}) {
+  const { data, error } = await withDates(
+    supabase.from("purchase_orders").select("*"),
+    filters
+  ).order("created_at", { ascending: false })
+  if (error) return empty({ summary: {}, bySupplier: [], byCategory: [], rows: [] }, error)
+  const rows = (data || []).map(normalizePurchaseOrder)
+  const total = rows.reduce((sum, row) => sum + number(row.total), 0)
+  const bySupplier = aggregateRows(rows, "supplier", total)
+  const byCategory = aggregateRows(rows.flatMap((row) => row.categories.map((category) => ({ ...category, total: category.amount }))), "category", total)
+  const dayTotal = rows.filter((row) => isInRange(row.created_at, rangeForPreset("today"))).reduce((sum, row) => sum + row.total, 0)
+  const monthTotal = rows.filter((row) => isInRange(row.created_at, rangeForPreset("month"))).reduce((sum, row) => sum + row.total, 0)
+  const yearTotal = rows.filter((row) => isInRange(row.created_at, rangeForPreset("year"))).reduce((sum, row) => sum + row.total, 0)
+  return empty({ summary: { dayTotal, monthTotal, yearTotal, total }, bySupplier, byCategory, rows })
+}
+
+function normalizePurchaseOrder(order) {
+  const data = order.data || {}
+  const items = Array.isArray(data.items) ? data.items : Array.isArray(data.productos) ? data.productos : []
+  const total = number(data.total || data.totalOrden || data.montoTotal || items.reduce((sum, item) => sum + number(item.subtotal || item.total || number(item.cantidad || item.quantity) * number(item.precio || item.unitPrice || item.costoUnitario)), 0))
+  const categories = new Map()
+  items.forEach((item) => {
+    const category = item.categoria || item.category || item.tipo || "Sin categoria"
+    const amount = number(item.subtotal || item.total || number(item.cantidad || item.quantity) * number(item.precio || item.unitPrice || item.costoUnitario))
+    categories.set(category, number(categories.get(category)) + amount)
+  })
+  return {
+    id: order.id,
+    orderNumber: order.order_number || data.numeroOrden || order.id,
+    status: order.status,
+    created_at: order.created_at,
+    supplier: data.proveedorNombre || data.proveedor || data.supplier || "Sin proveedor",
+    total,
+    categories: [...categories].map(([category, amount]) => ({ category, amount }))
+  }
+}
+
+function aggregateRows(rows, key, total) {
+  const grouped = new Map()
+  rows.forEach((row) => {
+    const label = row[key] || "Sin informacion"
+    const current = grouped.get(label) || { name: label, amount: 0, percent: 0 }
+    current.amount += number(row.total)
+    grouped.set(label, current)
+  })
+  return [...grouped.values()].map((row) => ({ ...row, percent: total ? (row.amount / total) * 100 : 0 })).sort((a, b) => b.amount - a.amount)
+}
+
+function isInRange(value, range) {
+  const time = new Date(value).getTime()
+  return time >= new Date(range.start).getTime() && time <= new Date(range.end).getTime()
+}
+
+export async function getFixedCosts() {
+  const { data, error } = await supabase.from("fixed_costs").select("*").order("category", { ascending: true }).order("name", { ascending: true })
+  return empty(data || [], error)
+}
+
+export async function saveFixedCost(cost) {
+  const payload = {
+    name: cost.name?.trim(),
+    category: cost.category,
+    monthly_amount: Number(cost.monthly_amount || cost.monthlyAmount || 0),
+    start_date: cost.start_date || cost.startDate || null,
+    active: cost.active !== false
+  }
+  if (cost.id) {
+    const { data, error } = await supabase.from("fixed_costs").update(payload).eq("id", cost.id).select("*").single()
+    return { data, error }
+  }
+  const { data, error } = await supabase.from("fixed_costs").insert(payload).select("*").single()
+  return { data, error }
+}
+
+export async function getPayrollCostReport(filters = {}) {
+  const [payroll, profiles] = await Promise.all([
+    withDates(supabase.from("payroll_summaries").select("*"), filters, "week_start"),
+    supabase.from("profiles").select("id, full_name, role, area_name")
+  ])
+  if (payroll.error || profiles.error) return empty({ summary: {}, byDepartment: [], rows: [] }, payroll.error || profiles.error)
+  const profileMap = new Map((profiles.data || []).map((profile) => [profile.id, profile]))
+  const rows = (payroll.data || []).map((row) => {
+    const profile = profileMap.get(row.employee_id) || {}
+    return { ...row, employee: profile.full_name || row.employee_id, department: profile.area_name || roleDepartment(profile.role), amount: number(row.estimated_pay) }
+  })
+  const monthly = rows.reduce((sum, row) => sum + row.amount, 0)
+  const grouped = aggregateRows(rows.map((row) => ({ category: row.department, total: row.amount })), "category", monthly)
+  return empty({ summary: { monthly, annual: monthly * 12 }, byDepartment: grouped, rows })
+}
+
+function roleDepartment(role) {
+  if (["cocinero", "pizzero"].includes(role)) return "Cocina"
+  if (["mesero", "cajero", "supervisor"].includes(role)) return "Servicio"
+  if (["barista", "bartender"].includes(role)) return "Barra"
+  if (["panadero", "repostero"].includes(role)) return "Panaderia"
+  if (["admin", "gerente_general", "gerente", "rrhh"].includes(role)) return "Administracion"
+  return "Sin departamento"
 }
 
 export async function getProductionReport(filters = {}) {
