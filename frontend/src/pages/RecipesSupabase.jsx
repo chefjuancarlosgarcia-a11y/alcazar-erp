@@ -65,6 +65,8 @@ function RecipesSupabase() {
   const [importing, setImporting] = useState(false)
   const [importFileName, setImportFileName] = useState("")
   const [importReadError, setImportReadError] = useState("")
+  const [importReading, setImportReading] = useState(false)
+  const [importProgress, setImportProgress] = useState("")
 
   const manager = ["admin", "ceo", "gerente_general", "gerente"].includes(user?.role)
   const canCreate = manager || (user?.role === "supervisor" && Boolean(user?.areaId))
@@ -206,20 +208,25 @@ function RecipesSupabase() {
     setImportFileName(file.name)
     setImportReadError("")
     setImportDraft(null)
+    setImportReading(true)
+    setImportProgress("Leyendo archivo...")
     const extension = file.name.toLowerCase().split(".").pop()
     if (!["xlsx", "xls", "csv"].includes(extension)) {
       const message = "Sube un archivo .xlsx, .xls o .csv."
       setImportReadError(message)
       setError(message)
+      setImportReading(false)
+      setImportProgress("")
       return
     }
     try {
-      const rows = await readExcelRows(file)
-      const draft = buildRecipeImportDraft({
-        rows,
+      const workbook = await withTimeout(readExcelRows(file), 45000, "El archivo tardo demasiado en leerse. Revisa que no este danado o divide el archivo en lotes.")
+      const draft = await buildRecipeImportDraft({
+        workbook,
         inventory,
         recipes,
         productionAreaId: user?.areaId || productionAreas[0]?.id || "",
+        onProgress: setImportProgress,
         defaultYieldUnit: "porción"
       })
       setImportDraft({ ...draft, fileName: file.name, duplicateMode: "skip", importErrors: [], importedCount: 0, skippedCount: 0 })
@@ -232,6 +239,8 @@ function RecipesSupabase() {
       setImportReadError(message)
       setError(message)
     } finally {
+      setImportReading(false)
+      setImportProgress("")
       if (recipeImportInputRef.current) recipeImportInputRef.current.value = ""
     }
   }
@@ -324,8 +333,8 @@ function RecipesSupabase() {
                 accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
                 onChange={(event) => handleRecipeImportFile(event.target.files?.[0])}
               />
-              <button type="button" className="recipe-import-button" onClick={() => recipeImportInputRef.current?.click()}>
-                Importar Excel
+              <button type="button" className="recipe-import-button" disabled={importReading} onClick={() => recipeImportInputRef.current?.click()}>
+                {importReading ? "Procesando..." : "Importar Excel"}
               </button>
             </>
           )}
@@ -340,6 +349,11 @@ function RecipesSupabase() {
         </div>
       )}
       {localRecipesExist && <div className="recipes-warning">Existen recetas locales antiguas. Las nuevas recetas oficiales serán Supabase.</div>}
+      {importReading && (
+        <div className="recipes-warning recipe-import-loading">
+          <span>{importProgress || "Procesando archivo..."}</span>
+        </div>
+      )}
       {message && <div className="recipes-success">{message}</div>}
       {error && <div className="recipes-error">{error}</div>}
       <div className="recipes-filters">
@@ -549,6 +563,7 @@ function RecipeImportModal({ draft, inventory, importing, setDraft, onIngredient
   const unresolved = draft.recipes.reduce((total, recipe) => total + recipe.ingredients.filter((ingredient) => !ingredient.inventoryItemId).length, 0)
   const duplicates = draft.recipes.filter((recipe) => recipe.duplicateRecipeId).length
   const errors = draft.recipes.flatMap((recipe) => recipe.errors.map((message) => ({ recipe: recipe.name, message })))
+  const parseErrors = draft.parseErrors || []
   const importableCount = getImportableRecipes(draft).length
   return (
     <div className="recipes-backdrop">
@@ -558,7 +573,8 @@ function RecipeImportModal({ draft, inventory, importing, setDraft, onIngredient
             <p className="recipes-eyebrow">Importación masiva</p>
             <h2>Validar recetas desde Excel</h2>
             {draft.fileName && <p className="recipes-muted">Archivo: <strong>{draft.fileName}</strong></p>}
-            <p className="recipes-muted">{draft.recipes.length} receta(s), {unresolved} ingrediente(s) sin coincidencia, {duplicates} duplicado(s).</p>
+            <p className="recipes-muted">{draft.recipes.length} receta(s), {draft.detectedIngredients || 0} ingrediente(s), {unresolved} sin coincidencia, {duplicates} duplicado(s).</p>
+            <p className="recipes-muted">Formato detectado: {draft.sourceFormat === "block" ? "bloques por receta" : "tabla plana"}.</p>
           </div>
           <button type="button" onClick={onClose}>Cerrar</button>
         </header>
@@ -579,6 +595,14 @@ function RecipeImportModal({ draft, inventory, importing, setDraft, onIngredient
           <div className="recipe-import-errors">
             <strong>Errores detectados</strong>
             {errors.map((error, index) => <p key={`${error.recipe}-${index}`}>{error.recipe}: {error.message}</p>)}
+          </div>
+        )}
+
+        {parseErrors.length > 0 && (
+          <div className="recipe-import-errors">
+            <strong>Filas ignoradas o advertencias</strong>
+            {parseErrors.slice(0, 40).map((message, index) => <p key={`${message}-${index}`}>{message}</p>)}
+            {parseErrors.length > 40 && <p>+{parseErrors.length - 40} advertencia(s) adicional(es).</p>}
           </div>
         )}
 
@@ -693,6 +717,15 @@ function isImportableRecipe(recipe, inventory) {
   })
 }
 
+function withTimeout(promise, milliseconds, message) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      window.setTimeout(() => reject(new Error(message)), milliseconds)
+    })
+  ])
+}
+
 function readExcelRows(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -700,11 +733,14 @@ function readExcelRows(file) {
     reader.onload = (event) => {
       try {
         const workbook = XLSX.read(event.target.result, { type: extension === "csv" ? "string" : "array" })
-        const rows = workbook.SheetNames.flatMap((sheetName) => (
-          XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: "" }).map((row) => ({ ...row, __sheet: sheetName }))
-        ))
-        if (!rows.length) reject(new Error("El archivo no contiene filas para importar."))
-        else resolve(rows)
+        const sheets = workbook.SheetNames.map((sheetName) => ({
+          name: sheetName,
+          rows: XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: "" }).map((row) => ({ ...row, __sheet: sheetName })),
+          matrix: XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: "", blankrows: false })
+        }))
+        const rowCount = sheets.reduce((total, sheet) => total + sheet.rows.length + sheet.matrix.length, 0)
+        if (!rowCount) reject(new Error("El archivo no contiene filas para importar."))
+        else resolve({ sheets })
       } catch (caught) {
         reject(caught)
       }
@@ -715,7 +751,123 @@ function readExcelRows(file) {
   })
 }
 
-function buildRecipeImportDraft({ rows, inventory, recipes, productionAreaId, defaultYieldUnit }) {
+async function buildRecipeImportDraft({ workbook, inventory, recipes, productionAreaId, defaultYieldUnit, onProgress = () => {} }) {
+  const blockDraft = await buildBlockRecipeImportDraft({ workbook, inventory, recipes, productionAreaId, defaultYieldUnit, onProgress })
+  if (blockDraft.recipes.length) return blockDraft
+  const rows = workbook.sheets.flatMap((sheet) => sheet.rows)
+  return buildFlatRecipeImportDraft({ rows, inventory, recipes, productionAreaId, defaultYieldUnit })
+}
+
+async function buildBlockRecipeImportDraft({ workbook, inventory, recipes, productionAreaId, defaultYieldUnit, onProgress }) {
+  const existingByName = new Map(recipes.map((recipe) => [normalizeText(recipe.name), recipe]))
+  const recipeMarkers = workbook.sheets.flatMap((sheet) => sheet.matrix.filter(isRecipeMarkerRow))
+  const importErrors = []
+  const parsed = []
+  let current = null
+  let recipeCounter = 0
+  let processedRows = 0
+  const maxRows = 15000
+
+  for (const sheet of workbook.sheets) {
+    for (let index = 0; index < sheet.matrix.length; index += 1) {
+      processedRows += 1
+      if (processedRows > maxRows) {
+        importErrors.push(`Se detuvo el analisis al llegar a ${maxRows} filas. Divide el archivo en lotes mas pequenos.`)
+        break
+      }
+      const row = sheet.matrix[index] || []
+      if (isEmptyMatrixRow(row) || isImportHeaderRow(row)) continue
+      if (isRecipeMarkerRow(row)) {
+        recipeCounter += 1
+        const name = cellText(row[1])
+        const recipeKey = normalizeText(name)
+        current = {
+          id: `${recipeKey}-${sheet.name}-${index}`,
+          name,
+          category: "importadas",
+          recipeType: "subrecipe",
+          productionAreaId,
+          yieldQuantity: "1",
+          yieldUnit: defaultYieldUnit,
+          preparationSteps: [],
+          duplicateRecipeId: existingByName.get(recipeKey)?.id || "",
+          ingredients: [],
+          errors: []
+        }
+        if (!productionAreaId) current.errors.push("Selecciona un area de produccion antes de importar.")
+        parsed.push(current)
+        onProgress(`Procesando receta ${recipeCounter} de ${recipeMarkers.length || "?"}`)
+        await yieldToBrowser()
+        continue
+      }
+      if (!current) {
+        if (!isEmptyMatrixRow(row)) importErrors.push(`${sheet.name} fila ${index + 1}: fila ignorada porque aparece antes de una receta.`)
+        continue
+      }
+      if (isTotalProductionRow(row)) {
+        const yieldQuantity = parseNumberCell(row[9])
+        const yieldUnit = normalizeRecipeUnit(row[10] || defaultYieldUnit)
+        if (yieldQuantity > 0) current.yieldQuantity = String(yieldQuantity)
+        if (yieldUnit) current.yieldUnit = yieldUnit
+        current.totalProductionCost = parseNumberCell(row[11])
+        continue
+      }
+      const ingredient = buildBlockIngredient(row, inventory, sheet.name, index)
+      if (ingredient.error) {
+        current.errors.push(ingredient.error)
+        continue
+      }
+      if (ingredient.value) current.ingredients.push(ingredient.value)
+      if (processedRows % 150 === 0) await yieldToBrowser()
+    }
+  }
+
+  parsed.forEach((recipe) => {
+    if (!recipe.ingredients.length) recipe.errors.push("No se detectaron ingredientes para esta receta.")
+  })
+  return {
+    recipes: parsed,
+    inventory,
+    sourceFormat: "block",
+    parseErrors: importErrors,
+    detectedIngredients: parsed.reduce((total, recipe) => total + recipe.ingredients.length, 0)
+  }
+}
+
+function buildBlockIngredient(row, inventory, sheetName, index) {
+  const ingredientName = cellText(row[2])
+  if (!ingredientName) return { value: null }
+  const recipeQuantity = parseNumberCell(row[9])
+  const recipeUnit = normalizeRecipeUnit(row[10])
+  const inventoryQuantity = parseNumberCell(row[6])
+  const inventoryUnit = normalizeRecipeUnit(row[7])
+  const quantity = recipeQuantity || inventoryQuantity
+  const unit = recipeQuantity ? recipeUnit : inventoryUnit
+  if (!quantity) return { error: `${sheetName} fila ${index + 1}: cantidad invalida para ${ingredientName}.` }
+  const match = findInventoryMatch(ingredientName, inventory)
+  const catalog = match ? inventory.find((item) => item.id === match.id) : null
+  const normalized = normalizeRecipeIngredient({
+    rawName: ingredientName,
+    inventoryItemId: match?.id || "",
+    matched: Boolean(match),
+    matchName: match?.name || "",
+    recipeQuantity: String(quantity),
+    recipeUnit: unit || "Unidades",
+    wastePercentage: "0",
+    supplier: cellText(row[1]),
+    purchaseQuantity: cellText(row[3]),
+    purchasePresentation: cellText(row[4]),
+    purchaseCost: cellText(row[5]),
+    inventoryBaseQuantity: inventoryQuantity ? String(inventoryQuantity) : "",
+    inventoryBaseUnit: inventoryUnit || "",
+    unitCost: cellText(row[8]),
+    productionCost: cellText(row[11]),
+    notes: [cellText(row[12]), `Importado desde Excel: ${ingredientName}`].filter(Boolean).join(" | ")
+  }, catalog)
+  return { value: normalized }
+}
+
+function buildFlatRecipeImportDraft({ rows, inventory, recipes, productionAreaId, defaultYieldUnit }) {
   const grouped = new Map()
   const existingByName = new Map(recipes.map((recipe) => [normalizeText(recipe.name), recipe]))
   let lastRecipeName = ""
@@ -770,7 +922,55 @@ function buildRecipeImportDraft({ rows, inventory, recipes, productionAreaId, de
     }
     grouped.set(recipeKey, existing)
   })
-  return { recipes: [...grouped.values()], inventory }
+  return {
+    recipes: [...grouped.values()],
+    inventory,
+    sourceFormat: "flat",
+    parseErrors: [],
+    detectedIngredients: [...grouped.values()].reduce((total, recipe) => total + recipe.ingredients.length, 0)
+  }
+}
+
+function yieldToBrowser() {
+  return new Promise((resolve) => window.setTimeout(resolve, 0))
+}
+
+function cellText(value) {
+  return String(value ?? "").trim()
+}
+
+function parseNumberCell(value) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0
+  const raw = cellText(value).replace(/[Q$]/g, "").replace(/\s+/g, "")
+  const decimalFixed = raw.includes(",") && !raw.includes(".") ? raw.replace(",", ".") : raw.replace(/,/g, "")
+  const number = Number(decimalFixed)
+  return Number.isFinite(number) ? number : 0
+}
+
+function isEmptyMatrixRow(row) {
+  return !row.some((cell) => cellText(cell))
+}
+
+function isRecipeMarkerRow(row) {
+  const firstCell = cellText(row[0])
+  return firstCell !== "" && Number.isFinite(Number(firstCell)) && cellText(row[1]).length > 1 && !isImportHeaderRow(row)
+}
+
+function isImportHeaderRow(row) {
+  const text = normalizeText(row.join(" "))
+  return [
+    "proveedor",
+    "ingredientes",
+    "cantidad compra",
+    "presentacion compra",
+    "costo aprox",
+    "cantidad produccion",
+    "costo produccion"
+  ].some((token) => text.includes(token))
+}
+
+function isTotalProductionRow(row) {
+  return normalizeText(row.join(" ")).includes("total produccion")
 }
 
 function valueFromRow(row, aliases) {
