@@ -564,6 +564,7 @@ function RecipeImportModal({ draft, inventory, importing, setDraft, onIngredient
   const duplicates = draft.recipes.filter((recipe) => recipe.duplicateRecipeId).length
   const errors = draft.recipes.flatMap((recipe) => recipe.errors.map((message) => ({ recipe: recipe.name, message })))
   const parseErrors = draft.parseErrors || []
+  const debugRows = draft.debugRows || []
   const importableCount = getImportableRecipes(draft).length
   return (
     <div className="recipes-backdrop">
@@ -590,6 +591,32 @@ function RecipeImportModal({ draft, inventory, importing, setDraft, onIngredient
             {importableCount ? `${importableCount} receta(s) lista(s) para importar.` : "Aún no hay recetas listas para importar."}
           </div>
         </div>
+
+        {debugRows.length > 0 && (
+          <section className="recipe-import-debug">
+            <div>
+              <strong>Debug temporal del parser</strong>
+              <p>Primeras {debugRows.length} filas interpretadas. Revisa tambien la consola del navegador para el detalle completo por receta.</p>
+            </div>
+            <div className="recipe-import-debug-table">
+              <div className="recipe-import-debug-head">
+                <span>Tipo</span><span>Receta</span><span>Fila</span><span>B</span><span>C ingrediente</span><span>J cantidad</span><span>K unidad</span><span>L costo</span>
+              </div>
+              {debugRows.map((row, index) => (
+                <div className="recipe-import-debug-row" key={`${row.type}-${row.rowNumber}-${index}`}>
+                  <span>{row.type}</span>
+                  <span>{row.recipe || "-"}</span>
+                  <span>{row.rowNumber}</span>
+                  <span>{row.B || "-"}</span>
+                  <span>{row.C || "-"}</span>
+                  <span>{row.J || "-"}</span>
+                  <span>{row.K || "-"}</span>
+                  <span>{row.L || "-"}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         {errors.length > 0 && (
           <div className="recipe-import-errors">
@@ -762,6 +789,7 @@ async function buildBlockRecipeImportDraft({ workbook, inventory, recipes, produ
   const existingByName = new Map(recipes.map((recipe) => [normalizeText(recipe.name), recipe]))
   const recipeMarkers = workbook.sheets.flatMap((sheet) => sheet.matrix.filter(isRecipeMarkerRow))
   const importErrors = []
+  const debugRows = []
   const parsed = []
   let current = null
   let recipeCounter = 0
@@ -776,7 +804,16 @@ async function buildBlockRecipeImportDraft({ workbook, inventory, recipes, produ
         break
       }
       const row = sheet.matrix[index] || []
-      if (isEmptyMatrixRow(row) || isImportHeaderRow(row)) continue
+      if (isEmptyMatrixRow(row)) continue
+      if (isImportHeaderRow(row)) {
+        pushImportDebugRow(debugRows, row, {
+          type: "Encabezado ignorado",
+          sheet: sheet.name,
+          rowNumber: index + 1,
+          recipe: current?.name || ""
+        })
+        continue
+      }
       if (isRecipeMarkerRow(row)) {
         recipeCounter += 1
         const name = cellText(row[1])
@@ -792,8 +829,23 @@ async function buildBlockRecipeImportDraft({ workbook, inventory, recipes, produ
           preparationSteps: [],
           duplicateRecipeId: existingByName.get(recipeKey)?.id || "",
           ingredients: [],
-          errors: []
+          errors: [],
+          debugStartRow: index + 1,
+          debugEndRow: index + 1,
+          debugIngredientRows: []
         }
+        pushImportDebugRow(debugRows, row, {
+          type: "Inicio receta",
+          sheet: sheet.name,
+          rowNumber: index + 1,
+          recipe: name
+        })
+        console.info("[Recipe import debug] Inicio receta", {
+          recipe: name,
+          sheet: sheet.name,
+          rowNumber: index + 1,
+          columns: getDebugColumns(row)
+        })
         if (!productionAreaId) current.errors.push("Selecciona un area de produccion antes de importar.")
         parsed.push(current)
         onProgress(`Procesando receta ${recipeCounter} de ${recipeMarkers.length || "?"}`)
@@ -804,7 +856,23 @@ async function buildBlockRecipeImportDraft({ workbook, inventory, recipes, produ
         if (!isEmptyMatrixRow(row)) importErrors.push(`${sheet.name} fila ${index + 1}: fila ignorada porque aparece antes de una receta.`)
         continue
       }
+      current.debugEndRow = index + 1
       if (isTotalProductionRow(row)) {
+        pushImportDebugRow(debugRows, row, {
+          type: "Total produccion",
+          sheet: sheet.name,
+          rowNumber: index + 1,
+          recipe: current.name
+        })
+        console.info("[Recipe import debug] Total produccion", {
+          recipe: current.name,
+          sheet: sheet.name,
+          rowNumber: index + 1,
+          yieldQuantityColumnJ: cellText(row[9]),
+          yieldUnitColumnK: cellText(row[10]),
+          totalCostColumnL: cellText(row[11]),
+          columns: getDebugColumns(row)
+        })
         const yieldQuantity = parseNumberCell(row[9])
         const yieldUnit = normalizeRecipeUnit(row[10] || defaultYieldUnit)
         if (yieldQuantity > 0) current.yieldQuantity = String(yieldQuantity)
@@ -812,24 +880,56 @@ async function buildBlockRecipeImportDraft({ workbook, inventory, recipes, produ
         current.totalProductionCost = parseNumberCell(row[11])
         continue
       }
+      pushImportDebugRow(debugRows, row, {
+        type: "Intento ingrediente",
+        sheet: sheet.name,
+        rowNumber: index + 1,
+        recipe: current.name
+      })
+      console.info("[Recipe import debug] Fila ingrediente detectada", {
+        recipe: current.name,
+        sheet: sheet.name,
+        rowNumber: index + 1,
+        ingredientColumnC: cellText(row[2]),
+        quantityColumnJ: cellText(row[9]),
+        unitColumnK: cellText(row[10]),
+        inventoryQuantityColumnG: cellText(row[6]),
+        inventoryUnitColumnH: cellText(row[7]),
+        costColumnL: cellText(row[11]),
+        columns: getDebugColumns(row)
+      })
       const ingredient = buildBlockIngredient(row, inventory, sheet.name, index)
       if (ingredient.error) {
         current.errors.push(ingredient.error)
         continue
       }
-      if (ingredient.value) current.ingredients.push(ingredient.value)
+      if (ingredient.value) {
+        current.ingredients.push(ingredient.value)
+        current.debugIngredientRows.push({
+          rowNumber: index + 1,
+          ingredient: ingredient.value.rawName,
+          quantity: ingredient.value.recipeQuantity,
+          unit: ingredient.value.recipeUnit
+        })
+      }
       if (processedRows % 150 === 0) await yieldToBrowser()
     }
   }
 
   parsed.forEach((recipe) => {
     if (!recipe.ingredients.length) recipe.errors.push("No se detectaron ingredientes para esta receta.")
+    console.groupCollapsed(`[Recipe import debug] Receta: ${recipe.name}`)
+    console.info("Nombre receta:", recipe.name)
+    console.info("Filas:", `${recipe.debugStartRow || "?"}-${recipe.debugEndRow || "?"}`)
+    console.info("Ingredientes encontrados:", recipe.debugIngredientRows || [])
+    console.groupEnd()
   })
   return {
     recipes: parsed,
     inventory,
     sourceFormat: "block",
     parseErrors: importErrors,
+    debugRows,
     detectedIngredients: parsed.reduce((total, recipe) => total + recipe.ingredients.length, 0)
   }
 }
@@ -865,6 +965,32 @@ function buildBlockIngredient(row, inventory, sheetName, index) {
     notes: [cellText(row[12]), `Importado desde Excel: ${ingredientName}`].filter(Boolean).join(" | ")
   }, catalog)
   return { value: normalized }
+}
+
+function pushImportDebugRow(debugRows, row, metadata) {
+  if (debugRows.length >= 20) return
+  debugRows.push({
+    ...metadata,
+    ...getDebugColumns(row)
+  })
+}
+
+function getDebugColumns(row) {
+  return {
+    A: cellText(row[0]),
+    B: cellText(row[1]),
+    C: cellText(row[2]),
+    D: cellText(row[3]),
+    E: cellText(row[4]),
+    F: cellText(row[5]),
+    G: cellText(row[6]),
+    H: cellText(row[7]),
+    I: cellText(row[8]),
+    J: cellText(row[9]),
+    K: cellText(row[10]),
+    L: cellText(row[11]),
+    M: cellText(row[12])
+  }
 }
 
 function buildFlatRecipeImportDraft({ rows, inventory, recipes, productionAreaId, defaultYieldUnit }) {

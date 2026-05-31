@@ -87,6 +87,18 @@
 .recipe-import-status.danger { background: #3b1119; color: #fecaca; }
 .recipe-import-errors { display: grid; gap: 6px; padding: 12px; border: 1px solid #7f1d1d; border-radius: 11px; background: #3b1119; color: #fecaca; }
 .recipe-import-errors p { margin: 0; }
+.recipe-import-debug {
+  display: grid; gap: 10px; padding: 12px; border: 1px solid #334155; border-radius: 11px; background: #081425;
+}
+.recipe-import-debug strong { color: #f8fafc; }
+.recipe-import-debug p { margin: 4px 0 0; color: #94a3b8; }
+.recipe-import-debug-table { display: grid; overflow-x: auto; border: 1px solid #1d2b40; border-radius: 9px; }
+.recipe-import-debug-head, .recipe-import-debug-row {
+  display: grid; grid-template-columns: 150px 180px 70px repeat(5, minmax(120px, 1fr)); gap: 8px;
+  min-width: 940px; padding: 9px 10px; align-items: center;
+}
+.recipe-import-debug-head { background: #101b2d; color: #94a3b8; font-size: 11px; font-weight: 900; text-transform: uppercase; }
+.recipe-import-debug-row { border-top: 1px solid #1d2b40; color: #dbeafe; font-size: 12px; }
 .recipe-import-list { display: grid; gap: 13px; }
 .recipe-import-card { border: 1px solid #24344a; border-radius: 13px; overflow: hidden; background: #081425; }
 .recipe-import-card-head { display: flex; justify-content: space-between; gap: 12px; align-items: start; padding: 13px; background: #101b2d; }
