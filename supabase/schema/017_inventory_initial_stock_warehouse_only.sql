@@ -1,60 +1,17 @@
--- Product images for the Supabase inventory catalog.
--- Apply after 004_inventory.sql.
+-- Initial inventory loads belong only to Almacen.
+-- Safe to run even if 016_inventory_purchase_price.sql was not applied.
+-- This does not delete existing zero-quantity rows from operational areas.
 
 alter table public.inventory_items
-  add column if not exists image_url text;
+  add column if not exists purchase_price numeric;
 
-insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-values (
-  'inventory-images',
-  'inventory-images',
-  true,
-  5242880,
-  array['image/jpeg', 'image/png', 'image/webp']
-)
-on conflict (id) do update
-set public = true,
-    file_size_limit = excluded.file_size_limit,
-    allowed_mime_types = excluded.allowed_mime_types;
+alter table public.inventory_items
+  drop constraint if exists inventory_items_purchase_price_check;
 
-drop policy if exists "inventory_images_public_read" on storage.objects;
-create policy "inventory_images_public_read"
-  on storage.objects for select
-  to public
-  using (bucket_id = 'inventory-images');
+alter table public.inventory_items
+  add constraint inventory_items_purchase_price_check
+  check (purchase_price is null or purchase_price >= 0);
 
-drop policy if exists "inventory_images_managers_insert" on storage.objects;
-create policy "inventory_images_managers_insert"
-  on storage.objects for insert
-  to authenticated
-  with check (
-    bucket_id = 'inventory-images'
-    and public.is_inventory_manager()
-  );
-
-drop policy if exists "inventory_images_managers_update" on storage.objects;
-create policy "inventory_images_managers_update"
-  on storage.objects for update
-  to authenticated
-  using (
-    bucket_id = 'inventory-images'
-    and public.is_inventory_manager()
-  )
-  with check (
-    bucket_id = 'inventory-images'
-    and public.is_inventory_manager()
-  );
-
-drop policy if exists "inventory_images_managers_delete" on storage.objects;
-create policy "inventory_images_managers_delete"
-  on storage.objects for delete
-  to authenticated
-  using (
-    bucket_id = 'inventory-images'
-    and public.is_inventory_manager()
-  );
-
--- Replace the bulk importer so optional image URLs from spreadsheets are preserved.
 create or replace function public.import_inventory_rows(p_rows jsonb)
 returns jsonb
 language plpgsql
@@ -137,10 +94,7 @@ begin
     end if;
 
     insert into public.area_inventory (item_id, area_id, quantity, minimum_quantity)
-    select inventory_item.id, areas.id, 0, 0
-    from public.areas
-    where areas.active = true
-      and areas.id = 'almacen'
+    values (inventory_item.id, 'almacen', 0, 0)
     on conflict (item_id, area_id) do nothing;
 
     select quantity into previous_value

@@ -11,6 +11,7 @@ create table if not exists public.inventory_items (
   purchase_unit text,
   base_unit text not null,
   conversion_factor numeric not null default 1 check (conversion_factor > 0),
+  purchase_price numeric check (purchase_price >= 0),
   cost_per_base_unit numeric not null default 0 check (cost_per_base_unit >= 0),
   supplier text,
   active boolean not null default true,
@@ -56,6 +57,25 @@ grant select, insert, update on public.area_inventory to authenticated;
 grant select, insert on public.inventory_movements to authenticated;
 grant all on public.inventory_items, public.area_inventory, public.inventory_movements to service_role;
 
+create or replace function public.is_inventory_manager()
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1
+    from public.profiles
+    where id = auth.uid()
+      and role in ('admin', 'gerente_general', 'encargado_almacen')
+      and status = 'active'
+  );
+$$;
+
+revoke all on function public.is_inventory_manager() from public;
+grant execute on function public.is_inventory_manager() to authenticated;
+
 drop policy if exists "inventory_items_read_active" on public.inventory_items;
 create policy "inventory_items_read_active"
   on public.inventory_items for select to authenticated
@@ -64,21 +84,20 @@ create policy "inventory_items_read_active"
 drop policy if exists "inventory_items_managers_read_all" on public.inventory_items;
 create policy "inventory_items_managers_read_all"
   on public.inventory_items for select to authenticated
-  using (public.is_profile_manager());
+  using (public.is_inventory_manager());
 
 drop policy if exists "inventory_items_managers_insert" on public.inventory_items;
 create policy "inventory_items_managers_insert"
   on public.inventory_items for insert to authenticated
-  with check (public.is_profile_manager());
+  with check (public.is_inventory_manager());
 
 drop policy if exists "inventory_items_managers_update" on public.inventory_items;
 create policy "inventory_items_managers_update"
   on public.inventory_items for update to authenticated
-  using (public.is_profile_manager())
-  with check (public.is_profile_manager());
+  using (public.is_inventory_manager())
+  with check (public.is_inventory_manager());
 
 -- Internal testing phase: authenticated staff may inspect stock in all areas.
--- TODO: include encargado_almacen when that role is added to profiles.
 drop policy if exists "area_inventory_authenticated_read" on public.area_inventory;
 create policy "area_inventory_authenticated_read"
   on public.area_inventory for select to authenticated
@@ -87,13 +106,13 @@ create policy "area_inventory_authenticated_read"
 drop policy if exists "area_inventory_managers_insert" on public.area_inventory;
 create policy "area_inventory_managers_insert"
   on public.area_inventory for insert to authenticated
-  with check (public.is_profile_manager());
+  with check (public.is_inventory_manager());
 
 drop policy if exists "area_inventory_managers_update" on public.area_inventory;
 create policy "area_inventory_managers_update"
   on public.area_inventory for update to authenticated
-  using (public.is_profile_manager())
-  with check (public.is_profile_manager());
+  using (public.is_inventory_manager())
+  with check (public.is_inventory_manager());
 
 drop policy if exists "inventory_movements_authenticated_read" on public.inventory_movements;
 create policy "inventory_movements_authenticated_read"
@@ -103,7 +122,7 @@ create policy "inventory_movements_authenticated_read"
 drop policy if exists "inventory_movements_managers_insert" on public.inventory_movements;
 create policy "inventory_movements_managers_insert"
   on public.inventory_movements for insert to authenticated
-  with check (public.is_profile_manager());
+  with check (public.is_inventory_manager());
 
 create or replace function public.set_inventory_updated_at()
 returns trigger
@@ -142,7 +161,7 @@ declare
   previous_value numeric;
   adjusted public.area_inventory;
 begin
-  if not public.is_profile_manager() then
+  if not public.is_inventory_manager() then
     raise exception 'No tienes permiso para ajustar inventario.';
   end if;
   if p_quantity < 0 or p_minimum_quantity < 0 then
@@ -201,7 +220,7 @@ declare
   previous_value numeric;
   imported public.area_inventory;
 begin
-  if not public.is_profile_manager() then
+  if not public.is_inventory_manager() then
     raise exception 'No tienes permiso para importar inventario.';
   end if;
   if p_quantity < 0 or p_minimum_quantity < 0 then
@@ -255,7 +274,7 @@ declare
   stock_count integer := 0;
   movement_count integer := 0;
 begin
-  if not public.is_profile_manager() then
+  if not public.is_inventory_manager() then
     raise exception 'No tienes permiso para importar inventario.';
   end if;
 
@@ -286,7 +305,11 @@ begin
         purchase_unit = nullif(trim(row_data ->> 'purchase_unit'), ''),
         base_unit = trim(row_data ->> 'base_unit'),
         conversion_factor = (row_data ->> 'conversion_factor')::numeric,
-        cost_per_base_unit = (row_data ->> 'cost_per_base_unit')::numeric,
+        cost_per_base_unit = case
+          when inventory_item.purchase_price is not null
+            then inventory_item.purchase_price / (row_data ->> 'conversion_factor')::numeric
+          else (row_data ->> 'cost_per_base_unit')::numeric
+        end,
         supplier = nullif(trim(row_data ->> 'supplier'), ''),
         notes = 'Importado desde Excel/CSV',
         active = true
@@ -318,12 +341,13 @@ begin
     select inventory_item.id, areas.id, 0, 0
     from public.areas
     where areas.active = true
+      and areas.id = 'almacen'
     on conflict (item_id, area_id) do nothing;
 
     select quantity into previous_value
     from public.area_inventory
     where item_id = inventory_item.id
-      and area_id = row_data ->> 'area_id'
+      and area_id = 'almacen'
     for update;
 
     update public.area_inventory
@@ -331,14 +355,14 @@ begin
       quantity = (row_data ->> 'quantity')::numeric,
       minimum_quantity = (row_data ->> 'minimum_quantity')::numeric
     where item_id = inventory_item.id
-      and area_id = row_data ->> 'area_id';
+      and area_id = 'almacen';
 
     insert into public.inventory_movements (
       item_id, movement_type, to_area_id, quantity, unit, previous_quantity,
       new_quantity, source_type, notes, performed_by
     )
     values (
-      inventory_item.id, 'adjustment', row_data ->> 'area_id',
+      inventory_item.id, 'adjustment', 'almacen',
       abs((row_data ->> 'quantity')::numeric - previous_value),
       row_data ->> 'base_unit', previous_value, (row_data ->> 'quantity')::numeric,
       'file_import', 'Importación Excel/CSV', auth.uid()

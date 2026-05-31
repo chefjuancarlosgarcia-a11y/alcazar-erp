@@ -271,6 +271,15 @@
 .inventory-field { display: grid; gap: 6px; color: #cbd5e1; font-size: 13px; font-weight: 700; }
 .inventory-field > span { display: inline-flex; align-items: center; }
 .inventory-field small { font-weight: 500; line-height: 1.35; }
+.inventory-supplier-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+}
+.inventory-supplier-field button {
+  white-space: nowrap;
+}
 .inventory-currency-input { position: relative; }
 .inventory-currency-input > span {
   position: absolute;
@@ -449,6 +458,7 @@
 
 @media (max-width: 620px) {
   .inventory-base-filters, .inventory-form-grid { grid-template-columns: 1fr; }
+  .inventory-supplier-field { grid-template-columns: 1fr; }
   .inventory-area-tabs { display: none; }
   .inventory-area-controls { grid-template-columns: 1fr; }
   .inventory-area-line { display: grid; grid-template-columns: auto 1fr auto; }

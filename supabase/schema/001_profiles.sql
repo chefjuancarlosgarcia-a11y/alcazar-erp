@@ -8,7 +8,7 @@ create table if not exists public.profiles (
   email text,
   role text not null default 'colaborador'
     check (role in (
-      'admin', 'gerente_general', 'rrhh', 'supervisor', 'cajero', 'mesero',
+      'admin', 'gerente_general', 'gerente', 'encargado_almacen', 'rrhh', 'supervisor', 'cajero', 'mesero',
       'cocinero', 'pizzero', 'barista', 'bartender', 'repostero', 'panadero',
       'colaborador'
     )),
@@ -116,7 +116,7 @@ declare
   initial_role text;
 begin
   -- Privileged roles are never trusted from user-supplied signup metadata.
-  -- Assign admin/gerente_general/rrhh/supervisor in Table Editor or a future server-only flow.
+  -- Assign admin/gerente_general/encargado_almacen/rrhh/supervisor in Table Editor or a future server-only flow.
   initial_role := case
     when requested_role in (
       'cajero', 'mesero', 'cocinero', 'pizzero', 'barista', 'bartender',
@@ -141,4 +141,3 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
-

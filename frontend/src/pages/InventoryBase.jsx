@@ -59,6 +59,23 @@ const EMPTY_ITEM = {
 const EMPTY_ADJUSTMENT = { itemId: "", areaId: "almacen", quantity: "", minimumQuantity: "", reason: "" }
 const MANAGER_ROLES = ["admin", "gerente_general", "encargado_almacen"]
 
+function readStoredProviders() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem("proveedores") || "[]")
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function providerName(provider) {
+  return String(provider?.nombreComercial || provider?.razonSocial || provider?.nombre || "").trim()
+}
+
+function uniqueProviderNames(providers) {
+  return Array.from(new Set(providers.map(providerName).filter(Boolean))).sort((a, b) => a.localeCompare(b, "es"))
+}
+
 function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
   const { user } = useAuth()
   const canManage = MANAGER_ROLES.includes(user?.role)
@@ -79,6 +96,7 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
   const [legacyOpen, setLegacyOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
   const [legacyItems, setLegacyItems] = useState(readLegacyItems)
+  const [providerOptions, setProviderOptions] = useState(() => uniqueProviderNames(readStoredProviders()))
   const realtimeTimerRef = useRef(null)
 
   function refreshFromRealtime(showMovementNotice = false) {
@@ -122,6 +140,7 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
     setAreas(areasResult.data || [])
     setItems(itemsResult.data || [])
     setMovements(movementsResult.data || [])
+    setProviderOptions(uniqueProviderNames(readStoredProviders()))
     setLoading(false)
   }
 
@@ -449,7 +468,7 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
       {section === "inventarioAreas" && <AreaStockDashboard items={items} areas={areas} initialAreaId={initialAreaId} canManage={canManage} onAdjust={openAdjustment} />}
       {section === "movimientosInventario" && <MovementsTable movements={movements} items={movementItems} areas={areaNames} loading={loading} />}
 
-      {showItemForm && <ItemModal form={itemForm} setForm={setItemForm} editingItem={editingItem} onSave={saveItem} onDelete={deactivate} onClose={() => setShowItemForm(false)} />}
+      {showItemForm && <ItemModal form={itemForm} setForm={setItemForm} editingItem={editingItem} providers={providerOptions} onSave={saveItem} onDelete={deactivate} onClose={() => setShowItemForm(false)} />}
       {adjustment && <AdjustmentModal adjustment={adjustment} setAdjustment={setAdjustment} items={items} areas={areas} onSave={saveAdjustment} onClose={() => setAdjustment(null)} />}
       {legacyOpen && <LegacyModal items={legacyItems} canManage={canManage} onMigrate={migrateLegacyItem} onMigrateSelected={migrateSelectedLegacyItems} onClose={() => setLegacyOpen(false)} />}
       {importOpen && <InventoryImportModal areas={areas} existingItems={items} onClose={() => setImportOpen(false)} onImported={refresh} />}
@@ -627,7 +646,7 @@ function MovementsTable({ movements, items, areas, loading }) {
   </div>
 }
 
-function ItemModal({ form, setForm, editingItem, onSave, onDelete, onClose }) {
+function ItemModal({ form, setForm, editingItem, providers, onSave, onDelete, onClose }) {
   const editing = Boolean(editingItem)
   const [imageError, setImageError] = useState("")
   const update = (field, value) => setForm((current) => ({ ...current, [field]: value }))
@@ -665,7 +684,19 @@ function ItemModal({ form, setForm, editingItem, onSave, onDelete, onClose }) {
       <Field label="Nombre"><input required value={form.name} onChange={(event) => update("name", event.target.value)} /></Field>
       <Field label="SKU"><input value={form.sku} onChange={(event) => update("sku", event.target.value)} /></Field>
       <Field label="Categoría"><input value={form.category} onChange={(event) => update("category", event.target.value)} /></Field>
-      <Field label="Proveedor"><input value={form.supplier} onChange={(event) => update("supplier", event.target.value)} /></Field>
+      <Field label="Proveedor">
+        <div className="inventory-supplier-field">
+          <select value={form.supplier} onChange={(event) => update("supplier", event.target.value)}>
+            <option value="">Seleccionar proveedor</option>
+            {form.supplier && !providers.includes(form.supplier) && <option value={form.supplier}>Actual: {form.supplier}</option>}
+            {providers.map((provider) => <option key={provider} value={provider}>{provider}</option>)}
+          </select>
+          <button type="button" className="secondary" onClick={() => { window.location.href = "/inventory?section=proveedores" }}>
+            Crear proveedor
+          </button>
+        </div>
+        {!providers.length && <small className="inventory-base-muted">No hay proveedores guardados todavía.</small>}
+      </Field>
       <Field label="Unidad de compra" tooltip="Cómo compras este producto al proveedor."><InventoryUnitSelect required value={form.purchase_unit} onChange={(value) => update("purchase_unit", value)} /></Field>
       <Field label="Unidad base" tooltip="Cómo el sistema consume este producto en recetas e inventario."><InventoryUnitSelect required value={form.base_unit} onChange={(value) => update("base_unit", value)} /></Field>
       <Field label="Factor conversión" tooltip="Cuántas unidades base contiene la unidad de compra."><input min="0.0001" step="any" type="number" value={form.conversion_factor} onChange={(event) => update("conversion_factor", event.target.value)} /></Field>

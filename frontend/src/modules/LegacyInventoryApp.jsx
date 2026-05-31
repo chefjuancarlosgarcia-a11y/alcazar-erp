@@ -815,8 +815,11 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
   const [proveedorTipo, setProveedorTipo] = useState("Lácteos")
   const [proveedorEncargado, setProveedorEncargado] = useState("")
   const [proveedorTelefono, setProveedorTelefono] = useState("")
+  const [proveedorTelefono2, setProveedorTelefono2] = useState("")
+  const [proveedorTelefono3, setProveedorTelefono3] = useState("")
   const [proveedorWhatsApp, setProveedorWhatsApp] = useState("")
   const [proveedorCorreo, setProveedorCorreo] = useState("")
+  const [proveedorPaginaWeb, setProveedorPaginaWeb] = useState("")
   const [proveedorDireccion, setProveedorDireccion] = useState("")
   const [proveedorMetodosPago, setProveedorMetodosPago] = useState({
     efectivo: false,
@@ -4060,8 +4063,11 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
     setProveedorTipo("Lácteos")
     setProveedorEncargado("")
     setProveedorTelefono("")
+    setProveedorTelefono2("")
+    setProveedorTelefono3("")
     setProveedorWhatsApp("")
     setProveedorCorreo("")
+    setProveedorPaginaWeb("")
     setProveedorDireccion("")
     setProveedorMetodosPago({ efectivo: false, transferencia: false, tarjeta: false, cheque: false })
     setProveedorCuentaBancaria("")
@@ -4078,17 +4084,23 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
       return
     }
 
+    const telefonosProveedor = [proveedorTelefono, proveedorTelefono2, proveedorTelefono3]
+      .map((telefono) => telefono.trim())
+      .filter(Boolean)
+    const proveedorExistente = editandoProveedorId ? proveedores.find((p) => p.id === editandoProveedorId) : null
     const nuevoProveedor = {
       id: editandoProveedorId || Date.now(),
-      codigo: editandoProveedorId ? proveedores.find((p) => p.id === editandoProveedorId)?.codigo : generarCodigoProveedor(proveedores.length),
+      codigo: editandoProveedorId ? proveedorExistente?.codigo : generarCodigoProveedor(proveedores.length),
       nombreComercial: proveedorNombreComercial,
       razonSocial: proveedorRazonSocial,
       nit: proveedorNit,
       tipo: proveedorTipo,
       encargado: proveedorEncargado,
-      telefono: proveedorTelefono,
+      telefono: telefonosProveedor[0] || "",
+      telefonos: telefonosProveedor,
       whatsapp: proveedorWhatsApp,
       correo: proveedorCorreo,
+      paginaWeb: proveedorPaginaWeb,
       direccion: proveedorDireccion,
       metodosPago: proveedorMetodosPago,
       cuentaBancaria: proveedorCuentaBancaria,
@@ -4096,8 +4108,8 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
       diasEntrega: proveedorDiasEntrega,
       tiempoEntrega: proveedorTiempoEntrega,
       estrellas: proveedorEstrellas,
-      historialCompras: editandoProveedorId ? proveedores.find((p) => p.id === editandoProveedorId)?.historialCompras || [] : [],
-      creado: editandoProveedorId ? proveedores.find((p) => p.id === editandoProveedorId)?.creado : new Date().toLocaleString()
+      historialCompras: proveedorExistente?.historialCompras || [],
+      creado: proveedorExistente?.creado || new Date().toLocaleString()
     }
 
     if (editandoProveedorId) {
@@ -4117,15 +4129,21 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
   }
 
   function editarProveedor(proveedor) {
+    const telefonos = Array.isArray(proveedor.telefonos) && proveedor.telefonos.length
+      ? proveedor.telefonos
+      : [proveedor.telefono || "", proveedor.telefono2 || "", proveedor.telefono3 || ""]
     setEditandoProveedorId(proveedor.id)
     setProveedorNombreComercial(proveedor.nombreComercial || "")
     setProveedorRazonSocial(proveedor.razonSocial || "")
     setProveedorNit(proveedor.nit || "")
     setProveedorTipo(proveedor.tipo || "Lácteos")
     setProveedorEncargado(proveedor.encargado || "")
-    setProveedorTelefono(proveedor.telefono || "")
+    setProveedorTelefono(telefonos[0] || "")
+    setProveedorTelefono2(telefonos[1] || "")
+    setProveedorTelefono3(telefonos[2] || "")
     setProveedorWhatsApp(proveedor.whatsapp || "")
     setProveedorCorreo(proveedor.correo || "")
+    setProveedorPaginaWeb(proveedor.paginaWeb || proveedor.website || "")
     setProveedorDireccion(proveedor.direccion || "")
     setProveedorMetodosPago(proveedor.metodosPago || { efectivo: false, transferencia: false, tarjeta: false, cheque: false })
     setProveedorCuentaBancaria(proveedor.cuentaBancaria || "")
@@ -4149,6 +4167,26 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
       ...prev,
       [dia]: !prev[dia]
     }))
+  }
+
+  function toggleTodosDiasEntrega() {
+    const seleccionarTodos = Object.values(proveedorDiasEntrega).some((habilitado) => !habilitado)
+    setProveedorDiasEntrega(Object.fromEntries(
+      Object.keys(proveedorDiasEntrega).map((dia) => [dia, seleccionarTodos])
+    ))
+  }
+
+  function obtenerTelefonosProveedor(proveedor) {
+    const telefonos = Array.isArray(proveedor?.telefonos) ? proveedor.telefonos : []
+    return [...telefonos, proveedor?.telefono, proveedor?.telefono2, proveedor?.telefono3]
+      .map((telefono) => String(telefono || "").trim())
+      .filter((telefono, index, lista) => telefono && lista.indexOf(telefono) === index)
+  }
+
+  function normalizarUrlProveedor(url) {
+    const limpia = String(url || "").trim()
+    if (!limpia) return ""
+    return /^https?:\/\//i.test(limpia) ? limpia : `https://${limpia}`
   }
 
   function obtenerProveedoresSimilares(proveedor) {
@@ -8031,6 +8069,20 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
                 />
                 <input
                   type="text"
+                  placeholder="Teléfono 2"
+                  value={proveedorTelefono2}
+                  onChange={(e) => setProveedorTelefono2(e.target.value)}
+                  style={inputStyle}
+                />
+                <input
+                  type="text"
+                  placeholder="Teléfono 3"
+                  value={proveedorTelefono3}
+                  onChange={(e) => setProveedorTelefono3(e.target.value)}
+                  style={inputStyle}
+                />
+                <input
+                  type="text"
                   placeholder="WhatsApp"
                   value={proveedorWhatsApp}
                   onChange={(e) => setProveedorWhatsApp(e.target.value)}
@@ -8041,6 +8093,13 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
                   placeholder="Correo electrónico"
                   value={proveedorCorreo}
                   onChange={(e) => setProveedorCorreo(e.target.value)}
+                  style={inputStyle}
+                />
+                <input
+                  type="url"
+                  placeholder="Página web"
+                  value={proveedorPaginaWeb}
+                  onChange={(e) => setProveedorPaginaWeb(e.target.value)}
                   style={inputStyle}
                 />
                 <input
@@ -8088,6 +8147,14 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
 
                 <div style={{ display: "grid", gap: "10px", marginBottom: "10px" }}>
                   <label style={fieldLabelStyle}>Días de entrega</label>
+                  <label style={{ display: "flex", gap: "8px", alignItems: "center", fontWeight: 600 }}>
+                    <input
+                      type="checkbox"
+                      checked={Object.values(proveedorDiasEntrega).every(Boolean)}
+                      onChange={toggleTodosDiasEntrega}
+                    />
+                    Seleccionar todos
+                  </label>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: "10px" }}>
                     {Object.keys(proveedorDiasEntrega).map((dia) => (
                       <label key={dia} style={{ display: "flex", gap: "8px", alignItems: "center" }}>
@@ -8135,6 +8202,22 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
 
               <div style={cardStyle}>
                 <h2>Lista de proveedores</h2>
+                {proveedorSeleccionadoPrincipal && (
+                  <div style={{ ...orderBoxStyle, marginBottom: "16px" }}>
+                    <h3>Perfil de {proveedorSeleccionadoPrincipal.nombreComercial}</h3>
+                    <p><strong>Código:</strong> {proveedorSeleccionadoPrincipal.codigo}</p>
+                    <p><strong>Razón social:</strong> {proveedorSeleccionadoPrincipal.razonSocial || "No definido"}</p>
+                    <p><strong>NIT:</strong> {proveedorSeleccionadoPrincipal.nit || "No definido"}</p>
+                    <p><strong>Encargado:</strong> {proveedorSeleccionadoPrincipal.encargado || "No definido"}</p>
+                    <p><strong>Teléfonos:</strong> {obtenerTelefonosProveedor(proveedorSeleccionadoPrincipal).join(" / ") || "No definido"}</p>
+                    <p><strong>WhatsApp:</strong> {proveedorSeleccionadoPrincipal.whatsapp || "No definido"}</p>
+                    <p><strong>Correo:</strong> {proveedorSeleccionadoPrincipal.correo || "No definido"}</p>
+                    <p><strong>Página web:</strong> {normalizarUrlProveedor(proveedorSeleccionadoPrincipal.paginaWeb || proveedorSeleccionadoPrincipal.website) ? <a href={normalizarUrlProveedor(proveedorSeleccionadoPrincipal.paginaWeb || proveedorSeleccionadoPrincipal.website)} target="_blank" rel="noreferrer">{proveedorSeleccionadoPrincipal.paginaWeb || proveedorSeleccionadoPrincipal.website}</a> : "No definido"}</p>
+                    <p><strong>Dirección:</strong> {proveedorSeleccionadoPrincipal.direccion || "No definido"}</p>
+                    <p><strong>Días de entrega:</strong> {Object.entries(proveedorSeleccionadoPrincipal.diasEntrega || {}).filter(([, enabled]) => enabled).map(([dia]) => dia.charAt(0).toUpperCase() + dia.slice(1)).join(", ") || "No definido"}</p>
+                    <button type="button" onClick={() => setProveedorSeleccionadoPrincipalId(null)} style={cancelButtonStyle}>Cerrar perfil</button>
+                  </div>
+                )}
                 {proveedores.length === 0 ? (
                   <p>No hay proveedores registrados.</p>
                 ) : (
@@ -8142,7 +8225,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
                     <div key={proveedor.id} style={orderItemStyle}>
                       <p><strong>{proveedor.nombreComercial}</strong> ({proveedor.codigo})</p>
                       <p><strong>Tipo:</strong> {proveedor.tipo}</p>
-                      <p><strong>Contacto:</strong> {proveedor.telefono || proveedor.correo}</p>
+                      <p><strong>Contacto:</strong> {obtenerTelefonosProveedor(proveedor).join(" / ") || proveedor.correo || "Sin contacto"}</p>
                       <p><strong>Estrellas:</strong> {proveedor.estrellas} / 5</p>
                       <div style={buttonRowStyle}>
                         <button onClick={() => setProveedorSeleccionadoPrincipalId(proveedor.id)} style={editButtonStyle}>
@@ -8163,11 +8246,12 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
                     <p><strong>Razón social:</strong> {proveedorSeleccionadoPrincipal.razonSocial}</p>
                     <p><strong>NIT:</strong> {proveedorSeleccionadoPrincipal.nit}</p>
                     <p><strong>Encargado:</strong> {proveedorSeleccionadoPrincipal.encargado}</p>
-                    <p><strong>Teléfono:</strong> {proveedorSeleccionadoPrincipal.telefono}</p>
+                    <p><strong>Teléfonos:</strong> {obtenerTelefonosProveedor(proveedorSeleccionadoPrincipal).join(" / ") || "No definido"}</p>
                     <p><strong>WhatsApp:</strong> {proveedorSeleccionadoPrincipal.whatsapp}</p>
                     <p><strong>Correo:</strong> {proveedorSeleccionadoPrincipal.correo}</p>
+                    <p><strong>Página web:</strong> {normalizarUrlProveedor(proveedorSeleccionadoPrincipal.paginaWeb || proveedorSeleccionadoPrincipal.website) ? <a href={normalizarUrlProveedor(proveedorSeleccionadoPrincipal.paginaWeb || proveedorSeleccionadoPrincipal.website)} target="_blank" rel="noreferrer">{proveedorSeleccionadoPrincipal.paginaWeb || proveedorSeleccionadoPrincipal.website}</a> : "No definido"}</p>
                     <p><strong>Dirección:</strong> {proveedorSeleccionadoPrincipal.direccion}</p>
-                                    <p><strong>Días de entrega:</strong> {Object.entries(proveedorSeleccionadoPrincipal.diasEntrega || {}).filter(([, enabled]) => enabled).map(([dia]) => dia.charAt(0).toUpperCase() + dia.slice(1)).join(", ") || "No definido"}</p>
+                    <p><strong>Días de entrega:</strong> {Object.entries(proveedorSeleccionadoPrincipal.diasEntrega || {}).filter(([, enabled]) => enabled).map(([dia]) => dia.charAt(0).toUpperCase() + dia.slice(1)).join(", ") || "No definido"}</p>
                     <p><strong>Tiempo entrega:</strong> {proveedorSeleccionadoPrincipal.tiempoEntrega}</p>
                     <p><strong>Métodos de pago:</strong> {Object.entries(proveedorSeleccionadoPrincipal.metodosPago || {}).filter(([, enabled]) => enabled).map(([metodo]) => metodo).join(", ") || "No definido"}</p>
 
