@@ -94,7 +94,7 @@
 .recipe-import-debug p { margin: 4px 0 0; color: #94a3b8; }
 .recipe-import-debug-table { display: grid; overflow-x: auto; border: 1px solid #1d2b40; border-radius: 9px; }
 .recipe-import-debug-head, .recipe-import-debug-row {
-  display: grid; grid-template-columns: 150px 180px 70px repeat(5, minmax(120px, 1fr)); gap: 8px;
+  display: grid; grid-template-columns: 64px 110px 180px 150px 180px repeat(3, minmax(120px, 1fr)); gap: 8px;
   min-width: 940px; padding: 9px 10px; align-items: center;
 }
 .recipe-import-debug-head { background: #101b2d; color: #94a3b8; font-size: 11px; font-weight: 900; text-transform: uppercase; }

@@ -600,18 +600,18 @@ function RecipeImportModal({ draft, inventory, importing, setDraft, onIngredient
             </div>
             <div className="recipe-import-debug-table">
               <div className="recipe-import-debug-head">
-                <span>Tipo</span><span>Receta</span><span>Fila</span><span>B</span><span>C ingrediente</span><span>J cantidad</span><span>K unidad</span><span>L costo</span>
+                <span>Fila</span><span>Columna A</span><span>Columna B</span><span>Tipo detectado</span><span>Receta actual</span><span>C ingrediente</span><span>J cantidad</span><span>K unidad</span>
               </div>
               {debugRows.map((row, index) => (
                 <div className="recipe-import-debug-row" key={`${row.type}-${row.rowNumber}-${index}`}>
+                  <span>{row.rowNumber}</span>
+                  <span>{row.A || "-"}</span>
+                  <span>{row.B || "-"}</span>
                   <span>{row.type}</span>
                   <span>{row.recipe || "-"}</span>
-                  <span>{row.rowNumber}</span>
-                  <span>{row.B || "-"}</span>
                   <span>{row.C || "-"}</span>
                   <span>{row.J || "-"}</span>
                   <span>{row.K || "-"}</span>
-                  <span>{row.L || "-"}</span>
                 </div>
               ))}
             </div>
@@ -1079,7 +1079,7 @@ function isEmptyMatrixRow(row) {
 
 function isRecipeMarkerRow(row) {
   const firstCell = cellText(row[0])
-  return firstCell !== "" && Number.isFinite(Number(firstCell)) && cellText(row[1]).length > 1 && !isImportHeaderRow(row)
+  return /^[0-9]+$/.test(firstCell) && cellText(row[1]).length > 1 && !isImportHeaderRow(row)
 }
 
 function isImportHeaderRow(row) {
