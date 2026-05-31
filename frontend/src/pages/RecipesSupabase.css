@@ -26,7 +26,13 @@
   display: inline-flex; align-items: center; min-height: 43px; padding: 10px 13px; box-sizing: border-box;
   border: 1px solid #334155; border-radius: 9px; background: #101b2d; color: #e2e8f0; cursor: pointer; font-weight: 700;
 }
-.recipe-import-button input { display: none; }
+.recipe-import-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
 .recipes-warning, .recipes-success, .recipes-error {
   padding: 12px 14px; border-radius: 10px; border: 1px solid #92400e; background: #361806; color: #fde68a;
 }

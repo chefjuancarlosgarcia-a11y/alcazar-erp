@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import * as XLSX from "xlsx"
 import { useAuth } from "../context/AuthContext"
 import { getActiveAreas } from "../services/areasService"
@@ -48,6 +48,7 @@ function recipeDebug(label, payload) {
 
 function RecipesSupabase() {
   const { user } = useAuth()
+  const recipeImportInputRef = useRef(null)
   const [recipes, setRecipes] = useState([])
   const [areas, setAreas] = useState([])
   const [inventory, setInventory] = useState([])
@@ -62,6 +63,8 @@ function RecipesSupabase() {
   const [error, setError] = useState("")
   const [saving, setSaving] = useState(false)
   const [importing, setImporting] = useState(false)
+  const [importFileName, setImportFileName] = useState("")
+  const [importReadError, setImportReadError] = useState("")
 
   const manager = ["admin", "ceo", "gerente_general", "gerente"].includes(user?.role)
   const canCreate = manager || (user?.role === "supervisor" && Boolean(user?.areaId))
@@ -200,8 +203,14 @@ function RecipesSupabase() {
 
   async function handleRecipeImportFile(file) {
     if (!file) return
-    if (!file.name.toLowerCase().endsWith(".xlsx")) {
-      setError("Sube un archivo Excel .xlsx.")
+    setImportFileName(file.name)
+    setImportReadError("")
+    setImportDraft(null)
+    const extension = file.name.toLowerCase().split(".").pop()
+    if (!["xlsx", "xls", "csv"].includes(extension)) {
+      const message = "Sube un archivo .xlsx, .xls o .csv."
+      setImportReadError(message)
+      setError(message)
       return
     }
     try {
@@ -213,10 +222,17 @@ function RecipesSupabase() {
         productionAreaId: user?.areaId || productionAreas[0]?.id || "",
         defaultYieldUnit: "porción"
       })
-      setImportDraft({ ...draft, duplicateMode: "skip", importErrors: [], importedCount: 0, skippedCount: 0 })
+      setImportDraft({ ...draft, fileName: file.name, duplicateMode: "skip", importErrors: [], importedCount: 0, skippedCount: 0 })
+      if (!draft.recipes.length) {
+        setImportReadError("No se encontraron recetas válidas en el archivo.")
+      }
       setError("")
     } catch (caught) {
-      setError(caught?.message || "No se pudo leer el archivo Excel.")
+      const message = caught?.message || "No se pudo leer el archivo."
+      setImportReadError(message)
+      setError(message)
+    } finally {
+      if (recipeImportInputRef.current) recipeImportInputRef.current.value = ""
     }
   }
 
@@ -300,15 +316,29 @@ function RecipesSupabase() {
         </div>
         <div className="recipes-actions">
           {canCreate && (
-            <label className="recipe-import-button">
-              Importar Excel
-              <input type="file" accept=".xlsx" onChange={(event) => handleRecipeImportFile(event.target.files?.[0])} />
-            </label>
+            <>
+              <input
+                ref={recipeImportInputRef}
+                className="recipe-import-input"
+                type="file"
+                accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
+                onChange={(event) => handleRecipeImportFile(event.target.files?.[0])}
+              />
+              <button type="button" className="recipe-import-button" onClick={() => recipeImportInputRef.current?.click()}>
+                Importar Excel
+              </button>
+            </>
           )}
           {canCreate && <button type="button" className="primary" onClick={openNew}>Nueva receta</button>}
           <button type="button" onClick={refresh}>Actualizar</button>
         </div>
       </header>
+      {(importFileName || importReadError) && (
+        <div className={importReadError ? "recipes-error" : "recipes-success"}>
+          {importFileName && <span>Archivo seleccionado: <strong>{importFileName}</strong></span>}
+          {importReadError && <span>{importFileName ? " · " : ""}{importReadError}</span>}
+        </div>
+      )}
       {localRecipesExist && <div className="recipes-warning">Existen recetas locales antiguas. Las nuevas recetas oficiales serán Supabase.</div>}
       {message && <div className="recipes-success">{message}</div>}
       {error && <div className="recipes-error">{error}</div>}
@@ -527,6 +557,7 @@ function RecipeImportModal({ draft, inventory, importing, setDraft, onIngredient
           <div>
             <p className="recipes-eyebrow">Importación masiva</p>
             <h2>Validar recetas desde Excel</h2>
+            {draft.fileName && <p className="recipes-muted">Archivo: <strong>{draft.fileName}</strong></p>}
             <p className="recipes-muted">{draft.recipes.length} receta(s), {unresolved} ingrediente(s) sin coincidencia, {duplicates} duplicado(s).</p>
           </div>
           <button type="button" onClick={onClose}>Cerrar</button>
@@ -665,9 +696,10 @@ function isImportableRecipe(recipe, inventory) {
 function readExcelRows(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
+    const extension = file.name.toLowerCase().split(".").pop()
     reader.onload = (event) => {
       try {
-        const workbook = XLSX.read(event.target.result, { type: "array" })
+        const workbook = XLSX.read(event.target.result, { type: extension === "csv" ? "string" : "array" })
         const rows = workbook.SheetNames.flatMap((sheetName) => (
           XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: "" }).map((row) => ({ ...row, __sheet: sheetName }))
         ))
@@ -678,7 +710,8 @@ function readExcelRows(file) {
       }
     }
     reader.onerror = () => reject(new Error("No se pudo leer el archivo."))
-    reader.readAsArrayBuffer(file)
+    if (extension === "csv") reader.readAsText(file, "utf-8")
+    else reader.readAsArrayBuffer(file)
   })
 }
 
