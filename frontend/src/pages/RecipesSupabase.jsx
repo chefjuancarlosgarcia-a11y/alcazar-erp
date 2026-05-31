@@ -245,7 +245,7 @@ function RecipesSupabase() {
   }
 
   async function importRecipesFromDraft() {
-    if (!importDraft || importBlocked(importDraft)) return
+    if (!importDraft || !getImportableRecipes(importDraft).length) return
     setImporting(true)
     const importErrors = []
     let importedCount = 0
@@ -519,6 +519,7 @@ function RecipeImportModal({ draft, inventory, importing, setDraft, onIngredient
   const unresolved = draft.recipes.reduce((total, recipe) => total + recipe.ingredients.filter((ingredient) => !ingredient.inventoryItemId).length, 0)
   const duplicates = draft.recipes.filter((recipe) => recipe.duplicateRecipeId).length
   const errors = draft.recipes.flatMap((recipe) => recipe.errors.map((message) => ({ recipe: recipe.name, message })))
+  const importableCount = getImportableRecipes(draft).length
   return (
     <div className="recipes-backdrop">
       <section className="recipes-modal recipe-import-modal">
@@ -538,8 +539,8 @@ function RecipeImportModal({ draft, inventory, importing, setDraft, onIngredient
               <option value="update">Actualizar existente</option>
             </select>
           </label>
-          <div className={unresolved || errors.length ? "recipe-import-status danger" : "recipe-import-status ok"}>
-            {unresolved || errors.length ? "Revisa coincidencias y errores antes de importar." : "Listo para importar."}
+          <div className={importableCount ? "recipe-import-status ok" : "recipe-import-status danger"}>
+            {importableCount ? `${importableCount} receta(s) lista(s) para importar.` : "Aún no hay recetas listas para importar."}
           </div>
         </div>
 
@@ -593,7 +594,7 @@ function RecipeImportModal({ draft, inventory, importing, setDraft, onIngredient
 
         <div className="recipes-modal-actions">
           <button type="button" onClick={onClose}>Cancelar</button>
-          <button type="button" className="primary" disabled={importing || importBlocked(draft)} onClick={onImport}>
+          <button type="button" className="primary" disabled={importing || !importableCount} onClick={onImport}>
             {importing ? "Importando..." : "Importar recetas validadas"}
           </button>
         </div>
@@ -646,15 +647,19 @@ function validateRecipe(recipe, inventory) {
   return ""
 }
 
-function importBlocked(draft) {
-  if (!draft?.recipes?.length) return true
-  return draft.recipes.some((recipe) => (
-    recipe.errors.length > 0 ||
-    recipe.ingredients.some((ingredient) => {
-      const catalog = draft.inventory?.find?.((item) => item.id === ingredient.inventoryItemId)
-      return !ingredient.inventoryItemId || normalizeRecipeIngredient(ingredient, catalog).conversionError
-    })
-  ))
+function getImportableRecipes(draft) {
+  if (!draft?.recipes?.length) return []
+  return draft.recipes.filter((recipe) => isImportableRecipe(recipe, draft.inventory || []))
+}
+
+function isImportableRecipe(recipe, inventory) {
+  if (!recipe.name?.trim() || !recipe.productionAreaId || Number(recipe.yieldQuantity) <= 0 || !recipe.ingredients.length) return false
+  return recipe.ingredients.every((ingredient) => {
+    const catalog = inventory.find((item) => item.id === ingredient.inventoryItemId)
+    if (!catalog) return false
+    const normalized = normalizeRecipeIngredient(ingredient, catalog)
+    return Number(normalized.recipeQuantity) > 0 && !normalized.conversionError
+  })
 }
 
 function readExcelRows(file) {
@@ -698,8 +703,9 @@ function buildRecipeImportDraft({ rows, inventory, recipes, productionAreaId, de
     if (!Number(quantity)) errors.push(`Fila ${index + 2}: cantidad inválida.`)
     if (!recipeName) return
     lastRecipeName = recipeName
-    const existing = grouped.get(recipeName) || {
-      id: `${normalizeText(recipeName)}-${index}`,
+    const recipeKey = normalizeText(recipeName)
+    const existing = grouped.get(recipeKey) || {
+      id: `${recipeKey}-${index}`,
       name: recipeName,
       category,
       recipeType: normalizeText(type).includes("final") ? "final_product" : "subrecipe",
@@ -707,7 +713,7 @@ function buildRecipeImportDraft({ rows, inventory, recipes, productionAreaId, de
       yieldQuantity: String(yieldQuantity || 1),
       yieldUnit,
       preparationSteps: [],
-      duplicateRecipeId: existingByName.get(normalizeText(recipeName))?.id || "",
+      duplicateRecipeId: existingByName.get(recipeKey)?.id || "",
       ingredients: [],
       errors: []
     }
@@ -729,7 +735,7 @@ function buildRecipeImportDraft({ rows, inventory, recipes, productionAreaId, de
         notes: `Importado desde Excel: ${ingredientName}`
       }, catalog))
     }
-    grouped.set(recipeName, existing)
+    grouped.set(recipeKey, existing)
   })
   return { recipes: [...grouped.values()], inventory }
 }
