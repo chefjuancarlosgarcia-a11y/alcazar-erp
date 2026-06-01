@@ -59,6 +59,34 @@ $$;
 revoke all on function public.is_attendance_manager() from public;
 grant execute on function public.is_attendance_manager() to authenticated;
 
+create or replace function public.can_manage_attendance_for_profile(p_employee_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1
+    from public.profiles actor
+    join public.profiles target on target.id = p_employee_id
+    where actor.id = auth.uid()
+      and actor.status = 'active'
+      and (
+        actor.role = 'admin'
+        or (actor.role = 'gerente_general' and target.role <> 'admin')
+        or (
+          actor.role = 'rrhh'
+          and target.role not in ('admin', 'gerente_general')
+          and target.id <> actor.id
+        )
+      )
+  );
+$$;
+
+revoke all on function public.can_manage_attendance_for_profile(uuid) from public;
+grant execute on function public.can_manage_attendance_for_profile(uuid) to authenticated;
+
 drop policy if exists "attendance_marks_managers_read" on public.attendance_marks;
 create policy "attendance_marks_managers_read"
   on public.attendance_marks for select to authenticated
@@ -133,11 +161,11 @@ security definer
 set search_path = '', extensions, public
 as $$
 begin
-  if not public.is_attendance_manager() then
+  if not public.can_manage_attendance_for_profile(p_employee_id) then
     raise exception 'No tienes permiso para configurar PIN de marcaje.';
   end if;
-  if p_pin !~ '^[0-9]{4,6}$' then
-    raise exception 'El PIN debe contener entre 4 y 6 digitos.';
+  if p_pin !~ '^[0-9]{4}$' then
+    raise exception 'El PIN debe contener 4 digitos.';
   end if;
   if exists (
     select 1
@@ -167,6 +195,31 @@ $$;
 revoke all on function public.set_attendance_pin(uuid,text,text) from public;
 grant execute on function public.set_attendance_pin(uuid,text,text) to authenticated;
 
+create or replace function public.validate_attendance_pin_available(
+  p_pin text,
+  p_employee_id uuid default null
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = '', extensions, public
+as $$
+  select p_pin ~ '^[0-9]{4}$'
+    and public.is_attendance_manager()
+    and not exists (
+      select 1
+      from public.attendance_credentials c
+      join public.profiles p on p.id = c.employee_id
+      where (p_employee_id is null or c.employee_id <> p_employee_id)
+        and p.status = 'active'
+        and crypt(p_pin, c.pin_hash) = c.pin_hash
+    );
+$$;
+
+revoke all on function public.validate_attendance_pin_available(text,uuid) from public;
+grant execute on function public.validate_attendance_pin_available(text,uuid) to authenticated;
+
 create or replace function public.set_attendance_device(p_employee_id uuid, p_authorized_device text default null)
 returns void
 language plpgsql
@@ -174,7 +227,7 @@ security definer
 set search_path = ''
 as $$
 begin
-  if not public.is_attendance_manager() then
+  if not public.can_manage_attendance_for_profile(p_employee_id) then
     raise exception 'No tienes permiso para configurar el dispositivo de marcaje.';
   end if;
   update public.profiles

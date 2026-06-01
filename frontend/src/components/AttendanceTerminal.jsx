@@ -87,8 +87,8 @@ function AttendanceTerminal({ kiosk = false }) {
 
   async function mark(markType) {
     if (!selected) return
-    if (!/^\d{4,6}$/.test(pin)) {
-      setError("Ingresa tu PIN de 4 a 6 dígitos.")
+    if (!/^\d{4}$/.test(pin)) {
+      setError("Ingresa tu PIN de 4 dígitos.")
       return
     }
     if (!cameraReady) {
@@ -179,7 +179,7 @@ function AttendanceTerminal({ kiosk = false }) {
 
             <label className="attendance-pin">
               PIN
-              <input value={pin} onChange={(event) => setPin(event.target.value.replace(/\D/g, "").slice(0, 6))} type="password" inputMode="numeric" maxLength={6} placeholder="••••" autoFocus />
+              <input value={pin} onChange={(event) => setPin(event.target.value.replace(/\D/g, "").slice(0, 4))} type="password" inputMode="numeric" maxLength={4} placeholder="••••" autoFocus />
             </label>
 
             <div className="attendance-actions">

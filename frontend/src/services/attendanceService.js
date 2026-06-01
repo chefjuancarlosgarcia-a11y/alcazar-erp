@@ -14,6 +14,13 @@ export function setAttendancePin(employeeId, pin, authorizedDevice = "") {
   })
 }
 
+export function validateAttendancePinAvailable(pin, employeeId = null) {
+  return supabase.rpc("validate_attendance_pin_available", {
+    p_pin: pin,
+    p_employee_id: employeeId
+  })
+}
+
 export function setAttendanceDevice(employeeId, authorizedDevice = "") {
   return supabase.rpc("set_attendance_device", {
     p_employee_id: employeeId,

@@ -2,14 +2,21 @@ import { useEffect, useMemo, useState } from "react"
 import { supabase } from "../lib/supabase"
 import { useAuth } from "../context/AuthContext"
 import { getActiveAreas } from "../services/areasService"
-import { getAttendanceTerminalProfiles, setAttendanceDevice, setAttendancePin } from "../services/attendanceService"
+import {
+  getAttendanceTerminalProfiles,
+  setAttendanceDevice,
+  setAttendancePin,
+  validateAttendancePinAvailable
+} from "../services/attendanceService"
 import {
   PROFILE_ROLES,
   PROFILE_STATUSES,
   canAssignUserRole,
+  canCreateUserRole,
   canDeactivateUser,
+  canEditUser,
   canEditUserRole,
-  canManageAttendancePin,
+  canManageAttendancePinForUser,
   canManageUsers
 } from "../utils/profilePermissions"
 import "./ProfileManagement.css"
@@ -30,12 +37,18 @@ const EMPTY_FORM = {
   status: "active"
 }
 
+const CREATE_FORM = {
+  ...EMPTY_FORM,
+  password: "",
+  send_invite: false
+}
+
 const ROLE_NAMES = {
   admin: "Admin",
   gerente_general: "Gerente General",
   gerente: "Gerente",
-  encargado_almacen: "Encargado de Almacén",
-  rrhh: "RRHH",
+  encargado_almacen: "Encargado de Almacen",
+  rrhh: "Recursos Humanos",
   supervisor: "Supervisor",
   cajero: "Cajero",
   mesero: "Mesero",
@@ -48,6 +61,14 @@ const ROLE_NAMES = {
   colaborador: "Colaborador"
 }
 
+const STATUS_NAMES = {
+  active: "Activo",
+  inactive: "Inactivo",
+  suspended: "Suspendido"
+}
+
+const PIN_ERROR = "El PIN ya esta asignado a otro usuario."
+
 function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
   const { user, refreshProfile } = useAuth()
   const [profiles, setProfiles] = useState([])
@@ -55,47 +76,54 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
+  const [modalError, setModalError] = useState("")
+  const [modalMessage, setModalMessage] = useState("")
   const [query, setQuery] = useState("")
   const [roleFilter, setRoleFilter] = useState("")
   const [statusFilter, setStatusFilter] = useState("")
   const [areaFilter, setAreaFilter] = useState("")
+  const [sortBy, setSortBy] = useState("name")
   const [editingProfile, setEditingProfile] = useState(null)
   const [form, setForm] = useState(EMPTY_FORM)
-  const [showCreateHelp, setShowCreateHelp] = useState(false)
+  const [showCreate, setShowCreate] = useState(false)
+  const [createForm, setCreateForm] = useState(CREATE_FORM)
   const [resettingId, setResettingId] = useState("")
+  const [deletingId, setDeletingId] = useState("")
   const [pinConfigured, setPinConfigured] = useState({})
   const [showAttendancePin, setShowAttendancePin] = useState(false)
   const [pinActionMessage, setPinActionMessage] = useState("")
+  const [saving, setSaving] = useState(false)
+  const [creating, setCreating] = useState(false)
 
   const canManage = canManageUsers(user)
-  const canEditBasic = canManage
-  const canManagePin = canManageAttendancePin(user)
-  const ownRrhhProfile = user?.role === "rrhh" && String(editingProfile?.id) === String(user?.id)
+  const canEditCurrent = editingProfile ? canEditUser(user, editingProfile) : false
+  const canManageCurrentPin = editingProfile ? canManageAttendancePinForUser(user, editingProfile) : false
+  const currentIsReadOnly = editingProfile && !canEditCurrent
 
   useEffect(() => {
-    loadProfiles()
+    loadProfiles({ silent: true })
     loadAreas()
   }, [])
 
   useEffect(() => {
     if (!profiles.length || !requestedProfileId || editingProfile) return
     const selected = profiles.find((profile) => String(profile.id) === String(requestedProfileId))
-    if (selected && editRequested && canEditBasic) openEdit(selected)
-  }, [canEditBasic, editRequested, editingProfile, profiles, requestedProfileId])
+    if (selected && editRequested) openEdit(selected)
+  }, [editRequested, editingProfile, profiles, requestedProfileId])
 
-  async function loadProfiles() {
+  async function loadProfiles(options = {}) {
     setLoading(true)
     setError("")
     const { data, error: queryError } = await supabase
       .from("profiles")
       .select("*")
-      .order("created_at", { ascending: false })
+      .order("full_name", { ascending: true, nullsFirst: false })
     if (queryError) {
-      setError("No se pudo cargar la lista de profiles. Verifica las políticas RLS aplicadas.")
+      setError("No se pudo cargar la lista de usuarios. Verifica las politicas RLS aplicadas.")
       setProfiles([])
     } else {
       setProfiles(data || [])
-      setMessage("Lista de usuarios actualizada.")
+      if (!options.silent) setMessage("Lista de usuarios actualizada.")
     }
     const { data: terminalProfiles } = await getAttendanceTerminalProfiles()
     setPinConfigured(Object.fromEntries((terminalProfiles || []).map((profile) => [profile.id, profile.pin_configured])))
@@ -105,7 +133,7 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
   async function loadAreas() {
     const { data, error: areasError } = await getActiveAreas()
     if (areasError) {
-      setError("No se pudieron cargar las áreas desde Supabase.")
+      setError("No se pudieron cargar las areas desde Supabase.")
       setAreaOptions([])
       return
     }
@@ -116,6 +144,8 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
     setEditingProfile(profile)
     setShowAttendancePin(false)
     setPinActionMessage("")
+    setModalError("")
+    setModalMessage("")
     setForm({
       ...EMPTY_FORM,
       ...profile,
@@ -133,73 +163,111 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
     setMessage("")
   }
 
-  function updateField(field, value) {
-    setForm((current) => ({ ...current, [field]: value }))
+  function openCreate() {
+    setCreateForm({ ...CREATE_FORM })
+    setModalError("")
+    setModalMessage("")
+    setShowCreate(true)
   }
 
-  function updateArea(value) {
+  function updateField(field, value) {
+    setForm((current) => ({ ...current, [field]: value }))
+    setModalError("")
+  }
+
+  function updateCreateField(field, value) {
+    setCreateForm((current) => ({ ...current, [field]: value }))
+    setModalError("")
+  }
+
+  function updateArea(value, setter = setForm) {
     const area = areaOptions.find((item) => item.id === value)
-    setForm((current) => ({
+    setter((current) => ({
       ...current,
       area_id: area?.id || "",
       area_name: area?.name || ""
     }))
   }
 
-  function generateAttendancePin() {
+  async function generateAttendancePin() {
+    if (!canManageCurrentPin) return
+    setModalError("")
     if (editingProfile && pinConfigured[editingProfile.id]) {
-      const confirmed = window.confirm("Este colaborador ya tiene un PIN configurado. Al guardar el nuevo PIN, el anterior dejará de funcionar. ¿Deseas continuar?")
+      const confirmed = window.confirm("Este colaborador ya tiene un PIN configurado. Al guardar el nuevo PIN, el anterior dejara de funcionar. Deseas continuar?")
       if (!confirmed) return
     }
-    updateField("attendance_pin", String(Math.floor(1000 + Math.random() * 9000)))
+    const pin = await generateUniquePin(editingProfile?.id)
+    if (!pin) {
+      setModalError("No se pudo generar un PIN unico. Intenta nuevamente.")
+      return
+    }
+    updateField("attendance_pin", pin)
     setShowAttendancePin(true)
     setPinActionMessage(pinConfigured[editingProfile?.id]
-      ? "Nuevo PIN generado. Compártelo con el colaborador y guarda los cambios para invalidar el PIN anterior."
-      : "PIN generado. Compártelo con el colaborador antes de guardar.")
+      ? "Nuevo PIN unico generado. Compartelo con el colaborador y guarda los cambios para invalidar el PIN anterior."
+      : "PIN unico generado. Compartelo con el colaborador antes de guardar.")
+  }
+
+  async function generateUniquePin(employeeId) {
+    const tried = new Set()
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      const pin = String(Math.floor(1000 + Math.random() * 9000))
+      if (tried.has(pin)) continue
+      tried.add(pin)
+      const { data, error: availabilityError } = await validateAttendancePinAvailable(pin, employeeId)
+      if (!availabilityError && data === true) return pin
+    }
+    return ""
   }
 
   async function copyAttendancePin() {
     if (!form.attendance_pin) return
     try {
       await navigator.clipboard.writeText(form.attendance_pin)
-      setPinActionMessage("PIN copiado. Entrégalo únicamente al colaborador correspondiente.")
+      setPinActionMessage("PIN copiado. Entregalo unicamente al colaborador correspondiente.")
     } catch {
-      setPinActionMessage("No se pudo copiar automáticamente. Puedes seleccionar y copiar el PIN visible.")
+      setPinActionMessage("No se pudo copiar automaticamente. Puedes seleccionar y copiar el PIN visible.")
       setShowAttendancePin(true)
     }
   }
 
   async function saveProfile(event) {
     event.preventDefault()
-    if (!editingProfile || !canEditBasic) return
-    if (!form.full_name.trim() || !form.username.trim()) {
-      setError("Nombre y username son obligatorios.")
+    if (saving) return
+    if (!editingProfile) return
+    if (!canEditCurrent) {
+      setModalError("No tienes permisos para editar este usuario.")
       return
     }
-    if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
-      setError("Ingresa un correo válido.")
+
+    const validationError = validateProfileForm(form)
+    if (validationError) {
+      setModalError(validationError)
       return
     }
     if (form.role !== editingProfile.role && !canAssignUserRole(user, editingProfile, form.role)) {
-      setError("No tienes permiso para asignar ese rol.")
+      setModalError("No tienes permisos para editar este usuario.")
       return
     }
     if (form.status !== editingProfile.status && !canDeactivateUser(user, editingProfile)) {
-      setError("No puedes cambiar tu propio estado ni administrar el estado de este usuario.")
+      setModalError("No tienes permisos para editar este usuario.")
       return
     }
-    if (form.attendance_pin && !/^\d{4,6}$/.test(form.attendance_pin)) {
-      setError("El PIN de marcaje debe tener entre 4 y 6 dígitos.")
+    if ((form.attendance_pin || form.authorized_attendance_device !== (editingProfile.authorized_attendance_device || "")) && !canManageCurrentPin) {
+      setModalError("No tienes permisos para editar este usuario.")
       return
     }
-    if (form.hourly_rate !== "" && Number(form.hourly_rate) < 0) {
-      setError("El salario por hora no puede ser negativo.")
-      return
+    if (form.attendance_pin) {
+      const { data: pinAvailable, error: pinCheckError } = await validateAttendancePinAvailable(form.attendance_pin, editingProfile.id)
+      if (pinCheckError || pinAvailable !== true) {
+        setModalError(PIN_ERROR)
+        return
+      }
     }
-    if ((form.attendance_pin || form.authorized_attendance_device !== (editingProfile.authorized_attendance_device || "")) && !canManagePin) {
-      setError("No tienes permiso para configurar el PIN o dispositivo de marcaje.")
-      return
-    }
+
+    setSaving(true)
+    setModalError("")
+    setModalMessage("Guardando...")
 
     const changes = {
       full_name: form.full_name.trim(),
@@ -222,31 +290,86 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
       .select("*")
       .single()
     if (updateError) {
-      setError(updateError.message || "No se pudo guardar el profile.")
+      finishSaveWithError(databaseError(updateError))
       return
     }
-    if (canManagePin && form.attendance_pin) {
+
+    if (canManageCurrentPin && form.attendance_pin) {
       const { error: pinError } = await setAttendancePin(data.id, form.attendance_pin, form.authorized_attendance_device.trim())
       if (pinError) {
-        setError(pinError.message || "No se pudo guardar el PIN de marcaje.")
+        finishSaveWithError(pinError.message?.toLowerCase().includes("pin") ? PIN_ERROR : "Error al guardar en la base de datos.")
         return
       }
       setPinConfigured((current) => ({ ...current, [data.id]: true }))
-    } else if (canManagePin && (form.authorized_attendance_device || "") !== (editingProfile.authorized_attendance_device || "")) {
+    } else if (canManageCurrentPin && (form.authorized_attendance_device || "") !== (editingProfile.authorized_attendance_device || "")) {
       const { error: deviceError } = await setAttendanceDevice(data.id, form.authorized_attendance_device.trim())
       if (deviceError) {
-        setError(deviceError.message || "No se pudo actualizar el dispositivo autorizado.")
+        finishSaveWithError("Error al guardar en la base de datos.")
         return
       }
     }
-    const savedProfile = { ...data, authorized_attendance_device: form.authorized_attendance_device.trim() || null }
-    setProfiles((current) => current.map((profile) => profile.id === data.id ? savedProfile : profile))
+
     if (data.id === user.id) await refreshProfile()
-    setEditingProfile(null)
-    setMessage(form.attendance_pin
-      ? "PIN de marcaje guardado correctamente. Cualquier PIN anterior dejó de funcionar."
-      : "Profile actualizado correctamente.")
-    setError("")
+    setModalMessage("Usuario guardado correctamente")
+    setSaving(false)
+    await loadProfiles({ silent: true })
+    window.setTimeout(() => {
+      setEditingProfile(null)
+      setModalMessage("")
+    }, 700)
+  }
+
+  function finishSaveWithError(nextError) {
+    setSaving(false)
+    setModalMessage("")
+    setModalError(nextError)
+  }
+
+  async function createUser(event) {
+    event.preventDefault()
+    if (creating) return
+    const validationError = validateProfileForm(createForm, true)
+    if (validationError) {
+      setModalError(validationError)
+      return
+    }
+    if (!canCreateUserRole(user, createForm.role)) {
+      setModalError("No tienes permisos para asignar ese rol.")
+      return
+    }
+
+    setCreating(true)
+    setModalError("")
+    setModalMessage("Guardando...")
+    const { error: createError } = await supabase.functions.invoke("create-user", {
+      body: {
+        email: createForm.email.trim(),
+        password: createForm.password,
+        profile: {
+          full_name: createForm.full_name.trim(),
+          username: createForm.username.trim(),
+          role: createForm.role,
+          area_id: createForm.area_id || null,
+          area_name: createForm.area_name || null,
+          employee_id: createForm.employee_id.trim() || null,
+          phone: createForm.phone.trim() || null,
+          status: createForm.status
+        }
+      }
+    })
+    if (createError) {
+      setCreating(false)
+      setModalMessage("")
+      setModalError(createError.message || "Error al guardar en la base de datos.")
+      return
+    }
+    setModalMessage("Usuario guardado correctamente")
+    setCreating(false)
+    await loadProfiles({ silent: true })
+    window.setTimeout(() => {
+      setShowCreate(false)
+      setModalMessage("")
+    }, 700)
   }
 
   async function toggleStatus(profile) {
@@ -259,16 +382,33 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
       .select("*")
       .single()
     if (updateError) {
-      setError(updateError.message || "No se pudo actualizar el estado.")
+      setError(databaseError(updateError))
       return
     }
     setProfiles((current) => current.map((item) => item.id === data.id ? data : item))
     setMessage(nextStatus === "active" ? "Usuario activado." : "Usuario desactivado.")
   }
 
+  async function deleteUser(profile) {
+    if (deletingId || !canDeactivateUser(user, profile)) return
+    const confirmed = window.confirm(`Eliminar definitivamente a ${profile.full_name || profile.username || "este usuario"}?`)
+    if (!confirmed) return
+    setDeletingId(profile.id)
+    const { error: deleteError } = await supabase.functions.invoke("delete-user", {
+      body: { user_id: profile.id }
+    })
+    setDeletingId("")
+    if (deleteError) {
+      setError(deleteError.message || "Error al guardar en la base de datos.")
+      return
+    }
+    setProfiles((current) => current.filter((item) => item.id !== profile.id))
+    setMessage("Usuario eliminado correctamente.")
+  }
+
   async function sendPasswordRecovery(profile) {
     if (!profile.email) {
-      setError("Este profile no tiene correo registrado para recuperación.")
+      setError("Este usuario no tiene correo registrado para recuperacion.")
       return
     }
     setResettingId(profile.id)
@@ -277,40 +417,49 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
     })
     setResettingId("")
     if (resetError) {
-      setError("No se pudo solicitar la recuperación de contraseña.")
+      setError("No se pudo solicitar la recuperacion de contrasena.")
       return
     }
     setError("")
-    setMessage("Se envió un correo de recuperación si el usuario existe.")
+    setMessage("Se envio un correo de recuperacion si el usuario existe.")
   }
 
   const filterAreas = useMemo(() => {
     const knownAreas = areaOptions.map((area) => area.name)
     return [...new Set([...knownAreas, ...profiles.map((profile) => profile.area_name).filter(Boolean)])].sort()
   }, [areaOptions, profiles])
-  const visibleProfiles = profiles.filter((profile) => {
-    const text = `${profile.full_name || ""} ${profile.username || ""} ${profile.email || ""}`.toLowerCase()
-    return (!query || text.includes(query.toLowerCase())) &&
-      (!roleFilter || profile.role === roleFilter) &&
-      (!statusFilter || profile.status === statusFilter) &&
-      (!areaFilter || profile.area_name === areaFilter)
-  })
+
+  const visibleProfiles = useMemo(() => {
+    const filtered = profiles.filter((profile) => {
+      const text = `${profile.full_name || ""} ${profile.username || ""} ${profile.email || ""}`.toLowerCase()
+      return (!query || text.includes(query.toLowerCase())) &&
+        (!roleFilter || profile.role === roleFilter) &&
+        (!statusFilter || profile.status === statusFilter) &&
+        (!areaFilter || profile.area_name === areaFilter)
+    })
+    return [...filtered].sort((a, b) => {
+      if (sortBy === "role") {
+        return `${ROLE_NAMES[a.role] || a.role}${a.full_name || ""}`.localeCompare(`${ROLE_NAMES[b.role] || b.role}${b.full_name || ""}`)
+      }
+      return (a.full_name || a.username || "").localeCompare(b.full_name || b.username || "")
+    })
+  }, [areaFilter, profiles, query, roleFilter, sortBy, statusFilter])
 
   if (!canManage) {
-    return <section className="profiles-page"><article className="profiles-empty"><h1>Gestión de usuarios</h1><p>No tienes permiso para administrar profiles.</p></article></section>
+    return <section className="profiles-page"><article className="profiles-empty"><h1>Gestion de usuarios</h1><p>No tienes permiso para administrar usuarios.</p></article></section>
   }
 
   return (
     <section className="profiles-page">
       <header className="profiles-header">
         <div>
-          <p className="profiles-eyebrow">Supabase Profiles</p>
-          <h1>Gestión de usuarios</h1>
-          <p className="profiles-muted">Administra roles, áreas y estado de las cuentas autenticadas.</p>
+          <p className="profiles-eyebrow">Recursos Humanos</p>
+          <h1>Gestion de usuarios</h1>
+          <p className="profiles-muted">Administra colaboradores, roles, estado de cuenta y PIN de marcaje.</p>
         </div>
         <div className="profiles-header-actions">
-          <button type="button" className="profiles-secondary" onClick={() => setShowCreateHelp(true)}>Crear usuario</button>
-          <button type="button" className="profiles-primary" onClick={loadProfiles}>Actualizar lista de usuarios</button>
+          <button type="button" className="profiles-secondary" onClick={openCreate}>Crear usuario</button>
+          <button type="button" className="profiles-primary" onClick={() => loadProfiles()}>Actualizar lista</button>
         </div>
       </header>
 
@@ -318,84 +467,146 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
       {error && <div className="profiles-error" role="alert">{error}</div>}
 
       <div className="profiles-filters">
-        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar nombre, usuario o correo..." />
+        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar por nombre, usuario o correo..." />
         <select value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)}>
           <option value="">Todos los roles</option>
           {PROFILE_ROLES.map((role) => <option key={role} value={role}>{ROLE_NAMES[role]}</option>)}
         </select>
         <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
           <option value="">Todos los estados</option>
-          {PROFILE_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
+          {PROFILE_STATUSES.map((status) => <option key={status} value={status}>{STATUS_NAMES[status]}</option>)}
         </select>
         <select value={areaFilter} onChange={(event) => setAreaFilter(event.target.value)}>
-          <option value="">Todas las áreas</option>
+          <option value="">Todas las areas</option>
           {filterAreas.map((area) => <option key={area} value={area}>{area}</option>)}
+        </select>
+        <select value={sortBy} onChange={(event) => setSortBy(event.target.value)}>
+          <option value="name">Ordenar por nombre</option>
+          <option value="role">Ordenar por rol</option>
         </select>
       </div>
 
-      {loading ? <article className="profiles-empty">Cargando profiles...</article> : (
+      {loading ? <article className="profiles-empty">Cargando usuarios...</article> : (
         <div className="profiles-table">
           <div className="profiles-table-heading">
-            <span>Usuario</span><span>Rol / Área</span><span>Contacto</span><span>Estado</span><span>Actualización</span><span>Acciones</span>
+            <span>Usuario</span><span>Rol / Area</span><span>Contacto</span><span>Estado</span><span>PIN</span><span>Acciones</span>
           </div>
-          {visibleProfiles.map((profile) => (
-            <article className="profiles-row" key={profile.id}>
-              <div className="profiles-identity">
-                {profile.avatar_url ? <img src={profile.avatar_url} alt="" /> : <span>{initials(profile.full_name)}</span>}
-                <div><strong>{profile.full_name || "Sin nombre"}</strong><small>@{profile.username || "sin-usuario"}</small></div>
-              </div>
-              <div>
-                <Badge type="role" value={profile.role} />
-                <small>{profile.area_name || "Sin área"}</small>
-                {canManagePin && <span className={`profiles-pin-status ${pinConfigured[profile.id] ? "configured" : ""}`}>{pinConfigured[profile.id] ? "PIN configurado" : "Sin PIN de marcaje"}</span>}
-              </div>
-              <div><span>{profile.email || "Sin correo"}</span><small>{profile.phone || "Sin teléfono"}</small></div>
-              <div><Badge type="status" value={profile.status} /></div>
-              <div><small>Alta: {formatDate(profile.created_at)}</small><small>Editado: {formatDate(profile.updated_at)}</small></div>
-              <div className="profiles-actions">
-                <button type="button" onClick={() => openEdit(profile)}>Editar</button>
-                <button type="button" onClick={() => sendPasswordRecovery(profile)} disabled={resettingId === profile.id}>
-                  {resettingId === profile.id ? "Enviando..." : "Enviar recuperación"}
-                </button>
-                {canDeactivateUser(user, profile) && (
-                  <button type="button" className="danger" onClick={() => toggleStatus(profile)}>
-                    {profile.status === "active" ? "Desactivar" : "Activar"}
+          {visibleProfiles.map((profile) => {
+            const rowReadOnly = !canEditUser(user, profile)
+            return (
+              <article className={`profiles-row ${rowReadOnly ? "is-readonly" : ""}`} key={profile.id}>
+                <div className="profiles-identity">
+                  {profile.avatar_url ? <img src={profile.avatar_url} alt="" /> : <span>{initials(profile.full_name)}</span>}
+                  <div><strong>{profile.full_name || "Sin nombre"}</strong><small>@{profile.username || "sin-usuario"}</small></div>
+                </div>
+                <div>
+                  <Badge type="role" value={profile.role} />
+                  <small>{profile.area_name || "Sin area"}</small>
+                </div>
+                <div><span>{profile.email || "Sin correo"}</span><small>{profile.phone || "Sin telefono"}</small></div>
+                <div><Badge type="status" value={profile.status} /></div>
+                <div><span className={`profiles-pin-status ${pinConfigured[profile.id] ? "configured" : ""}`}>{pinConfigured[profile.id] ? "PIN asignado" : "Sin PIN"}</span></div>
+                <div className="profiles-actions">
+                  <button type="button" onClick={() => openEdit(profile)}>{rowReadOnly ? "Ver" : "Editar"}</button>
+                  <button type="button" onClick={() => sendPasswordRecovery(profile)} disabled={resettingId === profile.id || rowReadOnly}>
+                    {resettingId === profile.id ? "Enviando..." : "Recuperacion"}
                   </button>
-                )}
-              </div>
-            </article>
-          ))}
-          {!visibleProfiles.length && <article className="profiles-empty">No existen profiles para estos filtros.</article>}
+                  {canDeactivateUser(user, profile) && (
+                    <button type="button" className="danger" onClick={() => toggleStatus(profile)}>
+                      {profile.status === "active" ? "Desactivar" : "Activar"}
+                    </button>
+                  )}
+                  {canDeactivateUser(user, profile) && (
+                    <button type="button" className="danger" onClick={() => deleteUser(profile)} disabled={deletingId === profile.id}>
+                      {deletingId === profile.id ? "Eliminando..." : "Eliminar"}
+                    </button>
+                  )}
+                </div>
+              </article>
+            )
+          })}
+          {!visibleProfiles.length && <article className="profiles-empty">No existen usuarios para estos filtros.</article>}
         </div>
       )}
 
       {editingProfile && (
         <div className="profiles-modal-overlay">
           <form className="profiles-modal" onSubmit={saveProfile}>
-            <header><div><p className="profiles-eyebrow">Editar Profile</p><h2>{editingProfile.full_name || "Usuario"}</h2></div><button type="button" onClick={() => setEditingProfile(null)}>Cerrar</button></header>
-            {canManagePin && (
-              <section className="profiles-attendance-panel">
-                <div>
-                  <p className="profiles-eyebrow">Asistencia</p>
-                  <h3>PIN de marcaje</h3>
-                  <p className="profiles-attendance-help">Genera o escribe un PIN y entrégaselo al colaborador para usar la terminal. Después de guardarlo no podrá consultarse; solo podrá reemplazarse.</p>
+            <header className="profiles-modal-header">
+              <div>
+                <p className="profiles-eyebrow">{currentIsReadOnly ? "Solo lectura" : "Editar usuario"}</p>
+                <h2>{editingProfile.full_name || "Usuario"}</h2>
+              </div>
+              <button type="button" onClick={() => setEditingProfile(null)} disabled={saving}>Cerrar</button>
+            </header>
+
+            <div className="profiles-modal-body">
+              {currentIsReadOnly && <p className="profiles-warning">Este usuario esta protegido. Las acciones de edicion estan deshabilitadas.</p>}
+              <FormSection title="Datos personales">
+                <div className="profiles-form-grid">
+                  <Field label="Nombre completo"><input value={form.full_name} onChange={(event) => updateField("full_name", event.target.value)} disabled={currentIsReadOnly || saving} required /></Field>
+                  <Field label="Username"><input value={form.username} onChange={(event) => updateField("username", event.target.value)} disabled={currentIsReadOnly || saving} required /></Field>
+                  <Field label="Correo"><input type="email" value={form.email} onChange={(event) => updateField("email", event.target.value)} disabled={currentIsReadOnly || saving} /></Field>
+                  <Field label="Telefono"><input value={form.phone} onChange={(event) => updateField("phone", event.target.value)} disabled={currentIsReadOnly || saving} /></Field>
                 </div>
+              </FormSection>
+
+              <FormSection title="Rol y acceso">
+                <div className="profiles-form-grid">
+                  <Field label="Rol">
+                    <select value={form.role} onChange={(event) => updateField("role", event.target.value)} disabled={saving || !canEditUserRole(user, editingProfile)}>
+                      {PROFILE_ROLES.map((role) => <option key={role} value={role} disabled={!canAssignUserRole(user, editingProfile, role)}>{ROLE_NAMES[role]}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="Estado">
+                    <select value={form.status} onChange={(event) => updateField("status", event.target.value)} disabled={saving || !canDeactivateUser(user, editingProfile)}>
+                      {PROFILE_STATUSES.map((status) => <option key={status} value={status}>{STATUS_NAMES[status]}</option>)}
+                    </select>
+                  </Field>
+                </div>
+              </FormSection>
+
+              <FormSection title="Horarios / informacion laboral">
+                <div className="profiles-form-grid">
+                  <Field label="Area">
+                    <select value={form.area_id} onChange={(event) => updateArea(event.target.value)} disabled={currentIsReadOnly || saving}>
+                      <option value="">Sin area asignada</option>
+                      {areaOptions.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="Employee ID"><input value={form.employee_id} onChange={(event) => updateField("employee_id", event.target.value)} disabled={currentIsReadOnly || saving} /></Field>
+                  <Field label="Salario por hora (Q)"><input type="number" min="0" step="0.01" value={form.hourly_rate} onChange={(event) => updateField("hourly_rate", event.target.value)} placeholder="Opcional" disabled={currentIsReadOnly || saving} /></Field>
+                  <Field label="Dispositivo autorizado">
+                    <input value={form.authorized_attendance_device} onChange={(event) => updateField("authorized_attendance_device", event.target.value)} placeholder="Ej. terminal-recepcion-01" disabled={!canManageCurrentPin || saving} />
+                  </Field>
+                </div>
+              </FormSection>
+
+              <FormSection title="Documentos / imagenes">
+                <div className="profiles-form-grid">
+                  <Field label="Avatar URL"><input value={form.avatar_url} onChange={(event) => updateField("avatar_url", event.target.value)} disabled={currentIsReadOnly || saving} /></Field>
+                </div>
+              </FormSection>
+
+              <FormSection title="PIN de marcaje">
                 <div className="profiles-attendance-fields">
-                  <Field label="Nuevo PIN de marcaje">
+                  <Field label="Nuevo PIN de 4 digitos">
                     <div className="profiles-pin-field">
                       <input
                         type={showAttendancePin ? "text" : "password"}
                         inputMode="numeric"
-                        maxLength={6}
+                        pattern="[0-9]{4}"
+                        maxLength={4}
                         value={form.attendance_pin}
                         onChange={(event) => {
-                          updateField("attendance_pin", event.target.value.replace(/\D/g, "").slice(0, 6))
+                          updateField("attendance_pin", event.target.value.replace(/\D/g, "").slice(0, 4))
                           setPinActionMessage("")
                         }}
-                        placeholder={pinConfigured[editingProfile.id] ? "PIN configurado" : "4 a 6 dígitos"}
+                        placeholder={pinConfigured[editingProfile.id] ? "PIN asignado" : "0000"}
+                        disabled={!canManageCurrentPin || saving}
                       />
-                      <button type="button" className="profiles-secondary" onClick={generateAttendancePin}>
-                        {pinConfigured[editingProfile.id] ? "Generar PIN nuevo" : "Generar PIN"}
+                      <button type="button" className="profiles-secondary" onClick={generateAttendancePin} disabled={!canManageCurrentPin || saving}>
+                        Generar PIN unico
                       </button>
                     </div>
                     <div className="profiles-pin-actions">
@@ -405,73 +616,98 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
                       <button type="button" className="profiles-text-action" onClick={copyAttendancePin} disabled={!form.attendance_pin}>Copiar PIN</button>
                     </div>
                   </Field>
-                  <Field label="Dispositivo autorizado (opcional)">
-                    <input
-                      value={form.authorized_attendance_device}
-                      onChange={(event) => updateField("authorized_attendance_device", event.target.value)}
-                      placeholder="Ej. terminal-recepcion-01"
-                    />
-                  </Field>
+                  <div className={`profiles-pin-status ${pinConfigured[editingProfile.id] ? "configured" : ""}`}>{pinConfigured[editingProfile.id] ? "Este usuario tiene PIN asignado" : "Este usuario no tiene PIN asignado"}</div>
                 </div>
                 {pinActionMessage && <p className="profiles-pin-feedback" role="status">{pinActionMessage}</p>}
-                {form.attendance_pin && (
-                  <div className="profiles-pin-save-row">
-                    <span>Este PIN aún no está activo. Debes guardar para que funcione en la terminal.</span>
-                    <button type="submit" className="profiles-primary">Guardar y activar PIN</button>
-                  </div>
-                )}
-                {pinConfigured[editingProfile.id] && !form.attendance_pin && <p className="profiles-note">Este colaborador ya tiene PIN. Si lo perdió, presiona <strong>Generar PIN nuevo</strong>; al guardar, el PIN anterior dejará de funcionar.</p>}
-              </section>
-            )}
-            <div className="profiles-form-grid">
-              <Field label="Nombre completo"><input value={form.full_name} onChange={(event) => updateField("full_name", event.target.value)} disabled={ownRrhhProfile} required /></Field>
-              <Field label="Username"><input value={form.username} onChange={(event) => updateField("username", event.target.value)} disabled={ownRrhhProfile} required /></Field>
-              <Field label="Correo"><input type="email" value={form.email} onChange={(event) => updateField("email", event.target.value)} /></Field>
-              <Field label="Teléfono"><input value={form.phone} onChange={(event) => updateField("phone", event.target.value)} /></Field>
-              <Field label="Área">
-                <select value={form.area_id} onChange={(event) => updateArea(event.target.value)} disabled={ownRrhhProfile}>
-                  <option value="">Sin área asignada</option>
-                  {areaOptions.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}
-                </select>
-              </Field>
-              <Field label="Employee ID"><input value={form.employee_id} onChange={(event) => updateField("employee_id", event.target.value)} disabled={ownRrhhProfile} /></Field>
-              <Field label="Avatar URL"><input value={form.avatar_url} onChange={(event) => updateField("avatar_url", event.target.value)} /></Field>
-              <Field label="Salario por hora (Q)"><input type="number" min="0" step="0.01" value={form.hourly_rate} onChange={(event) => updateField("hourly_rate", event.target.value)} placeholder="Opcional" disabled={ownRrhhProfile} /></Field>
-              <Field label="Rol">
-                <select value={form.role} onChange={(event) => updateField("role", event.target.value)} disabled={!canEditUserRole(user, editingProfile)}>
-                  {PROFILE_ROLES.map((role) => <option key={role} value={role} disabled={!canAssignUserRole(user, editingProfile, role)}>{ROLE_NAMES[role]}</option>)}
-                </select>
-              </Field>
-              <Field label="Estado">
-                <select value={form.status} onChange={(event) => updateField("status", event.target.value)} disabled={!canDeactivateUser(user, editingProfile)}>
-                  {PROFILE_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
-                </select>
-              </Field>
+              </FormSection>
             </div>
-            {user.role === "rrhh" && <p className="profiles-note">RRHH puede editar datos básicos. Los roles y estados son administrados por Admin o Gerente General.</p>}
-            <div className="profiles-modal-actions">
-              <button type="button" className="profiles-secondary" onClick={() => setEditingProfile(null)}>Cancelar</button>
-              <button type="submit" className="profiles-primary">Guardar cambios</button>
-            </div>
+
+            <footer className="profiles-modal-actions">
+              <div className="profiles-modal-feedback">
+                {modalMessage && <span className="profiles-success compact">{modalMessage}</span>}
+                {modalError && <span className="profiles-error compact" role="alert">{modalError}</span>}
+              </div>
+              <button type="button" className="profiles-secondary" onClick={() => setEditingProfile(null)} disabled={saving}>Cancelar</button>
+              <button type="submit" className="profiles-primary" disabled={saving || currentIsReadOnly}>{saving ? "Guardando..." : "Guardar"}</button>
+            </footer>
           </form>
         </div>
       )}
 
-      {showCreateHelp && (
+      {showCreate && (
         <div className="profiles-modal-overlay">
-          <article className="profiles-modal create">
-            <header><h2>Crear usuario</h2><button type="button" onClick={() => setShowCreateHelp(false)}>Cerrar</button></header>
-            <p>Por seguridad, la creación real de usuario Auth se hará desde Supabase hasta implementar una Edge Function segura.</p>
-            <ol>
-              <li>Crea el usuario en Supabase Authentication con correo y contraseña.</li>
-              <li>Regresa aquí y presiona <strong>Actualizar lista de usuarios</strong>.</li>
-              <li>Edita el profile creado automáticamente para asignar rol, área y estado.</li>
-            </ol>
-          </article>
+          <form className="profiles-modal create" onSubmit={createUser}>
+            <header className="profiles-modal-header"><div><p className="profiles-eyebrow">Nuevo colaborador</p><h2>Crear usuario</h2></div><button type="button" onClick={() => setShowCreate(false)} disabled={creating}>Cerrar</button></header>
+            <div className="profiles-modal-body">
+              <FormSection title="Datos personales">
+                <div className="profiles-form-grid">
+                  <Field label="Nombre completo"><input value={createForm.full_name} onChange={(event) => updateCreateField("full_name", event.target.value)} required disabled={creating} /></Field>
+                  <Field label="Username"><input value={createForm.username} onChange={(event) => updateCreateField("username", event.target.value)} required disabled={creating} /></Field>
+                  <Field label="Correo"><input type="email" value={createForm.email} onChange={(event) => updateCreateField("email", event.target.value)} required disabled={creating} /></Field>
+                  <Field label="Contrasena temporal"><input type="password" value={createForm.password} onChange={(event) => updateCreateField("password", event.target.value)} minLength={6} required disabled={creating} /></Field>
+                </div>
+              </FormSection>
+              <FormSection title="Rol y acceso">
+                <div className="profiles-form-grid">
+                  <Field label="Rol">
+                    <select value={createForm.role} onChange={(event) => updateCreateField("role", event.target.value)} disabled={creating}>
+                      {PROFILE_ROLES.map((role) => <option key={role} value={role} disabled={!canCreateUserRole(user, role)}>{ROLE_NAMES[role]}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="Estado">
+                    <select value={createForm.status} onChange={(event) => updateCreateField("status", event.target.value)} disabled={creating}>
+                      {PROFILE_STATUSES.map((status) => <option key={status} value={status}>{STATUS_NAMES[status]}</option>)}
+                    </select>
+                  </Field>
+                </div>
+              </FormSection>
+              <FormSection title="Horarios / informacion laboral">
+                <div className="profiles-form-grid">
+                  <Field label="Area">
+                    <select value={createForm.area_id} onChange={(event) => updateArea(event.target.value, setCreateForm)} disabled={creating}>
+                      <option value="">Sin area asignada</option>
+                      {areaOptions.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="Employee ID"><input value={createForm.employee_id} onChange={(event) => updateCreateField("employee_id", event.target.value)} disabled={creating} /></Field>
+                  <Field label="Telefono"><input value={createForm.phone} onChange={(event) => updateCreateField("phone", event.target.value)} disabled={creating} /></Field>
+                </div>
+              </FormSection>
+            </div>
+            <footer className="profiles-modal-actions">
+              <div className="profiles-modal-feedback">
+                {modalMessage && <span className="profiles-success compact">{modalMessage}</span>}
+                {modalError && <span className="profiles-error compact" role="alert">{modalError}</span>}
+              </div>
+              <button type="button" className="profiles-secondary" onClick={() => setShowCreate(false)} disabled={creating}>Cancelar</button>
+              <button type="submit" className="profiles-primary" disabled={creating}>{creating ? "Guardando..." : "Guardar"}</button>
+            </footer>
+          </form>
         </div>
       )}
     </section>
   )
+}
+
+function validateProfileForm(values, creating = false) {
+  if (!values.full_name.trim() || !values.username.trim() || (creating && !values.email.trim()) || (creating && !values.password)) {
+    return "Faltan campos obligatorios."
+  }
+  if (values.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email)) return "Faltan campos obligatorios."
+  if (creating && values.password.length < 6) return "Faltan campos obligatorios."
+  if (values.attendance_pin && !/^\d{4}$/.test(values.attendance_pin)) return "El PIN debe ser de 4 digitos numericos."
+  if (values.hourly_rate !== "" && Number(values.hourly_rate) < 0) return "Faltan campos obligatorios."
+  return ""
+}
+
+function databaseError(error) {
+  const text = String(error?.message || "")
+  if (text.toLowerCase().includes("permission") || text.toLowerCase().includes("permiso")) return "No tienes permisos para editar este usuario."
+  return "Error al guardar en la base de datos."
+}
+
+function FormSection({ title, children }) {
+  return <section className="profiles-form-section"><h3>{title}</h3>{children}</section>
 }
 
 function Field({ label, children }) {
@@ -479,16 +715,12 @@ function Field({ label, children }) {
 }
 
 function Badge({ type, value }) {
-  return <span className={`profiles-badge ${type}-${value}`}>{ROLE_NAMES[value] || value}</span>
+  const label = type === "status" ? STATUS_NAMES[value] : ROLE_NAMES[value]
+  return <span className={`profiles-badge ${type}-${value}`}>{label || value}</span>
 }
 
 function initials(name) {
   return String(name || "U").split(/\s+/).slice(0, 2).map((part) => part.charAt(0).toUpperCase()).join("")
-}
-
-function formatDate(value) {
-  if (!value) return "Sin información"
-  return new Intl.DateTimeFormat("es-GT", { dateStyle: "medium" }).format(new Date(value))
 }
 
 export default ProfileManagement

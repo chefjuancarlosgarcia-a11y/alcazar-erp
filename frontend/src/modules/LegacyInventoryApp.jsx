@@ -2096,8 +2096,8 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
   }
 
   async function abrirCamaraAsistencia(tipo) {
-    if (!/^\d{4,6}$/.test(asistenciaPin)) {
-      setAsistenciaLoginError("Ingresa tu PIN de marcaje de 4 a 6 dígitos antes de continuar.")
+    if (!/^\d{4}$/.test(asistenciaPin)) {
+      setAsistenciaLoginError("Ingresa tu PIN de marcaje de 4 dígitos antes de continuar.")
       return
     }
     if (!colaboradorMarcaje?.pinConfigurado) {
@@ -7820,7 +7820,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
                             maxLength={6}
                             placeholder="Ingresa tu PIN"
                             value={asistenciaPin}
-                            onChange={(event) => setAsistenciaPin(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                            onChange={(event) => setAsistenciaPin(event.target.value.replace(/\D/g, "").slice(0, 4))}
                             style={inputStyle}
                           />
                           <p style={{ margin: 0, color: "#94a3b8" }}>La foto es obligatoria para registrar cualquier movimiento.</p>
