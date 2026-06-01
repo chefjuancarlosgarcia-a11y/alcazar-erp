@@ -142,6 +142,13 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
   }
 
   function openEdit(profile) {
+    const profileUsername = String(profile.username || "").trim()
+    const copiedCurrentUsername = profileUsername &&
+      String(profile.id) !== String(user?.id) &&
+      profileUsername === user?.username &&
+      profile.email &&
+      user?.email &&
+      profile.email !== user.email
     setEditingProfile(profile)
     setShowAttendancePin(false)
     setPinActionMessage("")
@@ -151,6 +158,7 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
     setForm({
       ...EMPTY_FORM,
       ...profile,
+      username: copiedCurrentUsername ? suggestUsername(profile) : profileUsername || suggestUsername(profile),
       email: profile.email || "",
       phone: profile.phone || "",
       area_id: profile.area_id || "",
@@ -254,6 +262,13 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
       setModalError(validationError)
       return
     }
+    const nextUsername = normalizeUsername(form.username)
+    const currentUsername = normalizeUsername(editingProfile.username || "")
+    const usernameError = await validateUsernameAvailable(nextUsername, editingProfile.id)
+    if (usernameError) {
+      setModalError(usernameError)
+      return
+    }
     if (form.role !== editingProfile.role && !canAssignUserRole(user, editingProfile, form.role)) {
       setModalError("No tienes permisos para editar este usuario.")
       return
@@ -291,24 +306,21 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
 
     const changes = {
       full_name: form.full_name.trim(),
-      username: form.username.trim(),
+      username: nextUsername || currentUsername || suggestUsername({ ...editingProfile, ...form }),
       email: form.email.trim() || null,
       area_id: form.area_id.trim() || null,
       area_name: form.area_name.trim() || null,
       employee_id: form.employee_id.trim() || null,
       avatar_url: form.avatar_url.trim() || null,
-      hourly_rate: form.hourly_rate === "" ? null : Number(form.hourly_rate),
       phone: form.phone.trim() || null
+    }
+    if (form.hourly_rate !== "" || editingProfile.hourly_rate != null) {
+      changes.hourly_rate = form.hourly_rate === "" ? null : Number(form.hourly_rate)
     }
     if (canEditUserRole(user, editingProfile)) changes.role = form.role
     if (canDeactivateUser(user, editingProfile)) changes.status = form.status
 
-    const { data, error: updateError } = await supabase
-      .from("profiles")
-      .update(changes)
-      .eq("id", editingProfile.id)
-      .select("*")
-      .single()
+    const { data, error: updateError } = await updateProfileWithFallback(editingProfile.id, changes)
     if (updateError) {
       finishSaveWithError(databaseError(updateError))
       return
@@ -351,6 +363,42 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
     setModalError(nextError)
   }
 
+  async function updateProfileWithFallback(profileId, changes) {
+    const result = await supabase
+      .from("profiles")
+      .update(changes)
+      .eq("id", profileId)
+      .select("*")
+      .single()
+    if (!result.error) return result
+
+    const message = String(result.error.message || "").toLowerCase()
+    if (message.includes("hourly_rate") && Object.hasOwn(changes, "hourly_rate")) {
+      const fallbackChanges = { ...changes }
+      delete fallbackChanges.hourly_rate
+      return supabase
+        .from("profiles")
+        .update(fallbackChanges)
+        .eq("id", profileId)
+        .select("*")
+        .single()
+    }
+    return result
+  }
+
+  async function validateUsernameAvailable(username, profileId) {
+    if (!username) return "Faltan campos obligatorios."
+    let query = supabase
+      .from("profiles")
+      .select("id")
+      .eq("username", username)
+      .limit(1)
+    if (profileId) query = query.neq("id", profileId)
+    const { data, error: usernameError } = await query
+    if (usernameError) return databaseError(usernameError)
+    return data?.length ? "Este nombre de usuario ya esta en uso. Por favor utiliza uno diferente." : ""
+  }
+
   async function saveAttendancePinWithRetry(employeeId, initialPin, authorizedDevice) {
     let nextPin = initialPin
     const tried = new Set([initialPin])
@@ -385,6 +433,12 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
       setModalError(validationError)
       return
     }
+    const nextUsername = normalizeUsername(createForm.username || suggestUsername(createForm))
+    const usernameError = await validateUsernameAvailable(nextUsername)
+    if (usernameError) {
+      setModalError(usernameError)
+      return
+    }
     if (!canCreateUserRole(user, createForm.role)) {
       setModalError("No tienes permisos para asignar ese rol.")
       return
@@ -399,7 +453,7 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
         password: createForm.password,
         profile: {
           full_name: createForm.full_name.trim(),
-          username: createForm.username.trim(),
+          username: nextUsername,
           role: createForm.role,
           area_id: createForm.area_id || null,
           area_name: createForm.area_name || null,
@@ -759,10 +813,29 @@ function validateProfileForm(values, creating = false) {
   return ""
 }
 
+function suggestUsername(profile) {
+  const emailBase = String(profile.email || "").split("@")[0]
+  const nameBase = String(profile.full_name || profile.username || "usuario")
+  return normalizeUsername(emailBase || nameBase) || `usuario${String(profile.id || Date.now()).slice(0, 6)}`
+}
+
+function normalizeUsername(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9._-]+/g, "")
+}
+
 function databaseError(error) {
   const text = String(error?.message || "")
+  const details = [error?.message, error?.details, error?.hint].filter(Boolean).join(" ")
+  if (text.includes("profiles_username_key") || text.toLowerCase().includes("duplicate key")) {
+    return "Este nombre de usuario ya esta en uso. Por favor utiliza uno diferente."
+  }
   if (text.toLowerCase().includes("permission") || text.toLowerCase().includes("permiso")) return "No tienes permisos para editar este usuario."
-  return "Error al guardar en la base de datos."
+  return details ? `Error al guardar en la base de datos: ${details}` : "Error al guardar en la base de datos."
 }
 
 function FormSection({ title, children }) {

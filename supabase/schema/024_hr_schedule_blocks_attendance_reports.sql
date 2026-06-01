@@ -2,6 +2,17 @@
 -- Apply after 023_public_attendance_kiosk.sql.
 -- PIN functions are intentionally untouched.
 
+alter table public.profiles
+  add column if not exists hourly_rate numeric,
+  add column if not exists authorized_attendance_device text;
+
+alter table public.profiles
+  drop constraint if exists profiles_hourly_rate_check;
+
+alter table public.profiles
+  add constraint profiles_hourly_rate_check
+  check (hourly_rate is null or hourly_rate >= 0);
+
 alter table public.employee_schedules
   add column if not exists is_work_day boolean not null default true,
   add column if not exists shift_type text not null default 'full',
