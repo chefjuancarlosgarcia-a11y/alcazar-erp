@@ -169,7 +169,7 @@
 .requisition-picker {
   display: grid;
   grid-template-columns: 2fr 1fr auto;
-  align-items: center;
+  align-items: start;
   gap: 10px;
   padding: 13px;
   border-radius: 11px;
@@ -177,6 +177,92 @@
   color: #94a3b8;
 }
 .requisition-picker strong { color: #f8fafc; }
+.requisition-product-search {
+  position: relative;
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  align-items: center;
+  gap: 6px;
+}
+.requisition-search-icon {
+  display: grid;
+  place-items: center;
+  height: 42px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #081425;
+  color: #5eead4;
+  font-weight: 900;
+}
+.requisition-product-search > button {
+  min-height: 42px;
+  padding: 8px 10px;
+}
+.requisition-product-results {
+  position: absolute;
+  z-index: 3;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  display: grid;
+  overflow: hidden;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: #0b1424;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, .35);
+}
+.requisition-product-results button {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  border-radius: 0;
+  border-bottom: 1px solid #1d2b40;
+  background: transparent;
+  text-align: left;
+}
+.requisition-product-results button:hover {
+  background: #13233a;
+}
+.requisition-product-results img,
+.requisition-product-placeholder {
+  width: 42px;
+  height: 42px;
+  border-radius: 8px;
+  object-fit: cover;
+  display: grid;
+  place-items: center;
+  background: #134e4a;
+  color: #99f6e4;
+  font-weight: 800;
+}
+.requisition-product-results strong {
+  display: grid;
+  gap: 3px;
+}
+.requisition-product-results small {
+  color: #94a3b8;
+  font-weight: 500;
+}
+.requisition-product-results em {
+  color: #99f6e4;
+  font-style: normal;
+  white-space: nowrap;
+}
+.requisition-product-results p {
+  margin: 0;
+  padding: 13px;
+  color: #94a3b8;
+}
+.requisition-stock-warning {
+  display: grid;
+  gap: 4px;
+  color: #fbbf24;
+}
+.requisition-stock-warning small {
+  color: #fca5a5;
+}
 .requisition-items {
   border: 1px solid #24344a;
   border-radius: 12px;

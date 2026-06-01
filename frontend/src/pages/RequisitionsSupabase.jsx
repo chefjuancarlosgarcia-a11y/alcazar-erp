@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useAuth } from "../context/AuthContext"
+import { supabase } from "../lib/supabase"
 import { getActiveAreas } from "../services/areasService"
 import { getActiveInventoryItems } from "../services/inventoryService"
 import {
@@ -40,11 +41,30 @@ const PRIORITY_LABELS = {
   urgent: "Urgente"
 }
 
+const REQUESTER_ROLES = new Set([
+  "admin",
+  "administrador",
+  "gerente_general",
+  "gerente general",
+  "recursos_humanos",
+  "rrhh",
+  "rr.hh.",
+  "encargado_almacen",
+  "encargado de almacen",
+  "encargado de almacén",
+  "supervisor",
+  "supervisores",
+  "bartender",
+  "barista",
+  "limpieza"
+])
+
 function RequisitionsSupabase() {
   const { user } = useAuth()
   const [requisitions, setRequisitions] = useState([])
   const [areas, setAreas] = useState([])
   const [inventory, setInventory] = useState([])
+  const [requesters, setRequesters] = useState([])
   const [loading, setLoading] = useState(true)
   const [workingId, setWorkingId] = useState("")
   const [tab, setTab] = useState("all")
@@ -65,17 +85,19 @@ function RequisitionsSupabase() {
 
   const loadData = useCallback(async () => {
     setLoading(true)
-    const [requestsResult, areasResult, inventoryResult] = await Promise.all([
+    const [requestsResult, areasResult, inventoryResult, requestersResult] = await Promise.all([
       getRequisitions(),
       getActiveAreas(),
-      getActiveInventoryItems()
+      getActiveInventoryItems(),
+      getAuthorizedRequesters()
     ])
-    const loadError = requestsResult.error || areasResult.error || inventoryResult.error
+    const loadError = requestsResult.error || areasResult.error || inventoryResult.error || requestersResult.error
     if (loadError) setError(`No se pudieron cargar requisiciones: ${loadError.message}`)
     else {
       setRequisitions(requestsResult.data)
       setAreas(areasResult.data)
       setInventory(inventoryResult.data)
+      setRequesters(requestersResult.data)
       setError("")
     }
     setLoading(false)
@@ -105,6 +127,7 @@ function RequisitionsSupabase() {
       fromAreaId: areas.find((area) => area.id === "almacen")?.id || areas[0]?.id || "",
       toAreaId: allowedDestinationAreas.find((area) => area.id !== "almacen")?.id || "",
       priority: "normal",
+      requestedByProfileId: defaultRequesterId(requesters, user),
       notes: "",
       items: []
     })
@@ -116,6 +139,7 @@ function RequisitionsSupabase() {
       fromAreaId: request.from_area_id,
       toAreaId: request.to_area_id,
       priority: request.priority,
+      requestedByProfileId: request.requested_by_profile_id || request.requested_by || defaultRequesterId(requesters, user),
       notes: request.notes || "",
       items: request.items.map((item) => ({
         itemId: item.item_id,
@@ -128,7 +152,7 @@ function RequisitionsSupabase() {
   async function saveRequest(data, submit) {
     setError("")
     setMessage("")
-    const validation = validateRequest(data, inventory, areas)
+    const validation = validateRequest(data, inventory, areas, user?.role === "admin")
     if (validation) {
       setError(validation)
       return
@@ -144,7 +168,7 @@ function RequisitionsSupabase() {
     }
     setWorkingId("")
     if (actionError) {
-      setError(actionError.message)
+      setError(requisitionError(actionError))
       return
     }
     setFormRequest(null)
@@ -258,6 +282,8 @@ function RequisitionsSupabase() {
           areas={areas}
           destinationAreas={allowedDestinationAreas}
           inventory={inventory}
+          requesters={requesters}
+          currentUser={user}
           saving={Boolean(workingId)}
           onClose={() => setFormRequest(null)}
           onSave={saveRequest}
@@ -269,23 +295,66 @@ function RequisitionsSupabase() {
   )
 }
 
-function RequestForm({ request, areas, destinationAreas, inventory, saving, onClose, onSave }) {
+function RequestForm({ request, areas, destinationAreas, inventory, requesters, currentUser, saving, onClose, onSave }) {
   const [form, setForm] = useState(request)
-  const [selectedItemId, setSelectedItemId] = useState(inventory[0]?.id || "")
+  const [selectedItemId, setSelectedItemId] = useState("")
+  const [productQuery, setProductQuery] = useState("")
+  const [showResults, setShowResults] = useState(false)
+  const [formError, setFormError] = useState("")
+  const pickerRef = useRef(null)
   const selectedItem = inventory.find((item) => item.id === selectedItemId)
+  const canOverrideStock = currentUser?.role === "admin"
+
+  useEffect(() => {
+    function closeResults(event) {
+      if (pickerRef.current && !pickerRef.current.contains(event.target)) setShowResults(false)
+    }
+    document.addEventListener("mousedown", closeResults)
+    return () => document.removeEventListener("mousedown", closeResults)
+  }, [])
+
+  const filteredProducts = useMemo(() => {
+    const term = normalizeSearch(productQuery)
+    if (!term) return []
+    return inventory.filter((item) => productMatches(item, term)).slice(0, 10)
+  }, [inventory, productQuery])
 
   function addItem() {
     if (!selectedItem || form.items.some((item) => item.itemId === selectedItem.id)) return
-    setForm({ ...form, items: [...form.items, { itemId: selectedItem.id, requestedQuantity: 1, notes: "" }] })
+    const available = stockOf(selectedItem, form.fromAreaId)
+    if (available <= 0 && !canOverrideStock) {
+      setFormError("Sin stock disponible en el origen.")
+      return
+    }
+    const quantity = available > 0 && !canOverrideStock ? Math.min(1, available) : 1
+    setForm({ ...form, items: [...form.items, { itemId: selectedItem.id, requestedQuantity: quantity, notes: "" }] })
+    setFormError("")
   }
 
   function updateItem(itemId, updates) {
     setForm({ ...form, items: form.items.map((item) => item.itemId === itemId ? { ...item, ...updates } : item) })
   }
 
+  function submitForm(submit) {
+    const validation = validateRequest(form, inventory, areas, canOverrideStock)
+    if (validation) {
+      setFormError(validation)
+      return
+    }
+    setFormError("")
+    onSave(form, submit)
+  }
+
+  function selectProduct(item) {
+    setSelectedItemId(item.id)
+    setProductQuery(item.name)
+    setShowResults(false)
+    setFormError("")
+  }
+
   return (
     <div className="requisitions-backdrop">
-      <form className="requisitions-modal request-form" onSubmit={(event) => { event.preventDefault(); onSave(form, false) }}>
+      <form className="requisitions-modal request-form" onSubmit={(event) => { event.preventDefault(); submitForm(false) }}>
         <header>
           <div><p className="requisitions-eyebrow">Traslado interno</p><h2>{form.id ? "Editar borrador" : "Nueva requisición"}</h2></div>
           <button type="button" onClick={onClose}>Cerrar</button>
@@ -307,17 +376,46 @@ function RequestForm({ request, areas, destinationAreas, inventory, saving, onCl
               {Object.entries(PRIORITY_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select>
           </Field>
+          <Field label="Solicitado por">
+            <select required value={form.requestedByProfileId || ""} onChange={(event) => setForm({ ...form, requestedByProfileId: event.target.value })}>
+              <option value="">Selecciona solicitante</option>
+              {requesters.map((profile) => <option key={profile.id} value={profile.id}>{profileLabel(profile)}</option>)}
+            </select>
+          </Field>
           <Field label="Notas">
             <input value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} placeholder="Motivo o instrucciones" />
           </Field>
         </div>
-        <div className="requisition-picker">
-          <select value={selectedItemId} onChange={(event) => setSelectedItemId(event.target.value)}>
-            {inventory.map((item) => <option key={item.id} value={item.id}>{item.name} ({item.base_unit})</option>)}
-          </select>
-          <span>Disponible origen: <strong>{stockOf(selectedItem, form.fromAreaId)}</strong> {selectedItem?.base_unit || ""}</span>
+        <div className="requisition-picker" ref={pickerRef}>
+          <div className="requisition-product-search">
+            <span className="requisition-search-icon">⌕</span>
+            <input
+              value={productQuery}
+              onChange={(event) => { setProductQuery(event.target.value); setShowResults(true); setSelectedItemId("") }}
+              onFocus={() => setShowResults(true)}
+              placeholder="Buscar producto del inventario..."
+            />
+            {selectedItem && <button type="button" onClick={() => { setSelectedItemId(""); setProductQuery(""); setShowResults(false) }}>Limpiar</button>}
+            {showResults && productQuery && (
+              <div className="requisition-product-results">
+                {filteredProducts.map((item) => (
+                  <button type="button" key={item.id} onClick={() => selectProduct(item)}>
+                    {item.image_url ? <img src={item.image_url} alt="" /> : <span className="requisition-product-placeholder">{initials(item.name)}</span>}
+                    <strong>{item.name}<small>{item.category || "Sin categoria"} · {item.base_unit}</small></strong>
+                    <em>{stockOf(item, form.fromAreaId)} {item.base_unit}</em>
+                  </button>
+                ))}
+                {!filteredProducts.length && <p>No se encontraron productos.</p>}
+              </div>
+            )}
+          </div>
+          <span className={selectedItem && stockOf(selectedItem, form.fromAreaId) <= 0 ? "requisition-stock-warning" : ""}>
+            {selectedItem ? <>Disponible en origen: <strong>{stockOf(selectedItem, form.fromAreaId)}</strong> {selectedItem.base_unit}</> : "Selecciona un producto"}
+            {selectedItem && stockOf(selectedItem, form.fromAreaId) <= 0 && <small>Sin stock disponible en el origen.</small>}
+          </span>
           <button type="button" className="primary" onClick={addItem}>Agregar producto</button>
         </div>
+        {formError && <div className="requisitions-error">{formError}</div>}
         <div className="requisition-items">
           <div className="requisition-items-head"><span>Producto</span><span>Origen / destino actual</span><span>Cantidad</span><span>Notas</span><span /></div>
           {form.items.map((line) => {
@@ -326,7 +424,7 @@ function RequestForm({ request, areas, destinationAreas, inventory, saving, onCl
               <div className="requisition-item-row" key={line.itemId}>
                 <strong>{item?.name || "Producto"}</strong>
                 <span>{stockOf(item, form.fromAreaId)} / {stockOf(item, form.toAreaId)} {item?.base_unit}</span>
-                <input type="number" min="0.001" step="any" value={line.requestedQuantity} onChange={(event) => updateItem(line.itemId, { requestedQuantity: event.target.value })} />
+                <input type="number" min="0.001" max={canOverrideStock ? undefined : stockOf(item, form.fromAreaId)} step="any" value={line.requestedQuantity} onChange={(event) => updateItem(line.itemId, { requestedQuantity: event.target.value })} />
                 <input value={line.notes} onChange={(event) => updateItem(line.itemId, { notes: event.target.value })} placeholder="Opcional" />
                 <button type="button" className="danger" onClick={() => setForm({ ...form, items: form.items.filter((itemLine) => itemLine.itemId !== line.itemId) })}>Quitar</button>
               </div>
@@ -336,8 +434,8 @@ function RequestForm({ request, areas, destinationAreas, inventory, saving, onCl
         </div>
         <div className="requisitions-modal-actions">
           <button type="button" onClick={onClose}>Cancelar</button>
-          <button type="submit" disabled={saving}>Guardar borrador</button>
-          <button type="button" className="primary" disabled={saving} onClick={() => onSave(form, true)}>Enviar requisición</button>
+          <button type="button" disabled={saving} onClick={() => submitForm(false)}>Guardar borrador</button>
+          <button type="button" className="primary" disabled={saving} onClick={() => submitForm(true)}>Enviar requisición</button>
         </div>
       </form>
     </div>
@@ -450,7 +548,7 @@ function readLegacyRequests() {
   }
 }
 
-function validateRequest(request, inventory, areas) {
+function validateRequestLegacy(request, inventory, areas) {
   if (!request.fromAreaId || !request.toAreaId || request.fromAreaId === request.toAreaId) return "Origen y destino deben ser áreas diferentes."
   if (!areas.some((area) => area.id === request.toAreaId && area.active)) return "El área destino no está activa."
   if (!request.items.length) return "Agrega al menos un producto."
@@ -459,6 +557,61 @@ function validateRequest(request, inventory, areas) {
     if (Number(line.requestedQuantity) <= 0) return "Cada cantidad solicitada debe ser mayor que cero."
   }
   return ""
+}
+
+function validateRequest(request, inventory, areas, canOverrideStock = false) {
+  if (!request.requestedByProfileId) return "Selecciona quién está haciendo la requisición."
+  if (!request.fromAreaId || !request.toAreaId || request.fromAreaId === request.toAreaId) return "Origen y destino deben ser areas diferentes."
+  if (!areas.some((area) => area.id === request.toAreaId && area.active)) return "El area destino no esta activa."
+  if (!request.items.length) return "Agrega al menos un producto."
+  for (const line of request.items) {
+    const item = inventory.find((entry) => entry.id === line.itemId && entry.active)
+    if (!item) return "La requisición contiene un producto inactivo."
+    if (Number(line.requestedQuantity) <= 0) return "Cada cantidad solicitada debe ser mayor que cero."
+    if (!canOverrideStock && Number(line.requestedQuantity) > stockOf(item, request.fromAreaId)) return `La cantidad de ${item.name} supera el stock disponible en origen.`
+  }
+  return ""
+}
+
+async function getAuthorizedRequesters() {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, full_name, username, email, role, status")
+    .eq("status", "active")
+    .order("full_name", { ascending: true, nullsFirst: false })
+  if (error) return { data: [], error }
+  return { data: (data || []).filter((profile) => REQUESTER_ROLES.has(normalizeRole(profile.role))), error: null }
+}
+
+function defaultRequesterId(requesters, user) {
+  return requesters.find((profile) => String(profile.id) === String(user?.id))?.id || requesters[0]?.id || ""
+}
+
+function normalizeRole(value) {
+  return String(value || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+}
+
+function normalizeSearch(value) {
+  return String(value || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+}
+
+function productMatches(item, term) {
+  return [item.name, item.category, item.base_unit, item.purchase_unit, item.supplier]
+    .some((value) => normalizeSearch(value).includes(term))
+}
+
+function profileLabel(profile) {
+  return `${profile.full_name || profile.username || profile.email || "Usuario"} - ${profile.role || "sin rol"}`
+}
+
+function initials(name) {
+  return String(name || "P").split(/\s+/).slice(0, 2).map((part) => part.charAt(0).toUpperCase()).join("")
+}
+
+function requisitionError(error) {
+  const message = String(error?.message || "")
+  if (message.toLowerCase().includes("selecciona quien")) return "Selecciona quién está haciendo la requisición."
+  return message
 }
 
 export default RequisitionsSupabase

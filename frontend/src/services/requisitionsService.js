@@ -12,7 +12,8 @@ function normalizeRequisition(row) {
   return row ? {
     ...row,
     items: row.requisition_items || [],
-    requestedByName: row.requester?.full_name || row.requester?.username || "Sin información",
+    requestedByName: row.requested_by_name || row.requester?.full_name || row.requester?.username || "Sin informacion",
+    requestedByRole: row.requested_by_role || "",
     approvedByName: row.approver?.full_name || row.approver?.username || "",
     completedByName: row.completer?.full_name || row.completer?.username || ""
   } : row
@@ -23,7 +24,8 @@ function serializeData(data) {
     from_area_id: data.fromAreaId,
     to_area_id: data.toAreaId,
     priority: data.priority || "normal",
-    notes: data.notes || ""
+    notes: data.notes || "",
+    requested_by_profile_id: data.requestedByProfileId || null
   }
 }
 
