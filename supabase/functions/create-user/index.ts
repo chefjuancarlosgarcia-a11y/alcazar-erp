@@ -12,16 +12,64 @@ const validRoles = [
   "gerente",
   "encargado_almacen",
   "rrhh",
+  "recursos_humanos",
   "supervisor",
   "cajero",
+  "caja",
   "mesero",
   "cocinero",
+  "cocina",
+  "servicio",
   "pizzero",
+  "pizzeria",
   "barista",
   "bartender",
   "repostero",
   "panadero",
+  "cafeteria",
+  "limpieza",
+  "repartidor",
+  "mantenimiento",
+  "operativo",
   "colaborador"
+]
+
+const roleAliases: Record<string, string> = {
+  "recursos humanos": "recursos_humanos",
+  recursos_humanos: "recursos_humanos",
+  rrhh: "recursos_humanos",
+  "rr.hh.": "recursos_humanos",
+  "gerente general": "gerente_general",
+  gerente_general: "gerente_general",
+  cajero: "caja",
+  caja: "caja",
+  cocinero: "cocina",
+  cocina: "cocina",
+  pizzero: "pizzeria",
+  pizzeria: "pizzeria",
+  "encargado de almacen": "encargado_almacen",
+  encargado_almacen: "encargado_almacen"
+}
+
+const hrAssignableRoles = [
+  "recursos_humanos",
+  "encargado_almacen",
+  "supervisor",
+  "bartender",
+  "barista",
+  "cocina",
+  "servicio",
+  "pizzeria",
+  "cafeteria",
+  "limpieza",
+  "caja",
+  "operativo",
+  "mesero",
+  "repartidor",
+  "mantenimiento",
+  "colaborador",
+  "repostero",
+  "panadero"
 ]
 
 Deno.serve(async (req) => {
@@ -95,10 +143,19 @@ Deno.serve(async (req) => {
 })
 
 function canCreateRole(actorRole: string, nextRole: string) {
-  if (actorRole === "admin") return true
-  if (actorRole === "gerente_general") return nextRole !== "admin"
-  if (actorRole === "rrhh") return !protectedRoles.includes(nextRole)
+  const actor = normalizeRole(actorRole)
+  const next = normalizeRole(nextRole)
+  if (actor === "admin") return true
+  if (actor === "gerente_general") return next !== "admin"
+  if (actor === "recursos_humanos") return hrAssignableRoles.includes(next) && !protectedRoles.includes(next)
   return false
+}
+
+function normalizeRole(role: string) {
+  const normalized = String(role || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+  const spaced = normalized.replace(/[_-]+/g, " ").replace(/\s+/g, " ")
+  const underscored = normalized.replace(/[\s-]+/g, "_")
+  return roleAliases[underscored] || roleAliases[spaced] || underscored
 }
 
 function validStatus(status: string) {

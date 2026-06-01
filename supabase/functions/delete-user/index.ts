@@ -43,10 +43,29 @@ Deno.serve(async (req) => {
   return json({ deleted: true })
 })
 
+const roleAliases: Record<string, string> = {
+  "recursos humanos": "recursos_humanos",
+  recursos_humanos: "recursos_humanos",
+  rrhh: "recursos_humanos",
+  "rr.hh.": "recursos_humanos",
+  "gerente general": "gerente_general",
+  gerente_general: "gerente_general"
+}
+
 function canDelete(actorRole: string, targetRole: string) {
-  if (actorRole === "admin") return true
-  if (actorRole === "gerente_general") return targetRole !== "admin"
+  const actor = normalizeRole(actorRole)
+  const target = normalizeRole(targetRole)
+  if (actor === "admin") return true
+  if (actor === "gerente_general") return target !== "admin"
+  if (actor === "recursos_humanos") return target !== "admin" && target !== "gerente_general"
   return false
+}
+
+function normalizeRole(role: string) {
+  const normalized = String(role || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+  const spaced = normalized.replace(/[_-]+/g, " ").replace(/\s+/g, " ")
+  const underscored = normalized.replace(/[\s-]+/g, "_")
+  return roleAliases[underscored] || roleAliases[spaced] || underscored
 }
 
 function json(body: unknown, status = 200) {

@@ -17,7 +17,8 @@ import {
   canEditUser,
   canEditUserRole,
   canManageAttendancePinForUser,
-  canManageUsers
+  canManageUsers,
+  getAllowedAssignableRoles
 } from "../utils/profilePermissions"
 import "./ProfileManagement.css"
 
@@ -51,13 +52,22 @@ const ROLE_NAMES = {
   rrhh: "Recursos Humanos",
   supervisor: "Supervisor",
   cajero: "Cajero",
+  caja: "Caja",
   mesero: "Mesero",
   cocinero: "Cocinero",
+  cocina: "Cocina",
+  servicio: "Servicio",
   pizzero: "Pizzero",
+  pizzeria: "Pizzeria",
   barista: "Barista",
   bartender: "Bartender",
   repostero: "Repostero",
   panadero: "Panadero",
+  cafeteria: "Cafeteria",
+  limpieza: "Limpieza",
+  repartidor: "Repartidor",
+  mantenimiento: "Mantenimiento",
+  operativo: "Operativo",
   colaborador: "Colaborador"
 }
 
@@ -97,6 +107,7 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
   const [creating, setCreating] = useState(false)
 
   const canManage = canManageUsers(user)
+  const assignableRoles = useMemo(() => getAllowedAssignableRoles(user), [user])
   const canEditCurrent = editingProfile ? canEditUser(user, editingProfile) : false
   const canManageCurrentPin = editingProfile ? canManageAttendancePinForUser(user, editingProfile) : false
   const currentIsReadOnly = editingProfile && !canEditCurrent
@@ -174,7 +185,7 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
   }
 
   function openCreate() {
-    setCreateForm({ ...CREATE_FORM })
+    setCreateForm({ ...CREATE_FORM, role: assignableRoles[0] || "colaborador" })
     setModalError("")
     setModalMessage("")
     setShowCreate(true)
@@ -270,7 +281,7 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
       return
     }
     if (form.role !== editingProfile.role && !canAssignUserRole(user, editingProfile, form.role)) {
-      setModalError("No tienes permisos para editar este usuario.")
+      setModalError("No tienes permisos para asignar este rol.")
       return
     }
     if (form.status !== editingProfile.status && !canDeactivateUser(user, editingProfile)) {
@@ -576,7 +587,7 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
         <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar por nombre, usuario o correo..." />
         <select value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)}>
           <option value="">Todos los roles</option>
-          {PROFILE_ROLES.map((role) => <option key={role} value={role}>{ROLE_NAMES[role]}</option>)}
+          {PROFILE_ROLES.map((role) => <option key={role} value={role}>{ROLE_NAMES[role] || role}</option>)}
         </select>
         <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
           <option value="">Todos los estados</option>
@@ -661,7 +672,7 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
                 <div className="profiles-form-grid">
                   <Field label="Rol">
                     <select value={form.role} onChange={(event) => updateField("role", event.target.value)} disabled={saving || !canEditUserRole(user, editingProfile)}>
-                      {PROFILE_ROLES.map((role) => <option key={role} value={role} disabled={!canAssignUserRole(user, editingProfile, role)}>{ROLE_NAMES[role]}</option>)}
+                      {PROFILE_ROLES.map((role) => <option key={role} value={role} disabled={!canAssignUserRole(user, editingProfile, role)}>{ROLE_NAMES[role] || role}</option>)}
                     </select>
                   </Field>
                   <Field label="Estado">
@@ -764,7 +775,7 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
                 <div className="profiles-form-grid">
                   <Field label="Rol">
                     <select value={createForm.role} onChange={(event) => updateCreateField("role", event.target.value)} disabled={creating}>
-                      {PROFILE_ROLES.map((role) => <option key={role} value={role} disabled={!canCreateUserRole(user, role)}>{ROLE_NAMES[role]}</option>)}
+                      {assignableRoles.map((role) => <option key={role} value={role}>{ROLE_NAMES[role] || role}</option>)}
                     </select>
                   </Field>
                   <Field label="Estado">
@@ -834,6 +845,7 @@ function databaseError(error) {
   if (text.includes("profiles_username_key") || text.toLowerCase().includes("duplicate key")) {
     return "Este nombre de usuario ya esta en uso. Por favor utiliza uno diferente."
   }
+  if (text.toLowerCase().includes("asignar este rol")) return "No tienes permisos para asignar este rol."
   if (text.toLowerCase().includes("permission") || text.toLowerCase().includes("permiso")) return "No tienes permisos para editar este usuario."
   return details ? `Error al guardar en la base de datos: ${details}` : "Error al guardar en la base de datos."
 }
