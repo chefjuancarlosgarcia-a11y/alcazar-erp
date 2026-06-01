@@ -43,14 +43,15 @@ export async function uploadAttendanceEvidence(blob, employeeId) {
   return { data: error ? null : { path }, error }
 }
 
-export function registerAttendanceMark({ employeeId, pin, markType, photoPath, deviceId, deviceName }) {
+export function registerAttendanceMark({ employeeId, pin, markType, photoPath, deviceId, deviceName, observation = "" }) {
   return supabase.rpc("register_attendance_mark", {
     p_employee_id: employeeId,
     p_pin: pin,
     p_mark_type: markType,
     p_photo_path: photoPath,
     p_device_id: deviceId,
-    p_device_name: deviceName
+    p_device_name: deviceName,
+    p_observation: observation || null
   })
 }
 

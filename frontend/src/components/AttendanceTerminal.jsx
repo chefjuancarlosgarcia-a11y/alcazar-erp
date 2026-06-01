@@ -10,9 +10,9 @@ import "./AttendanceTerminal.css"
 
 const MARK_LABELS = {
   entrada: "Entrada",
-  salida: "Salida",
-  bano_inicio: "Break",
-  bano_regreso: "Regreso"
+  salida_comida: "Salida a comida",
+  regreso_comida: "Regreso de comida",
+  salida_final: "Salida final"
 }
 
 function AttendanceTerminal({ kiosk = false }) {
@@ -29,6 +29,7 @@ function AttendanceTerminal({ kiosk = false }) {
   const [saving, setSaving] = useState(false)
   const [cameraReady, setCameraReady] = useState(false)
   const [cameraError, setCameraError] = useState("")
+  const [observation, setObservation] = useState("")
   const [deviceId] = useState(() => getOrCreateDeviceId())
 
   useEffect(() => {
@@ -46,9 +47,9 @@ function AttendanceTerminal({ kiosk = false }) {
     marks.filter((mark) => String(mark.employee_id) === String(selected?.id))
   ), [marks, selected])
 
-  const lastShiftMark = selectedMarks.find((mark) => ["entrada", "salida"].includes(mark.mark_type))
+  const lastShiftMark = selectedMarks.find((mark) => ["entrada", "salida", "salida_final"].includes(mark.mark_type))
   const isCheckedIn = lastShiftMark?.mark_type === "entrada"
-  const activeBreak = selectedMarks.find((mark) => mark.mark_type === "bano_inicio" && !selectedMarks.some((candidate) => candidate.related_mark_id === mark.id && candidate.mark_type === "bano_regreso"))
+  const activeMeal = selectedMarks.find((mark) => ["salida_comida", "bano_inicio"].includes(mark.mark_type) && !selectedMarks.some((candidate) => candidate.related_mark_id === mark.id && ["regreso_comida", "bano_regreso"].includes(candidate.mark_type)))
 
   async function refresh() {
     setLoading(true)
@@ -108,11 +109,13 @@ function AttendanceTerminal({ kiosk = false }) {
         markType,
         photoPath: upload.data.path,
         deviceId,
-        deviceName: navigator.userAgent.slice(0, 120)
+        deviceName: navigator.userAgent.slice(0, 120),
+        observation
       })
       if (result.error) throw result.error
       setMessage(`${MARK_LABELS[markType]} registrada correctamente para ${selected.fullName}.`)
       setPin("")
+      setObservation("")
       await refresh()
       window.setTimeout(() => {
         setSelected(null)
@@ -166,7 +169,7 @@ function AttendanceTerminal({ kiosk = false }) {
               {selected.avatarUrl ? <img src={selected.avatarUrl} alt="" /> : <span>{initials(selected.fullName)}</span>}
               <div>
                 <h2>{selected.fullName}</h2>
-                <p>{selected.areaName || "Sin área"} · {isCheckedIn ? "Entrada activa" : "Fuera de turno"}</p>
+                <p>{selected.areaName || "Sin area"} · {isCheckedIn ? activeMeal ? "En comida" : "Entrada activa" : "Fuera de turno"}</p>
               </div>
             </div>
 
@@ -181,10 +184,16 @@ function AttendanceTerminal({ kiosk = false }) {
               PIN
               <input value={pin} onChange={(event) => setPin(event.target.value.replace(/\D/g, "").slice(0, 4))} type="password" inputMode="numeric" maxLength={4} placeholder="••••" autoFocus />
             </label>
+            <label className="attendance-pin">
+              Observacion opcional
+              <input value={observation} onChange={(event) => setObservation(event.target.value)} type="text" maxLength={160} placeholder="Ej. olvide marcar comida" />
+            </label>
 
             <div className="attendance-actions">
               <button type="button" className="entry" disabled={saving || isCheckedIn} onClick={() => mark("entrada")}>Entrada</button>
-              <button type="button" className="exit" disabled={saving || !isCheckedIn || Boolean(activeBreak)} onClick={() => mark("salida")}>Salida</button>
+              <button type="button" className="meal" disabled={saving || !isCheckedIn || Boolean(activeMeal)} onClick={() => mark("salida_comida")}>Salida a comida</button>
+              <button type="button" className="meal" disabled={saving || !isCheckedIn || !activeMeal} onClick={() => mark("regreso_comida")}>Regreso de comida</button>
+              <button type="button" className="exit" disabled={saving || !isCheckedIn || Boolean(activeMeal)} onClick={() => mark("salida_final")}>Salida final</button>
             </div>
           </section>
         )}

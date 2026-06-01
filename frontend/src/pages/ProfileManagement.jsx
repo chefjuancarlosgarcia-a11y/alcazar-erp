@@ -92,6 +92,7 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
   const [pinConfigured, setPinConfigured] = useState({})
   const [showAttendancePin, setShowAttendancePin] = useState(false)
   const [pinActionMessage, setPinActionMessage] = useState("")
+  const [pinGeneratedAutomatically, setPinGeneratedAutomatically] = useState(false)
   const [saving, setSaving] = useState(false)
   const [creating, setCreating] = useState(false)
 
@@ -144,6 +145,7 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
     setEditingProfile(profile)
     setShowAttendancePin(false)
     setPinActionMessage("")
+    setPinGeneratedAutomatically(false)
     setModalError("")
     setModalMessage("")
     setForm({
@@ -202,6 +204,7 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
       return
     }
     updateField("attendance_pin", pin)
+    setPinGeneratedAutomatically(true)
     setShowAttendancePin(true)
     setPinActionMessage(pinConfigured[editingProfile?.id]
       ? "Nuevo PIN unico generado. Compartelo con el colaborador y guarda los cambios para invalidar el PIN anterior."
@@ -214,10 +217,16 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
       const pin = String(Math.floor(1000 + Math.random() * 9000))
       if (tried.has(pin)) continue
       tried.add(pin)
-      const { data, error: availabilityError } = await validateAttendancePinAvailable(pin, employeeId)
-      if (!availabilityError && data === true) return pin
+      const availability = await checkPinAvailability(pin, employeeId)
+      if (availability !== false) return pin
     }
     return ""
+  }
+
+  async function checkPinAvailability(pin, employeeId) {
+    const { data, error: availabilityError } = await validateAttendancePinAvailable(pin, employeeId)
+    if (availabilityError) return null
+    return data === true
   }
 
   async function copyAttendancePin() {
@@ -257,11 +266,22 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
       setModalError("No tienes permisos para editar este usuario.")
       return
     }
-    if (form.attendance_pin) {
-      const { data: pinAvailable, error: pinCheckError } = await validateAttendancePinAvailable(form.attendance_pin, editingProfile.id)
-      if (pinCheckError || pinAvailable !== true) {
-        setModalError(PIN_ERROR)
-        return
+    let pinToSave = form.attendance_pin
+    if (pinToSave) {
+      const pinAvailable = await checkPinAvailability(pinToSave, editingProfile.id)
+      if (pinAvailable === false) {
+        if (!pinGeneratedAutomatically) {
+          setModalError(PIN_ERROR)
+          return
+        }
+        const replacementPin = await generateUniquePin(editingProfile.id)
+        if (!replacementPin) {
+          setModalError(PIN_ERROR)
+          return
+        }
+        pinToSave = replacementPin
+        setForm((current) => ({ ...current, attendance_pin: replacementPin }))
+        setShowAttendancePin(true)
       }
     }
 
@@ -294,12 +314,14 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
       return
     }
 
-    if (canManageCurrentPin && form.attendance_pin) {
-      const { error: pinError } = await setAttendancePin(data.id, form.attendance_pin, form.authorized_attendance_device.trim())
-      if (pinError) {
-        finishSaveWithError(pinError.message?.toLowerCase().includes("pin") ? PIN_ERROR : "Error al guardar en la base de datos.")
+    let savedPin = pinToSave
+    if (canManageCurrentPin && pinToSave) {
+      const pinResult = await saveAttendancePinWithRetry(data.id, pinToSave, form.authorized_attendance_device.trim())
+      if (pinResult.error) {
+        finishSaveWithError(pinResult.message)
         return
       }
+      savedPin = pinResult.pin
       setPinConfigured((current) => ({ ...current, [data.id]: true }))
     } else if (canManageCurrentPin && (form.authorized_attendance_device || "") !== (editingProfile.authorized_attendance_device || "")) {
       const { error: deviceError } = await setAttendanceDevice(data.id, form.authorized_attendance_device.trim())
@@ -310,6 +332,10 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
     }
 
     if (data.id === user.id) await refreshProfile()
+    if (savedPin && savedPin !== form.attendance_pin) {
+      setForm((current) => ({ ...current, attendance_pin: savedPin }))
+      setShowAttendancePin(true)
+    }
     setModalMessage("Usuario guardado correctamente")
     setSaving(false)
     await loadProfiles({ silent: true })
@@ -323,6 +349,32 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
     setSaving(false)
     setModalMessage("")
     setModalError(nextError)
+  }
+
+  async function saveAttendancePinWithRetry(employeeId, initialPin, authorizedDevice) {
+    let nextPin = initialPin
+    const tried = new Set([initialPin])
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const { error: pinError } = await setAttendancePin(employeeId, nextPin, authorizedDevice)
+      if (!pinError) return { pin: nextPin, error: null, message: "" }
+
+      const message = String(pinError.message || "").toLowerCase()
+      const isConflict = message.includes("asignado") || message.includes("duplicate") || message.includes("pin")
+      if (!pinGeneratedAutomatically || !isConflict) {
+        return {
+          pin: nextPin,
+          error: pinError,
+          message: isConflict ? PIN_ERROR : "Error al guardar en la base de datos."
+        }
+      }
+
+      nextPin = await generateUniquePin(employeeId)
+      if (!nextPin || tried.has(nextPin)) {
+        return { pin: initialPin, error: pinError, message: PIN_ERROR }
+      }
+      tried.add(nextPin)
+    }
+    return { pin: initialPin, error: new Error(PIN_ERROR), message: PIN_ERROR }
   }
 
   async function createUser(event) {
@@ -600,6 +652,7 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
                         value={form.attendance_pin}
                         onChange={(event) => {
                           updateField("attendance_pin", event.target.value.replace(/\D/g, "").slice(0, 4))
+                          setPinGeneratedAutomatically(false)
                           setPinActionMessage("")
                         }}
                         placeholder={pinConfigured[editingProfile.id] ? "PIN asignado" : "0000"}
@@ -614,10 +667,16 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
                         {showAttendancePin ? "Ocultar PIN" : "Mostrar PIN"}
                       </button>
                       <button type="button" className="profiles-text-action" onClick={copyAttendancePin} disabled={!form.attendance_pin}>Copiar PIN</button>
+                      <button type="button" className="profiles-text-action" onClick={() => {
+                        updateField("attendance_pin", "")
+                        setPinGeneratedAutomatically(false)
+                        setPinActionMessage("No se asignara ni cambiara PIN al guardar.")
+                      }} disabled={!form.attendance_pin || saving}>Limpiar PIN</button>
                     </div>
                   </Field>
                   <div className={`profiles-pin-status ${pinConfigured[editingProfile.id] ? "configured" : ""}`}>{pinConfigured[editingProfile.id] ? "Este usuario tiene PIN asignado" : "Este usuario no tiene PIN asignado"}</div>
                 </div>
+                <p className="profiles-note">Puedes guardar la informacion del usuario sin generar PIN. El PIN solo se asigna o cambia si este campo tiene 4 digitos al presionar Guardar.</p>
                 {pinActionMessage && <p className="profiles-pin-feedback" role="status">{pinActionMessage}</p>}
               </FormSection>
             </div>

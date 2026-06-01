@@ -236,6 +236,10 @@
   background: #0f766e;
 }
 
+.attendance-actions .meal {
+  background: #1d4ed8;
+}
+
 .attendance-actions .exit {
   background: #b91c1c;
 }

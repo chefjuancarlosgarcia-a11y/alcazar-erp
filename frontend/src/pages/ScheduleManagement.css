@@ -318,6 +318,35 @@
   color: #7dd3fc;
 }
 
+.schedule-status.rest,
+.schedule-status.descanso {
+  background: #1f2937;
+  color: #d1d5db;
+}
+
+.schedule-status.half,
+.schedule-status.medio_turno {
+  background: #172554;
+  color: #93c5fd;
+}
+
+.schedule-status.completo {
+  background: #052e2c;
+  color: #99f6e4;
+}
+
+.schedule-status.tarde,
+.schedule-status.horas_extra {
+  background: #30200a;
+  color: #fde68a;
+}
+
+.schedule-status.falta,
+.schedule-status.incompleto {
+  background: #3b1119;
+  color: #fca5a5;
+}
+
 .schedule-shift-actions {
   display: flex;
   gap: 6px;
