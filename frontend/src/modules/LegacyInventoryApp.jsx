@@ -14,6 +14,7 @@ import { useDevice } from "../context/DeviceContext"
 import { supabase } from "../lib/supabase"
 import { createNotification, notifyRoles } from "../services/notificationsService"
 import { getPurchaseOrders, savePurchaseOrder } from "../services/purchaseOrdersService"
+import { getInventoryItems } from "../services/inventoryService"
 import {
   createSupplier,
   getSuppliers,
@@ -296,6 +297,77 @@ function getPurchaseProductDetails(item) {
     precioCompra: priceValue >= 0 ? priceValue : 0,
     proveedor: item?.proveedorNombre || item?.supplier || ""
   }
+}
+
+function mapPurchaseInventoryItem(item) {
+  const stockByLocation = item?.stockByLocation || item?.stockByArea || {}
+  const minimumStockByLocation = item?.minimumStockByLocation || item?.minimumByArea || {}
+  const totalStock = Number(
+    item?.totalUnidades ?? item?.stockActual ?? item?.totalQuantity ??
+    Object.values(stockByLocation).reduce((sum, value) => sum + Number(value || 0), 0)
+  )
+  const purchaseUnit = item?.purchase_unit || item?.unidadCompra || item?.base_unit || item?.unidad || "Unidad/Pieza"
+  const baseUnit = item?.base_unit || item?.unidadBase || item?.unidad || purchaseUnit
+  const purchasePrice = Number(item?.purchase_price ?? item?.precioCompra ?? item?.costoUnitario ?? item?.cost_per_base_unit ?? 0)
+
+  return {
+    ...item,
+    nombre: item?.name || item?.nombre || "",
+    codigo: item?.sku || item?.codigo || item?.codigoBarras || "",
+    sku: item?.sku || item?.codigo || "",
+    categoria: item?.category || item?.categoria || "Sin categoria",
+    unidadCompra: purchaseUnit,
+    unidadBase: baseUnit,
+    unidadesPorEmpaque: Number(item?.conversion_factor ?? item?.unidadesPorEmpaque ?? 1) || 1,
+    precioCompra: purchasePrice >= 0 ? purchasePrice : 0,
+    costoUnitario: purchasePrice >= 0 ? purchasePrice : 0,
+    proveedorNombre: item?.supplier || item?.proveedorNombre || "",
+    imagen: item?.image_url || item?.imagen || "",
+    stockByLocation,
+    minimumStockByLocation,
+    stockActual: totalStock,
+    totalUnidades: totalStock
+  }
+}
+
+function getPurchaseSearchScore(item, searchText) {
+  const text = String(searchText || "").trim().toLowerCase()
+  if (text.length < 2) return 0
+
+  const fields = {
+    name: String(item?.nombre || item?.name || "").toLowerCase(),
+    code: String(item?.codigo || item?.sku || item?.codigoBarras || "").toLowerCase(),
+    category: String(item?.categoria || item?.category || "").toLowerCase(),
+    supplier: String(item?.proveedorNombre || item?.supplier || "").toLowerCase()
+  }
+  let score = 0
+
+  if (fields.name.startsWith(text)) score += 24
+  if (fields.code.startsWith(text)) score += 20
+  if (fields.category.startsWith(text)) score += 10
+  if (fields.name.includes(text)) score += 14
+  if (fields.code.includes(text)) score += 12
+  if (fields.category.includes(text)) score += 6
+  if (fields.supplier.includes(text)) score += 4
+
+  text.split(" ").filter(Boolean).forEach((word) => {
+    if (fields.name.includes(word)) score += 4
+    if (fields.code.includes(word)) score += 3
+    if (fields.category.includes(word)) score += 2
+    if (fields.supplier.includes(word)) score += 1
+  })
+
+  return score
+}
+
+function getProductInitials(item) {
+  const name = String(item?.nombre || item?.name || "?").trim()
+  return name
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase() || "?"
 }
 
 function getLocationStock(item, location) {
@@ -797,6 +869,9 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
   const [manualIngredienteSeleccionadoId, setManualIngredienteSeleccionadoId] = useState(null)
   const [manualCantidadComprar, setManualCantidadComprar] = useState("")
   const [manualOrdenItems, setManualOrdenItems] = useState([])
+  const [manualInventoryItems, setManualInventoryItems] = useState([])
+  const [manualInventoryLoading, setManualInventoryLoading] = useState(false)
+  const [manualInventoryError, setManualInventoryError] = useState("")
   const [manualIssueDate, setManualIssueDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [manualExpectedDate, setManualExpectedDate] = useState("")
   const [manualStatus, setManualStatus] = useState("pendiente_aprobacion")
@@ -930,6 +1005,35 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
   useEffect(() => {
     cargarProveedoresSupabase()
   }, [cargarProveedoresSupabase])
+
+  useEffect(() => {
+    let isMounted = true
+
+    async function cargarInventarioOrdenManual() {
+      setManualInventoryLoading(true)
+      setManualInventoryError("")
+
+      const result = await getInventoryItems()
+      if (!isMounted) return
+
+      if (result.error) {
+        setManualInventoryError(result.error.message || "No se pudo cargar el inventario para la orden manual.")
+        setManualInventoryItems([])
+      } else {
+        setManualInventoryItems((result.data || [])
+          .filter((item) => item?.active !== false)
+          .map(mapPurchaseInventoryItem)
+        )
+      }
+
+      setManualInventoryLoading(false)
+    }
+
+    cargarInventarioOrdenManual()
+    return () => {
+      isMounted = false
+    }
+  }, [])
 
   useEffect(() => {
     return () => {
@@ -3654,7 +3758,11 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
     return () => window.removeEventListener("purchase-order-action", processNotificationAction)
   }, [puedeAprobarOrdenCompra, ordenesCompraManual])
 
-  const manualIngredienteSeleccionado = ingredientes.find(
+  const manualInventorySource = manualInventoryItems.length > 0
+    ? manualInventoryItems
+    : ingredientes.map(mapPurchaseInventoryItem)
+  const manualSearchText = String(manualBusqueda || "").trim()
+  const manualIngredienteSeleccionado = manualInventorySource.find(
     (ingrediente) => ingrediente.id === manualIngredienteSeleccionadoId
   )
   const manualProductoCompra = manualIngredienteSeleccionado
@@ -3709,26 +3817,13 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
         .map((item) => item.ingrediente)
     : []
 
-  const manualIngredientesSugeridos = manualBusqueda
-    ? ingredientes
-        .map((ingrediente) => {
-          const texto = manualBusqueda.toLowerCase()
-          const nombre = String(ingrediente.nombre || "").toLowerCase()
-          const codigo = String(ingrediente.codigo || ingrediente.sku || ingrediente.codigoBarras || "").toLowerCase()
-          let score = 0
-
-          if (nombre.startsWith(texto)) score += 15
-          if (codigo.startsWith(texto)) score += 12
-          if (nombre.includes(texto)) score += 8
-          if (codigo.includes(texto)) score += 6
-
-          texto.split(" ").filter(Boolean).forEach((palabra) => {
-            if (nombre.includes(palabra)) score += 2
-            if (codigo.includes(palabra)) score += 1
-          })
-
-          return { ingrediente, score }
-        })
+  const manualIngredientesSugeridos = manualSearchText.length >= 2
+    ? manualInventorySource
+        .map((ingrediente) => ({
+          ingrediente,
+          score: getPurchaseSearchScore(ingrediente, manualSearchText)
+        }))
+        .filter((item) => item.score > 0)
         .sort((a, b) => b.score - a.score)
         .slice(0, 5)
         .map((item) => item.ingrediente)
@@ -5075,20 +5170,26 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
     const nuevoItem = {
       id: detalle.productoId,
       producto_id: detalle.productoId,
+      inventory_item_id: detalle.productoId,
       nombre: detalle.nombre,
+      item_name: detalle.nombre,
       sku: detalle.sku,
       codigo: detalle.sku,
       cantidad_compra: cantidad,
       cantidadComprar: cantidad,
       unidad_compra: detalle.unidadCompra,
       unidadCompra: detalle.unidadCompra,
+      unit: detalle.unidadCompra,
       precio_unitario_compra: detalle.precioCompra,
       costoUnitario: detalle.precioCompra,
+      estimated_cost: detalle.precioCompra,
       subtotal: cantidad * detalle.precioCompra,
       factor_conversion: detalle.factorConversion,
       unidad_base: detalle.unidadBase,
       cantidad_base_total: cantidad * detalle.factorConversion,
-      imagen: manualIngredienteSeleccionado.imagen || ""
+      proveedor: detalle.proveedor,
+      imagen: manualIngredienteSeleccionado.imagen || manualIngredienteSeleccionado.image_url || "",
+      image_url: manualIngredienteSeleccionado.image_url || manualIngredienteSeleccionado.imagen || ""
     }
 
     if (existeItem) {
@@ -7352,35 +7453,59 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
                 />
                 {manualBusqueda && (
                   <div style={suggestionsBoxStyle}>
-                    {manualIngredientesSugeridos.length > 0 ? (
+                    {manualSearchText.length < 2 ? (
+                      <p style={{ color: "#d1d5db", margin: 0 }}>Escribe al menos 2 caracteres para buscar en inventario.</p>
+                    ) : manualInventoryLoading ? (
+                      <p style={{ color: "#d1d5db", margin: 0 }}>Cargando inventario...</p>
+                    ) : manualInventoryError ? (
+                      <p style={{ color: "#fca5a5", margin: 0 }}>{manualInventoryError}</p>
+                    ) : manualIngredientesSugeridos.length > 0 ? (
                       manualIngredientesSugeridos.map((ingrediente) => (
                         <button
                           key={ingrediente.id}
                           type="button"
                           onClick={() => seleccionarIngredienteOrdenManual(ingrediente)}
+                          onMouseEnter={(event) => {
+                            event.currentTarget.style.backgroundColor = "#1f2937"
+                            event.currentTarget.style.borderColor = "#64748b"
+                          }}
+                          onMouseLeave={(event) => {
+                            event.currentTarget.style.backgroundColor = suggestionItemStyle.backgroundColor
+                            event.currentTarget.style.border = suggestionItemStyle.border
+                          }}
                           style={suggestionItemStyle}
                         >
-                          {ingrediente.imagen ? (
+                          {ingrediente.imagen || ingrediente.image_url ? (
                             <img
-                              src={ingrediente.imagen}
-                              alt={ingrediente.nombre}
+                              src={ingrediente.imagen || ingrediente.image_url}
+                              alt={ingrediente.nombre || ingrediente.name}
                               style={suggestionThumbnailStyle}
                             />
                           ) : (
                             <div style={suggestionPlaceholderThumbStyle}>
-                              Sin imagen
+                              {getProductInitials(ingrediente)}
                             </div>
                           )}
-                          <div>
-                            <div style={{ fontWeight: 600 }}>{ingrediente.nombre}</div>
-                            <div style={{ color: "#9ca3af", fontSize: "0.9rem" }}>
-                              {ingrediente.codigo || ingrediente.sku || ingrediente.codigoBarras || "Sin código"}
+                          <div style={suggestionContentStyle}>
+                            <div style={suggestionTitleRowStyle}>
+                              <span style={{ fontWeight: 700 }}>{ingrediente.nombre || ingrediente.name}</span>
+                              <span style={suggestionBadgeStyle}>
+                                {ingrediente.codigo || ingrediente.sku || ingrediente.codigoBarras || "Sin SKU"}
+                              </span>
+                            </div>
+                            <div style={suggestionMetaStyle}>
+                              <span>{ingrediente.unidadCompra || ingrediente.purchase_unit || ingrediente.unidadBase || ingrediente.base_unit || "Sin unidad"}</span>
+                              <span>Stock: {Number(ingrediente.totalUnidades ?? ingrediente.stockActual ?? 0).toLocaleString("es-GT")}</span>
+                              <span>{ingrediente.proveedorNombre || ingrediente.supplier || "Sin proveedor"}</span>
+                            </div>
+                            <div style={suggestionSubtleMetaStyle}>
+                              {ingrediente.categoria || ingrediente.category || "Sin categoria"}
                             </div>
                           </div>
                         </button>
                       ))
                     ) : (
-                      <p style={{ color: "#d1d5db" }}>No se encontró ningún ingrediente.</p>
+                      <p style={{ color: "#d1d5db", margin: 0 }}>No se encontró ningún ingrediente en inventario.</p>
                     )}
                   </div>
                 )}
@@ -7412,10 +7537,10 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
                       <div style={manualProductMetricStyle}><span>Factor conversión</span><strong>{manualProductoCompra.factorConversion}</strong></div>
                       <div style={manualProductMetricStyle}><span>Precio de compra</span><strong>Q{manualProductoCompra.precioCompra.toFixed(2)}</strong></div>
                       <div style={manualProductMetricStyle}><span>Proveedor sugerido</span><strong>{manualProductoCompra.proveedor || manualProveedorNombre || "Sin proveedor asignado"}</strong></div>
-                      <div style={manualProductMetricStyle}><span>Disponible</span><strong>{manualIngredienteSeleccionado.totalUnidades || 0} {manualProductoCompra.unidadCompra}</strong></div>
+                      <div style={manualProductMetricStyle}><span>Disponible</span><strong>{Number(manualIngredienteSeleccionado.totalUnidades || 0).toLocaleString("es-GT")} {manualProductoCompra.unidadCompra}</strong></div>
                     </div>
-                    {manualIngredienteSeleccionado.imagen ? (
-                      <img src={manualIngredienteSeleccionado.imagen} alt="Ingrediente" style={previewImageStyle} />
+                    {manualIngredienteSeleccionado.imagen || manualIngredienteSeleccionado.image_url ? (
+                      <img src={manualIngredienteSeleccionado.imagen || manualIngredienteSeleccionado.image_url} alt="Ingrediente" style={previewImageStyle} />
                     ) : null}
 
                     <label style={fieldLabelStyle}>Cantidad a comprar</label>
@@ -10958,6 +11083,45 @@ const suggestionItemStyle = {
   backgroundColor: "#111827",
   textAlign: "left",
   cursor: "pointer"
+}
+
+const suggestionContentStyle = {
+  flex: "1 1 auto",
+  minWidth: 0,
+  display: "grid",
+  gap: "5px"
+}
+
+const suggestionTitleRowStyle = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "8px",
+  color: "#f9fafb"
+}
+
+const suggestionBadgeStyle = {
+  flex: "0 0 auto",
+  color: "#cbd5e1",
+  backgroundColor: "#1f2937",
+  border: "1px solid #374151",
+  borderRadius: "999px",
+  padding: "2px 8px",
+  fontSize: "0.78rem",
+  fontWeight: 700
+}
+
+const suggestionMetaStyle = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: "6px 12px",
+  color: "#d1d5db",
+  fontSize: "0.86rem"
+}
+
+const suggestionSubtleMetaStyle = {
+  color: "#9ca3af",
+  fontSize: "0.8rem"
 }
 
 const suggestionThumbnailStyle = {
