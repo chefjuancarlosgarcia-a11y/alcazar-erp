@@ -7,6 +7,7 @@ import {
   createChecklistRunFromTemplate,
   createChecklistTemplate,
   deactivateChecklistTemplate,
+  deleteChecklistTemplate,
   getChecklistProfiles,
   getChecklistRuns,
   getChecklistTemplates,
@@ -548,6 +549,7 @@ function MyTasks({ tasks, user, allTasks, persistAllTasks }) {
 
 function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }) {
   const canManageTemplates = CHECKLIST_TEMPLATE_MANAGERS.includes(user?.role)
+  const canDeleteTemplates = ["admin", "gerente_general", "gerente"].includes(user?.role)
   const [section, setSection] = useState(initialChecklistView === "run" ? "today" : "today")
   const [templates, setTemplates] = useState([])
   const [runs, setRuns] = useState([])
@@ -645,6 +647,23 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
     refresh()
   }
 
+  async function removeTemplate(template) {
+    const confirmed = window.confirm("¿Seguro que deseas eliminar esta checklist? Esta acción no se puede deshacer.")
+    if (!confirmed) return
+
+    const result = await deleteChecklistTemplate(template.id)
+    if (result.error) return setMessage(result.error.message || "No se pudo eliminar la checklist.")
+
+    if (result.mode === "deactivated") {
+      setTemplates((current) => current.map((item) => item.id === template.id ? { ...item, status: "inactive" } : item))
+      setMessage("Esta checklist ya tiene historial. Se desactivará para conservar los reportes.")
+      return
+    }
+
+    setTemplates((current) => current.filter((item) => item.id !== template.id))
+    setMessage("Checklist eliminada.")
+  }
+
   async function startRun(runId) {
     const result = await startChecklistRun(runId)
     if (result.error) return setMessage(result.error.message || "No se pudo iniciar la checklist.")
@@ -705,6 +724,8 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
           onAssignToday={assignToday}
           onDuplicate={duplicateTemplate}
           onDeactivate={deactivate}
+          onDelete={removeTemplate}
+          canDelete={canDeleteTemplates}
         />
       )}
       {section === "create" && canManageTemplates && (
@@ -776,7 +797,7 @@ function ChecklistTodayCard({ run, profiles, onOpen }) {
   )
 }
 
-function ChecklistTemplatesView({ templates, profiles, onEdit, onAssign, onAssignToday, onDuplicate, onDeactivate }) {
+function ChecklistTemplatesView({ templates, profiles, onEdit, onAssign, onAssignToday, onDuplicate, onDeactivate, onDelete, canDelete }) {
   const [filters, setFilters] = useState({ area: "", frequency: "", status: "" })
   const [assigning, setAssigning] = useState(null)
   const filtered = templates.filter((template) =>
@@ -808,6 +829,7 @@ function ChecklistTemplatesView({ templates, profiles, onEdit, onAssign, onAssig
               <button type="button" className="tasks-secondary" onClick={() => onAssignToday(template)}>Asignar hoy</button>
               <button type="button" className="tasks-secondary" disabled>Programar recurrencia: Proximamente</button>
               {template.status === "active" && <button type="button" className="tasks-link danger" onClick={() => onDeactivate(template.id)}>Desactivar</button>}
+              {canDelete && <button type="button" className="tasks-link danger" onClick={() => onDelete(template)}>Eliminar</button>}
             </div>
           </article>
         ))}

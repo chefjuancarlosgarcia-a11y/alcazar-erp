@@ -105,6 +105,25 @@ export function deactivateChecklistTemplate(id) {
     .single()
 }
 
+export async function deleteChecklistTemplate(id) {
+  const { count, error: countError } = await supabase
+    .from("checklist_runs")
+    .select("id", { count: "exact", head: true })
+    .eq("template_id", id)
+  if (countError) return { data: null, error: countError, mode: "error" }
+
+  if (Number(count || 0) > 0) {
+    const { data, error } = await deactivateChecklistTemplate(id)
+    return { data: orderTemplate(data), error, mode: "deactivated" }
+  }
+
+  const { error } = await supabase
+    .from("checklist_templates")
+    .delete()
+    .eq("id", id)
+  return { data: { id }, error, mode: "deleted" }
+}
+
 export async function getChecklistRuns(filters = {}) {
   let query = supabase.from("checklist_runs").select(RUN_SELECT)
   if (filters.date) query = query.eq("run_date", filters.date)
