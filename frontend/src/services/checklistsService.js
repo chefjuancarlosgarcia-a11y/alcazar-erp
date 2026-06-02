@@ -44,6 +44,86 @@ function itemPayload(item, index, templateId) {
   }
 }
 
+function requestPayload(payload, items) {
+  return {
+    template_id: payload.template_id || null,
+    request_type: payload.request_type || (payload.template_id ? "update" : "create"),
+    status: "draft",
+    title: payload.title?.trim(),
+    description: payload.description?.trim() || null,
+    area: payload.area || null,
+    assigned_role: payload.assigned_role || null,
+    assigned_profile_id: payload.assigned_profile_id || null,
+    frequency: payload.frequency || "manual",
+    shift_context: payload.shift_context || "general",
+    status_after_approval: payload.status_after_approval || payload.status || "active",
+    items_snapshot: (items || []).map((item, index) => ({
+      item_order: index,
+      title: item.title?.trim(),
+      description: item.description?.trim() || "",
+      response_type: item.response_type || "checkbox",
+      is_required: item.is_required !== false,
+      requires_photo: Boolean(item.requires_photo),
+      requires_comment: Boolean(item.requires_comment),
+      score_points: Math.max(0, Number(item.score_points || 0))
+    })).filter((item) => item.title)
+  }
+}
+
+export async function createChecklistChangeRequest(payload, items) {
+  const { data, error } = await supabase
+    .from("checklist_template_change_requests")
+    .insert(requestPayload(payload, items))
+    .select("*")
+    .single()
+  return { data, error }
+}
+
+export async function updateChecklistChangeRequest(id, payload, items) {
+  const { data, error } = await supabase
+    .from("checklist_template_change_requests")
+    .update(requestPayload(payload, items))
+    .eq("id", id)
+    .select("*")
+    .single()
+  return { data, error }
+}
+
+export async function submitChecklistChangeRequest(id) {
+  const result = await supabase.rpc("submit_checklist_change_request", { p_request_id: id })
+  window.dispatchEvent(new CustomEvent("notifications-updated"))
+  return result
+}
+
+export async function getChecklistChangeRequests(filters = {}) {
+  let query = supabase
+    .from("checklist_template_change_requests")
+    .select("*")
+    .order("created_at", { ascending: false })
+  if (filters.status) query = query.eq("status", filters.status)
+  if (filters.templateId) query = query.eq("template_id", filters.templateId)
+  const { data, error } = await query
+  return { data: data || [], error }
+}
+
+export async function approveChecklistChangeRequest(id, reviewNotes = "") {
+  const result = await supabase.rpc("approve_checklist_change_request", {
+    p_request_id: id,
+    p_review_notes: reviewNotes || null
+  })
+  window.dispatchEvent(new CustomEvent("notifications-updated"))
+  return result
+}
+
+export async function rejectChecklistChangeRequest(id, reviewNotes) {
+  const result = await supabase.rpc("reject_checklist_change_request", {
+    p_request_id: id,
+    p_review_notes: reviewNotes
+  })
+  window.dispatchEvent(new CustomEvent("notifications-updated"))
+  return result
+}
+
 export async function getChecklistTemplates() {
   const { data, error } = await supabase
     .from("checklist_templates")
@@ -114,7 +194,7 @@ export async function deleteChecklistTemplate(id) {
 
   if (Number(count || 0) > 0) {
     const { data, error } = await deactivateChecklistTemplate(id)
-    return { data: orderTemplate(data), error, mode: "deactivated" }
+    return { data: orderTemplate(data), error, mode: "archived" }
   }
 
   const { error } = await supabase

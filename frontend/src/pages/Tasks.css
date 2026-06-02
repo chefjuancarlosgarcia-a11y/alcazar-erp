@@ -890,6 +890,68 @@
   font-size: 13px;
 }
 
+.checklist-approvals-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, .9fr) minmax(320px, 1.1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.checklist-approval-card {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid #26384e;
+  border-radius: 13px;
+  background: #101c30;
+  color: #e2e8f0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.checklist-approval-card.selected {
+  border-color: #14b8a6;
+  background: #102a31;
+}
+
+.checklist-approval-card small {
+  color: #94a3b8;
+}
+
+.checklist-approval-detail {
+  position: sticky;
+  top: 84px;
+}
+
+.checklist-compare-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.checklist-version-box {
+  display: grid;
+  gap: 6px;
+  padding: 13px;
+  border: 1px solid #26384e;
+  border-radius: 12px;
+  background: #101c30;
+}
+
+.checklist-version-box.proposed {
+  border-color: #0f766e;
+  background: #102a31;
+}
+
+.checklist-version-box span {
+  color: #f8fafc;
+  font-weight: 800;
+}
+
+.checklist-version-box small {
+  color: #94a3b8;
+}
+
 .checklists-empty-card {
   display: grid;
   gap: 8px;
@@ -940,11 +1002,13 @@
   }
 
   .tasks-assignment,
-  .tasks-dashboard-columns {
+  .tasks-dashboard-columns,
+  .checklist-approvals-layout {
     grid-template-columns: 1fr;
   }
 
-  .tasks-assignment-summary {
+  .tasks-assignment-summary,
+  .checklist-approval-detail {
     position: static;
   }
 }
@@ -975,7 +1039,8 @@
   }
 
   .checklist-sticky-actions,
-  .checklist-wizard-actions {
+  .checklist-wizard-actions,
+  .checklist-compare-grid {
     grid-template-columns: 1fr;
     display: grid;
   }

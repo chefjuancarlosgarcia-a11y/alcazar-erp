@@ -100,6 +100,8 @@ function NotificationsBell({ currentUser }) {
                   {notification.entity_type === "purchase_order" && <button type="button" onClick={() => viewEntity(notification)}>Ver orden</button>}
                   {["employee_schedule", "schedule_week"].includes(notification.entity_type) && <button type="button" onClick={() => viewEntity(notification)}>Ver horario</button>}
                   {notification.entity_type === "checklist_run" && <button type="button" onClick={() => viewEntity(notification)}>Abrir checklist</button>}
+                  {notification.entity_type === "checklist_template_change_request" && <button type="button" onClick={() => viewEntity(notification)}>Revisar solicitud</button>}
+                  {notification.action_url && !["purchase_order", "employee_schedule", "schedule_week", "checklist_run", "checklist_template_change_request"].includes(notification.entity_type) && <button type="button" onClick={() => viewEntity(notification)}>Abrir</button>}
                   {notification.entity_type === "purchase_order" && notification.type === "purchase_order_pending" && APPROVAL_ROLES.includes(currentUser?.role) && (
                     <>
                       <button type="button" className="approve" onClick={() => processOrder(notification, "approve")}>Aprobar</button>
