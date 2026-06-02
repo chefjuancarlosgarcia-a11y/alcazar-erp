@@ -1081,76 +1081,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
     { username: "colaborador", passwordHash: "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4", nombre: "Colaborador autorizado" }
   ]
 
-  const [users, setUsers] = useState(() => {
-    const datos = localStorage.getItem("users")
-    if (datos) {
-      try {
-        const parsed = JSON.parse(datos)
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed
-      } catch {
-        // ignore malformed stored users
-      }
-    }
-    // default admin user if none — Chef Juan Carlos Garcia
-    return [
-      {
-        id: Date.now(),
-        nombre: "Chef Juan Carlos Garcia",
-        username: "admin",
-        correo: "chefjuancarlosgarcia@gmail.com",
-        telefono: "",
-        puesto: "CEO / Administrador del sistema",
-        departamento: "Administración",
-        rol: "Administrador",
-        password: "9a31944c487c1d730c65ae7915827f5c066450440a39724be7a635d54b7cc89c",
-        activo: true,
-        creadoEn: new Date().toLocaleString(),
-        ultimaEdicion: new Date().toLocaleString(),
-        creadoPor: "sistema",
-        observaciones: "Cuenta administrador inicial",
-        auth: {
-          username: "admin",
-          passwordHash: "9a31944c487c1d730c65ae7915827f5c066450440a39724be7a635d54b7cc89c",
-          temporaryPassword: "",
-          mustChangePassword: false,
-          lastLogin: null,
-          isOnline: false,
-          status: "active"
-        }
-      }
-    ]
-  })
-
-  useEffect(() => {
-    let cancelado = false
-    async function recuperarUsuariosLocalhost() {
-      if (localStorage.getItem("usersRecoveryAppliedLocalhost5173")) return
-      try {
-        const respuesta = await fetch("/recovered-users-localhost-5173.json")
-        if (!respuesta.ok) return
-        const recuperados = await respuesta.json()
-        if (!Array.isArray(recuperados) || recuperados.length === 0) return
-        const actuales = JSON.parse(localStorage.getItem("users") || "[]")
-        if (!Array.isArray(actuales) || actuales.length >= recuperados.length) return
-        const confirmar = window.confirm(`Se encontró un respaldo anterior con ${recuperados.length} usuarios. ¿Deseas restaurarlo ahora?`)
-        if (!confirmar || cancelado) return
-        const clavesRecuperadas = new Set(recuperados.map((usuario) => usuario.username || usuario.id).filter(Boolean))
-        const fusionados = [
-          ...recuperados,
-          ...actuales.filter((usuario) => !clavesRecuperadas.has(usuario.username || usuario.id))
-        ]
-        localStorage.setItem("users", JSON.stringify(fusionados))
-        localStorage.setItem("usersRecoveryAppliedLocalhost5173", "true")
-        setUsers(fusionados)
-      } catch {
-        // Si no existe respaldo local, la app continúa usando los usuarios actuales.
-      }
-    }
-    recuperarUsuariosLocalhost()
-    return () => {
-      cancelado = true
-    }
-  }, [])
+  const [users, setUsers] = useState([])
 
   const [userSearch, setUserSearch] = useState("")
   const [editUserId, setEditUserId] = useState(null)
@@ -1165,15 +1096,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
   const [passwordResetMode, setPasswordResetMode] = useState("auto")
   const [passwordResetManual, setPasswordResetManual] = useState("")
   const [passwordResetResult, setPasswordResetResult] = useState("")
-  const [accessRequests, setAccessRequests] = useState(() => {
-    try {
-      const stored = localStorage.getItem("accessRecoveryRequests")
-      const parsed = stored ? JSON.parse(stored) : []
-      return Array.isArray(parsed) ? parsed : []
-    } catch {
-      return []
-    }
-  })
+  const [accessRequests, setAccessRequests] = useState([])
   const [colaboradorPerfilId, setColaboradorPerfilId] = useState(null)
   const [perfilColaboradorEditando, setPerfilColaboradorEditando] = useState(false)
   const [mensajePerfilColaborador, setMensajePerfilColaborador] = useState("")
@@ -1267,14 +1190,6 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
     },
     estado: "Activo"
   })
-  useEffect(() => {
-    localStorage.setItem("users", JSON.stringify(users))
-  }, [users])
-
-  useEffect(() => {
-    localStorage.setItem("accessRecoveryRequests", JSON.stringify(accessRequests))
-  }, [accessRequests])
-
   useEffect(() => {
     localStorage.setItem("asistenciaMovimientos", JSON.stringify(asistenciaMovimientos))
   }, [asistenciaMovimientos])

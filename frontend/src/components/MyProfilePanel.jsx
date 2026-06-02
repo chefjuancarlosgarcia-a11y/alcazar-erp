@@ -6,21 +6,15 @@ import { useAuth } from "../context/AuthContext"
 import "./MyProfilePanel.css"
 
 function loadManagedProfile(user) {
-  try {
-    const users = JSON.parse(localStorage.getItem("users") || "[]")
-    const legacyProfile = Array.isArray(users) ? users.find((item) => item.id === user?.id) || null : null
-    if (!legacyProfile) return null
-    return {
-      ...legacyProfile,
-      nombre: user?.name || legacyProfile.nombre,
-      correo: user?.email || legacyProfile.correo,
-      telefono: user?.phone || legacyProfile.telefono,
-      fotoColaborador: user?.avatar || legacyProfile.fotoColaborador,
-      rol: user?.legacyRole || legacyProfile.rol,
-      departamento: user?.areaName || user?.areaId || legacyProfile.departamento
-    }
-  } catch {
-    return null
+  if (!user) return null
+  return {
+    id: user.id,
+    nombre: user.name,
+    correo: user.email,
+    telefono: user.phone,
+    fotoColaborador: user.avatar,
+    rol: user.legacyRole,
+    departamento: user.areaName || user.areaId
   }
 }
 

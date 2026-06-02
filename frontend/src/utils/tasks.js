@@ -356,32 +356,7 @@ export function withComputedTaskStatus(task) {
 }
 
 export function updateTaskPerformance(tasks) {
-  const users = parseArray("users")
-  if (!users.length) return
-  const updated = users.map((user) => {
-    const id = user.id || user.username
-    const own = tasks.filter((task) => (task.assignedTo || []).includes(id))
-    if (!own.length) return user
-    const completed = own.filter((task) => task.status === "completed")
-    const late = own.filter((task) => task.status === "late")
-    const evidenceTasks = completed.filter((task) => task.evidenceRequired)
-    const minutes = completed.map((task) => {
-      if (!task.completedAt || !task.createdAt) return Number(task.estimatedMinutes) || 0
-      return Math.round((new Date(task.completedAt) - new Date(task.createdAt)) / 60000)
-    })
-    return {
-      ...user,
-      taskPerformance: {
-        assignedCount: own.length,
-        completedCount: completed.length,
-        lateCount: late.length,
-        completionRate: Math.round((completed.length / own.length) * 100),
-        averageCompletionTime: minutes.length ? Math.round(minutes.reduce((sum, minute) => sum + minute, 0) / minutes.length) : 0,
-        evidenceCompliance: evidenceTasks.length ? Math.round((evidenceTasks.filter((task) => task.evidenceFiles?.length).length / evidenceTasks.length) * 100) : 100
-      }
-    }
-  })
-  localStorage.setItem("users", JSON.stringify(updated))
+  return tasks
 }
 
 export function taskMatchesUser(task, user) {

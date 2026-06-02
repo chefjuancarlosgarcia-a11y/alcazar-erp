@@ -62,6 +62,20 @@ const LEGACY_ROLE_NAMES = {
 
 const AuthContext = createContext(null)
 
+const LEGACY_USER_STORAGE_KEYS = [
+  "users",
+  "usuarios",
+  "users_backup",
+  "usuarios_backup",
+  "profiles_backup",
+  "usersRecoveryAppliedLocalhost5173",
+  "accessRecoveryRequests"
+]
+
+function cleanupLegacyUserStorage() {
+  LEGACY_USER_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key))
+}
+
 function normalizeRole(role) {
   const normalized = String(role || "colaborador").trim().toLowerCase()
   return ROLE_PERMISSIONS[normalized] ? normalized : "colaborador"
@@ -92,6 +106,7 @@ export function normalizeProfileToCurrentUser(profile, sessionUser) {
 }
 
 function syncLegacyUser(user) {
+  cleanupLegacyUserStorage()
   localStorage.removeItem("authUser")
   if (!user) {
     localStorage.removeItem("usuarioActual")

@@ -15,17 +15,6 @@ const roleNames = {
   mesero: "Servicio"
 }
 
-function getManagedProfile(currentUser) {
-  if (!currentUser?.id) return null
-
-  try {
-    const users = JSON.parse(localStorage.getItem("users") || "[]")
-    return Array.isArray(users) ? users.find((user) => user.id === currentUser.id) : null
-  } catch {
-    return null
-  }
-}
-
 function getInitials(name) {
   return String(name || "Usuario")
     .trim()
@@ -52,18 +41,17 @@ function UserProfileDropdown({ currentUser, onOpenProfile }) {
   const [isOpen, setIsOpen] = useState(false)
   const taskUserId = getCurrentUserTaskId(currentUser)
   const [taskNotifications, setTaskNotifications] = useState(() => loadTaskNotifications().filter((notification) => notification.userId === taskUserId))
-  const managedProfile = getManagedProfile(currentUser)
   const profile = useMemo(() => ({
-    name: currentUser?.name || managedProfile?.nombre || "Usuario",
-    username: currentUser?.username || managedProfile?.username || "",
-    email: currentUser?.email || managedProfile?.correo || "",
-    avatar: currentUser?.avatar || managedProfile?.fotoColaborador || "",
+    name: currentUser?.name || "Usuario",
+    username: currentUser?.username || "",
+    email: currentUser?.email || "",
+    avatar: currentUser?.avatar || "",
     role: currentUser?.legacyRole || roleNames[currentUser?.role] || "Usuario",
     auth: {
-      isOnline: currentUser?.auth?.isOnline ?? managedProfile?.auth?.isOnline ?? true,
-      lastLogin: currentUser?.auth?.lastLogin || managedProfile?.auth?.lastLogin || null
+      isOnline: currentUser?.auth?.isOnline ?? true,
+      lastLogin: currentUser?.auth?.lastLogin || null
     }
-  }), [currentUser, managedProfile])
+  }), [currentUser])
   const lastLogin = formatLastLogin(profile.auth.lastLogin)
   const isManager = ["admin", "gerente", "gerente_general"].includes(currentUser?.role) ||
     ["Administrador", "Gerente General"].includes(currentUser?.legacyRole)
