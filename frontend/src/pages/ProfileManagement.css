@@ -506,3 +506,60 @@
     flex-direction: column;
   }
 }
+
+/* New Role Modal Styles */
+.profiles-role-select-container {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.profiles-role-select-container select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.profiles-add-role-btn {
+  flex-shrink: 0;
+  padding: 8px 14px;
+  border: 1px solid #2dd4bf;
+  border-radius: 6px;
+  background: transparent;
+  color: #2dd4bf;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.profiles-add-role-btn:hover {
+  background: #082825;
+  border-color: #5eead4;
+  color: #5eead4;
+}
+
+.profiles-add-role-btn:active {
+  background: #0f3d38;
+}
+
+.new-role-modal {
+  width: min(600px, 100%);
+}
+
+.new-role-modal textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #1f5961;
+  border-radius: 6px;
+  background: #0b1424;
+  color: #cbd5e1;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.new-role-modal textarea:focus {
+  outline: none;
+  border-color: #2dd4bf;
+  box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.1);
+}
+

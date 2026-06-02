@@ -15,8 +15,8 @@ import {
 } from "../services/schedulesService"
 import "./ScheduleManagement.css"
 
-const EDITOR_ROLES = ["admin", "gerente_general", "rrhh", "gerente"]
-const PUBLISHER_ROLES = ["admin", "gerente_general", "rrhh"]
+const EDITOR_ROLES = ["admin", "gerente_general", "recursos_humanos", "gerente"]
+const PUBLISHER_ROLES = ["admin", "gerente_general", "recursos_humanos"]
 const DAYS = ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado", "Domingo"]
 const DEFAULT_AREAS = ["Cocina", "Servicio", "Barra", "Cafeteria", "Panaderia", "Reposteria", "Mise en Place", "Almacen", "Caja", "Limpieza", "Administracion", "Otro"]
 const SHIFT_TYPES = {

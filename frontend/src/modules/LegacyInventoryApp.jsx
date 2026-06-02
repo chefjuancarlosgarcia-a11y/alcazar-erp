@@ -44,6 +44,7 @@ import {
   obtenerMetodoPagoPreferido
 } from "../utils"
 import { normalizeProductionArea } from "../utils/posProduction"
+import { normalizeRole } from "../utils/profilePermissions"
 
 function readLocalSuppliers() {
   try {
@@ -1351,7 +1352,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
       activo: true
     })))
 
-    const canReviewEvidence = ["admin", "gerente_general", "rrhh"].includes(authenticatedUser?.role)
+    const canReviewEvidence = ["admin", "gerente_general", "recursos_humanos"].includes(normalizeRole(authenticatedUser?.role))
     const { data: marks, error: marksError } = await getAttendanceMarks(canReviewEvidence)
     if (!marksError) {
       setAsistenciaMovimientos((marks || []).map((mark) => {

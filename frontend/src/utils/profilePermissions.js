@@ -1,3 +1,5 @@
+// Default roles for backward compatibility
+// These should be kept in sync with the user_roles table
 export const PROFILE_ROLES = [
   "admin",
   "gerente_general",
@@ -27,6 +29,10 @@ export const PROFILE_ROLES = [
 
 export const PROFILE_STATUSES = ["active", "inactive", "suspended"]
 export const PROTECTED_PROFILE_ROLES = ["admin", "gerente_general"]
+
+// Dynamic roles cache
+let cachedRoles = null
+let cachedRolesLoadingPromise = null
 
 const ROLE_ALIASES = {
   administrador: "admin",
@@ -80,6 +86,78 @@ export function normalizeRole(role) {
   const normalized = stripAccents(role).replace(/[\s-]+/g, "_")
   const spaced = stripAccents(role).replace(/[_-]+/g, " ").replace(/\s+/g, " ")
   return ROLE_ALIASES[normalized] || ROLE_ALIASES[spaced] || normalized
+}
+
+/**
+ * Load dynamic roles from the database
+ * Caches the result to avoid repeated queries
+ */
+export async function loadDynamicRoles() {
+  if (cachedRoles) return cachedRoles
+
+  // If already loading, return the existing promise
+  if (cachedRolesLoadingPromise) return cachedRolesLoadingPromise
+
+  cachedRolesLoadingPromise = (async () => {
+    try {
+      const supabase = (await import("../services/supabaseClient.js")).default
+      const { data, error } = await supabase
+        .from("user_roles")
+        .select("role_key, role_name")
+        .eq("is_active", true)
+        .order("role_key", { ascending: true })
+
+      if (error) throw error
+
+      // Create a mapping of role_key to role_name for display
+      cachedRoles = {
+        keys: (data || []).map((r) => r.role_key),
+        names: (data || []).reduce((acc, r) => {
+          acc[r.role_key] = r.role_name
+          return acc
+        }, {})
+      }
+
+      return cachedRoles
+    } catch (error) {
+      console.error("Error loading dynamic roles:", error)
+      // Fallback to default roles
+      cachedRoles = {
+        keys: PROFILE_ROLES,
+        names: {}
+      }
+      return cachedRoles
+    } finally {
+      cachedRolesLoadingPromise = null
+    }
+  })()
+
+  return cachedRolesLoadingPromise
+}
+
+/**
+ * Clear the roles cache (useful for testing or after role updates)
+ */
+export function clearRolesCache() {
+  cachedRoles = null
+  cachedRolesLoadingPromise = null
+}
+
+/**
+ * Get all available role keys
+ * Tries to load from database, falls back to default list
+ */
+export async function getAllRoleKeys() {
+  const roles = await loadDynamicRoles()
+  return roles.keys || PROFILE_ROLES
+}
+
+/**
+ * Get role display name by key
+ */
+export function getRoleDisplayName(roleKey) {
+  if (!cachedRoles) return roleKey
+  return cachedRoles.names[roleKey] || roleKey
 }
 
 export function canAccessUserManagement(currentUser) {
@@ -136,9 +214,13 @@ export function canChangeRole(currentUser, targetProfile, newRole) {
 
 export function getAllowedAssignableRoles(currentUser) {
   const actorRole = normalizeRole(currentUser?.role)
-  if (actorRole === "admin") return PROFILE_ROLES
-  if (actorRole === "gerente_general") return PROFILE_ROLES.filter((role) => normalizeRole(role) !== "admin")
-  if (actorRole === "recursos_humanos") return PROFILE_ROLES.filter((role) => HR_ASSIGNABLE_ROLES.has(normalizeRole(role)))
+  
+  // Use cached roles if available, otherwise fallback to defaults
+  const availableRoles = cachedRoles?.keys || PROFILE_ROLES
+  
+  if (actorRole === "admin") return availableRoles
+  if (actorRole === "gerente_general") return availableRoles.filter((role) => normalizeRole(role) !== "admin")
+  if (actorRole === "recursos_humanos") return availableRoles.filter((role) => HR_ASSIGNABLE_ROLES.has(normalizeRole(role)))
   return []
 }
 

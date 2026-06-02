@@ -1,8 +1,24 @@
-﻿function Settings() {
+﻿import { useState } from "react"
+import RolesManagement from "./RolesManagement"
+import "./Settings.css"
+
+function Settings() {
+  const [activeTab, setActiveTab] = useState("roles")
+
   return (
-    <section style={pageStyle}>
-      <h1>Configuración</h1>
-      <p>Preferencias generales y ajustes del sistema.</p>
+    <section className="settings-page">
+      <nav className="settings-tabs">
+        <button
+          className={`settings-tab ${activeTab === "roles" ? "active" : ""}`}
+          onClick={() => setActiveTab("roles")}
+        >
+          Roles de Usuario
+        </button>
+      </nav>
+
+      <div className="settings-content">
+        {activeTab === "roles" && <RolesManagement />}
+      </div>
     </section>
   )
 }
@@ -13,4 +29,5 @@ const pageStyle = {
 }
 
 export default Settings
+
 

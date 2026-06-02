@@ -1,0 +1,55 @@
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  background: #071023;
+}
+
+.settings-tabs {
+  display: flex;
+  gap: 0;
+  padding: 0 28px;
+  border-bottom: 1px solid #264653;
+  background: #0f172a;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.settings-tab {
+  padding: 14px 20px;
+  border: none;
+  border-bottom: 3px solid transparent;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.settings-tab:hover {
+  color: #cbd5e1;
+  background: rgba(45, 212, 191, 0.05);
+}
+
+.settings-tab.active {
+  color: #2dd4bf;
+  border-bottom-color: #2dd4bf;
+}
+
+.settings-content {
+  flex: 1 1 auto;
+  overflow-y: auto;
+}
+
+@media (max-width: 640px) {
+  .settings-tabs {
+    padding: 0 16px;
+  }
+
+  .settings-tab {
+    padding: 12px 14px;
+    font-size: 13px;
+  }
+}

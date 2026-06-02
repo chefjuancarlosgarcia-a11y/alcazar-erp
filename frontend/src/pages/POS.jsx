@@ -46,7 +46,7 @@ const DEFAULT_POS_CATEGORIES = [
   { id: "barra", name: "Barra", description: "", productionAreaId: "barra", active: true, sortOrder: 6, color: "#38bdf8", icon: "🍹" },
   { id: "extras", name: "Extras", description: "", productionAreaId: "cocina", active: true, sortOrder: 7, color: "#a78bfa", icon: "🍟" }
 ]
-const POS_ROLES = ["admin", "gerente_general", "supervisor", "mesero", "cajero"]
+const POS_ROLES = ["admin", "gerente_general", "supervisor", "mesero", "caja"]
 const CROQUIS_ROLES = ["admin", "gerente", "gerente_general", "gerente_operaciones"]
 const CATEGORY_ADMIN_ROLES = ["admin", "gerente", "gerente_general", "gerente_operaciones"]
 const CATEGORY_ICON_OPTIONS = [

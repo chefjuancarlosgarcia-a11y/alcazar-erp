@@ -16,25 +16,25 @@ const navigationItems = [
 ]
 
 const inventorySubmenu = [
-  { roles: ["admin", "gerente", "gerente_general", "encargado_almacen", "cocina", "cocinero"], to: "/inventory?section=inventario", label: "Productos" },
-  { roles: ["admin", "gerente", "gerente_general", "supervisor", "encargado_area", "cocina", "cocinero"], to: "/inventory?section=requisicion", label: "Requisiciones" },
-  { roles: ["admin", "gerente", "gerente_general", "encargado_almacen", "cocina", "cocinero"], to: "/inventory?section=movimientosInventario", label: "Movimientos" },
-  { roles: ["admin", "gerente", "gerente_general", "encargado_almacen", "cocina", "cocinero"], to: "/inventory?section=inventarioAreas", label: "Inventario por áreas" },
+  { roles: ["admin", "gerente", "gerente_general", "encargado_almacen", "cocina"], to: "/inventory?section=inventario", label: "Productos" },
+  { roles: ["admin", "gerente", "gerente_general", "supervisor", "encargado_area", "cocina"], to: "/inventory?section=requisicion", label: "Requisiciones" },
+  { roles: ["admin", "gerente", "gerente_general", "encargado_almacen", "cocina"], to: "/inventory?section=movimientosInventario", label: "Movimientos" },
+  { roles: ["admin", "gerente", "gerente_general", "encargado_almacen", "cocina"], to: "/inventory?section=inventarioAreas", label: "Inventario por áreas" },
   { roles: ["admin", "gerente", "gerente_general"], to: "/inventory?section=areas", label: "Administrar áreas" },
   { roles: ["admin", "gerente", "gerente_general", "encargado_almacen"], to: "/inventory?section=ordenes", label: "Órdenes de compra" },
-  { roles: ["admin", "gerente", "gerente_general", "encargado_almacen", "rrhh", "recursos_humanos"], to: "/inventory?section=proveedores", label: "Proveedores" },
+  { roles: ["admin", "gerente", "gerente_general", "encargado_almacen", "recursos_humanos"], to: "/inventory?section=proveedores", label: "Proveedores" },
   { roles: ["admin", "gerente", "gerente_general", "supervisor"], to: "/inventory?section=recetas", label: "Recetas estandarizadas" }
 ]
 
 const hrSubmenu = [
-  { roles: ["admin", "gerente", "gerente_general", "rrhh"], to: "/hr?section=usuarios", label: "Colaboradores" },
-  { roles: ["admin", "gerente", "gerente_general", "rrhh", "supervisor", "cajero", "mesero", "cocina", "cocinero", "barista", "bartender", "pizzero", "repostero", "panadero", "colaborador"], to: "/hr?section=horarios", label: "Horarios" },
-  { roles: ["admin", "gerente", "gerente_general", "rrhh", "mesero", "cocina", "cocinero"], to: "/hr?section=asistencia", label: "Marcaje de asistencia" },
-  { roles: ["admin", "gerente", "gerente_general", "rrhh"], to: "/hr?section=reportesAsistencia", label: "Reportes de asistencia" }
+  { roles: ["admin", "gerente", "gerente_general", "recursos_humanos"], to: "/hr?section=usuarios", label: "Colaboradores" },
+  { roles: ["admin", "gerente", "gerente_general", "recursos_humanos", "supervisor", "caja", "mesero", "cocina", "barista", "bartender", "pizzeria", "repostero", "panadero", "colaborador"], to: "/hr?section=horarios", label: "Horarios" },
+  { roles: ["admin", "gerente", "gerente_general", "recursos_humanos", "mesero", "cocina"], to: "/hr?section=asistencia", label: "Marcaje de asistencia" },
+  { roles: ["admin", "gerente", "gerente_general", "recursos_humanos"], to: "/hr?section=reportesAsistencia", label: "Reportes de asistencia" }
 ]
 
 const posSubmenu = [
-  { roles: ["admin", "gerente", "gerente_general", "mesero", "supervisor", "cajero"], to: "/pos?section=pos", label: "Punto de Venta" },
+  { roles: ["admin", "gerente", "gerente_general", "mesero", "supervisor", "caja"], to: "/pos?section=pos", label: "Punto de Venta" },
   { roles: ["admin", "gerente", "gerente_general", "supervisor"], to: "/pos?section=agregar-item", label: "Agregar item" },
   { roles: ["admin", "gerente", "gerente_general", "gerente_operaciones"], to: "/pos?section=categorias", label: "Secciones del menú" },
   { roles: ["admin", "gerente", "gerente_general", "gerente_operaciones"], to: "/pos?section=croquis", label: "Croquis del restaurante" }

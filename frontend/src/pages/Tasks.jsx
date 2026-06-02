@@ -44,10 +44,11 @@ import {
   updateTaskPerformance,
   withComputedTaskStatus
 } from "../utils/tasks"
+import { normalizeRole } from "../utils/profilePermissions"
 import "./Tasks.css"
 
 const TODAY = new Date().toISOString().slice(0, 10)
-const MANAGEMENT_ROLES = ["admin", "gerente", "gerente_general", "rrhh", "supervisor"]
+const MANAGEMENT_ROLES = ["admin", "gerente", "gerente_general", "recursos_humanos", "supervisor"]
 const ADMIN_TABS = [
   ["dashboard", "Dashboard"],
   ["bank", "Banco de tareas"],
@@ -91,7 +92,7 @@ const EMPTY_TEMPLATE = {
 function Tasks() {
   const { user } = useAuth()
   const [params, setParams] = useSearchParams()
-  const isManager = MANAGEMENT_ROLES.includes(user?.role)
+  const isManager = MANAGEMENT_ROLES.includes(normalizeRole(user?.role))
   const [templates, setTemplates] = useState(loadTaskTemplates)
   const [editingTemplate, setEditingTemplate] = useState(null)
   const [assignedTasks, setAssignedTasks] = useState(loadAssignedTasks)

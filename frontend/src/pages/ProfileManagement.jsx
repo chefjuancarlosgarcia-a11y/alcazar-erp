@@ -18,8 +18,11 @@ import {
   canEditUserRole,
   canManageAttendancePinForUser,
   canManageUsers,
-  getAllowedAssignableRoles
+  getAllowedAssignableRoles,
+  loadDynamicRoles,
+  getRoleDisplayName
 } from "../utils/profilePermissions"
+import * as userRolesService from "../services/userRolesService"
 import "./ProfileManagement.css"
 
 const EMPTY_FORM = {
@@ -105,16 +108,41 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
   const [pinGeneratedAutomatically, setPinGeneratedAutomatically] = useState(false)
   const [saving, setSaving] = useState(false)
   const [creating, setCreating] = useState(false)
+  
+  // Dynamic roles state
+  const [dynamicRoles, setDynamicRoles] = useState([])
+  const [rolesLoading, setRolesLoading] = useState(true)
+  const [showNewRoleModal, setShowNewRoleModal] = useState(false)
+  const [newRoleForm, setNewRoleForm] = useState({
+    role_name: "",
+    category: "Personalizado",
+    description: ""
+  })
+  const [newRoleError, setNewRoleError] = useState("")
+  const [newRoleCreating, setNewRoleCreating] = useState(false)
+  const [createdRoleKey, setCreatedRoleKey] = useState("")
 
   const canManage = canManageUsers(user)
-  const assignableRoles = useMemo(() => getAllowedAssignableRoles(user), [user])
+  const assignableRoles = useMemo(() => {
+    const availableRoleKeys = dynamicRoles.map((r) => r.role_key)
+    const allowed = getAllowedAssignableRoles(user)
+    // Filter allowed roles by what's available in dynamicRoles
+    return allowed.length > 0 ? allowed.filter((role) => availableRoleKeys.includes(role)) : availableRoleKeys
+  }, [user, dynamicRoles])
   const canEditCurrent = editingProfile ? canEditUser(user, editingProfile) : false
   const canManageCurrentPin = editingProfile ? canManageAttendancePinForUser(user, editingProfile) : false
   const currentIsReadOnly = editingProfile && !canEditCurrent
 
+  // Helper function to get role display name
+  const getRoleName = (roleKey) => {
+    const role = dynamicRoles.find((r) => r.role_key === roleKey)
+    return role?.role_name || ROLE_NAMES[roleKey] || roleKey
+  }
+
   useEffect(() => {
     loadProfiles({ silent: true })
     loadAreas()
+    loadRoles()
   }, [])
 
   useEffect(() => {
@@ -150,6 +178,77 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
       return
     }
     setAreaOptions(data || [])
+  }
+
+  async function loadRoles() {
+    try {
+      setRolesLoading(true)
+      const roles = await userRolesService.getUserRoles()
+      setDynamicRoles(roles || [])
+      // Also load the dynamic roles cache for profile permissions
+      await loadDynamicRoles()
+    } catch (err) {
+      console.error("Error loading roles:", err)
+      // Fall back to default roles
+      setDynamicRoles(PROFILE_ROLES.map((key) => ({
+        role_key: key,
+        role_name: key,
+        is_system: true,
+        is_active: true
+      })))
+    } finally {
+      setRolesLoading(false)
+    }
+  }
+
+  async function createNewRole() {
+    try {
+      setNewRoleError("")
+      if (!newRoleForm.role_name.trim()) {
+        setNewRoleError("El nombre del rol es obligatorio")
+        return
+      }
+
+      setNewRoleCreating(true)
+      const role = await userRolesService.createUserRole({
+        role_name: newRoleForm.role_name.trim(),
+        category: newRoleForm.category || "Personalizado",
+        description: newRoleForm.description || ""
+      })
+
+      // Update dynamic roles
+      const updatedRoles = await userRolesService.getUserRoles()
+      setDynamicRoles(updatedRoles || [])
+
+      // Clear form and close modal
+      setCreatedRoleKey(role.role_key)
+      setNewRoleForm({ role_name: "", category: "Personalizado", description: "" })
+      
+      setModalMessage(`Rol "${role.role_name}" creado exitosamente. Ahora está disponible para asignar.`)
+      
+      // Auto-close modal after 2 seconds
+      setTimeout(() => {
+        setShowNewRoleModal(false)
+        setModalMessage("")
+      }, 2000)
+    } catch (err) {
+      console.error("Error creating role:", err)
+      setNewRoleError(err.message || "Error al crear el rol")
+    } finally {
+      setNewRoleCreating(false)
+    }
+  }
+
+  function openNewRoleModal() {
+    setNewRoleForm({ role_name: "", category: "Personalizado", description: "" })
+    setNewRoleError("")
+    setShowNewRoleModal(true)
+  }
+
+  function closeNewRoleModal() {
+    setShowNewRoleModal(false)
+    setNewRoleForm({ role_name: "", category: "Personalizado", description: "" })
+    setNewRoleError("")
   }
 
   function openEdit(profile) {
@@ -587,7 +686,7 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
         <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar por nombre, usuario o correo..." />
         <select value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)}>
           <option value="">Todos los roles</option>
-          {PROFILE_ROLES.map((role) => <option key={role} value={role}>{ROLE_NAMES[role] || role}</option>)}
+          {dynamicRoles.map((role) => <option key={role.role_key} value={role.role_key}>{role.role_name || role.role_key}</option>)}
         </select>
         <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
           <option value="">Todos los estados</option>
@@ -671,9 +770,25 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
               <FormSection title="Rol y acceso">
                 <div className="profiles-form-grid">
                   <Field label="Rol">
-                    <select value={form.role} onChange={(event) => updateField("role", event.target.value)} disabled={saving || !canEditUserRole(user, editingProfile)}>
-                      {PROFILE_ROLES.map((role) => <option key={role} value={role} disabled={!canAssignUserRole(user, editingProfile, role)}>{ROLE_NAMES[role] || role}</option>)}
-                    </select>
+                    <div className="profiles-role-select-container">
+                      <select value={form.role} onChange={(event) => updateField("role", event.target.value)} disabled={saving || !canEditUserRole(user, editingProfile)}>
+                        {dynamicRoles.map((role) => (
+                          <option key={role.role_key} value={role.role_key} disabled={!canAssignUserRole(user, editingProfile, role.role_key)}>
+                            {role.role_name || role.role_key}
+                          </option>
+                        ))}
+                      </select>
+                      {canManageUsers(user) && (
+                        <button 
+                          type="button" 
+                          className="profiles-add-role-btn"
+                          onClick={openNewRoleModal}
+                          title="Crear un nuevo rol"
+                        >
+                          + Crear rol
+                        </button>
+                      )}
+                    </div>
                   </Field>
                   <Field label="Estado">
                     <select value={form.status} onChange={(event) => updateField("status", event.target.value)} disabled={saving || !canDeactivateUser(user, editingProfile)}>
@@ -758,6 +873,73 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
         </div>
       )}
 
+      {showNewRoleModal && (
+        <div className="profiles-modal-overlay">
+          <div className="profiles-modal new-role-modal">
+            <header className="profiles-modal-header">
+              <div>
+                <p className="profiles-eyebrow">Nuevo rol</p>
+                <h2>Crear rol personalizado</h2>
+              </div>
+              <button type="button" onClick={closeNewRoleModal} disabled={newRoleCreating}>Cerrar</button>
+            </header>
+
+            <div className="profiles-modal-body">
+              <FormSection title="Información del rol">
+                <div className="profiles-form-grid">
+                  <Field label="Nombre del rol *">
+                    <input 
+                      type="text"
+                      value={newRoleForm.role_name}
+                      onChange={(e) => setNewRoleForm({ ...newRoleForm, role_name: e.target.value })}
+                      placeholder="Ej: Closing Concierge"
+                      disabled={newRoleCreating}
+                      required
+                    />
+                  </Field>
+                  <Field label="Categoría">
+                    <input 
+                      type="text"
+                      value={newRoleForm.category}
+                      onChange={(e) => setNewRoleForm({ ...newRoleForm, category: e.target.value })}
+                      placeholder="Ej: Servicio"
+                      disabled={newRoleCreating}
+                    />
+                  </Field>
+                  <Field label="Descripción">
+                    <textarea 
+                      value={newRoleForm.description}
+                      onChange={(e) => setNewRoleForm({ ...newRoleForm, description: e.target.value })}
+                      placeholder="Descripción opcional del rol"
+                      disabled={newRoleCreating}
+                      rows="3"
+                    />
+                  </Field>
+                </div>
+              </FormSection>
+
+              <div className="profiles-modal-feedback">
+                {newRoleError && <span className="profiles-error" role="alert">{newRoleError}</span>}
+              </div>
+            </div>
+
+            <footer className="profiles-modal-actions">
+              <button type="button" className="profiles-secondary" onClick={closeNewRoleModal} disabled={newRoleCreating}>
+                Cancelar
+              </button>
+              <button 
+                type="button" 
+                className="profiles-primary" 
+                onClick={createNewRole} 
+                disabled={newRoleCreating || !newRoleForm.role_name.trim()}
+              >
+                {newRoleCreating ? "Creando..." : "Crear rol"}
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
+
       {showCreate && (
         <div className="profiles-modal-overlay">
           <form className="profiles-modal create" onSubmit={createUser}>
@@ -774,9 +956,27 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
               <FormSection title="Rol y acceso">
                 <div className="profiles-form-grid">
                   <Field label="Rol">
-                    <select value={createForm.role} onChange={(event) => updateCreateField("role", event.target.value)} disabled={creating}>
-                      {assignableRoles.map((role) => <option key={role} value={role}>{ROLE_NAMES[role] || role}</option>)}
-                    </select>
+                    <div className="profiles-role-select-container">
+                      <select value={createForm.role} onChange={(event) => updateCreateField("role", event.target.value)} disabled={creating}>
+                        {dynamicRoles
+                          .filter((role) => assignableRoles.includes(role.role_key))
+                          .map((role) => (
+                            <option key={role.role_key} value={role.role_key}>
+                              {role.role_name || role.role_key}
+                            </option>
+                          ))}
+                      </select>
+                      {canManageUsers(user) && (
+                        <button 
+                          type="button" 
+                          className="profiles-add-role-btn"
+                          onClick={openNewRoleModal}
+                          title="Crear un nuevo rol"
+                        >
+                          + Crear rol
+                        </button>
+                      )}
+                    </div>
                   </Field>
                   <Field label="Estado">
                     <select value={createForm.status} onChange={(event) => updateCreateField("status", event.target.value)} disabled={creating}>
