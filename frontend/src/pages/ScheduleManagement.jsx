@@ -22,7 +22,8 @@ const DEFAULT_AREAS = ["Cocina", "Servicio", "Barra", "Cafeteria", "Panaderia", 
 const SHIFT_TYPES = {
   full: "Turno completo",
   half: "Medio turno",
-  rest: "Descanso"
+  rest: "Descanso",
+  asueto: "Asueto"
 }
 const ATTENDANCE_STATUS = {
   completo: "Completo",
@@ -30,6 +31,7 @@ const ATTENDANCE_STATUS = {
   falta: "Falta",
   incompleto: "Incompleto",
   descanso: "Descanso",
+  asueto: "Asueto",
   medio_turno: "Medio turno",
   horas_extra: "Horas extra"
 }
@@ -181,7 +183,7 @@ function ScheduleManagement() {
       end_time: trimTime(template.end_time),
       break_minutes: template.break_minutes,
       is_work_day: true,
-      shift_type: current.shift_type === "rest" ? "full" : current.shift_type,
+      shift_type: isNonWorkShift(current) ? "full" : current.shift_type,
       area: template.area || current.area
     }) : ({ ...current, template: value }))
   }
@@ -189,7 +191,7 @@ function ScheduleManagement() {
   async function persistSchedule(event) {
     event.preventDefault()
     if (!modal) return
-    if (!modal.employee_id || (modal.shift_type !== "rest" && (!modal.area || !modal.start_time || !modal.end_time))) {
+    if (!modal.employee_id || (!isNonWorkShift(modal) && (!modal.area || !modal.start_time || !modal.end_time))) {
       setError("Colaborador, area y horario son obligatorios para dias laborales.")
       return
     }
@@ -476,17 +478,30 @@ function ScheduleManagement() {
         <div className="schedule-modal-overlay">
           <form className="schedule-modal" onSubmit={persistSchedule}>
             <header><div><p className="schedule-eyebrow">Turno rapido</p><h2>{modal.id ? "Editar turno" : "Nuevo turno"}</h2></div><button type="button" onClick={() => setModal(null)}>Cerrar</button></header>
-            <label>Plantilla<select value={modal.template} onChange={(event) => applyTemplate(event.target.value)} disabled={modal.shift_type === "rest"}><option value="">Personalizado</option>{templates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}</select></label>
+            <label>Plantilla<select value={modal.template} onChange={(event) => applyTemplate(event.target.value)} disabled={isNonWorkShift(modal)}><option value="">Personalizado</option>{templates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}</select></label>
             <label>Colaborador<select required value={modal.employee_id} onChange={(event) => setModal({ ...modal, employee_id: event.target.value })}>{profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
             <div className="schedule-modal-grid">
-              <label>Tipo de turno<select value={modal.shift_type || "full"} onChange={(event) => setModal({ ...modal, shift_type: event.target.value, is_work_day: event.target.value !== "rest" })}>{Object.entries(SHIFT_TYPES).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+              <label>Tipo de turno<select value={modal.shift_type || "full"} onChange={(event) => {
+                const nextType = event.target.value
+                const nonWork = isNonWorkShift(nextType)
+                setModal({
+                  ...modal,
+                  shift_type: nextType,
+                  is_work_day: !nonWork,
+                  area: nonWork ? (nextType === "asueto" ? "Asueto" : "Descanso") : modal.area,
+                  start_time: nonWork ? "" : modal.start_time,
+                  end_time: nonWork ? "" : modal.end_time,
+                  break_minutes: nonWork ? 0 : modal.break_minutes,
+                  template: nonWork ? "" : modal.template
+                })
+              }}>{Object.entries(SHIFT_TYPES).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
               <label>Bloque #<input type="number" min="1" value={modal.block_order || 1} onChange={(event) => setModal({ ...modal, block_order: event.target.value })} /></label>
-              <label>Area<select required={modal.shift_type !== "rest"} value={modal.area || ""} onChange={(event) => setModal({ ...modal, area: event.target.value })} disabled={modal.shift_type === "rest"}><option value="">Selecciona area</option>{areaChoices.map((area) => <option key={area} value={area}>{area}</option>)}</select></label>
-              <label>Puesto<input value={modal.position || ""} onChange={(event) => setModal({ ...modal, position: event.target.value })} placeholder="Ej. Cocinero" disabled={modal.shift_type === "rest"} /></label>
+              <label>Area<select required={!isNonWorkShift(modal)} value={modal.area || ""} onChange={(event) => setModal({ ...modal, area: event.target.value })} disabled={isNonWorkShift(modal)}><option value="">Selecciona area</option>{areaChoices.map((area) => <option key={area} value={area}>{area}</option>)}</select></label>
+              <label>Puesto<input value={modal.position || ""} onChange={(event) => setModal({ ...modal, position: event.target.value })} placeholder="Ej. Cocinero" disabled={isNonWorkShift(modal)} /></label>
               <label>Fecha<input type="date" value={modal.shift_date} onChange={(event) => setModal({ ...modal, shift_date: event.target.value })} required /></label>
-              <label>Break (minutos)<input type="number" min="0" value={modal.break_minutes} onChange={(event) => setModal({ ...modal, break_minutes: event.target.value })} disabled={modal.shift_type === "rest"} /></label>
-              <label>Hora entrada<input type="time" value={trimTime(modal.start_time)} onChange={(event) => setModal({ ...modal, start_time: event.target.value })} required={modal.shift_type !== "rest"} disabled={modal.shift_type === "rest"} /></label>
-              <label>Hora salida<input type="time" value={trimTime(modal.end_time)} onChange={(event) => setModal({ ...modal, end_time: event.target.value })} required={modal.shift_type !== "rest"} disabled={modal.shift_type === "rest"} /></label>
+              <label>Break (minutos)<input type="number" min="0" value={modal.break_minutes} onChange={(event) => setModal({ ...modal, break_minutes: event.target.value })} disabled={isNonWorkShift(modal)} /></label>
+              <label>Hora entrada<input type="time" value={isNonWorkShift(modal) ? "" : trimTime(modal.start_time)} onChange={(event) => setModal({ ...modal, start_time: event.target.value })} required={!isNonWorkShift(modal)} disabled={isNonWorkShift(modal)} /></label>
+              <label>Hora salida<input type="time" value={isNonWorkShift(modal) ? "" : trimTime(modal.end_time)} onChange={(event) => setModal({ ...modal, end_time: event.target.value })} required={!isNonWorkShift(modal)} disabled={isNonWorkShift(modal)} /></label>
             </div>
             <label>Observacion del dia<textarea value={modal.day_notes || modal.notes || ""} onChange={(event) => setModal({ ...modal, day_notes: event.target.value, notes: event.target.value })} placeholder="Ej. 9:00 a 12:00 Mise en Place / 12:00 a 18:00 Servicio" /></label>
             <p className="schedule-hours">Horas estimadas: <strong>{shiftHours(modal).toFixed(2)} h</strong></p>
@@ -500,7 +515,7 @@ function ScheduleManagement() {
 
 function ShiftCard({ schedule, employeeName, editable, onEdit, onCopy, onDelete }) {
   const color = AREA_COLORS[normalize(schedule.area)] || "#14b8a6"
-  const isRest = schedule.shift_type === "rest" || schedule.is_work_day === false
+  const isRest = isNonWorkShift(schedule)
   return (
     <article
       className="schedule-shift"
@@ -510,8 +525,8 @@ function ShiftCard({ schedule, employeeName, editable, onEdit, onCopy, onDelete 
       onClick={(event) => { event.stopPropagation(); if (editable) onEdit() }}
     >
       <b>{employeeName}</b>
-      <strong>{isRest ? "Descanso" : schedule.area}</strong>
-      <time>{isRest ? "Dia de descanso" : `${formatTime(schedule.start_time)} - ${formatTime(schedule.end_time)}`}</time>
+      <strong>{isRest ? shiftTypeLabel(schedule.shift_type) : schedule.area}</strong>
+      <time>{isRest ? shiftTypeLabel(schedule.shift_type) : `${formatTime(schedule.start_time)} - ${formatTime(schedule.end_time)}`}</time>
       <small>Bloque {schedule.block_order || 1} - {shiftTypeLabel(schedule.shift_type)} - {shiftHours(schedule).toFixed(1)} h{Number(schedule.break_minutes) ? ` - Comida ${schedule.break_minutes}m` : ""}</small>
       <span className={`schedule-status ${schedule.status}`}>{schedule.status === "published" ? "Publicado" : "Borrador"}</span>
       {editable && <div className="schedule-shift-actions"><button type="button" onClick={(event) => { event.stopPropagation(); onCopy() }}>Copiar</button><button type="button" onClick={(event) => { event.stopPropagation(); onDelete() }}>Eliminar</button></div>}
@@ -525,6 +540,7 @@ function SummaryCard({ label, value, warning = false }) {
 
 function buildSummary(schedules, payroll) {
   const byArea = schedules.reduce((result, schedule) => {
+    if (isNonWorkShift(schedule)) return result
     result[schedule.area || "Sin area"] = (result[schedule.area || "Sin area"] || 0) + shiftHours(schedule)
     return result
   }, {})
@@ -549,7 +565,7 @@ function buildAlerts(schedules, profiles, weekDates) {
   const alerts = []
   profiles.forEach((profile) => {
     const employeeShifts = schedules.filter((schedule) => schedule.employee_id === profile.id)
-    const workShifts = employeeShifts.filter((schedule) => schedule.shift_type !== "rest" && schedule.is_work_day !== false)
+    const workShifts = employeeShifts.filter((schedule) => !isNonWorkShift(schedule))
     const hours = employeeShifts.reduce((total, shift) => total + shiftHours(shift), 0)
     if (hours > 48) alerts.push(`${profile.name}: supera 48 horas programadas (${hours.toFixed(1)} h).`)
     if (new Set(workShifts.map((shift) => shift.shift_date)).size === 7) alerts.push(`${profile.name}: sin descanso semanal.`)
@@ -557,9 +573,9 @@ function buildAlerts(schedules, profiles, weekDates) {
       if (shift.shift_date === other.shift_date && overlaps(shift, other)) alerts.push(`${profile.name}: tiene choque de horarios el ${shift.shift_date}.`)
     }))
   })
-  schedules.filter((schedule) => schedule.shift_type !== "rest" && !schedule.area).forEach(() => alerts.push("Existe un turno sin area asignada."))
+  schedules.filter((schedule) => !isNonWorkShift(schedule) && !schedule.area).forEach(() => alerts.push("Existe un turno sin area asignada."))
   weekDates.forEach((day) => {
-    const shifts = schedules.filter((schedule) => schedule.shift_date === day.date && schedule.shift_type !== "rest")
+    const shifts = schedules.filter((schedule) => schedule.shift_date === day.date && !isNonWorkShift(schedule))
     if (shifts.length && !shifts.some((schedule) => trimTime(schedule.start_time) <= "12:00")) alerts.push(`${day.label}: apertura sin suficiente personal.`)
     if (shifts.length && !shifts.some((schedule) => trimTime(schedule.end_time) >= "22:00")) alerts.push(`${day.label}: cierre sin suficiente personal.`)
   })
@@ -567,12 +583,12 @@ function buildAlerts(schedules, profiles, weekDates) {
 }
 
 function overlaps(first, second) {
-  if (first.shift_type === "rest" || second.shift_type === "rest") return false
+  if (isNonWorkShift(first) || isNonWorkShift(second)) return false
   return trimTime(first.start_time) < trimTime(second.end_time) && trimTime(second.start_time) < trimTime(first.end_time)
 }
 
 function shiftHours(schedule) {
-  if (schedule?.shift_type === "rest" || schedule?.is_work_day === false) return 0
+  if (isNonWorkShift(schedule)) return 0
   const [startHours, startMinutes] = trimTime(schedule.start_time).split(":").map(Number)
   const [endHours, endMinutes] = trimTime(schedule.end_time).split(":").map(Number)
   let minutes = endHours * 60 + endMinutes - (startHours * 60 + startMinutes)
@@ -623,6 +639,11 @@ function payrollLabel(value) {
 
 function shiftTypeLabel(value) {
   return SHIFT_TYPES[value] || value || "Turno"
+}
+
+function isNonWorkShift(scheduleOrType) {
+  const shiftType = typeof scheduleOrType === "string" ? scheduleOrType : scheduleOrType?.shift_type
+  return shiftType === "rest" || shiftType === "asueto" || (typeof scheduleOrType === "object" && scheduleOrType?.is_work_day === false)
 }
 
 function attendanceStatusLabel(value) {

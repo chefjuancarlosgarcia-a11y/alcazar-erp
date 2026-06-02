@@ -324,6 +324,11 @@
   color: #d1d5db;
 }
 
+.schedule-status.asueto {
+  background: #3f1d46;
+  color: #f0abfc;
+}
+
 .schedule-status.half,
 .schedule-status.medio_turno {
   background: #172554;
