@@ -16,6 +16,7 @@ import {
   updateInventoryItem
 } from "../services/inventoryService"
 import { notifyRoles } from "../services/notificationsService"
+import { getSuppliers } from "../services/suppliersService"
 import "./InventoryBase.css"
 
 const DEFAULT_INVENTORY_UNIT = "Unidad/Pieza"
@@ -59,15 +60,6 @@ const EMPTY_ITEM = {
 const EMPTY_ADJUSTMENT = { itemId: "", areaId: "almacen", quantity: "", minimumQuantity: "", reason: "" }
 const MANAGER_ROLES = ["admin", "gerente_general", "encargado_almacen"]
 
-function readStoredProviders() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem("proveedores") || "[]")
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
-}
-
 function providerName(provider) {
   return String(provider?.nombreComercial || provider?.razonSocial || provider?.nombre || "").trim()
 }
@@ -96,7 +88,7 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
   const [legacyOpen, setLegacyOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
   const [legacyItems, setLegacyItems] = useState(readLegacyItems)
-  const [providerOptions, setProviderOptions] = useState(() => uniqueProviderNames(readStoredProviders()))
+  const [providerOptions, setProviderOptions] = useState([])
   const realtimeTimerRef = useRef(null)
 
   function refreshFromRealtime(showMovementNotice = false) {
@@ -129,10 +121,11 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
   async function refresh() {
     setLoading(true)
     setError("")
-    const [areasResult, itemsResult, movementsResult] = await Promise.all([
+    const [areasResult, itemsResult, movementsResult, suppliersResult] = await Promise.all([
       getActiveAreas(),
       getInventoryItems(),
-      getInventoryMovements({ limit: 100 })
+      getInventoryMovements({ limit: 100 }),
+      canEditCatalog ? getSuppliers() : Promise.resolve({ data: [], error: null })
     ])
     if (areasResult.error || itemsResult.error || movementsResult.error) {
       setError("No se pudo cargar el inventario desde Supabase. Verifica que la migración 004 esté aplicada.")
@@ -140,7 +133,10 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
     setAreas(areasResult.data || [])
     setItems(itemsResult.data || [])
     setMovements(movementsResult.data || [])
-    setProviderOptions(uniqueProviderNames(readStoredProviders()))
+    if (suppliersResult.error) {
+      setError(suppliersResult.error.message || "No se pudieron cargar los proveedores desde Supabase.")
+    }
+    setProviderOptions(uniqueProviderNames(suppliersResult.data || []))
     setLoading(false)
   }
 

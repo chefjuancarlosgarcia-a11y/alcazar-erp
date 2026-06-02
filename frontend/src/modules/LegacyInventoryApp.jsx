@@ -15,6 +15,12 @@ import { supabase } from "../lib/supabase"
 import { createNotification, notifyRoles } from "../services/notificationsService"
 import { getPurchaseOrders, savePurchaseOrder } from "../services/purchaseOrdersService"
 import {
+  createSupplier,
+  getSuppliers,
+  migrateLocalSuppliers,
+  updateSupplier
+} from "../services/suppliersService"
+import {
   getAttendanceMarks,
   getAttendanceTerminalProfiles,
   registerAttendanceMark,
@@ -37,6 +43,15 @@ import {
   obtenerMetodoPagoPreferido
 } from "../utils"
 import { normalizeProductionArea } from "../utils/posProduction"
+
+function readLocalSuppliers() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem("proveedores") || "[]")
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
 
 function createImage(imageSrc) {
   return new Promise((resolve, reject) => {
@@ -802,10 +817,10 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
   const [manualRecepcionNombre, setManualRecepcionNombre] = useState("")
   const [manualRecepcionImagen, setManualRecepcionImagen] = useState("")
 
-  const [proveedores, setProveedores] = useState(() => {
-    const datos = localStorage.getItem("proveedores")
-    return datos ? JSON.parse(datos) : []
-  })
+  const [proveedores, setProveedores] = useState([])
+  const [proveedoresLoading, setProveedoresLoading] = useState(false)
+  const [proveedoresError, setProveedoresError] = useState("")
+  const [proveedoresMigracion, setProveedoresMigracion] = useState("")
   const [proveedorBusqueda, setProveedorBusqueda] = useState("")
   const [proveedorSeleccionadoId, setProveedorSeleccionadoId] = useState(null)
   const [editandoProveedorId, setEditandoProveedorId] = useState(null)
@@ -882,6 +897,39 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
   useEffect(() => {
     setSeccionActiva(initialSeccion)
   }, [initialSeccion])
+
+  const cargarProveedoresSupabase = useCallback(async () => {
+    setProveedoresLoading(true)
+    setProveedoresError("")
+
+    const result = await getSuppliers()
+    if (result.error) {
+      setProveedoresError(result.error.message || "No se pudieron cargar los proveedores.")
+      setProveedoresLoading(false)
+      return
+    }
+
+    let remoteSuppliers = result.data || []
+    const localSuppliers = readLocalSuppliers()
+    if (authenticatedUser?.role === "admin" && remoteSuppliers.length === 0 && localSuppliers.length > 0) {
+      const migration = await migrateLocalSuppliers(localSuppliers)
+      if (migration.error) {
+        setProveedoresError(migration.error.message || "No se pudieron migrar los proveedores locales.")
+      } else if (migration.imported > 0) {
+        setProveedoresMigracion(`${migration.imported} proveedor(es) locales migrados a Supabase.`)
+        localStorage.setItem("proveedoresMigradosSupabase", new Date().toISOString())
+        const refreshed = await getSuppliers()
+        remoteSuppliers = refreshed.data || migration.data || []
+      }
+    }
+
+    setProveedores(remoteSuppliers)
+    setProveedoresLoading(false)
+  }, [authenticatedUser?.role])
+
+  useEffect(() => {
+    cargarProveedoresSupabase()
+  }, [cargarProveedoresSupabase])
 
   useEffect(() => {
     return () => {
@@ -1023,10 +1071,6 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
       active = false
     }
   }, [])
-
-  useEffect(() => {
-    localStorage.setItem("proveedores", JSON.stringify(proveedores))
-  }, [proveedores])
 
   useEffect(() => {
     localStorage.setItem("recetas", JSON.stringify(recetas))
@@ -4078,7 +4122,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
     setProveedorBusqueda("")
   }
 
-  function guardarProveedor() {
+  async function guardarProveedor() {
     if (!proveedorNombreComercial.trim()) {
       alert("Ingresa el nombre comercial del proveedor.")
       return
@@ -4089,7 +4133,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
       .filter(Boolean)
     const proveedorExistente = editandoProveedorId ? proveedores.find((p) => p.id === editandoProveedorId) : null
     const nuevoProveedor = {
-      id: editandoProveedorId || Date.now(),
+      id: editandoProveedorId || undefined,
       codigo: editandoProveedorId ? proveedorExistente?.codigo : generarCodigoProveedor(proveedores.length),
       nombreComercial: proveedorNombreComercial,
       razonSocial: proveedorRazonSocial,
@@ -4113,19 +4157,30 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
     }
 
     if (editandoProveedorId) {
-      setProveedores(proveedores.map((p) => (p.id === editandoProveedorId ? nuevoProveedor : p)))
+      const result = await updateSupplier(editandoProveedorId, nuevoProveedor)
+      if (result.error) {
+        alert(result.error.message || "No se pudo actualizar el proveedor.")
+        return
+      }
+      await cargarProveedoresSupabase()
       alert("Proveedor actualizado.")
     } else {
-      setProveedores([nuevoProveedor, ...proveedores])
+      const result = await createSupplier(nuevoProveedor)
+      if (result.error) {
+        alert(result.error.message || "No se pudo crear el proveedor.")
+        return
+      }
+      await cargarProveedoresSupabase()
       if (nuevoProveedor.correo) {
         agregarNotificacion(
-          `correo-proveedor-${nuevoProveedor.id}`,
+          `correo-proveedor-${result.data?.id || Date.now()}`,
           "correo",
           `Nuevo proveedor con correo registrado: ${nuevoProveedor.nombreComercial}.`
         )
       }
       alert("Proveedor creado.")
     }
+    limpiarFormularioProveedor()
   }
 
   function editarProveedor(proveedor) {
@@ -5529,6 +5584,10 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
             p.id === proveedorActualizado.id ? proveedorActualizado : p
           )
           setProveedores(nuevosProveedores)
+          const supplierUpdate = await updateSupplier(proveedorActualizado.id, proveedorActualizado)
+          if (supplierUpdate.error) {
+            alert("La orden se recibió, pero no se pudo actualizar el historial del proveedor.")
+          }
         }
       }
 
@@ -7990,6 +8049,9 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
               <div style={cardStyle}>
                 <h2>{editandoProveedorId ? "Editar proveedor" : "Crear proveedor"}</h2>
                 <p>Registra el proveedor con toda su información de contacto, pagos y días de entrega.</p>
+                {proveedoresLoading && <p style={{ color: "#cbd5e1" }}>Cargando proveedores desde Supabase...</p>}
+                {proveedoresError && <p style={{ color: "#fecaca" }}>{proveedoresError}</p>}
+                {proveedoresMigracion && <p style={{ color: "#bbf7d0" }}>{proveedoresMigracion}</p>}
 
                 <label style={fieldLabelStyle}>Buscar proveedor</label>
                 <input

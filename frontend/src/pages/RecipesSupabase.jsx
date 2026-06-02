@@ -146,11 +146,11 @@ function RecipesSupabase() {
     const validation = validateRecipe(recipe, inventory)
     if (validation) {
       setError(validation)
-      return
+      return { error: validation }
     }
     if (recipe.recipeType === "final_product" && recipe.availableInPOS && Number(recipe.salePrice) <= 0) {
       setError("Indica un precio de venta válido para publicar el producto en POS.")
-      return
+      return { error: "Indica un precio de venta válido para publicar el producto en POS." }
     }
     setSaving(true)
     setError("")
@@ -164,7 +164,7 @@ function RecipesSupabase() {
       console.error("Supabase recipe save error:", result.error)
       setError(result.error.message)
       setSaving(false)
-      return
+      return { error: result.error.message || "Error al guardar la receta." }
     }
     const recipeId = recipe.id || result.data.id
     if (recipe.recipeType === "final_product" && recipe.availableInPOS) {
@@ -175,7 +175,7 @@ function RecipesSupabase() {
         setError(`La receta se guardó, pero no se pudo publicar en POS: ${productResult.error.message}`)
         setSaving(false)
         await refresh()
-        return
+        return { error: `La receta se guardó, pero no se pudo publicar en POS: ${productResult.error.message}` }
       }
       const areaValid = productionAreas.some((area) => area.id === recipe.productionAreaId)
       recipeDebug("verificación inmediata producto POS", { product: productResult.data, areaValid })
@@ -183,14 +183,14 @@ function RecipesSupabase() {
         setError("La receta se guardó, pero el producto POS no quedó listo para producción.")
         setSaving(false)
         await refresh()
-        return
+        return { error: "La receta se guardó, pero el producto POS no quedó listo para producción." }
       }
       window.dispatchEvent(new Event("pos-products-updated"))
     }
     setSaving(false)
-    setForm(null)
     setMessage("Receta guardada correctamente en Supabase.")
     await refresh()
+    return { success: true }
   }
 
   async function disableRecipe(recipe) {
@@ -391,9 +391,231 @@ function RecipesSupabase() {
         {!loading && !filtered.length && <p className="recipes-empty">No hay recetas registradas para esta selección.</p>}
       </div>
       {importDraft && <RecipeImportModal draft={importDraft} inventory={inventory} importing={importing} setDraft={setImportDraft} onIngredientChange={updateImportIngredient} onImport={importRecipesFromDraft} onClose={() => setImportDraft(null)} />}
-      {form && <RecipeForm form={form} areas={productionAreas} inventory={inventory} posProducts={posProducts} saving={saving} onClose={() => setForm(null)} onSave={saveRecipe} />}
+      {form && <RecipeFormV2 form={form} areas={productionAreas} inventory={inventory} posProducts={posProducts} saving={saving} onClose={() => setForm(null)} onSave={saveRecipe} />}
       {detail && <RecipeDetailV2 recipe={detail} areas={areas} onClose={() => setDetail(null)} />}
     </section>
+  )
+}
+
+function RecipeFormV2({ form: initialForm, areas, inventory, posProducts, saving, onClose, onSave }) {
+  const [form, setForm] = useState(initialForm)
+  const [itemId, setItemId] = useState(inventory[0]?.id || "")
+  const [ingredientQuery, setIngredientQuery] = useState("")
+  const [formError, setFormError] = useState("")
+  const [formSuccess, setFormSuccess] = useState("")
+  const [imageMessage, setImageMessage] = useState("")
+  const item = inventory.find((entry) => entry.id === itemId)
+  const filteredInventory = useMemo(() => {
+    const term = normalizeText(ingredientQuery)
+    const matches = term
+      ? inventory.filter((entry) => [entry.name, entry.category, entry.base_unit, entry.supplier].some((value) => normalizeText(value).includes(term)))
+      : inventory
+    return matches.slice(0, 12)
+  }, [ingredientQuery, inventory])
+  useEffect(() => {
+    if (filteredInventory.length && !filteredInventory.some((entry) => entry.id === itemId)) {
+      setItemId(filteredInventory[0].id)
+    }
+  }, [filteredInventory, itemId])
+  const cost = form.ingredients.reduce((total, ingredient) => {
+    const catalog = inventory.find((entry) => entry.id === ingredient.inventoryItemId)
+    return total + Number(ingredient.inventoryQuantity || 0) * Number(catalog?.cost_per_base_unit || 0)
+  }, 0)
+
+  function addIngredient() {
+    if (!item || form.ingredients.some((ingredient) => ingredient.inventoryItemId === item.id)) return
+    setFormError("")
+    setForm({
+      ...form,
+      ingredients: [
+        ...form.ingredients,
+        normalizeRecipeIngredient({ inventoryItemId: item.id, recipeQuantity: "1", recipeUnit: item.base_unit, wastePercentage: "0", notes: "" }, item)
+      ]
+    })
+  }
+
+  function updateIngredient(id, updates) {
+    setForm({
+      ...form,
+      ingredients: form.ingredients.map((ingredient) => {
+        if (ingredient.inventoryItemId !== id) return ingredient
+        const catalog = inventory.find((entry) => entry.id === id)
+        return normalizeRecipeIngredient({ ...ingredient, ...updates }, catalog)
+      })
+    })
+  }
+
+  function handleImageUpload(event) {
+    const file = event.target.files?.[0]
+    if (!file) return
+    if (!file.type.startsWith("image/")) {
+      setImageMessage("")
+      setFormError("Debes subir un archivo de imagen.")
+      event.target.value = ""
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => {
+      setForm((current) => ({ ...current, imageUrl: reader.result || "" }))
+      setFormError("")
+      setImageMessage("Imagen cargada correctamente")
+    }
+    reader.readAsDataURL(file)
+  }
+
+  function addStep() {
+    setForm({
+      ...form,
+      preparationSteps: [...normalizePreparationSteps(form.preparationSteps), { id: Date.now(), text: "" }]
+    })
+  }
+
+  function updateStep(index, text) {
+    setForm({
+      ...form,
+      preparationSteps: normalizePreparationSteps(form.preparationSteps).map((step, stepIndex) => (
+        stepIndex === index ? { ...step, text } : step
+      ))
+    })
+  }
+
+  function removeStep(index) {
+    setForm({
+      ...form,
+      preparationSteps: normalizePreparationSteps(form.preparationSteps).filter((_, stepIndex) => stepIndex !== index)
+    })
+  }
+
+  async function submitForm(event) {
+    event.preventDefault()
+    const validation = validateRecipe(form, inventory)
+    if (validation) {
+      setFormError(validation)
+      return
+    }
+    if (form.recipeType === "final_product" && form.availableInPOS && Number(form.salePrice) <= 0) {
+      setFormError("Indica un precio de venta válido para publicar el producto en POS.")
+      return
+    }
+    setFormError("")
+    setFormSuccess("Guardando receta...")
+    const result = await onSave(form)
+    if (result?.error) {
+      setFormSuccess("")
+      setFormError(result.error)
+      return
+    }
+    setFormSuccess("Receta guardada correctamente")
+    window.setTimeout(onClose, 650)
+  }
+
+  return (
+    <div className="recipes-backdrop">
+      <form className="recipes-modal recipe-editor-modal" onSubmit={submitForm} noValidate>
+        <header><div><p className="recipes-eyebrow">Receta real</p><h2>{form.id ? "Editar receta" : "Nueva receta"}</h2></div><button type="button" onClick={onClose} disabled={saving}>Cerrar</button></header>
+        <div className="recipes-modal-body">
+          <section className="recipe-form-section">
+            <div className="recipe-section-heading"><h3>Información general de receta</h3></div>
+            <div className="recipe-form-grid">
+              <Field label="Nombre"><input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></Field>
+              <Field label="Tipo"><select value={form.recipeType} onChange={(event) => setForm({ ...form, recipeType: event.target.value })}><option value="subrecipe">Subreceta</option><option value="final_product">Producto final</option></select></Field>
+              <Field label="Área de producción"><select value={form.productionAreaId} onChange={(event) => setForm({ ...form, productionAreaId: event.target.value })}><option value="">Selecciona área</option>{areas.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}</select></Field>
+              <Field label="Categoría POS"><input value={form.posCategoryId} onChange={(event) => setForm({ ...form, posCategoryId: event.target.value })} placeholder="pizzas, barra..." /></Field>
+              <Field label="Rendimiento"><input type="number" min="0.001" step="any" value={form.yieldQuantity} onChange={(event) => setForm({ ...form, yieldQuantity: event.target.value })} /></Field>
+              <Field label="Unidad rendimiento"><input value={form.yieldUnit} onChange={(event) => setForm({ ...form, yieldUnit: event.target.value })} /></Field>
+              {form.recipeType === "final_product" && <Field label="Producto POS existente"><select disabled={!form.availableInPOS} value={form.posProductId} onChange={(event) => setForm({ ...form, posProductId: event.target.value })}><option value="">Crear producto nuevo</option>{posProducts.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}</select></Field>}
+              {form.recipeType === "final_product" && <Field label="Disponible en POS"><label className="recipe-checkbox"><input type="checkbox" checked={form.availableInPOS} onChange={(event) => setForm({ ...form, availableInPOS: event.target.checked })} />Crear o actualizar producto vendible</label></Field>}
+              {form.recipeType === "final_product" && form.availableInPOS && <Field label="Precio de venta"><input type="number" min="0.01" step="0.01" value={form.salePrice} onChange={(event) => setForm({ ...form, salePrice: event.target.value })} /></Field>}
+            </div>
+          </section>
+
+          <section className="recipe-form-section">
+            <div className="recipe-section-heading"><h3>Imagen de receta</h3></div>
+            <div className="recipe-image-upload">
+              {form.imageUrl ? <img src={form.imageUrl} alt="" /> : <span>Sin imagen</span>}
+              <div className="recipe-image-controls">
+                <label className="recipe-upload-button">
+                  {form.imageUrl ? "Cambiar imagen" : "Subir imagen"}
+                  <input type="file" accept="image/*" onChange={handleImageUpload} />
+                </label>
+                {form.imageUrl && <button type="button" className="danger" onClick={() => { setForm({ ...form, imageUrl: "" }); setImageMessage("") }}>Eliminar imagen</button>}
+                {imageMessage && <p className="recipe-image-message">{imageMessage}</p>}
+              </div>
+            </div>
+          </section>
+
+          <section className="recipe-form-section">
+            <div className="recipe-section-heading"><h3>Ingredientes</h3><span>{form.ingredients.length} ingrediente(s)</span></div>
+            <div className="recipe-picker">
+              <input value={ingredientQuery} onChange={(event) => setIngredientQuery(event.target.value)} placeholder="Buscar ingrediente del inventario..." />
+              <select value={itemId} onChange={(event) => setItemId(event.target.value)}>
+                {filteredInventory.map((inventoryItem) => <option key={inventoryItem.id} value={inventoryItem.id}>{inventoryItem.name} ({inventoryItem.base_unit})</option>)}
+                {!filteredInventory.length && <option value="">Sin resultados</option>}
+              </select>
+              <span>Costo base: <strong>Q{Number(item?.cost_per_base_unit || 0).toFixed(4)}</strong></span>
+              <button type="button" className="primary" onClick={addIngredient}>Agregar ingrediente</button>
+            </div>
+            <div className="recipe-inline-steps">
+              <div className="recipe-section-heading">
+                <div>
+                  <h3>Proceso de preparación</h3>
+                  <p>Agrega los pasos después de seleccionar ingredientes.</p>
+                </div>
+                <button type="button" className="primary" onClick={addStep}>Agregar paso</button>
+              </div>
+              <div className="recipe-steps-list">
+                {normalizePreparationSteps(form.preparationSteps).map((step, index) => (
+                  <div className="recipe-step-row" key={step.id || index}>
+                    <span>Paso {index + 1}</span>
+                    <textarea value={step.text} onChange={(event) => updateStep(index, event.target.value)} placeholder="Describe este paso de la receta" />
+                    <button type="button" className="danger" onClick={() => removeStep(index)}>Eliminar</button>
+                  </div>
+                ))}
+                {!normalizePreparationSteps(form.preparationSteps).length && <p className="recipes-empty">Agrega los pasos de preparación de esta receta.</p>}
+              </div>
+            </div>
+            <div className="recipe-ingredients">
+              <div className="recipe-ingredients-head"><span>Ingrediente</span><span>Cantidad receta</span><span>Equivalente inventario</span><span>Merma %</span><span>Subtotal</span><span>Acciones</span></div>
+              {form.ingredients.map((ingredient) => {
+                const catalog = inventory.find((entry) => entry.id === ingredient.inventoryItemId)
+                const normalized = normalizeRecipeIngredient(ingredient, catalog)
+                const subtotal = Number(normalized.inventoryQuantity || 0) * Number(catalog?.cost_per_base_unit || 0)
+                return <div className="recipe-ingredient-row" key={ingredient.inventoryItemId}>
+                  <strong>{catalog?.name || "Ingrediente"}</strong>
+                  <span className="recipe-quantity-control">
+                    <input type="number" min="0.001" step="any" value={normalized.recipeQuantity} onChange={(event) => updateIngredient(ingredient.inventoryItemId, { recipeQuantity: event.target.value })} />
+                    <select value={normalized.recipeUnit} onChange={(event) => updateIngredient(ingredient.inventoryItemId, { recipeUnit: event.target.value })}>
+                      {unitOptionsFor(catalog).map((unit) => <option key={unit} value={unit}>{unit}</option>)}
+                    </select>
+                  </span>
+                  <span className={normalized.conversionError ? "recipe-conversion-error" : "recipe-conversion-ok"}>
+                    {normalized.conversionError || `${formatRecipeNumber(normalized.inventoryQuantity)} ${normalized.inventoryUnit || catalog?.base_unit || ""}`}
+                  </span>
+                  <input type="number" min="0" max="100" step="any" value={ingredient.wastePercentage} onChange={(event) => updateIngredient(ingredient.inventoryItemId, { wastePercentage: event.target.value })} />
+                  <strong>Q{subtotal.toFixed(2)}</strong>
+                  <button type="button" className="danger" onClick={() => setForm({ ...form, ingredients: form.ingredients.filter((line) => line.inventoryItemId !== ingredient.inventoryItemId) })}>Quitar</button>
+                </div>
+              })}
+              {!form.ingredients.length && <p className="recipes-empty">Agrega ingredientes del inventario real.</p>}
+            </div>
+          </section>
+
+          <section className="recipe-form-section">
+            <div className="recipe-section-heading"><h3>Notas</h3></div>
+            <Field label="Notas"><textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></Field>
+          </section>
+        </div>
+        <footer className="recipes-modal-actions">
+          <div className="recipe-total"><span>Costo estimado total</span><strong>Q{cost.toFixed(2)}</strong><small>Q{(cost / Number(form.yieldQuantity || 1)).toFixed(2)} por porción</small></div>
+          <div className="recipe-modal-feedback">
+            {formSuccess && <span className="recipes-success compact">{formSuccess}</span>}
+            {formError && <span className="recipes-error compact">{formError}</span>}
+          </div>
+          <button type="button" onClick={onClose} disabled={saving}>Cancelar</button>
+          <button type="submit" className="primary" disabled={saving}>{saving ? "Guardando..." : "Guardar receta"}</button>
+        </footer>
+      </form>
+    </div>
   )
 }
 
@@ -716,6 +938,7 @@ function validateRecipe(recipe, inventory) {
   if (!recipe.name.trim()) return "El nombre de la receta es obligatorio."
   if (!recipe.productionAreaId) return "Selecciona un área de producción."
   if (Number(recipe.yieldQuantity) <= 0) return "El rendimiento debe ser mayor que cero."
+  if (!String(recipe.yieldUnit || "").trim()) return "La unidad de rendimiento es obligatoria."
   if (!recipe.ingredients.length) return "Agrega al menos un ingrediente."
   for (const ingredient of recipe.ingredients) {
     const item = inventory.find((entry) => entry.id === ingredient.inventoryItemId)
