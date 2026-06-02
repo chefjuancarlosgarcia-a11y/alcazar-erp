@@ -3,6 +3,18 @@ import { useSearchParams } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
 import { getActiveAreas } from "../services/areasService"
 import {
+  completeChecklistRun,
+  createChecklistRunFromTemplate,
+  createChecklistTemplate,
+  deactivateChecklistTemplate,
+  getChecklistProfiles,
+  getChecklistRuns,
+  getChecklistTemplates,
+  startChecklistRun,
+  updateChecklistRunItem,
+  updateChecklistTemplate
+} from "../services/checklistsService"
+import {
   TASK_CATEGORIES,
   TASK_DIFFICULTIES,
   TASK_LEVELS,
@@ -35,9 +47,17 @@ const ADMIN_TABS = [
   ["create", "Crear tarea nueva"],
   ["assign", "Asignar tareas"],
   ["calendar", "Calendario operativo"],
+  ["checklists", "Checklists"],
   ["mine", "Mis tareas"],
   ["reports", "Reportes"]
 ]
+
+const CHECKLIST_AREAS = ["FOH", "BOH / Cocina", "Pizzeria", "Cafeteria", "Barra", "Caja", "Panaderia", "Reposteria", "Almacen", "Limpieza", "Oficina", "Recursos Humanos", "Administracion"]
+const CHECKLIST_ROLES = ["admin", "gerente_general", "gerente", "supervisor", "encargado_almacen", "recursos_humanos", "cocina", "pizzeria", "barista", "bartender", "panadero", "repostero", "caja", "mesero", "limpieza", "mantenimiento", "colaborador"]
+const CHECKLIST_FREQUENCIES = [["manual", "Manual"], ["diaria", "Diaria"], ["semanal", "Semanal"], ["mensual", "Mensual"], ["apertura", "Apertura"], ["cierre", "Cierre"], ["por_turno", "Por turno"]]
+const CHECKLIST_CONTEXTS = [["general", "General"], ["apertura", "Apertura"], ["servicio", "Servicio"], ["cierre", "Cierre"], ["limpieza_profunda", "Limpieza profunda"], ["inventario", "Inventario"]]
+const CHECKLIST_RESPONSE_TYPES = [["checkbox", "Si / No"], ["text", "Respuesta escrita"], ["number", "Numero"], ["temperature", "Temperatura"], ["photo", "Foto"], ["signature", "Firma"], ["select", "Seleccion"]]
+const CHECKLIST_TEMPLATE_MANAGERS = ["admin", "gerente_general", "gerente", "supervisor"]
 
 const EMPTY_TEMPLATE = {
   title: "",
@@ -69,8 +89,8 @@ function Tasks() {
   const [assignedTasks, setAssignedTasks] = useState(loadAssignedTasks)
   const [areas, setAreas] = useState([])
   const [employees] = useState(() => loadOperationalEmployees(user))
-  const requestedTab = params.get("view") || (isManager ? "dashboard" : "mine")
-  const tab = isManager && ADMIN_TABS.some(([id]) => id === requestedTab) ? requestedTab : "mine"
+  const requestedTab = params.get("tab") === "checklists" ? "checklists" : params.get("view") || (isManager ? "dashboard" : "mine")
+  const tab = requestedTab === "checklists" ? "checklists" : isManager && ADMIN_TABS.some(([id]) => id === requestedTab) ? requestedTab : "mine"
   const visibleTemplates = templates.filter((template) => mayUseTemplate(template, user, employees))
   const computedTasks = assignedTasks.map(withComputedTaskStatus)
   const permittedAreas = getPermittedAreas(areas, user, employees, visibleTemplates)
@@ -152,6 +172,7 @@ function Tasks() {
         />
       )}
       {tab === "calendar" && <OperationalCalendar tasks={computedTasks} employees={employees} areas={areas} />}
+      {tab === "checklists" && <ChecklistsModule user={user} initialRunId={params.get("id") || ""} initialChecklistView={params.get("view") || ""} />}
       {tab === "mine" && <MyTasks tasks={computedTasks.filter((task) => taskMatchesUser(task, user))} user={user} persistAllTasks={persistTasks} allTasks={assignedTasks} />}
       {tab === "reports" && <TaskReports tasks={computedTasks} employees={employees} areas={areas} />}
     </section>
@@ -525,6 +546,473 @@ function MyTasks({ tasks, user, allTasks, persistAllTasks }) {
   )
 }
 
+function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }) {
+  const canManageTemplates = CHECKLIST_TEMPLATE_MANAGERS.includes(user?.role)
+  const [section, setSection] = useState(initialChecklistView === "run" ? "today" : "today")
+  const [templates, setTemplates] = useState([])
+  const [runs, setRuns] = useState([])
+  const [profiles, setProfiles] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [message, setMessage] = useState("")
+  const [editingTemplate, setEditingTemplate] = useState(null)
+  const [selectedRunId, setSelectedRunId] = useState("")
+  const selectedRun = runs.find((run) => run.id === selectedRunId)
+  const activeTemplates = templates.filter((template) => template.status === "active")
+  const visibleRuns = runs.filter((run) => run.status !== "cancelled")
+  const sections = canManageTemplates
+    ? [["today", "Hoy"], ["templates", "Plantillas"], ["create", editingTemplate ? "Editar" : "Crear plantilla"], ["reports", "Reportes"]]
+    : [["today", "Hoy"]]
+
+  async function refresh() {
+    setLoading(true)
+    const [templateResult, runResult, profileResult] = await Promise.all([
+      getChecklistTemplates(),
+      getChecklistRuns(),
+      getChecklistProfiles()
+    ])
+    if (templateResult.error || runResult.error) {
+      setMessage(templateResult.error?.message || runResult.error?.message || "No se pudieron cargar checklists.")
+    } else {
+      setTemplates(templateResult.data || [])
+      setRuns(markOverdueRuns(runResult.data || []))
+    }
+    if (!profileResult.error) setProfiles(profileResult.data || [])
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    refresh()
+  }, [])
+
+  useEffect(() => {
+    if (!initialRunId) return
+    setSection("today")
+    setSelectedRunId(initialRunId)
+  }, [initialRunId])
+
+  async function saveTemplate(form, items) {
+    if (!form.title.trim()) return setMessage("No se puede guardar una checklist sin titulo.")
+    if (!items.some((item) => item.title.trim())) return setMessage("Agrega al menos 1 item.")
+    setLoading(true)
+    const cleanedItems = items.filter((item) => item.title.trim())
+    const result = editingTemplate
+      ? await updateChecklistTemplate(editingTemplate.id, form, cleanedItems)
+      : await createChecklistTemplate(form, cleanedItems)
+    setLoading(false)
+    if (result.error) return setMessage(result.error.message || "No se pudo guardar la plantilla.")
+    setMessage(editingTemplate ? "Checklist actualizada." : "Checklist creada.")
+    setEditingTemplate(null)
+    setSection("templates")
+    refresh()
+  }
+
+  async function assignTemplate(payload) {
+    if (!payload.template_id) return setMessage("Selecciona una plantilla.")
+    setLoading(true)
+    const result = await createChecklistRunFromTemplate(payload.template_id, payload)
+    setLoading(false)
+    if (result.error) return setMessage(result.error.message || "No se pudo asignar la checklist.")
+    setMessage("Checklist asignada correctamente.")
+    setSection("today")
+    refresh()
+  }
+
+  async function assignToday(template) {
+    await assignTemplate({
+      template_id: template.id,
+      run_date: TODAY,
+      area: template.area || "",
+      assigned_role: template.assigned_role || "",
+      assigned_profile_id: template.assigned_profile_id || "",
+      notes: "Asignada desde Plantillas"
+    })
+  }
+
+  async function duplicateTemplate(template) {
+    const result = await createChecklistTemplate(
+      { ...template, title: `${template.title} (copia)`, status: "active" },
+      template.checklist_template_items || []
+    )
+    if (result.error) return setMessage(result.error.message || "No se pudo duplicar la plantilla.")
+    setMessage("Plantilla duplicada.")
+    refresh()
+  }
+
+  async function deactivate(id) {
+    const result = await deactivateChecklistTemplate(id)
+    if (result.error) return setMessage(result.error.message || "No se pudo desactivar.")
+    setMessage("Plantilla desactivada.")
+    refresh()
+  }
+
+  async function startRun(runId) {
+    const result = await startChecklistRun(runId)
+    if (result.error) return setMessage(result.error.message || "No se pudo iniciar la checklist.")
+    setSelectedRunId(runId)
+    refresh()
+  }
+
+  async function updateRunItem(itemId, payload) {
+    const result = await updateChecklistRunItem(itemId, payload)
+    if (result.error) return setMessage(result.error.message || "No se pudo guardar el progreso.")
+    refresh()
+  }
+
+  async function completeRun(runId) {
+    const result = await completeChecklistRun(runId)
+    if (result.error) return setMessage(result.error.message || "Completa los items obligatorios antes de finalizar.")
+    setMessage("Checklist completada.")
+    setSelectedRunId("")
+    refresh()
+  }
+
+  return (
+    <div className="checklists-module">
+      <article className="checklists-hero">
+        <div>
+          <p className="tasks-eyebrow">Operacion diaria</p>
+          <h2>Checklists</h2>
+          <p className="tasks-muted">Haz lo que toca hoy, guarda evidencia y mide cumplimiento sin ruido.</p>
+        </div>
+        {loading && <span className="tasks-access-chip">Cargando</span>}
+      </article>
+
+      {message && <p className={message.includes("No ") || message.includes("Completa") ? "tasks-warning" : "tasks-success"}>{message}</p>}
+
+      <nav className="checklists-main-tabs" aria-label="Checklists">
+        {sections.map(([id, label]) => (
+          <button key={id} type="button" className={section === id ? "active" : ""} onClick={() => { if (id === "create" && !editingTemplate) setEditingTemplate(null); setSection(id) }}>{label}</button>
+        ))}
+      </nav>
+
+      {section === "today" && (
+        <ChecklistToday
+          runs={visibleRuns}
+          profiles={profiles}
+          selectedRun={selectedRun}
+          onSelect={setSelectedRunId}
+          onStart={startRun}
+          onUpdateItem={updateRunItem}
+          onComplete={completeRun}
+        />
+      )}
+      {section === "templates" && canManageTemplates && (
+        <ChecklistTemplatesView
+          templates={templates}
+          profiles={profiles}
+          onEdit={(template) => { setEditingTemplate(template); setSection("create") }}
+          onAssign={assignTemplate}
+          onAssignToday={assignToday}
+          onDuplicate={duplicateTemplate}
+          onDeactivate={deactivate}
+        />
+      )}
+      {section === "create" && canManageTemplates && (
+        <ChecklistTemplateWizard
+          editingTemplate={editingTemplate}
+          profiles={profiles}
+          onCancel={() => { setEditingTemplate(null); setSection("templates") }}
+          onSave={saveTemplate}
+        />
+      )}
+      {section === "reports" && canManageTemplates && <ChecklistReports runs={runs} templates={templates} profiles={profiles} />}
+    </div>
+  )
+}
+
+function ChecklistToday({ runs, profiles, selectedRun, onSelect, onStart, onUpdateItem, onComplete }) {
+  const todayRuns = runs.filter((run) => run.run_date === TODAY || run.status === "overdue")
+  const pending = todayRuns.filter((run) => run.status === "pending")
+  const inProgress = todayRuns.filter((run) => run.status === "in_progress")
+  const completed = todayRuns.filter((run) => run.status === "completed")
+  const overdue = todayRuns.filter((run) => run.status === "overdue")
+  const completion = todayRuns.length ? Math.round((completed.length / todayRuns.length) * 100) : 0
+  const cards = [
+    ["Pendientes hoy", pending.length, "pending"],
+    ["En progreso", inProgress.length, "in_progress"],
+    ["Completadas", completed.length, "completed"],
+    ["Atrasadas", overdue.length, "overdue"],
+    ["Cumplimiento", `${completion}%`, "completed"]
+  ]
+  return (
+    <div className="checklists-today">
+      <div className="checklists-kpis">
+        {cards.map(([label, value, tone]) => <article className={`checklists-kpi ${tone}`} key={label}><span>{label}</span><strong>{value}</strong></article>)}
+      </div>
+
+      {selectedRun ? (
+        <ChecklistGuidedRun run={selectedRun} profiles={profiles} onClose={() => onSelect("")} onUpdateItem={onUpdateItem} onComplete={onComplete} />
+      ) : (
+        <div className="checklists-card-grid">
+          {todayRuns.map((run) => <ChecklistTodayCard key={run.id} run={run} profiles={profiles} onOpen={() => run.status === "pending" ? onStart(run.id) : onSelect(run.id)} />)}
+          {!todayRuns.length && <FriendlyEmpty title="No hay checklists pendientes para hoy." text="Cuando gerencia asigne una checklist, aparecera aqui lista para iniciar." />}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ChecklistTodayCard({ run, profiles, onOpen }) {
+  const progress = checklistRunProgress(run)
+  return (
+    <article className="checklist-today-card">
+      <div className="checklist-card-top">
+        <div>
+          <h3>{run.checklist_templates?.title || "Checklist"}</h3>
+          <p>{run.area || "Sin area"} · {responsibleLabel(run, profiles)}</p>
+        </div>
+        <Badge type="status" value={run.status} />
+      </div>
+      <div className="checklist-progress-row">
+        <progress value={progress} max="100" />
+        <strong>{progress}%</strong>
+      </div>
+      <div className="checklist-card-meta">
+        <span>{run.checklist_run_items?.length || 0} items</span>
+        <span>Hora limite: {run.due_time || "Sin hora"}</span>
+      </div>
+      <button type="button" className="checklist-primary-action" onClick={onOpen}>{run.status === "pending" ? "Iniciar" : run.status === "completed" ? "Ver" : "Continuar"}</button>
+    </article>
+  )
+}
+
+function ChecklistTemplatesView({ templates, profiles, onEdit, onAssign, onAssignToday, onDuplicate, onDeactivate }) {
+  const [filters, setFilters] = useState({ area: "", frequency: "", status: "" })
+  const [assigning, setAssigning] = useState(null)
+  const filtered = templates.filter((template) =>
+    (!filters.area || template.area === filters.area) &&
+    (!filters.frequency || template.frequency === filters.frequency) &&
+    (!filters.status || template.status === filters.status)
+  )
+  return (
+    <div className="checklists-admin-layout">
+      <article className="tasks-panel">
+        <div className="tasks-panel-title"><div><h2>Plantillas</h2><p className="tasks-muted">Biblioteca operativa para apertura, cierre, limpieza e inventario.</p></div></div>
+        <div className="tasks-filters">
+          <select value={filters.area} onChange={(event) => setFilters((current) => ({ ...current, area: event.target.value }))}><option value="">Todas las areas</option>{CHECKLIST_AREAS.map((area) => <option key={area}>{area}</option>)}</select>
+          <select value={filters.frequency} onChange={(event) => setFilters((current) => ({ ...current, frequency: event.target.value }))}><option value="">Todas las frecuencias</option>{CHECKLIST_FREQUENCIES.map(([id, label]) => <option value={id} key={id}>{label}</option>)}</select>
+          <select value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))}><option value="">Todos los estados</option><option value="active">Activa</option><option value="inactive">Inactiva</option></select>
+        </div>
+      </article>
+      <div className="checklists-card-grid">
+        {filtered.map((template) => (
+          <article className="checklist-template-card" key={template.id}>
+            <div className="checklist-card-top"><div><h3>{template.title}</h3><p>{template.area || "Todas las areas"} · {friendlyChecklistLabel(CHECKLIST_FREQUENCIES, template.frequency)}</p></div><span className="tasks-badge">{template.status === "active" ? "Activa" : "Inactiva"}</span></div>
+            <p>{template.description || "Sin descripcion"}</p>
+            <div className="checklist-card-meta"><span>{template.checklist_template_items?.length || 0} items</span><span>{friendlyChecklistLabel(CHECKLIST_CONTEXTS, template.shift_context)}</span><span>{template.assigned_role || "Rol libre"}</span></div>
+            <div className="checklist-actions">
+              <button type="button" className="tasks-secondary" onClick={() => onEdit(template)}>Ver</button>
+              <button type="button" className="tasks-secondary" onClick={() => onEdit(template)}>Editar</button>
+              <button type="button" className="tasks-secondary" onClick={() => setAssigning(template)}>Asignar</button>
+              <button type="button" className="tasks-secondary" onClick={() => onDuplicate(template)}>Duplicar</button>
+              <button type="button" className="tasks-secondary" onClick={() => onAssignToday(template)}>Asignar hoy</button>
+              <button type="button" className="tasks-secondary" disabled>Programar recurrencia: Proximamente</button>
+              {template.status === "active" && <button type="button" className="tasks-link danger" onClick={() => onDeactivate(template.id)}>Desactivar</button>}
+            </div>
+          </article>
+        ))}
+        {!filtered.length && <FriendlyEmpty title="Crea tu primera plantilla de apertura." text="Usa Crear plantilla para definir pasos simples por area." />}
+      </div>
+      {assigning && <ChecklistAssignPanel template={assigning} profiles={profiles} onClose={() => setAssigning(null)} onAssign={(payload) => { onAssign(payload); setAssigning(null) }} />}
+    </div>
+  )
+}
+
+function ChecklistAssignPanel({ template, profiles, onClose, onAssign }) {
+  const [form, setForm] = useState({ template_id: template.id, run_date: TODAY, area: template.area || "", assigned_profile_id: template.assigned_profile_id || "", assigned_role: template.assigned_role || "", notes: "" })
+  function update(field, value) {
+    setForm((current) => ({ ...current, [field]: value }))
+  }
+  return (
+    <article className="tasks-panel checklist-assign-panel">
+      <div className="tasks-panel-title"><div><h2>Asignar checklist</h2><p className="tasks-muted">{template.title}</p></div><button type="button" onClick={onClose}>Cerrar</button></div>
+      <div className="tasks-form-grid">
+        <Field label="Fecha"><input type="date" value={form.run_date} onChange={(event) => update("run_date", event.target.value)} /></Field>
+        <Field label="Area"><select value={form.area} onChange={(event) => update("area", event.target.value)}>{CHECKLIST_AREAS.map((area) => <option key={area}>{area}</option>)}</select></Field>
+        <Field label="Rol/Puesto"><select value={form.assigned_role} onChange={(event) => update("assigned_role", event.target.value)}><option value="">Rol libre</option>{CHECKLIST_ROLES.map((role) => <option key={role}>{role}</option>)}</select></Field>
+        <Field label="Colaborador"><select value={form.assigned_profile_id} onChange={(event) => update("assigned_profile_id", event.target.value)}><option value="">Sin colaborador especifico</option>{profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.full_name || profile.username}</option>)}</select></Field>
+      </div>
+      <Field label="Observacion"><textarea value={form.notes} onChange={(event) => update("notes", event.target.value)} /></Field>
+      <button type="button" className="tasks-primary" onClick={() => onAssign(form)}>Asignar</button>
+    </article>
+  )
+}
+
+function ChecklistTemplateWizard({ editingTemplate, profiles, onCancel, onSave }) {
+  const [step, setStep] = useState(1)
+  const [form, setForm] = useState(() => ({
+    title: editingTemplate?.title || "",
+    description: editingTemplate?.description || "",
+    area: editingTemplate?.area || CHECKLIST_AREAS[0],
+    assigned_role: editingTemplate?.assigned_role || "",
+    assigned_profile_id: editingTemplate?.assigned_profile_id || "",
+    frequency: editingTemplate?.frequency || "manual",
+    shift_context: editingTemplate?.shift_context || "general",
+    status: editingTemplate?.status || "active"
+  }))
+  const [items, setItems] = useState(() => editingTemplate?.checklist_template_items?.length ? editingTemplate.checklist_template_items : [emptyChecklistItem()])
+  const steps = ["Informacion", "Items", "Asignacion", "Vista previa"]
+  function update(field, value) {
+    setForm((current) => ({ ...current, [field]: value }))
+  }
+  function updateItem(index, field, value) {
+    setItems((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, [field]: value } : item))
+  }
+  function move(index, direction) {
+    setItems((current) => {
+      const next = [...current]
+      const target = index + direction
+      if (target < 0 || target >= next.length) return current
+      ;[next[index], next[target]] = [next[target], next[index]]
+      return next
+    })
+  }
+  function duplicateItem(index) {
+    setItems((current) => current.flatMap((item, itemIndex) => itemIndex === index ? [item, { ...item, id: `item-${Date.now()}-${index}`, title: `${item.title} copia` }] : [item]))
+  }
+  return (
+    <article className="tasks-panel checklist-wizard">
+      <div className="tasks-panel-title"><div><h2>{editingTemplate ? "Editar plantilla" : "Crear plantilla"}</h2><p className="tasks-muted">Paso {step} de 4 · {steps[step - 1]}</p></div><button type="button" onClick={onCancel}>Cancelar</button></div>
+      <div className="checklist-stepper">{steps.map((label, index) => <button key={label} type="button" className={step === index + 1 ? "active" : ""} onClick={() => setStep(index + 1)}><span>{index + 1}</span>{label}</button>)}</div>
+      {step === 1 && <div className="checklist-step-card"><div className="tasks-form-grid"><Field label="Nombre"><input required value={form.title} onChange={(event) => update("title", event.target.value)} placeholder="Apertura FOH" /></Field><Field label="Area"><select value={form.area} onChange={(event) => update("area", event.target.value)}>{CHECKLIST_AREAS.map((area) => <option key={area}>{area}</option>)}</select></Field><Field label="Frecuencia"><select value={form.frequency} onChange={(event) => update("frequency", event.target.value)}>{CHECKLIST_FREQUENCIES.map(([id, label]) => <option value={id} key={id}>{label}</option>)}</select></Field><Field label="Contexto"><select value={form.shift_context} onChange={(event) => update("shift_context", event.target.value)}>{CHECKLIST_CONTEXTS.map(([id, label]) => <option value={id} key={id}>{label}</option>)}</select></Field></div><Field label="Descripcion"><textarea value={form.description} onChange={(event) => update("description", event.target.value)} /></Field></div>}
+      {step === 2 && <div className="checklist-builder">{items.map((item, index) => <ChecklistBuilderItem key={item.id || index} item={item} index={index} onUpdate={updateItem} onMove={move} onDuplicate={duplicateItem} onDelete={() => setItems((current) => current.filter((_, itemIndex) => itemIndex !== index))} />)}<button type="button" className="checklist-add-item" onClick={() => setItems((current) => [...current, emptyChecklistItem()])}>Agregar item</button></div>}
+      {step === 3 && <div className="checklist-step-card"><div className="tasks-form-grid"><Field label="Area sugerida"><select value={form.area} onChange={(event) => update("area", event.target.value)}>{CHECKLIST_AREAS.map((area) => <option key={area}>{area}</option>)}</select></Field><Field label="Rol/Puesto sugerido"><select value={form.assigned_role} onChange={(event) => update("assigned_role", event.target.value)}><option value="">Cualquier rol</option>{CHECKLIST_ROLES.map((role) => <option key={role}>{role}</option>)}</select></Field><Field label="Colaborador opcional"><select value={form.assigned_profile_id} onChange={(event) => update("assigned_profile_id", event.target.value)}><option value="">Sin colaborador fijo</option>{profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.full_name || profile.username}</option>)}</select></Field></div></div>}
+      {step === 4 && <ChecklistTemplatePreview form={form} items={items} profiles={profiles} />}
+      <div className="checklist-wizard-actions"><button type="button" className="tasks-secondary" disabled={step === 1} onClick={() => setStep((current) => Math.max(1, current - 1))}>Anterior</button>{step < 4 ? <button type="button" className="tasks-primary" onClick={() => setStep((current) => Math.min(4, current + 1))}>Siguiente</button> : <button type="button" className="tasks-primary" onClick={() => onSave(form, items)}>Guardar plantilla</button>}</div>
+    </article>
+  )
+}
+
+function ChecklistBuilderItem({ item, index, onUpdate, onMove, onDuplicate, onDelete }) {
+  const [advanced, setAdvanced] = useState(false)
+  return (
+    <article className="checklist-builder-item">
+      <div className="tasks-form-grid">
+        <Field label={`Item ${index + 1}`}><input value={item.title} onChange={(event) => onUpdate(index, "title", event.target.value)} placeholder="Revisar estacion limpia" /></Field>
+        <Field label="Tipo"><select value={item.response_type} onChange={(event) => onUpdate(index, "response_type", event.target.value)}>{CHECKLIST_RESPONSE_TYPES.map(([id, label]) => <option value={id} key={id}>{label}</option>)}</select></Field>
+        <label className="tasks-checkbox checklist-touch-toggle"><input type="checkbox" checked={item.is_required !== false} onChange={(event) => onUpdate(index, "is_required", event.target.checked)} />Obligatorio</label>
+      </div>
+      <div className="checklist-actions compact"><button type="button" className="tasks-link" onClick={() => setAdvanced((current) => !current)}>{advanced ? "Ocultar avanzado" : "Avanzado"}</button><button type="button" className="tasks-link" onClick={() => onDuplicate(index)}>Duplicar</button><button type="button" className="tasks-link" onClick={() => onMove(index, -1)}>Subir</button><button type="button" className="tasks-link" onClick={() => onMove(index, 1)}>Bajar</button><button type="button" className="tasks-link danger" onClick={onDelete}>Eliminar</button></div>
+      {advanced && <div className="checklist-advanced"><div className="checklist-flags"><label className="tasks-checkbox"><input type="checkbox" checked={Boolean(item.requires_photo)} onChange={(event) => onUpdate(index, "requires_photo", event.target.checked)} />Requiere foto</label><label className="tasks-checkbox"><input type="checkbox" checked={Boolean(item.requires_comment)} onChange={(event) => onUpdate(index, "requires_comment", event.target.checked)} />Requiere comentario</label></div><div className="tasks-form-grid"><Field label="Puntos"><input type="number" min="0" value={item.score_points} onChange={(event) => onUpdate(index, "score_points", event.target.value)} /></Field><Field label="Descripcion"><textarea value={item.description || ""} onChange={(event) => onUpdate(index, "description", event.target.value)} /></Field></div></div>}
+    </article>
+  )
+}
+
+function ChecklistTemplatePreview({ form, items, profiles }) {
+  const assignee = profiles.find((profile) => profile.id === form.assigned_profile_id)
+  return (
+    <div className="checklist-preview">
+      <article className="checklist-template-card"><div className="checklist-card-top"><div><h3>{form.title || "Nueva checklist"}</h3><p>{form.area} · {friendlyChecklistLabel(CHECKLIST_FREQUENCIES, form.frequency)}</p></div><span className="tasks-badge">{friendlyChecklistLabel(CHECKLIST_CONTEXTS, form.shift_context)}</span></div><p>{form.description || "Sin descripcion"}</p><div className="checklist-card-meta"><span>{items.filter((item) => item.title.trim()).length} items</span><span>{form.assigned_role || "Cualquier rol"}</span><span>{assignee?.full_name || assignee?.username || "Sin colaborador fijo"}</span></div></article>
+      <div className="checklist-preview-items">{items.filter((item) => item.title.trim()).map((item, index) => <div key={item.id || index}><strong>{index + 1}. {item.title}</strong><span>{friendlyResponseType(item.response_type)}{item.requires_photo ? " · foto" : ""}{item.requires_comment ? " · comentario" : ""}</span></div>)}</div>
+    </div>
+  )
+}
+
+function ChecklistGuidedRun({ run, profiles, onClose, onUpdateItem, onComplete }) {
+  const progress = checklistRunProgress(run)
+  return (
+    <article className="checklist-guided">
+      <div className="checklist-guided-header">
+        <button type="button" className="tasks-link" onClick={onClose}>Volver</button>
+        <div><h2>{run.checklist_templates?.title || "Checklist"}</h2><p>{run.area || "Sin area"} · {responsibleLabel(run, profiles)}</p></div>
+        <Badge type="status" value={run.status} />
+      </div>
+      <div className="checklist-big-progress"><progress value={progress} max="100" /><strong>{progress}%</strong></div>
+      <div className="checklist-guided-items">{(run.checklist_run_items || []).map((item) => <ChecklistRunItem key={item.id} item={item} disabled={run.status === "completed"} onSave={(payload) => onUpdateItem(item.id, payload)} />)}</div>
+      {run.status !== "completed" && <div className="checklist-sticky-actions"><button type="button" className="tasks-secondary" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>Guardar progreso</button><button type="button" className="tasks-primary" onClick={() => onComplete(run.id)}>Completar checklist</button></div>}
+    </article>
+  )
+}
+
+function ChecklistRunItem({ item, disabled, onSave }) {
+  const [draft, setDraft] = useState(() => ({ checked: item.checked, response_text: item.response_text || "", response_number: item.response_number ?? "", photo_url: item.photo_url || "", comment: item.comment || "" }))
+  function update(field, value) {
+    setDraft((current) => ({ ...current, [field]: value }))
+  }
+  return (
+    <div className="checklist-run-item">
+      <div className="tasks-panel-title"><div><strong>{item.title}</strong><p className="tasks-muted">{friendlyResponseType(item.response_type)} · {item.score_points} pts</p></div>{item.is_required && <span className="tasks-badge">Obligatorio</span>}</div>
+      {item.response_type === "checkbox" && <button type="button" disabled={disabled} className={draft.checked ? "checklist-complete-button done" : "checklist-complete-button"} onClick={() => update("checked", !draft.checked)}>{draft.checked ? "Item completado" : "Completar item"}</button>}
+      {["text", "signature", "select"].includes(item.response_type) && <Field label={friendlyResponseType(item.response_type)}><input disabled={disabled} value={draft.response_text} onChange={(event) => update("response_text", event.target.value)} /></Field>}
+      {["number", "temperature"].includes(item.response_type) && <Field label={item.response_type === "temperature" ? "Temperatura" : "Numero"}><input disabled={disabled} type="number" step="any" value={draft.response_number} onChange={(event) => update("response_number", event.target.value)} /></Field>}
+      {(item.response_type === "photo" || item.requires_photo) && <Field label="Foto"><input disabled={disabled} value={draft.photo_url} onChange={(event) => update("photo_url", event.target.value)} placeholder="URL de foto o evidencia" /></Field>}
+      {item.requires_comment && <Field label="Comentario"><textarea disabled={disabled} value={draft.comment} onChange={(event) => update("comment", event.target.value)} /></Field>}
+      {!disabled && <button type="button" className="tasks-secondary" onClick={() => onSave(draft)}>Guardar item</button>}
+    </div>
+  )
+}
+
+function ChecklistReports({ runs, templates, profiles }) {
+  const profileName = (id) => profiles.find((profile) => profile.id === id)?.full_name || id || "Sin colaborador"
+  return (
+    <div className="tasks-reports">
+      <ChecklistReportTable title="Cumplimiento por area" rows={groupChecklistCompliance(runs, (run) => run.area || "Sin area")} />
+      <ChecklistReportTable title="Cumplimiento por colaborador" rows={groupChecklistCompliance(runs, (run) => profileName(run.assigned_profile_id))} />
+      <ChecklistReportTable title="Cumplimiento por plantilla" rows={groupChecklistCompliance(runs, (run) => templates.find((template) => template.id === run.template_id)?.title || run.checklist_templates?.title || "Checklist")} />
+      <article className="tasks-panel"><h2>Checklists atrasadas</h2>{runs.filter((run) => run.status === "overdue").map((run) => <CompactChecklistRun key={run.id} run={run} />)}{!runs.some((run) => run.status === "overdue") && <Empty text="No hay checklists atrasadas." />}</article>
+    </div>
+  )
+}
+
+function ChecklistReportTable({ title, rows }) {
+  return (
+    <article className="tasks-panel">
+      <h2>{title}</h2>
+      <div className="tasks-report-table checklist-report-table">
+        <header><span>Nombre</span><span>Asignadas</span><span>Completadas</span><span>Atrasadas</span><span>Cumplimiento</span><span>Puntos</span></header>
+        {rows.map((row) => <div key={row.label}><strong>{row.label}</strong><span>{row.assigned}</span><span>{row.completed}</span><span>{row.late}</span><span>{row.rate}%</span><span>{row.points}</span></div>)}
+      </div>
+    </article>
+  )
+}
+
+function CompactChecklistRun({ run }) {
+  return <div className="tasks-compact"><div><strong>{run.checklist_templates?.title || "Checklist"}</strong><span>{run.run_date} · {run.area || "Sin area"}</span></div><Badge type="status" value={run.status} /></div>
+}
+
+function emptyChecklistItem() {
+  return { id: `item-${Date.now()}`, title: "", description: "", response_type: "checkbox", is_required: true, requires_photo: false, requires_comment: false, score_points: 1 }
+}
+
+function checklistRunProgress(run) {
+  const items = run?.checklist_run_items || []
+  if (!items.length) return run?.status === "completed" ? 100 : 0
+  const done = items.filter((item) => item.checked || item.response_text || item.response_number != null || item.photo_url || item.completed_at).length
+  return Math.round((done / items.length) * 100)
+}
+
+function responsibleLabel(run, profiles) {
+  const profile = profiles.find((item) => item.id === run.assigned_profile_id)
+  if (profile) return profile.full_name || profile.username
+  if (run.assigned_role) return run.assigned_role
+  return "Equipo operativo"
+}
+
+function friendlyChecklistLabel(options, value) {
+  return options.find(([id]) => id === value)?.[1] || value || "General"
+}
+
+function friendlyResponseType(value) {
+  return friendlyChecklistLabel(CHECKLIST_RESPONSE_TYPES, value)
+}
+
+function markOverdueRuns(runs) {
+  return runs.map((run) => run.run_date < TODAY && ["pending", "in_progress"].includes(run.status) ? { ...run, status: "overdue" } : run)
+}
+
+function groupChecklistCompliance(runs, getter) {
+  const grouped = {}
+  runs.forEach((run) => {
+    const label = getter(run)
+    if (!grouped[label]) grouped[label] = { label, assigned: 0, completed: 0, late: 0, points: 0 }
+    grouped[label].assigned += 1
+    if (run.status === "completed") grouped[label].completed += 1
+    if (run.status === "overdue") grouped[label].late += 1
+    grouped[label].points += Number(run.earned_points || 0)
+  })
+  return Object.values(grouped).map((row) => ({ ...row, rate: row.assigned ? Math.round((row.completed / row.assigned) * 100) : 0 })).sort((a, b) => b.assigned - a.assigned)
+}
+
 function TaskReports({ tasks, employees, areas }) {
   return (
     <div className="tasks-reports">
@@ -574,7 +1062,7 @@ function CompactTask({ task, employees }) {
 }
 
 function Badge({ type, value }) {
-  const labels = { low: "Baja", medium: "Media", high: "Alta", critical: "Crítica", easy: "Fácil", hard: "Difícil", expert: "Experta", pending: "Pendiente", in_progress: "En proceso", completed: "Completada", late: "Atrasada", cancelled: "Cancelada", review_required: "Requiere revisión" }
+  const labels = { low: "Baja", medium: "Media", high: "Alta", critical: "Crítica", easy: "Fácil", hard: "Difícil", expert: "Experta", pending: "Pendiente", in_progress: "En proceso", completed: "Completada", late: "Atrasada", overdue: "Atrasada", cancelled: "Cancelada", review_required: "Requiere revisión" }
   return <span className={`tasks-badge ${type}-${value}`}>{labels[value] || value}</span>
 }
 
@@ -592,6 +1080,10 @@ function FilterOption({ options, value, onChange }) {
 
 function Empty({ text }) {
   return <p className="tasks-empty">{text}</p>
+}
+
+function FriendlyEmpty({ title, text }) {
+  return <div className="checklists-empty-card"><strong>{title}</strong><span>{text}</span></div>
 }
 
 function listFromText(text) {

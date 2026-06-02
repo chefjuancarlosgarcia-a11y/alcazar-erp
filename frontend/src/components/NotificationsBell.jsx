@@ -48,10 +48,16 @@ function NotificationsBell({ currentUser }) {
   async function viewEntity(notification) {
     await markRead(notification)
     setOpen(false)
+    if (notification.action_url) {
+      navigate(notification.action_url)
+      return
+    }
     if (notification.entity_type === "purchase_order") {
       navigate(`/inventory?section=ordenes&view=history&order=${encodeURIComponent(notification.entity_id || "")}`)
     } else if (["employee_schedule", "schedule_week"].includes(notification.entity_type)) {
       navigate("/hr?section=horarios")
+    } else if (notification.entity_type === "checklist_run") {
+      navigate(`/tasks?tab=checklists&view=run&id=${encodeURIComponent(notification.entity_id || "")}`)
     }
   }
 
@@ -93,6 +99,7 @@ function NotificationsBell({ currentUser }) {
                 <div className="notifications-actions">
                   {notification.entity_type === "purchase_order" && <button type="button" onClick={() => viewEntity(notification)}>Ver orden</button>}
                   {["employee_schedule", "schedule_week"].includes(notification.entity_type) && <button type="button" onClick={() => viewEntity(notification)}>Ver horario</button>}
+                  {notification.entity_type === "checklist_run" && <button type="button" onClick={() => viewEntity(notification)}>Abrir checklist</button>}
                   {notification.entity_type === "purchase_order" && notification.type === "purchase_order_pending" && APPROVAL_ROLES.includes(currentUser?.role) && (
                     <>
                       <button type="button" className="approve" onClick={() => processOrder(notification, "approve")}>Aprobar</button>
