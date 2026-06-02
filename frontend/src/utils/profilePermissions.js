@@ -100,7 +100,7 @@ export async function loadDynamicRoles() {
 
   cachedRolesLoadingPromise = (async () => {
     try {
-      const supabase = (await import("../services/supabaseClient.js")).default
+      const { supabase } = await import("../lib/supabase.js")
       const { data, error } = await supabase
         .from("user_roles")
         .select("role_key, role_name")

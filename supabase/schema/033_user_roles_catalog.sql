@@ -166,9 +166,15 @@ alter table public.profiles
 
 -- Add a new check constraint that validates against user_roles
 -- Note: Supabase doesn't support CHECK with subqueries, so we use a trigger instead
-alter table public.profiles
-  add constraint profiles_role_not_empty
-  check (role is not null and length(role) > 0);
+-- Use a DO block to make it idempotent - only add constraint if it doesn't exist
+do $$
+begin
+  alter table public.profiles
+    add constraint profiles_role_not_empty
+    check (role is not null and length(role) > 0);
+exception when duplicate_object then
+  null;  -- Constraint already exists, continue
+end $$;
 
 -- Create trigger to validate role exists in user_roles
 create or replace function public.validate_profile_role()
@@ -215,9 +221,25 @@ create trigger validate_profile_role_trigger
   execute function public.validate_profile_role();
 
 -- Normalize existing roles in profiles table
-update public.profiles
-set role = public.normalize_profile_role(role)
-where role is not null;
+-- Disable trigger temporarily to avoid permission errors in SQL Editor (auth.uid() context missing)
+do $$
+begin
+  -- Temporarily disable the protection trigger
+  alter table public.profiles disable trigger protect_profile_managed_fields;
+  
+  -- Normalize existing roles
+  update public.profiles
+  set role = public.normalize_profile_role(role)
+  where role is not null;
+  
+  -- Re-enable the protection trigger
+  alter table public.profiles enable trigger protect_profile_managed_fields;
+  
+exception when others then
+  -- Ensure trigger is re-enabled even if update fails
+  alter table public.profiles enable trigger protect_profile_managed_fields;
+  raise;
+end $$;
 
 -- Create function to ensure user_roles is never empty
 -- This prevents accidental deletion of all roles
