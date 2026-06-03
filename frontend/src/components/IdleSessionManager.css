@@ -1,0 +1,67 @@
+.idle-session-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(2, 6, 23, .72);
+  backdrop-filter: blur(8px);
+}
+
+.idle-session-modal {
+  display: grid;
+  gap: 14px;
+  width: min(100%, 430px);
+  padding: 22px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #e2e8f0;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, .36);
+}
+
+.idle-session-modal h2 {
+  margin: 0;
+  color: #f8fafc;
+  font-size: 22px;
+}
+
+.idle-session-modal p {
+  margin: 0;
+  color: #cbd5e1;
+  line-height: 1.5;
+}
+
+.idle-session-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.idle-session-primary,
+.idle-session-secondary {
+  min-height: 44px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  font: inherit;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.idle-session-primary {
+  background: #14b8a6;
+  color: #042f2e;
+}
+
+.idle-session-secondary {
+  border-color: #475569;
+  background: #111827;
+  color: #e2e8f0;
+}
+
+@media (max-width: 520px) {
+  .idle-session-actions {
+    grid-template-columns: 1fr;
+  }
+}

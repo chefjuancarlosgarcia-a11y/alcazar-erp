@@ -15,6 +15,11 @@ function Login() {
   const [submitting, setSubmitting] = useState(false)
   const [debugging, setDebugging] = useState(false)
   const [debugResult, setDebugResult] = useState(null)
+  const [securityMessage] = useState(() => {
+    const message = sessionStorage.getItem("auth:autoLogoutMessage") || ""
+    if (message) sessionStorage.removeItem("auth:autoLogoutMessage")
+    return message
+  })
   const isDevelopment = import.meta.env.DEV
 
   if (loading) {
@@ -104,6 +109,7 @@ function Login() {
               </span>
             </label>
 
+            {securityMessage && <p style={successStyle}>{securityMessage}</p>}
             {(error || profileError) && <p style={errorStyle}>{error || profileError}</p>}
             {isDevelopment && authError && (
               <p style={debugErrorStyle}>Supabase: {authError.message} {authError.status ? `(status ${authError.status})` : ""}</p>
@@ -248,6 +254,13 @@ const errorStyle = {
   borderRadius: "8px",
   background: "#7f1d1d",
   color: "#fecaca"
+}
+
+const successStyle = {
+  padding: "10px 12px",
+  borderRadius: "8px",
+  background: "#123427",
+  color: "#86efac"
 }
 
 const debugErrorStyle = {
