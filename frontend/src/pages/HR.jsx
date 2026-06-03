@@ -12,7 +12,7 @@ function HR() {
   const section = params.get("section")
   const profileId = params.get("profileId") || ""
   const editProfile = params.get("mode") === "edit"
-  const defaultSection = ["admin", "gerente", "gerente_general", "rrhh"].includes(user?.role) ? "usuarios" : "asistencia"
+  const defaultSection = ["admin", "gerente", "gerente_general", "recursos_humanos", "rrhh"].includes(user?.role) ? "usuarios" : "asistencia"
   const selectedSection = section || defaultSection
 
   if (selectedSection === "usuarios") {

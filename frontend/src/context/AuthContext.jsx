@@ -77,8 +77,20 @@ function cleanupLegacyUserStorage() {
 }
 
 function normalizeRole(role) {
-  const normalized = String(role || "colaborador").trim().toLowerCase()
-  return ROLE_PERMISSIONS[normalized] ? normalized : "colaborador"
+  const normalized = String(role || "colaborador")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, "_")
+  const aliases = {
+    "rr.hh.": "recursos_humanos",
+    "rr._hh.": "recursos_humanos",
+    rrhh: "recursos_humanos",
+    recursos_humanos: "recursos_humanos"
+  }
+  const roleKey = aliases[normalized] || normalized
+  return ROLE_PERMISSIONS[roleKey] ? roleKey : "colaborador"
 }
 
 export function normalizeProfileToCurrentUser(profile, sessionUser) {
