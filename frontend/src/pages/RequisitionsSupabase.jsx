@@ -8,6 +8,7 @@ import {
   cancelRequisition,
   completeRequisition,
   createRequisition,
+  getInventoryUnitConversions,
   getRequisitions,
   rejectRequisition,
   submitRequisition,
@@ -41,6 +42,23 @@ const PRIORITY_LABELS = {
   urgent: "Urgente"
 }
 
+const STOCK_OVERRIDE_ROLES = new Set(["supervisor", "gerente", "gerente_general", "admin"])
+const UNIT_LABELS = {
+  unidad: "Unidad",
+  unidades: "Unidad",
+  libra: "Libra",
+  libras: "Libra",
+  kilogramo: "Kilogramo",
+  kilogramos: "Kilogramo",
+  kg: "Kilogramo",
+  gramo: "Gramo",
+  gramos: "Gramo",
+  g: "Gramo",
+  onza: "Onza",
+  onzas: "Onza",
+  oz: "Onza"
+}
+
 const REQUESTER_ROLES = new Set([
   "admin",
   "administrador",
@@ -64,6 +82,7 @@ function RequisitionsSupabase() {
   const [requisitions, setRequisitions] = useState([])
   const [areas, setAreas] = useState([])
   const [inventory, setInventory] = useState([])
+  const [unitConversions, setUnitConversions] = useState([])
   const [requesters, setRequesters] = useState([])
   const [loading, setLoading] = useState(true)
   const [workingId, setWorkingId] = useState("")
@@ -76,6 +95,7 @@ function RequisitionsSupabase() {
   const [error, setError] = useState("")
 
   const manager = ["admin", "gerente_general"].includes(user?.role)
+  const canUseStockOverrideToggle = STOCK_OVERRIDE_ROLES.has(user?.role)
   const ownResponsibleAreas = areas.filter((area) => area.responsibleUserId === user?.id)
   const canCreate = manager || (user?.role === "supervisor" && Boolean(user?.areaId)) || ownResponsibleAreas.length > 0
   const allowedDestinationAreas = manager
@@ -85,11 +105,12 @@ function RequisitionsSupabase() {
 
   const loadData = useCallback(async () => {
     setLoading(true)
-    const [requestsResult, areasResult, inventoryResult, requestersResult] = await Promise.all([
+    const [requestsResult, areasResult, inventoryResult, requestersResult, conversionsResult] = await Promise.all([
       getRequisitions(),
       getActiveAreas(),
       getActiveInventoryItems(),
-      getAuthorizedRequesters()
+      getAuthorizedRequesters(),
+      getInventoryUnitConversions()
     ])
     const loadError = requestsResult.error || areasResult.error || inventoryResult.error || requestersResult.error
     if (loadError) setError(`No se pudieron cargar requisiciones: ${loadError.message}`)
@@ -98,6 +119,7 @@ function RequisitionsSupabase() {
       setAreas(areasResult.data)
       setInventory(inventoryResult.data)
       setRequesters(requestersResult.data)
+      setUnitConversions(conversionsResult.error ? [] : conversionsResult.data)
       setError("")
     }
     setLoading(false)
@@ -129,6 +151,7 @@ function RequisitionsSupabase() {
       priority: "normal",
       requestedByProfileId: defaultRequesterId(requesters, user),
       notes: "",
+      allowOverStock: true,
       items: []
     })
   }
@@ -141,9 +164,11 @@ function RequisitionsSupabase() {
       priority: request.priority,
       requestedByProfileId: request.requested_by_profile_id || request.requested_by || defaultRequesterId(requesters, user),
       notes: request.notes || "",
+      allowOverStock: true,
       items: request.items.map((item) => ({
         itemId: item.item_id,
         requestedQuantity: item.requested_quantity,
+        requestedUnit: item.requested_unit || item.unit,
         notes: item.notes || ""
       }))
     })
@@ -152,15 +177,19 @@ function RequisitionsSupabase() {
   async function saveRequest(data, submit) {
     setError("")
     setMessage("")
-    const validation = validateRequest(data, inventory, areas, user?.role === "admin")
+    const enrichedData = {
+      ...data,
+      items: enrichRequestItems(data.items, inventory, data.fromAreaId, unitConversions)
+    }
+    const validation = validateRequest(enrichedData, inventory, areas)
     if (validation) {
       setError(validation)
       return
     }
     setWorkingId(data.id || "new")
-    const result = data.id
-      ? await updateRequisition(data.id, data, data.items)
-      : await createRequisition(data, data.items, submit)
+    const result = enrichedData.id
+      ? await updateRequisition(enrichedData.id, enrichedData, enrichedData.items)
+      : await createRequisition(enrichedData, enrichedData.items, submit)
     let actionError = result.error
     if (!actionError && data.id && submit) {
       const submitResult = await submitRequisition(data.id)
@@ -283,19 +312,21 @@ function RequisitionsSupabase() {
           destinationAreas={allowedDestinationAreas}
           inventory={inventory}
           requesters={requesters}
+          unitConversions={unitConversions}
           currentUser={user}
+          canUseStockOverrideToggle={canUseStockOverrideToggle}
           saving={Boolean(workingId)}
           onClose={() => setFormRequest(null)}
           onSave={saveRequest}
         />
       )}
-      {detail && <RequestDetail request={detail} areas={areas} inventory={inventory} onClose={() => setDetail(null)} />}
+      {detail && <RequestDetail request={detail} areas={areas} inventory={inventory} unitConversions={unitConversions} onClose={() => setDetail(null)} />}
       {approval && <ApprovalModal request={approval} saving={workingId === approval.id} onClose={() => setApproval(null)} onApprove={handleApprove} />}
     </section>
   )
 }
 
-function RequestForm({ request, areas, destinationAreas, inventory, requesters, currentUser, saving, onClose, onSave }) {
+function RequestForm({ request, areas, destinationAreas, inventory, requesters, unitConversions, currentUser, canUseStockOverrideToggle, saving, onClose, onSave }) {
   const [form, setForm] = useState(request)
   const [selectedItemId, setSelectedItemId] = useState("")
   const [productQuery, setProductQuery] = useState("")
@@ -303,7 +334,6 @@ function RequestForm({ request, areas, destinationAreas, inventory, requesters, 
   const [formError, setFormError] = useState("")
   const pickerRef = useRef(null)
   const selectedItem = inventory.find((item) => item.id === selectedItemId)
-  const canOverrideStock = currentUser?.role === "admin"
 
   useEffect(() => {
     function closeResults(event) {
@@ -321,13 +351,7 @@ function RequestForm({ request, areas, destinationAreas, inventory, requesters, 
 
   function addItem() {
     if (!selectedItem || form.items.some((item) => item.itemId === selectedItem.id)) return
-    const available = stockOf(selectedItem, form.fromAreaId)
-    if (available <= 0 && !canOverrideStock) {
-      setFormError("Sin stock disponible en el origen.")
-      return
-    }
-    const quantity = available > 0 && !canOverrideStock ? Math.min(1, available) : 1
-    setForm({ ...form, items: [...form.items, { itemId: selectedItem.id, requestedQuantity: quantity, notes: "" }] })
+    setForm({ ...form, items: [...form.items, { itemId: selectedItem.id, requestedQuantity: 1, requestedUnit: selectedItem.base_unit, notes: "" }] })
     setFormError("")
   }
 
@@ -336,13 +360,17 @@ function RequestForm({ request, areas, destinationAreas, inventory, requesters, 
   }
 
   function submitForm(submit) {
-    const validation = validateRequest(form, inventory, areas, canOverrideStock)
+    const enrichedForm = {
+      ...form,
+      items: enrichRequestItems(form.items, inventory, form.fromAreaId, unitConversions)
+    }
+    const validation = validateRequest(enrichedForm, inventory, areas)
     if (validation) {
       setFormError(validation)
       return
     }
     setFormError("")
-    onSave(form, submit)
+    onSave(enrichedForm, submit)
   }
 
   function selectProduct(item) {
@@ -385,6 +413,12 @@ function RequestForm({ request, areas, destinationAreas, inventory, requesters, 
           <Field label="Notas">
             <input value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} placeholder="Motivo o instrucciones" />
           </Field>
+          {canUseStockOverrideToggle && (
+            <label className="requisition-field toggle">
+              <input type="checkbox" checked={form.allowOverStock !== false} onChange={(event) => setForm({ ...form, allowOverStock: event.target.checked })} />
+              <span>Permitir requisicion superior al stock</span>
+            </label>
+          )}
         </div>
         <div className="requisition-picker" ref={pickerRef}>
           <div className="requisition-product-search">
@@ -410,21 +444,34 @@ function RequestForm({ request, areas, destinationAreas, inventory, requesters, 
             )}
           </div>
           <span className={selectedItem && stockOf(selectedItem, form.fromAreaId) <= 0 ? "requisition-stock-warning" : ""}>
-            {selectedItem ? <>Disponible en origen: <strong>{stockOf(selectedItem, form.fromAreaId)}</strong> {selectedItem.base_unit}</> : "Selecciona un producto"}
+            {selectedItem ? <>Disponible en origen: <strong>{formatNumber(stockOf(selectedItem, form.fromAreaId))}</strong> {selectedItem.base_unit} · Minimo: <strong>{formatNumber(minimumOf(selectedItem, form.fromAreaId))}</strong></> : "Selecciona un producto"}
             {selectedItem && stockOf(selectedItem, form.fromAreaId) <= 0 && <small>Sin stock disponible en el origen.</small>}
           </span>
           <button type="button" className="primary" onClick={addItem}>Agregar producto</button>
         </div>
         {formError && <div className="requisitions-error">{formError}</div>}
         <div className="requisition-items">
-          <div className="requisition-items-head"><span>Producto</span><span>Origen / destino actual</span><span>Cantidad</span><span>Notas</span><span /></div>
+          <div className="requisition-items-head"><span>Producto</span><span>Stock / disponibilidad</span><span>Cantidad</span><span>Solicitar en</span><span>Notas</span><span /></div>
           {form.items.map((line) => {
             const item = inventory.find((inventoryItem) => inventoryItem.id === line.itemId)
+            const unitOptions = getUnitOptions(item, unitConversions)
+            const requestedUnit = line.requestedUnit || item?.base_unit || ""
+            const availability = calculateAvailability(item, form.fromAreaId, line.requestedQuantity, requestedUnit, unitConversions)
             return (
               <div className="requisition-item-row" key={line.itemId}>
-                <strong>{item?.name || "Producto"}</strong>
-                <span>{stockOf(item, form.fromAreaId)} / {stockOf(item, form.toAreaId)} {item?.base_unit}</span>
-                <input type="number" min="0.001" max={canOverrideStock ? undefined : stockOf(item, form.fromAreaId)} step="any" value={line.requestedQuantity} onChange={(event) => updateItem(line.itemId, { requestedQuantity: event.target.value })} />
+                <strong>{item?.name || "Producto"}<small>{item?.base_unit || ""}</small></strong>
+                <span>
+                  Actual: {formatNumber(availability.available)} {item?.base_unit} · Minimo: {formatNumber(availability.minimum)} {item?.base_unit}
+                  <AvailabilityBadge status={availability.status} />
+                  {availability.shortage > 0 && (
+                    <small className="requisition-stock-warning">⚠ Stock insuficiente. Solicitado: {formatNumber(availability.requestedBase)} {item?.base_unit}. Disponible: {formatNumber(availability.available)}. Faltante: {formatNumber(availability.shortage)}.</small>
+                  )}
+                  {availability.conversionWarning && <small className="requisition-stock-warning">No hay conversion configurada; se guardara la cantidad solicitada como referencia operativa.</small>}
+                </span>
+                <input type="number" min="0.001" step="any" value={line.requestedQuantity} onChange={(event) => updateItem(line.itemId, { requestedQuantity: event.target.value })} />
+                <select value={requestedUnit} onChange={(event) => updateItem(line.itemId, { requestedUnit: event.target.value })}>
+                  {unitOptions.map((unit) => <option key={unit} value={unit}>{unitLabel(unit)}</option>)}
+                </select>
                 <input value={line.notes} onChange={(event) => updateItem(line.itemId, { notes: event.target.value })} placeholder="Opcional" />
                 <button type="button" className="danger" onClick={() => setForm({ ...form, items: form.items.filter((itemLine) => itemLine.itemId !== line.itemId) })}>Quitar</button>
               </div>
@@ -442,7 +489,7 @@ function RequestForm({ request, areas, destinationAreas, inventory, requesters, 
   )
 }
 
-function RequestDetail({ request, areas, inventory, onClose }) {
+function RequestDetail({ request, areas, inventory, unitConversions, onClose }) {
   return (
     <div className="requisitions-backdrop">
       <section className="requisitions-modal detail">
@@ -460,20 +507,27 @@ function RequestDetail({ request, areas, inventory, onClose }) {
         </div>
         {request.notes && <p className="requisition-note">{request.notes}</p>}
         <div className="requisition-detail-table">
-          <div><strong>Producto</strong><strong>Solicitado / aprobado</strong><strong>Origen ahora / después</strong><strong>Destino ahora / después</strong></div>
+          <div><strong>Producto</strong><strong>Solicitado / aprobado</strong><strong>Disponibilidad</strong><strong>Origen ahora / después</strong><strong>Destino ahora / después</strong></div>
           {request.items.map((line) => {
             const item = inventory.find((entry) => entry.id === line.item_id)
-            const quantity = Number(line.approved_quantity || line.requested_quantity)
+            const requestedUnit = line.requested_unit || line.unit || item?.base_unit
+            const quantity = Number(line.converted_approved_quantity || line.converted_requested_quantity || line.approved_quantity || line.requested_quantity)
             const origin = stockOf(item, request.from_area_id)
             const destination = stockOf(item, request.to_area_id)
-            const insufficient = origin < quantity && request.status !== "completed"
+            const availability = calculateAvailability(item, request.from_area_id, line.approved_quantity || line.requested_quantity, requestedUnit, unitConversions)
+            const insufficient = availability.shortage > 0 && request.status !== "completed"
             return (
               <div className={insufficient ? "insufficient" : ""} key={line.id}>
                 <strong>{line.item_name}</strong>
-                <span>{line.requested_quantity} / {line.approved_quantity || "-"} {line.unit}</span>
-                <span>{origin} / {origin - quantity} {line.unit}</span>
-                <span>{destination} / {destination + quantity} {line.unit}</span>
-                {insufficient && <small>Stock insuficiente en origen.</small>}
+                <span>{formatNumber(line.requested_quantity)} / {line.approved_quantity ? formatNumber(line.approved_quantity) : "-"} {requestedUnit}</span>
+                <span>
+                  <AvailabilityBadge status={line.availability_status || availability.status} />
+                  Actual: {formatNumber(origin)} {item?.base_unit || line.unit} · Mínimo: {formatNumber(minimumOf(item, request.from_area_id))} {item?.base_unit || line.unit}
+                </span>
+                <span>{formatNumber(origin)} / {formatNumber(origin - quantity)} {item?.base_unit || line.unit}</span>
+                <span>{formatNumber(destination)} / {formatNumber(destination + quantity)} {item?.base_unit || line.unit}</span>
+                {insufficient && <small>⚠ Stock insuficiente. Solicitado: {formatNumber(availability.requestedBase)}. Disponible: {formatNumber(availability.available)}. Faltante: {formatNumber(availability.shortage)}.</small>}
+                {(line.conversion_warning || availability.conversionWarning) && <small>No había conversión configurada para {requestedUnit} → {item?.base_unit || line.unit}.</small>}
               </div>
             )
           })}
@@ -531,6 +585,95 @@ function stockOf(item, areaId) {
   return Number(item?.stockByArea?.[areaId] || 0)
 }
 
+function minimumOf(item, areaId) {
+  return Number(item?.minimumByArea?.[areaId] || 0)
+}
+
+function normalizeUnit(unit) {
+  const value = String(unit || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+  if (["unidad", "unidades", "u"].includes(value)) return "unidad"
+  if (["libra", "libras", "lb", "lbs"].includes(value)) return "libra"
+  if (["onza", "onzas", "oz"].includes(value)) return "onza"
+  if (["kilogramo", "kilogramos", "kg"].includes(value)) return "kilogramo"
+  if (["gramo", "gramos", "g"].includes(value)) return "gramo"
+  return value
+}
+
+function unitLabel(unit) {
+  return UNIT_LABELS[normalizeUnit(unit)] || unit || "Unidad"
+}
+
+function getUnitOptions(item, conversions) {
+  if (!item?.base_unit) return ["unidad"]
+  const baseUnit = normalizeUnit(item.base_unit)
+  const options = new Set([item.base_unit])
+  conversions.forEach((conversion) => {
+    const fromUnit = normalizeUnit(conversion.from_unit)
+    const toUnit = normalizeUnit(conversion.to_unit)
+    if (fromUnit === baseUnit) options.add(conversion.to_unit)
+    if (toUnit === baseUnit) options.add(conversion.from_unit)
+  })
+  return Array.from(options)
+}
+
+function findConversionFactor(fromUnit, toUnit, conversions) {
+  const fromKey = normalizeUnit(fromUnit)
+  const toKey = normalizeUnit(toUnit)
+  if (!fromKey || !toKey || fromKey === toKey) return { factor: 1, warning: false }
+  const direct = conversions.find((conversion) => normalizeUnit(conversion.from_unit) === fromKey && normalizeUnit(conversion.to_unit) === toKey)
+  if (direct) return { factor: Number(direct.factor || 1), warning: false }
+  const reverse = conversions.find((conversion) => normalizeUnit(conversion.from_unit) === toKey && normalizeUnit(conversion.to_unit) === fromKey)
+  if (reverse && Number(reverse.factor) > 0) return { factor: 1 / Number(reverse.factor), warning: false }
+  return { factor: 1, warning: true }
+}
+
+function calculateAvailability(item, areaId, requestedQuantity, requestedUnit, conversions) {
+  const available = stockOf(item, areaId)
+  const minimum = minimumOf(item, areaId)
+  const quantity = Number(requestedQuantity || 0)
+  const conversion = findConversionFactor(requestedUnit || item?.base_unit, item?.base_unit, conversions)
+  const requestedBase = quantity * conversion.factor
+  const shortage = Math.max(0, requestedBase - available)
+  const status = available <= 0 ? "Sin stock" : shortage > 0 ? "Parcial" : "Disponible"
+  return {
+    available,
+    minimum,
+    requestedBase,
+    shortage,
+    status,
+    conversionFactor: conversion.factor,
+    conversionWarning: conversion.warning
+  }
+}
+
+function enrichRequestItems(items, inventory, fromAreaId, conversions) {
+  return items.map((line) => {
+    const item = inventory.find((entry) => entry.id === line.itemId || entry.id === line.item_id)
+    const requestedUnit = line.requestedUnit || line.requested_unit || item?.base_unit || line.unit
+    const availability = calculateAvailability(item, fromAreaId, line.requestedQuantity ?? line.requested_quantity, requestedUnit, conversions)
+    return {
+      ...line,
+      requestedUnit,
+      conversionFactor: availability.conversionFactor,
+      convertedRequestedQuantity: availability.requestedBase,
+      availabilityStatus: availability.status,
+      stockAvailableAtRequest: availability.available,
+      stockMinimumAtRequest: availability.minimum,
+      conversionWarning: availability.conversionWarning
+    }
+  })
+}
+
+function AvailabilityBadge({ status }) {
+  const normalized = status || "Disponible"
+  return <span className={`availability-badge availability-${normalizeSearch(normalized).replace(/\s+/g, "-")}`}>{normalized}</span>
+}
+
+function formatNumber(value) {
+  const number = Number(value || 0)
+  return Number.isInteger(number) ? String(number) : number.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")
+}
+
 function countStatus(requests, status) {
   return status === "all" ? requests.length : requests.filter((request) => request.status === status).length
 }
@@ -559,7 +702,7 @@ function validateRequestLegacy(request, inventory, areas) {
   return ""
 }
 
-function validateRequest(request, inventory, areas, canOverrideStock = false) {
+function validateRequest(request, inventory, areas) {
   if (!request.requestedByProfileId) return "Selecciona quién está haciendo la requisición."
   if (!request.fromAreaId || !request.toAreaId || request.fromAreaId === request.toAreaId) return "Origen y destino deben ser areas diferentes."
   if (!areas.some((area) => area.id === request.toAreaId && area.active)) return "El area destino no esta activa."
@@ -568,7 +711,6 @@ function validateRequest(request, inventory, areas, canOverrideStock = false) {
     const item = inventory.find((entry) => entry.id === line.itemId && entry.active)
     if (!item) return "La requisición contiene un producto inactivo."
     if (Number(line.requestedQuantity) <= 0) return "Cada cantidad solicitada debe ser mayor que cero."
-    if (!canOverrideStock && Number(line.requestedQuantity) > stockOf(item, request.fromAreaId)) return `La cantidad de ${item.name} supera el stock disponible en origen.`
   }
   return ""
 }

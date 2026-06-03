@@ -270,7 +270,7 @@
 }
 .requisition-items-head, .requisition-item-row {
   display: grid;
-  grid-template-columns: 1.45fr 1.2fr .7fr 1.1fr auto;
+  grid-template-columns: minmax(150px, 1.4fr) minmax(220px, 1.6fr) minmax(96px, .7fr) minmax(110px, .8fr) minmax(130px, 1fr) auto;
   align-items: center;
   gap: 10px;
   padding: 11px 12px;
@@ -284,7 +284,55 @@
 }
 .requisition-item-row { border-top: 1px solid #1d2b40; }
 .requisition-item-row span { color: #94a3b8; font-size: 13px; }
+.requisition-item-row strong small {
+  display: block;
+  margin-top: 3px;
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 500;
+}
+.requisition-item-row span small {
+  display: block;
+  margin-top: 5px;
+}
 .requisition-item-row button { padding: 8px; }
+.requisition-field.toggle {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 9px;
+}
+.requisition-field.toggle input {
+  width: auto;
+}
+.availability-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  margin: 0 0 4px 0;
+  padding: 3px 7px;
+  border-radius: 999px;
+  border: 1px solid #334155;
+  color: #cbd5e1;
+  font-size: 12px;
+  font-weight: 700;
+}
+.availability-disponible {
+  border-color: #0f766e;
+  background: #052e2b;
+  color: #99f6e4;
+}
+.availability-parcial {
+  border-color: #a16207;
+  background: #33240b;
+  color: #fde68a;
+}
+.availability-sin-stock {
+  border-color: #991b1b;
+  background: #3b1119;
+  color: #fecaca;
+}
 
 .requisition-detail-meta {
   display: grid;
@@ -315,7 +363,7 @@
 }
 .requisition-detail-table > div {
   display: grid;
-  grid-template-columns: 1.5fr 1fr 1.15fr 1.15fr;
+  grid-template-columns: minmax(140px, 1.2fr) minmax(120px, .9fr) minmax(180px, 1.3fr) minmax(130px, 1fr) minmax(130px, 1fr);
   gap: 10px;
   padding: 12px;
 }

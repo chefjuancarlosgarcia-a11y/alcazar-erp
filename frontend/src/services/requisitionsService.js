@@ -35,8 +35,24 @@ function serializeItems(items) {
     item_id: item.itemId || item.item_id,
     requested_quantity: Number(item.requestedQuantity ?? item.requested_quantity ?? 0),
     approved_quantity: item.approvedQuantity ?? item.approved_quantity ?? null,
+    requested_unit: item.requestedUnit || item.requested_unit || item.unit || null,
+    conversion_factor: item.conversionFactor ?? item.conversion_factor ?? null,
+    converted_requested_quantity: item.convertedRequestedQuantity ?? item.converted_requested_quantity ?? null,
+    converted_approved_quantity: item.convertedApprovedQuantity ?? item.converted_approved_quantity ?? null,
+    availability_status: item.availabilityStatus || item.availability_status || null,
+    stock_available_at_request: item.stockAvailableAtRequest ?? item.stock_available_at_request ?? null,
+    stock_minimum_at_request: item.stockMinimumAtRequest ?? item.stock_minimum_at_request ?? null,
+    conversion_warning: item.conversionWarning ?? item.conversion_warning ?? false,
     notes: item.notes || ""
   }))
+}
+
+export async function getInventoryUnitConversions() {
+  const { data, error } = await supabase
+    .from("inventory_unit_conversions")
+    .select("*")
+    .order("from_unit", { ascending: true })
+  return { data: data || [], error }
 }
 
 export async function getRequisitions(filters = {}) {
