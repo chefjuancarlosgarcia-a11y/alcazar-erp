@@ -24,9 +24,19 @@ function templatePayload(payload) {
     area: payload.area || null,
     assigned_role: payload.assigned_role || null,
     assigned_profile_id: payload.assigned_profile_id || null,
+    supervisor_profile_id: payload.supervisor_profile_id || null,
+    backup_profile_id: payload.backup_profile_id || null,
     frequency: payload.frequency || "manual",
     shift_context: payload.shift_context || "general",
-    status: payload.status || "active"
+    status: payload.status || "active",
+    reminder_time: payload.reminder_time || null,
+    due_time: payload.due_time || null,
+    recurrence_days: payload.recurrence_days || [],
+    recurrence_month_day: payload.recurrence_month_day ? Number(payload.recurrence_month_day) : null,
+    recurrence_rule: payload.recurrence_rule?.trim() || null,
+    skip_non_work_days: payload.skip_non_work_days !== false,
+    auto_generate: Boolean(payload.auto_generate),
+    requires_approval: payload.requires_approval !== false
   }
 }
 
@@ -40,6 +50,11 @@ function itemPayload(item, index, templateId) {
     is_required: item.is_required !== false,
     requires_photo: Boolean(item.requires_photo),
     requires_comment: Boolean(item.requires_comment),
+    require_comment_on_no: Boolean(item.require_comment_on_no),
+    require_photo_on_no: Boolean(item.require_photo_on_no),
+    generate_incident_on_no: Boolean(item.generate_incident_on_no),
+    options: parseOptions(item.options),
+    rule_config: { ...(item.rule_config || {}), section: item.section || item.rule_config?.section || "" },
     score_points: Math.max(0, Number(item.score_points || 0))
   }
 }
@@ -57,6 +72,16 @@ function requestPayload(payload, items) {
     frequency: payload.frequency || "manual",
     shift_context: payload.shift_context || "general",
     status_after_approval: payload.status_after_approval || payload.status || "active",
+    supervisor_profile_id: payload.supervisor_profile_id || null,
+    backup_profile_id: payload.backup_profile_id || null,
+    reminder_time: payload.reminder_time || null,
+    due_time: payload.due_time || null,
+    recurrence_days: payload.recurrence_days || [],
+    recurrence_month_day: payload.recurrence_month_day ? Number(payload.recurrence_month_day) : null,
+    recurrence_rule: payload.recurrence_rule?.trim() || null,
+    skip_non_work_days: payload.skip_non_work_days !== false,
+    auto_generate: Boolean(payload.auto_generate),
+    requires_approval: payload.requires_approval !== false,
     items_snapshot: (items || []).map((item, index) => ({
       item_order: index,
       title: item.title?.trim(),
@@ -65,9 +90,22 @@ function requestPayload(payload, items) {
       is_required: item.is_required !== false,
       requires_photo: Boolean(item.requires_photo),
       requires_comment: Boolean(item.requires_comment),
+      require_comment_on_no: Boolean(item.require_comment_on_no),
+      require_photo_on_no: Boolean(item.require_photo_on_no),
+      generate_incident_on_no: Boolean(item.generate_incident_on_no),
+      options: parseOptions(item.options),
+      rule_config: { ...(item.rule_config || {}), section: item.section || item.rule_config?.section || "" },
       score_points: Math.max(0, Number(item.score_points || 0))
     })).filter((item) => item.title)
   }
+}
+
+function parseOptions(options) {
+  if (Array.isArray(options)) return options.map((item) => String(item).trim()).filter(Boolean)
+  return String(options || "")
+    .split(/\n|,/)
+    .map((item) => item.trim())
+    .filter(Boolean)
 }
 
 export async function createChecklistChangeRequest(payload, items) {
@@ -104,6 +142,49 @@ export async function getChecklistChangeRequests(filters = {}) {
   if (filters.templateId) query = query.eq("template_id", filters.templateId)
   const { data, error } = await query
   return { data: data || [], error }
+}
+
+export async function getChecklistTemplateSuggestions(filters = {}) {
+  let query = supabase
+    .from("checklist_template_suggestions")
+    .select("*, checklist_templates(title, area)")
+    .order("created_at", { ascending: false })
+  if (filters.status) query = query.eq("status", filters.status)
+  if (filters.templateId) query = query.eq("template_id", filters.templateId)
+  const { data, error } = await query
+  return { data: data || [], error }
+}
+
+export async function createChecklistTemplateSuggestion(payload) {
+  const { data, error } = await supabase
+    .from("checklist_template_suggestions")
+    .insert({
+      template_id: payload.template_id,
+      area: payload.area || null,
+      change_type: payload.change_type,
+      description: payload.description?.trim(),
+      justification: payload.justification?.trim(),
+      priority: payload.priority || "medium",
+      evidence_url: payload.evidence_url || null,
+      status: "pending"
+    })
+    .select("*")
+    .single()
+  return { data, error }
+}
+
+export async function updateChecklistTemplateSuggestionStatus(id, status, reviewNotes = "") {
+  const { data, error } = await supabase
+    .from("checklist_template_suggestions")
+    .update({
+      status,
+      review_notes: reviewNotes?.trim() || null,
+      reviewed_at: new Date().toISOString()
+    })
+    .eq("id", id)
+    .select("*")
+    .single()
+  return { data, error }
 }
 
 export async function approveChecklistChangeRequest(id, reviewNotes = "") {
@@ -214,49 +295,35 @@ export async function getChecklistRuns(filters = {}) {
 }
 
 export async function createChecklistRunFromTemplate(templateId, assignmentPayload = {}) {
-  const { data: template, error: templateError } = await getChecklistTemplateById(templateId)
-  if (templateError) return { data: null, error: templateError }
-
-  const totalPoints = (template.checklist_template_items || []).reduce((sum, item) => sum + Number(item.score_points || 0), 0)
-  const { data: run, error } = await supabase
-    .from("checklist_runs")
-    .insert({
-      template_id: templateId,
-      run_date: assignmentPayload.run_date || new Date().toISOString().slice(0, 10),
-      area: assignmentPayload.area || template.area || null,
-      assigned_profile_id: assignmentPayload.assigned_profile_id || template.assigned_profile_id || null,
-      assigned_role: assignmentPayload.assigned_role || template.assigned_role || null,
-      notes: assignmentPayload.notes?.trim() || null,
-      total_points: totalPoints,
-      earned_points: 0,
-      status: "pending"
-    })
-    .select("*")
-    .single()
+  const runDate = assignmentPayload.run_date || new Date().toISOString().slice(0, 10)
+  const { data: run, error } = await supabase.rpc("create_checklist_run_from_template", {
+    p_template_id: templateId,
+    p_run_date: runDate,
+    p_assignment_source: assignmentPayload.assignment_source || "manual",
+    p_assigned_profile_id: assignmentPayload.assigned_profile_id || null,
+    p_notes: assignmentPayload.notes?.trim() || null
+  })
   if (error) return { data: null, error }
-
-  const runItems = (template.checklist_template_items || []).map((item) => ({
-    run_id: run.id,
-    template_item_id: item.id,
-    item_order: item.item_order,
-    title: item.title,
-    response_type: item.response_type,
-    is_required: item.is_required,
-    requires_photo: item.requires_photo,
-    requires_comment: item.requires_comment,
-    score_points: item.score_points,
-    comment: item.requires_comment ? "" : null
-  }))
-  if (runItems.length) {
-    const { error: itemsError } = await supabase.from("checklist_run_items").insert(runItems)
-    if (itemsError) return { data: null, error: itemsError }
+  if (assignmentPayload.area || assignmentPayload.assigned_role) {
+    const { error: updateError } = await supabase
+      .from("checklist_runs")
+      .update({
+        area: assignmentPayload.area || run.area || null,
+        assigned_role: assignmentPayload.assigned_role || run.assigned_role || null
+      })
+      .eq("id", run.id)
+    if (updateError) return { data: null, error: updateError }
   }
-
-  await supabase.rpc("create_checklist_run_notifications", { p_run_id: run.id })
   window.dispatchEvent(new CustomEvent("notifications-updated"))
 
-  const result = await getChecklistRuns({ date: assignmentPayload.run_date || run.run_date })
+  const result = await getChecklistRuns({ date: runDate })
   return { data: result.data.find((item) => item.id === run.id) || run, error: result.error }
+}
+
+export async function generateDueChecklistRuns(date = new Date().toISOString().slice(0, 10)) {
+  const result = await supabase.rpc("generate_due_checklist_runs", { p_target_date: date })
+  if (!result.error) window.dispatchEvent(new CustomEvent("notifications-updated"))
+  return result
 }
 
 export async function updateChecklistRunItem(runItemId, payload) {
@@ -266,6 +333,9 @@ export async function updateChecklistRunItem(runItemId, payload) {
       checked: Boolean(payload.checked),
       response_text: payload.response_text ?? null,
       response_number: payload.response_number === "" || payload.response_number == null ? null : Number(payload.response_number),
+      response_date: payload.response_date || null,
+      response_time: payload.response_time || null,
+      response_json: payload.response_json || {},
       photo_url: payload.photo_url || null,
       comment: payload.comment || null
     })
@@ -296,23 +366,36 @@ export async function completeChecklistRun(runId) {
   if (runError) return { data: null, error: runError }
 
   const missing = (run.checklist_run_items || []).filter((item) => {
-    const hasValue = item.checked || item.response_text || item.response_number != null || item.photo_url
+    const jsonValue = item.response_json && Object.keys(item.response_json).length > 0
+    const answeredNo = String(item.response_text || "").toLowerCase() === "no"
+    const hasValue = item.checked || item.response_text || item.response_number != null || item.response_date || item.response_time || item.photo_url || jsonValue
     const missingRequired = item.is_required && !hasValue
-    const missingPhoto = (item.response_type === "photo" || item.requires_photo) && !item.photo_url
-    const missingComment = item.requires_comment && !item.comment
+    const missingPhoto = (item.response_type === "photo" || item.requires_photo || (item.require_photo_on_no && answeredNo)) && !item.photo_url
+    const missingComment = (item.requires_comment || (item.require_comment_on_no && answeredNo)) && !item.comment
     return missingRequired || missingPhoto || missingComment
   })
   if (missing.length) return { data: null, error: { message: "Completa los items obligatorios antes de finalizar." } }
 
-  await supabase.rpc("recalculate_checklist_run_points", { p_run_id: runId })
-  const { data, error } = await supabase
-    .from("checklist_runs")
-    .update({ status: "completed", completed_at: new Date().toISOString() })
-    .eq("id", runId)
-    .select(RUN_SELECT)
-    .single()
+  const submitResult = await supabase.rpc("submit_checklist_run_for_review", { p_run_id: runId })
+  if (submitResult.error) return { data: null, error: submitResult.error }
+  const { data, error } = await supabase.from("checklist_runs").select(RUN_SELECT).eq("id", runId).single()
   if (!error) await supabase.rpc("mark_checklist_notifications_read", { p_run_id: runId })
   return { data: orderRun(data), error }
+}
+
+export async function approveChecklistRun(runId, reviewNotes = "") {
+  const result = await supabase.rpc("approve_checklist_run", {
+    p_run_id: runId,
+    p_review_notes: reviewNotes || null
+  })
+  return result
+}
+
+export async function rejectChecklistRun(runId, reviewNotes) {
+  return supabase.rpc("reject_checklist_run", {
+    p_run_id: runId,
+    p_review_notes: reviewNotes
+  })
 }
 
 export async function getChecklistDashboardStats() {

@@ -278,8 +278,10 @@
 .tasks-badge.status-late,
 .tasks-badge.status-overdue { background: #441620; color: #fca5a5; }
 .tasks-badge.status-in_progress { background: #123454; color: #7dd3fc; }
+.tasks-badge.status-pending_review { background: #45310b; color: #fde68a; }
 .tasks-badge.status-completed { background: #123427; color: #86efac; }
 .tasks-badge.status-review_required { background: #45310b; color: #fde68a; }
+.tasks-badge.status-rejected { background: #441620; color: #fca5a5; }
 .tasks-badge.status-cancelled { background: #273244; color: #9ca3af; }
 
 .tasks-success,
@@ -659,6 +661,7 @@
 .checklists-kpi.completed strong { color: #86efac; }
 .checklists-kpi.overdue strong { color: #fca5a5; }
 .checklists-kpi.in_progress strong { color: #7dd3fc; }
+.checklists-kpi.pending_review strong { color: #fde68a; }
 
 .checklists-card-grid {
   display: grid;
@@ -755,8 +758,8 @@
 
 .checklist-guided {
   display: grid;
-  gap: 16px;
-  padding: 18px;
+  gap: 12px;
+  padding: 14px;
 }
 
 .checklist-guided-header {
@@ -779,7 +782,41 @@
 .checklist-guided-items,
 .checklist-preview-items {
   display: grid;
-  gap: 12px;
+  gap: 10px;
+}
+
+.checklist-section {
+  border: 1px solid #223348;
+  border-radius: 10px;
+  background: #0b1323;
+  overflow: hidden;
+}
+
+.checklist-section summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  color: #e2e8f0;
+  cursor: pointer;
+  list-style: none;
+}
+
+.checklist-section summary::-webkit-details-marker {
+  display: none;
+}
+
+.checklist-section summary span {
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.checklist-section-items {
+  display: grid;
+  gap: 8px;
+  padding: 0 8px 8px;
 }
 
 .checklist-sticky-actions {
@@ -794,6 +831,26 @@
   border-radius: 14px;
   background: rgba(15, 23, 42, .96);
   backdrop-filter: blur(8px);
+}
+
+.checklist-sticky-actions.review {
+  grid-template-columns: 1fr;
+}
+
+.checklist-review-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #5b4714;
+  border-radius: 12px;
+  background: #201a0b;
+  color: #fde68a;
+}
+
+.checklist-review-summary strong {
+  width: 100%;
+  color: #fff7cc;
 }
 
 .checklist-actions {
@@ -976,9 +1033,9 @@
 
 .checklist-builder-item,
 .checklist-run-item {
-  padding: 14px;
+  padding: 10px 12px;
   border: 1px solid #26384e;
-  border-radius: 14px;
+  border-radius: 8px;
   background: #101c30;
 }
 
@@ -986,6 +1043,112 @@
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
+}
+
+.form-question {
+  gap: 9px;
+}
+
+.checklist-choice-row,
+.checklist-rating,
+.checklist-option-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.checklist-choice-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.checklist-choice-row label,
+.checklist-rating button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 48px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0b1628;
+  color: #e2e8f0;
+  font: inherit;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.checklist-choice-row.native label {
+  min-height: 38px;
+  justify-content: flex-start;
+  padding: 8px 10px;
+}
+
+.checklist-choice-row label.selected {
+  border-color: #14b8a6;
+  background: #0f766e;
+  color: #f0fdfa;
+}
+
+.checklist-choice-row label.danger.selected {
+  border-color: #f87171;
+  background: #7f1d1d;
+  color: #fee2e2;
+}
+
+.checklist-inline-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  color: #e2e8f0;
+  font-weight: 800;
+}
+
+.checklist-inline-check input,
+.checklist-choice-row input,
+.checklist-option-grid input {
+  width: 18px;
+  height: 18px;
+  accent-color: #14b8a6;
+}
+
+.checklist-answer-state {
+  align-self: start;
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: #17263a;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.checklist-answer-state.done {
+  background: #123427;
+  color: #86efac;
+}
+
+.checklist-rating {
+  grid-template-columns: repeat(5, 48px);
+}
+
+.checklist-rating button {
+  color: #64748b;
+  font-size: 24px;
+}
+
+.checklist-rating button.selected {
+  border-color: #f59e0b;
+  background: #451a03;
+  color: #fbbf24;
+}
+
+.checklist-option-grid {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.checklist-evidence-preview {
+  width: min(100%, 260px);
+  border-radius: 10px;
+  border: 1px solid #334155;
 }
 
 .checklist-report-table header,
