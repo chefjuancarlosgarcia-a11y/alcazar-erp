@@ -40,6 +40,13 @@ const RECIPE_UNITS = [
   "Unidades"
 ]
 
+const RECIPE_FORM_STEPS = [
+  { id: "general", label: "Información general" },
+  { id: "ingredients", label: "Ingredientes" },
+  { id: "preparation", label: "Preparación" },
+  { id: "costs", label: "Costos" }
+]
+
 const DEBUG = import.meta.env.DEV
 
 function recipeDebug(label, payload) {
@@ -399,6 +406,7 @@ function RecipesSupabase() {
 
 function RecipeFormV2({ form: initialForm, areas, inventory, posProducts, saving, onClose, onSave }) {
   const [form, setForm] = useState(initialForm)
+  const [activeStep, setActiveStep] = useState("general")
   const [itemId, setItemId] = useState(inventory[0]?.id || "")
   const [ingredientQuery, setIngredientQuery] = useState("")
   const [formError, setFormError] = useState("")
@@ -421,6 +429,7 @@ function RecipeFormV2({ form: initialForm, areas, inventory, posProducts, saving
     const catalog = inventory.find((entry) => entry.id === ingredient.inventoryItemId)
     return total + Number(ingredient.inventoryQuantity || 0) * Number(catalog?.cost_per_base_unit || 0)
   }, 0)
+  const activeStepIndex = Math.max(0, RECIPE_FORM_STEPS.findIndex((step) => step.id === activeStep))
 
   function addIngredient() {
     if (!item || form.ingredients.some((ingredient) => ingredient.inventoryItemId === item.id)) return
@@ -513,8 +522,18 @@ function RecipeFormV2({ form: initialForm, areas, inventory, posProducts, saving
     <div className="recipes-backdrop">
       <form className="recipes-modal recipe-editor-modal" onSubmit={submitForm} noValidate>
         <header><div><p className="recipes-eyebrow">Receta real</p><h2>{form.id ? "Editar receta" : "Nueva receta"}</h2></div><button type="button" onClick={onClose} disabled={saving}>Cerrar</button></header>
+        <div className="recipe-stepper" aria-label="Pasos del formulario de receta">
+          <strong>Paso {activeStepIndex + 1} de {RECIPE_FORM_STEPS.length}</strong>
+          <div>
+            {RECIPE_FORM_STEPS.map((step, index) => (
+              <button key={step.id} type="button" className={activeStep === step.id ? "active" : ""} onClick={() => setActiveStep(step.id)}>
+                <span>{index + 1}</span>{step.label}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="recipes-modal-body">
-          <section className="recipe-form-section">
+          <section className={`recipe-form-section ${activeStep === "general" ? "" : "is-hidden"}`}>
             <div className="recipe-section-heading"><h3>Información general de receta</h3></div>
             <div className="recipe-form-grid">
               <Field label="Nombre"><input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></Field>
@@ -529,7 +548,7 @@ function RecipeFormV2({ form: initialForm, areas, inventory, posProducts, saving
             </div>
           </section>
 
-          <section className="recipe-form-section">
+          <section className={`recipe-form-section ${activeStep === "general" ? "" : "is-hidden"}`}>
             <div className="recipe-section-heading"><h3>Imagen de receta</h3></div>
             <div className="recipe-image-upload">
               {form.imageUrl ? <img src={form.imageUrl} alt="" /> : <span>Sin imagen</span>}
@@ -544,9 +563,9 @@ function RecipeFormV2({ form: initialForm, areas, inventory, posProducts, saving
             </div>
           </section>
 
-          <section className="recipe-form-section">
-            <div className="recipe-section-heading"><h3>Ingredientes</h3><span>{form.ingredients.length} ingrediente(s)</span></div>
-            <div className="recipe-picker">
+          <section className={`recipe-form-section ${["ingredients", "preparation"].includes(activeStep) ? "" : "is-hidden"}`}>
+            <div className="recipe-section-heading"><h3>{activeStep === "preparation" ? "Preparación" : "Ingredientes"}</h3><span>{activeStep === "preparation" ? `${normalizePreparationSteps(form.preparationSteps).length} paso(s)` : `${form.ingredients.length} ingrediente(s)`}</span></div>
+            <div className={`recipe-picker ${activeStep === "ingredients" ? "" : "is-hidden"}`}>
               <input value={ingredientQuery} onChange={(event) => setIngredientQuery(event.target.value)} placeholder="Buscar ingrediente del inventario..." />
               <select value={itemId} onChange={(event) => setItemId(event.target.value)}>
                 {filteredInventory.map((inventoryItem) => <option key={inventoryItem.id} value={inventoryItem.id}>{inventoryItem.name} ({inventoryItem.base_unit})</option>)}
@@ -555,7 +574,7 @@ function RecipeFormV2({ form: initialForm, areas, inventory, posProducts, saving
               <span>Costo base: <strong>Q{Number(item?.cost_per_base_unit || 0).toFixed(4)}</strong></span>
               <button type="button" className="primary" onClick={addIngredient}>Agregar ingrediente</button>
             </div>
-            <div className="recipe-inline-steps">
+            <div className={`recipe-inline-steps ${activeStep === "preparation" ? "" : "is-hidden"}`}>
               <div className="recipe-section-heading">
                 <div>
                   <h3>Proceso de preparación</h3>
@@ -574,7 +593,7 @@ function RecipeFormV2({ form: initialForm, areas, inventory, posProducts, saving
                 {!normalizePreparationSteps(form.preparationSteps).length && <p className="recipes-empty">Agrega los pasos de preparación de esta receta.</p>}
               </div>
             </div>
-            <div className="recipe-ingredients">
+            <div className={`recipe-ingredients ${activeStep === "ingredients" ? "" : "is-hidden"}`}>
               <div className="recipe-ingredients-head"><span>Ingrediente</span><span>Cantidad receta</span><span>Equivalente inventario</span><span>Merma %</span><span>Subtotal</span><span>Acciones</span></div>
               {form.ingredients.map((ingredient) => {
                 const catalog = inventory.find((entry) => entry.id === ingredient.inventoryItemId)
@@ -600,8 +619,9 @@ function RecipeFormV2({ form: initialForm, areas, inventory, posProducts, saving
             </div>
           </section>
 
-          <section className="recipe-form-section">
-            <div className="recipe-section-heading"><h3>Notas</h3></div>
+          <section className={`recipe-form-section ${activeStep === "costs" ? "" : "is-hidden"}`}>
+            <div className="recipe-section-heading"><h3>Costos y notas</h3></div>
+            <div className="recipe-total expanded"><span>Costo estimado total</span><strong>Q{cost.toFixed(2)}</strong><small>Q{(cost / Number(form.yieldQuantity || 1)).toFixed(2)} por porción</small></div>
             <Field label="Notas"><textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></Field>
           </section>
         </div>
