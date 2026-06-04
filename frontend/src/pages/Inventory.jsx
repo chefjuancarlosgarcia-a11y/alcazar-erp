@@ -1,6 +1,7 @@
 import { useSearchParams } from "react-router-dom"
 import LegacyInventoryApp from "../modules/LegacyInventoryApp"
 import InventoryBase from "./InventoryBase"
+import InventoryItemConversions from "./InventoryItemConversions"
 import RequisitionsSupabase from "./RequisitionsSupabase"
 import RecipesSupabase from "./RecipesSupabase"
 
@@ -12,7 +13,8 @@ const allowedSections = new Set([
   "areas",
   "ordenes",
   "proveedores",
-  "recetas"
+  "recetas",
+  "conversiones"
 ])
 
 function Inventory() {
@@ -33,6 +35,10 @@ function Inventory() {
 
   if (initialSeccion === "recetas") {
     return <RecipesSupabase />
+  }
+
+  if (initialSeccion === "conversiones") {
+    return <InventoryItemConversions />
   }
 
   return <LegacyInventoryApp initialSeccion={initialSeccion} initialPurchaseOrderView={orderView} initialPurchaseOrderId={orderId} hideLegacyNavigation />

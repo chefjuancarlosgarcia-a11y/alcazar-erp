@@ -6,7 +6,9 @@ import { getActiveInventoryItems } from "../services/inventoryService"
 import {
   createRecipe,
   deactivateRecipe,
+  getInventoryItemUnitConversions,
   getRecipes,
+  upsertInventoryItemUnitConversion,
   updateRecipe
 } from "../services/recipesService"
 import { createOrUpdatePOSProductFromRecipe, getPOSProducts } from "../services/posProductsService"
@@ -59,6 +61,7 @@ function RecipesSupabase() {
   const [recipes, setRecipes] = useState([])
   const [areas, setAreas] = useState([])
   const [inventory, setInventory] = useState([])
+  const [itemConversions, setItemConversions] = useState([])
   const [posProducts, setPosProducts] = useState([])
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState("")
@@ -81,11 +84,12 @@ function RecipesSupabase() {
   const localRecipesExist = readArray("recetas").length > 0
   const refresh = useCallback(async () => {
     setLoading(true)
-    const [recipesResult, areasResult, inventoryResult, posProductsResult] = await Promise.all([
+    const [recipesResult, areasResult, inventoryResult, posProductsResult, conversionsResult] = await Promise.all([
       getRecipes(),
       getActiveAreas(),
       getActiveInventoryItems(),
-      getPOSProducts()
+      getPOSProducts(),
+      getInventoryItemUnitConversions()
     ])
     const loadError = recipesResult.error || areasResult.error || inventoryResult.error || posProductsResult.error
     if (loadError) setError(`No se pudieron cargar recetas: ${loadError.message}`)
@@ -94,6 +98,7 @@ function RecipesSupabase() {
       setAreas(areasResult.data)
       setInventory(inventoryResult.data)
       setPosProducts(posProductsResult.data)
+      setItemConversions(conversionsResult.error ? [] : conversionsResult.data)
       setError("")
     }
     setLoading(false)
@@ -150,7 +155,7 @@ function RecipesSupabase() {
   }
 
   async function saveRecipe(recipe) {
-    const validation = validateRecipe(recipe, inventory)
+    const validation = validateRecipe(recipe, inventory, itemConversions)
     if (validation) {
       setError(validation)
       return { error: validation }
@@ -267,7 +272,7 @@ function RecipesSupabase() {
               inventoryItemId,
               matched: Boolean(catalog),
               matchName: catalog?.name || ""
-            }, catalog)
+            }, catalog, itemConversions)
             return { ...normalized, rawName: ingredient.rawName }
           })
         }
@@ -301,10 +306,10 @@ function RecipesSupabase() {
         active: true,
         ingredients: recipe.ingredients.map((ingredient) => {
           const catalog = inventory.find((entry) => entry.id === ingredient.inventoryItemId)
-          return normalizeRecipeIngredient({ ...ingredient, wastePercentage: ingredient.wastePercentage || "0" }, catalog)
+          return normalizeRecipeIngredient({ ...ingredient, wastePercentage: ingredient.wastePercentage || "0" }, catalog, itemConversions)
         })
       }
-      const validation = validateRecipe(payload, inventory)
+      const validation = validateRecipe(payload, inventory, itemConversions)
       if (validation) {
         importErrors.push({ recipe: recipe.name, message: validation })
         continue
@@ -398,13 +403,13 @@ function RecipesSupabase() {
         {!loading && !filtered.length && <p className="recipes-empty">No hay recetas registradas para esta selección.</p>}
       </div>
       {importDraft && <RecipeImportModal draft={importDraft} inventory={inventory} importing={importing} setDraft={setImportDraft} onIngredientChange={updateImportIngredient} onImport={importRecipesFromDraft} onClose={() => setImportDraft(null)} />}
-      {form && <RecipeFormV2 form={form} areas={productionAreas} inventory={inventory} posProducts={posProducts} saving={saving} onClose={() => setForm(null)} onSave={saveRecipe} />}
+      {form && <RecipeFormV2 form={form} areas={productionAreas} inventory={inventory} itemConversions={itemConversions} setItemConversions={setItemConversions} posProducts={posProducts} saving={saving} onClose={() => setForm(null)} onSave={saveRecipe} />}
       {detail && <RecipeDetailV2 recipe={detail} areas={areas} onClose={() => setDetail(null)} />}
     </section>
   )
 }
 
-function RecipeFormV2({ form: initialForm, areas, inventory, posProducts, saving, onClose, onSave }) {
+function RecipeFormV2({ form: initialForm, areas, inventory, itemConversions, setItemConversions, posProducts, saving, onClose, onSave }) {
   const [form, setForm] = useState(initialForm)
   const [activeStep, setActiveStep] = useState("general")
   const [itemId, setItemId] = useState(inventory[0]?.id || "")
@@ -412,6 +417,7 @@ function RecipeFormV2({ form: initialForm, areas, inventory, posProducts, saving
   const [formError, setFormError] = useState("")
   const [formSuccess, setFormSuccess] = useState("")
   const [imageMessage, setImageMessage] = useState("")
+  const [conversionDrafts, setConversionDrafts] = useState({})
   const item = inventory.find((entry) => entry.id === itemId)
   const filteredInventory = useMemo(() => {
     const term = normalizeText(ingredientQuery)
@@ -438,7 +444,7 @@ function RecipeFormV2({ form: initialForm, areas, inventory, posProducts, saving
       ...form,
       ingredients: [
         ...form.ingredients,
-        normalizeRecipeIngredient({ inventoryItemId: item.id, recipeQuantity: "1", recipeUnit: item.base_unit, wastePercentage: "0", notes: "" }, item)
+        normalizeRecipeIngredient({ inventoryItemId: item.id, recipeQuantity: "1", recipeUnit: item.base_unit, wastePercentage: "0", notes: "" }, item, itemConversions)
       ]
     })
   }
@@ -449,9 +455,44 @@ function RecipeFormV2({ form: initialForm, areas, inventory, posProducts, saving
       ingredients: form.ingredients.map((ingredient) => {
         if (ingredient.inventoryItemId !== id) return ingredient
         const catalog = inventory.find((entry) => entry.id === id)
-        return normalizeRecipeIngredient({ ...ingredient, ...updates }, catalog)
+        return normalizeRecipeIngredient({ ...ingredient, ...updates }, catalog, itemConversions)
       })
     })
+  }
+
+  async function saveIngredientConversion(ingredient, catalog) {
+    const normalized = normalizeRecipeIngredient(ingredient, catalog, itemConversions)
+    const draftKey = ingredient.inventoryItemId
+    const draft = conversionDrafts[draftKey] || {}
+    const factor = Number(draft.factor || 0)
+    if (!catalog || !normalized.recipeUnit || factor <= 0) {
+      setFormError("Indica una equivalencia mayor que cero.")
+      return
+    }
+    const result = await upsertInventoryItemUnitConversion({
+      inventoryItemId: catalog.id,
+      fromUnit: catalog.base_unit,
+      toUnit: normalized.recipeUnit,
+      factor,
+      notes: draft.notes || `1 ${catalog.base_unit} = ${factor} ${normalized.recipeUnit}`
+    })
+    if (result.error) {
+      setFormError(result.error.message || "No se pudo guardar la equivalencia.")
+      return
+    }
+    setItemConversions((current) => {
+      const next = current.filter((entry) => String(entry.id) !== String(result.data.id))
+      return [result.data, ...next]
+    })
+    setForm((current) => ({
+      ...current,
+      ingredients: current.ingredients.map((line) => {
+        if (line.inventoryItemId !== ingredient.inventoryItemId) return line
+        return normalizeRecipeIngredient(line, catalog, [result.data, ...itemConversions])
+      })
+    }))
+    setFormError("")
+    setFormSuccess("Equivalencia guardada.")
   }
 
   function handleImageUpload(event) {
@@ -497,7 +538,7 @@ function RecipeFormV2({ form: initialForm, areas, inventory, posProducts, saving
 
   async function submitForm(event) {
     event.preventDefault()
-    const validation = validateRecipe(form, inventory)
+    const validation = validateRecipe(form, inventory, itemConversions)
     if (validation) {
       setFormError(validation)
       return
@@ -597,7 +638,7 @@ function RecipeFormV2({ form: initialForm, areas, inventory, posProducts, saving
               <div className="recipe-ingredients-head"><span>Ingrediente</span><span>Cantidad receta</span><span>Equivalente inventario</span><span>Merma %</span><span>Subtotal</span><span>Acciones</span></div>
               {form.ingredients.map((ingredient) => {
                 const catalog = inventory.find((entry) => entry.id === ingredient.inventoryItemId)
-                const normalized = normalizeRecipeIngredient(ingredient, catalog)
+                const normalized = normalizeRecipeIngredient(ingredient, catalog, itemConversions)
                 const subtotal = Number(normalized.inventoryQuantity || 0) * Number(catalog?.cost_per_base_unit || 0)
                 return <div className="recipe-ingredient-row" key={ingredient.inventoryItemId}>
                   <strong>{catalog?.name || "Ingrediente"}</strong>
@@ -609,6 +650,30 @@ function RecipeFormV2({ form: initialForm, areas, inventory, posProducts, saving
                   </span>
                   <span className={normalized.conversionError ? "recipe-conversion-error" : "recipe-conversion-ok"}>
                     {normalized.conversionError || `${formatRecipeNumber(normalized.inventoryQuantity)} ${normalized.inventoryUnit || catalog?.base_unit || ""}`}
+                    {normalized.conversionError && (
+                      <div className="recipe-conversion-config">
+                        <strong>⚠ Este ingrediente usa una unidad distinta en inventario.</strong>
+                        <small>Configurar equivalencia</small>
+                        <label>1 {catalog?.base_unit || "Unidad inventario"} =
+                          <input
+                            type="number"
+                            min="0.0001"
+                            step="any"
+                            value={conversionDrafts[ingredient.inventoryItemId]?.factor || ""}
+                            onChange={(event) => setConversionDrafts({
+                              ...conversionDrafts,
+                              [ingredient.inventoryItemId]: {
+                                ...(conversionDrafts[ingredient.inventoryItemId] || {}),
+                                factor: event.target.value
+                              }
+                            })}
+                            placeholder="100"
+                          />
+                          {normalized.recipeUnit}
+                        </label>
+                        <button type="button" onClick={() => saveIngredientConversion(ingredient, catalog)}>Guardar equivalencia</button>
+                      </div>
+                    )}
                   </span>
                   <input type="number" min="0" max="100" step="any" value={ingredient.wastePercentage} onChange={(event) => updateIngredient(ingredient.inventoryItemId, { wastePercentage: event.target.value })} />
                   <strong>Q{subtotal.toFixed(2)}</strong>
@@ -954,7 +1019,7 @@ function RecipeDetailV2({ recipe, areas, onClose }) {
   </section></div>
 }
 
-function validateRecipe(recipe, inventory) {
+function validateRecipe(recipe, inventory, itemConversions = []) {
   if (!recipe.name.trim()) return "El nombre de la receta es obligatorio."
   if (!recipe.productionAreaId) return "Selecciona un área de producción."
   if (Number(recipe.yieldQuantity) <= 0) return "El rendimiento debe ser mayor que cero."
@@ -962,10 +1027,9 @@ function validateRecipe(recipe, inventory) {
   if (!recipe.ingredients.length) return "Agrega al menos un ingrediente."
   for (const ingredient of recipe.ingredients) {
     const item = inventory.find((entry) => entry.id === ingredient.inventoryItemId)
-    const normalized = normalizeRecipeIngredient(ingredient, item)
+    const normalized = normalizeRecipeIngredient(ingredient, item, itemConversions)
     if (!item) return "La receta contiene un ingrediente inactivo o inexistente."
     if (Number(normalized.recipeQuantity) <= 0) return "La cantidad de cada ingrediente debe ser mayor que cero."
-    if (normalized.conversionError) return normalized.conversionError
   }
   const emptyStep = normalizePreparationSteps(recipe.preparationSteps).some((step) => !step.text.trim())
   if (emptyStep) return "Completa o elimina los pasos de preparación vacíos."
@@ -983,7 +1047,7 @@ function isImportableRecipe(recipe, inventory) {
     const catalog = inventory.find((item) => item.id === ingredient.inventoryItemId)
     if (!catalog) return false
     const normalized = normalizeRecipeIngredient(ingredient, catalog)
-    return Number(normalized.recipeQuantity) > 0 && !normalized.conversionError
+    return Number(normalized.recipeQuantity) > 0
   })
 }
 
@@ -1383,19 +1447,20 @@ function normalizePreparationSteps(steps) {
   })
 }
 
-function normalizeRecipeIngredient(ingredient, catalog) {
+function normalizeRecipeIngredient(ingredient, catalog, itemConversions = []) {
   const recipeQuantity = ingredient.recipeQuantity ?? ingredient.recipe_quantity ?? ingredient.quantity ?? "1"
   const recipeUnit = ingredient.recipeUnit || ingredient.recipe_unit || ingredient.unit || catalog?.base_unit || "Unidades"
   const inventoryUnit = catalog?.base_unit || ingredient.inventoryUnit || ingredient.inventory_unit || ingredient.unit || recipeUnit
-  const conversion = convertRecipeQuantity(recipeQuantity, recipeUnit, inventoryUnit)
+  const conversion = convertRecipeQuantity(recipeQuantity, recipeUnit, inventoryUnit, catalog?.id || ingredient.inventoryItemId || ingredient.inventory_item_id, itemConversions)
   return {
     ...ingredient,
     recipeQuantity: String(recipeQuantity),
     recipeUnit,
-    inventoryQuantity: conversion.value === null ? "" : String(conversion.value),
+    inventoryQuantity: conversion.value === null ? String(recipeQuantity) : String(conversion.value),
     inventoryUnit,
     conversionFactor: conversion.factor || 1,
-    conversionError: conversion.error
+    conversionError: conversion.error,
+    conversionWarning: Boolean(conversion.warning)
   }
 }
 
@@ -1404,22 +1469,49 @@ function unitOptionsFor(catalog) {
   return Array.from(new Set([baseUnit, ...RECIPE_UNITS].filter(Boolean)))
 }
 
-function convertRecipeQuantity(quantity, fromUnit, toUnit) {
+function convertRecipeQuantity(quantity, fromUnit, toUnit, inventoryItemId, itemConversions = []) {
   const amount = Number(quantity || 0)
   if (!Number.isFinite(amount) || amount <= 0) return { value: amount, factor: 1, error: "" }
   const from = normalizeUnit(fromUnit)
   const to = normalizeUnit(toUnit)
   if (!from || !to || from.key === to.key) return { value: amount, factor: 1, error: "" }
   if (from.family !== to.family) {
+    const itemConversion = findItemUnitConversion(inventoryItemId, fromUnit, toUnit, itemConversions)
+    if (itemConversion) {
+      const converted = amount * itemConversion.factor
+      return { value: converted, factor: itemConversion.factor, error: "" }
+    }
     return {
-      value: null,
+      value: amount,
       factor: 1,
-      error: `No se puede convertir ${fromUnit} a ${toUnit}. Ajusta la unidad base del ingrediente o usa una unidad compatible.`
+      warning: true,
+      error: `Este ingrediente usa una unidad distinta en inventario. Configura equivalencia para convertir ${fromUnit} a ${toUnit}.`
     }
   }
   const baseAmount = amount * from.toBase
   const converted = baseAmount / to.toBase
   return { value: converted, factor: converted / amount, error: "" }
+}
+
+function findItemUnitConversion(inventoryItemId, fromUnit, toUnit, conversions) {
+  const itemId = String(inventoryItemId || "")
+  const from = normalizeUnit(fromUnit)
+  const to = normalizeUnit(toUnit)
+  if (!itemId || !from || !to) return null
+  const direct = conversions.find((conversion) => (
+    String(conversion.inventory_item_id) === itemId &&
+    normalizeUnit(conversion.from_unit)?.key === from.key &&
+    normalizeUnit(conversion.to_unit)?.key === to.key
+  ))
+  if (direct) return { factor: Number(direct.factor || 1) }
+  const reverse = conversions.find((conversion) => (
+    String(conversion.inventory_item_id) === itemId &&
+    normalizeUnit(conversion.from_unit)?.key === to.key &&
+    normalizeUnit(conversion.to_unit)?.key === from.key &&
+    Number(conversion.factor) > 0
+  ))
+  if (reverse) return { factor: 1 / Number(reverse.factor) }
+  return null
 }
 
 function normalizeUnit(unit) {

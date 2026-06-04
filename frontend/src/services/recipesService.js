@@ -61,9 +61,36 @@ function serializeIngredients(ingredients) {
     inventory_quantity: Number(ingredient.inventoryQuantity ?? ingredient.inventory_quantity ?? ingredient.quantity ?? 0),
     inventory_unit: ingredient.inventoryUnit || ingredient.inventory_unit || ingredient.unit,
     conversion_factor: Number(ingredient.conversionFactor ?? ingredient.conversion_factor ?? 1),
+    conversion_warning: Boolean(ingredient.conversionWarning ?? ingredient.conversion_warning ?? false),
     waste_percentage: Number(ingredient.wastePercentage ?? ingredient.waste_percentage ?? 0),
     notes: ingredient.notes || ""
   }))
+}
+
+export async function getInventoryItemUnitConversions() {
+  const { data, error } = await supabase
+    .from("inventory_item_unit_conversions")
+    .select("*, inventory_item:inventory_items(id, name, base_unit)")
+    .order("created_at", { ascending: false })
+  return { data: data || [], error }
+}
+
+export function upsertInventoryItemUnitConversion(conversion) {
+  return supabase
+    .from("inventory_item_unit_conversions")
+    .upsert({
+      inventory_item_id: conversion.inventoryItemId || conversion.inventory_item_id,
+      from_unit: conversion.fromUnit || conversion.from_unit,
+      to_unit: conversion.toUnit || conversion.to_unit,
+      factor: Number(conversion.factor || 0),
+      notes: conversion.notes || null
+    }, { onConflict: "inventory_item_id,from_unit,to_unit" })
+    .select("*, inventory_item:inventory_items(id, name, base_unit)")
+    .single()
+}
+
+export function deleteInventoryItemUnitConversion(id) {
+  return supabase.from("inventory_item_unit_conversions").delete().eq("id", id)
 }
 
 async function queryRecipes(activeOnly = false) {

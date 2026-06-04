@@ -238,6 +238,29 @@
 .recipe-quantity-control { display: grid; grid-template-columns: .8fr 1.2fr; gap: 7px; align-items: center; }
 .recipe-conversion-ok { color: #bfdbfe; font-size: 13px; }
 .recipe-conversion-error { color: #fca5a5; font-size: 12px; line-height: 1.35; }
+.recipe-conversion-config {
+  display: grid;
+  gap: 7px;
+  margin-top: 8px;
+  padding: 9px;
+  border: 1px solid #7c2d12;
+  border-radius: 8px;
+  background: #2a140b;
+  color: #fed7aa;
+}
+.recipe-conversion-config label {
+  display: grid;
+  grid-template-columns: auto minmax(90px, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+}
+.recipe-conversion-config input {
+  min-height: 36px;
+}
+.recipe-conversion-config button {
+  width: fit-content;
+  padding: 7px 9px;
+}
 .recipe-detail-items div { grid-template-columns: 1.3fr .9fr 1fr .65fr .55fr; }
 .recipe-detail-items div:first-child { border-top: 0; }
 .recipe-detail-items span { color: #94a3b8; }
