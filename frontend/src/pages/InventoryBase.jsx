@@ -15,6 +15,11 @@ import {
   uploadInventoryImage,
   updateInventoryItem
 } from "../services/inventoryService"
+import {
+  deleteItemUnitToGramsConversion,
+  getItemConversions,
+  upsertItemUnitToGramsConversion
+} from "../services/inventoryConversionsService"
 import { notifyRoles } from "../services/notificationsService"
 import { getSuppliers } from "../services/suppliersService"
 import "./InventoryBase.css"
@@ -36,6 +41,8 @@ const INVENTORY_UNITS = [
   "Botella",
   "Quintal"
 ]
+const RECIPE_WEIGHT_UNIT = "Gramos"
+const PIECE_UNIT_KEYS = new Set(["unidad", "unidades", "unidad_pieza", "pieza", "piezas", "unit", "units", "piece", "pieces"])
 
 const EMPTY_ITEM = {
   name: "",
@@ -54,6 +61,10 @@ const EMPTY_ITEM = {
   notes: "",
   initialQuantity: "0",
   minimumQuantity: "0",
+  useRecipeWeightConversion: false,
+  recipeWeightGrams: "",
+  recipeWeightUnit: RECIPE_WEIGHT_UNIT,
+  existingRecipeConversion: null,
   active: true
 }
 
@@ -66,6 +77,32 @@ function providerName(provider) {
 
 function uniqueProviderNames(providers) {
   return Array.from(new Set(providers.map(providerName).filter(Boolean))).sort((a, b) => a.localeCompare(b, "es"))
+}
+
+function normalizeUnitKey(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/[\/\s]+/g, "_")
+}
+
+function isPieceUnit(unit) {
+  return PIECE_UNIT_KEYS.has(normalizeUnitKey(unit))
+}
+
+function isGramsUnit(unit) {
+  return ["gramo", "gramos", "g", "gr"].includes(normalizeUnitKey(unit))
+}
+
+function findRecipeWeightConversion(conversions, baseUnit) {
+  const baseKey = normalizeUnitKey(baseUnit)
+  return (conversions || []).find((conversion) => (
+    normalizeUnitKey(conversion.from_unit) === baseKey && isGramsUnit(conversion.to_unit)
+  )) || (conversions || []).find((conversion) => (
+    isPieceUnit(conversion.from_unit) && isGramsUnit(conversion.to_unit)
+  )) || null
 }
 
 function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
@@ -147,7 +184,7 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
     setError("")
   }
 
-  function openEdit(item) {
+  async function openEdit(item) {
     setEditingItem(item)
     setItemForm({
       ...EMPTY_ITEM,
@@ -168,6 +205,21 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
       active: item.active !== false
     })
     setShowItemForm(true)
+    const conversionsResult = await getItemConversions(item.id)
+    if (conversionsResult.error) {
+      setError("No se pudo cargar la conversión para recetas de este producto.")
+      return
+    }
+    const recipeConversion = findRecipeWeightConversion(conversionsResult.data, unitForForm(item.base_unit))
+    if (recipeConversion) {
+      setItemForm((current) => ({
+        ...current,
+        useRecipeWeightConversion: true,
+        recipeWeightGrams: String(recipeConversion.factor || ""),
+        recipeWeightUnit: recipeConversion.to_unit || RECIPE_WEIGHT_UNIT,
+        existingRecipeConversion: recipeConversion
+      }))
+    }
   }
 
   async function saveItem(event) {
@@ -187,6 +239,12 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
       setError("El precio de compra no puede ser negativo.")
       return
     }
+    const canUseRecipeConversion = isPieceUnit(itemForm.base_unit)
+    const recipeWeightGrams = Number(itemForm.recipeWeightGrams)
+    if (canUseRecipeConversion && itemForm.useRecipeWeightConversion && (!Number.isFinite(recipeWeightGrams) || recipeWeightGrams <= 0)) {
+      setError("El peso promedio por unidad para recetas debe ser mayor que 0.")
+      return
+    }
     const duplicateItem = items.find((item) => (
       item.id !== editingItem?.id &&
       normalizeItemName(item.name) === normalizeItemName(itemForm.name)
@@ -204,6 +262,24 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
     if (result.error) {
       setError(result.error.message || "No se pudo guardar el producto inventariable.")
       return
+    }
+    let conversionWarning = ""
+    if (canUseRecipeConversion && itemForm.useRecipeWeightConversion) {
+      const conversionResult = await upsertItemUnitToGramsConversion(result.data.id, itemForm.base_unit, recipeWeightGrams)
+      if (conversionResult.error) {
+        conversionWarning = "Producto guardado, pero no se pudo guardar la conversión para recetas."
+      }
+    } else if (itemForm.existingRecipeConversion) {
+      const shouldDelete = window.confirm("Este producto ya tiene una equivalencia configurada. ¿Deseas desactivarla/eliminarla?")
+      if (shouldDelete) {
+        const deleteResult = await deleteItemUnitToGramsConversion(
+          result.data.id,
+          itemForm.existingRecipeConversion.from_unit || itemForm.base_unit
+        )
+        if (deleteResult.error) {
+          conversionWarning = "Producto guardado, pero no se pudo eliminar la conversión para recetas."
+        }
+      }
     }
     if (itemForm.imageFile) {
       const uploadResult = await uploadInventoryImage(itemForm.imageFile, result.data.id)
@@ -264,7 +340,8 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
     }
     setShowItemForm(false)
     setEditingItem(null)
-    setMessage(editingItem ? "Producto actualizado correctamente." : "Producto creado en Supabase.")
+    setMessage(conversionWarning || (editingItem ? "Producto actualizado correctamente." : "Producto creado en Supabase."))
+    if (conversionWarning) setError(conversionWarning)
     await refresh()
   }
 
@@ -645,6 +722,7 @@ function MovementsTable({ movements, items, areas, loading }) {
 function ItemModal({ form, setForm, editingItem, providers, onSave, onDelete, onClose }) {
   const editing = Boolean(editingItem)
   const [imageError, setImageError] = useState("")
+  const showRecipeConversion = isPieceUnit(form.base_unit)
   const update = (field, value) => setForm((current) => ({ ...current, [field]: value }))
   function selectImage(event) {
     const file = event.target.files?.[0]
@@ -694,7 +772,17 @@ function ItemModal({ form, setForm, editingItem, providers, onSave, onDelete, on
         {!providers.length && <small className="inventory-base-muted">No hay proveedores guardados todavía.</small>}
       </Field>
       <Field label="Unidad de compra" tooltip="Cómo compras este producto al proveedor."><InventoryUnitSelect required value={form.purchase_unit} onChange={(value) => update("purchase_unit", value)} /></Field>
-      <Field label="Unidad base" tooltip="Cómo el sistema consume este producto en recetas e inventario."><InventoryUnitSelect required value={form.base_unit} onChange={(value) => update("base_unit", value)} /></Field>
+      <Field label="Unidad base" tooltip="Cómo el sistema consume este producto en recetas e inventario.">
+        <InventoryUnitSelect
+          required
+          value={form.base_unit}
+          onChange={(value) => setForm((current) => ({
+            ...current,
+            base_unit: value,
+            useRecipeWeightConversion: isPieceUnit(value) ? current.useRecipeWeightConversion : false
+          }))}
+        />
+      </Field>
       <Field label="Factor conversión" tooltip="Cuántas unidades base contiene la unidad de compra."><input min="0.0001" step="any" type="number" value={form.conversion_factor} onChange={(event) => update("conversion_factor", event.target.value)} /></Field>
       <Field label="Precio de compra" tooltip="Costo total de la unidad como la compras al proveedor.">
         <div className="inventory-currency-input"><span>Q</span><input min="0" step="0.01" type="number" placeholder="0.00" value={form.purchase_price} onChange={(event) => update("purchase_price", event.target.value)} /></div>
@@ -706,6 +794,47 @@ function ItemModal({ form, setForm, editingItem, providers, onSave, onDelete, on
       {!editing && <Field label="Stock inicial almacén"><input min="0" step="any" type="number" value={form.initialQuantity} onChange={(event) => update("initialQuantity", event.target.value)} /></Field>}
       {!editing && <Field label="Punto mínimo" tooltip="Cantidad mínima recomendada antes de alertar falta de stock."><input min="0" step="any" type="number" value={form.minimumQuantity} onChange={(event) => update("minimumQuantity", event.target.value)} /></Field>}
     </div>
+    {showRecipeConversion && (
+      <section className="inventory-recipe-conversion">
+        <div>
+          <h3>Conversión para recetas</h3>
+          <p>Activa esta opción si este producto se compra por unidad, pero se usa por gramos en recetas.</p>
+        </div>
+        <label className="inventory-recipe-toggle">
+          <input
+            type="checkbox"
+            checked={Boolean(form.useRecipeWeightConversion)}
+            onChange={(event) => update("useRecipeWeightConversion", event.target.checked)}
+          />
+          <span>Usar este producto por peso en recetas</span>
+        </label>
+        {form.useRecipeWeightConversion && (
+          <div className="inventory-recipe-equivalence">
+            <span>1 {form.base_unit || DEFAULT_INVENTORY_UNIT} =</span>
+            <input
+              type="number"
+              min="0.0001"
+              step="any"
+              value={form.recipeWeightGrams}
+              onChange={(event) => update("recipeWeightGrams", event.target.value)}
+              placeholder="80"
+            />
+            <select value={form.recipeWeightUnit || RECIPE_WEIGHT_UNIT} onChange={(event) => update("recipeWeightUnit", event.target.value)}>
+              <option value={RECIPE_WEIGHT_UNIT}>Gramos</option>
+            </select>
+          </div>
+        )}
+        {form.existingRecipeConversion && !form.useRecipeWeightConversion && (
+          <p className="inventory-recipe-note">Este producto ya tiene una equivalencia configurada; al guardar podrás decidir si deseas eliminarla.</p>
+        )}
+        <div className="inventory-recipe-examples">
+          <span>Limón: 1 unidad ≈ 80 g</span>
+          <span>Aguacate: 1 unidad ≈ 220 g</span>
+          <span>Albahaca: 1 manojo ≈ 100 g</span>
+          <span>Lechuga: 1 unidad ≈ 600 g</span>
+        </div>
+      </section>
+    )}
     <Field label="Imagen del producto">
       <div className="inventory-image-actions">
         <label className="inventory-image-action">
