@@ -933,6 +933,13 @@
   border-top: 1px solid #25364d;
 }
 
+.checklist-incident-config {
+  display: grid;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #25364d;
+}
+
 .checklist-preview-items div {
   display: grid;
   gap: 4px;

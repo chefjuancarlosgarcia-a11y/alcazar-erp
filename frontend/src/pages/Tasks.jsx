@@ -13,6 +13,7 @@ import {
   deactivateChecklistTemplate,
   deleteChecklistTemplate,
   getChecklistChangeRequests,
+  getChecklistIncidents,
   getChecklistProfiles,
   getChecklistRuns,
   getChecklistTemplateSuggestions,
@@ -23,6 +24,7 @@ import {
   startChecklistRun,
   submitChecklistChangeRequest,
   updateChecklistRunItem,
+  updateChecklistIncidentStatus,
   updateChecklistChangeRequest,
   updateChecklistTemplate,
   updateChecklistTemplateSuggestionStatus
@@ -75,6 +77,9 @@ const CHECKLIST_WEEKDAYS = [[1, "Lunes"], [2, "Martes"], [3, "Miercoles"], [4, "
 const CHECKLIST_SUGGESTION_TYPES = [["add_item", "Agregar item"], ["remove_item", "Eliminar item"], ["edit_item_text", "Editar texto de item"], ["change_order", "Cambiar orden"], ["change_frequency", "Cambiar frecuencia"], ["change_responsible", "Cambiar responsable"], ["change_evidence", "Cambiar evidencia requerida"], ["other", "Otro"]]
 const CHECKLIST_TEMPLATE_MANAGERS = ["admin", "gerente_general", "gerente", "supervisor"]
 const CHECKLIST_TEMPLATE_APPROVERS = ["admin", "gerente_general", "gerente"]
+const CHECKLIST_INCIDENT_SEVERITIES = [["low", "Baja"], ["medium", "Media"], ["high", "Alta"], ["critical", "Critica"]]
+const CHECKLIST_INCIDENT_STATUSES = [["open", "Abiertas"], ["acknowledged", "Reconocidas"], ["in_progress", "En proceso"], ["resolved", "Resueltas"], ["dismissed", "Descartadas"]]
+const CHECKLIST_INCIDENT_NOTIFY_ROLES = [["admin", "Admin"], ["gerente_general", "Gerencia General"], ["gerente", "Gerente"], ["supervisor", "Supervisor"]]
 
 const EMPTY_TEMPLATE = {
   title: "",
@@ -578,9 +583,10 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   const canApproveTemplateChanges = ["admin", "gerente_general"].includes(userRole)
   const isSupervisorOnly = userRole === "supervisor"
   const canDeleteTemplates = ["admin", "gerente_general"].includes(userRole)
-  const [section, setSection] = useState(initialChecklistView === "run" ? "today" : "today")
+  const [section, setSection] = useState(initialChecklistView === "incidents" ? "incidents" : "today")
   const [templates, setTemplates] = useState([])
   const [runs, setRuns] = useState([])
+  const [incidents, setIncidents] = useState([])
   const [changeRequests, setChangeRequests] = useState([])
   const [suggestions, setSuggestions] = useState([])
   const [profiles, setProfiles] = useState([])
@@ -588,6 +594,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   const [message, setMessage] = useState("")
   const [editingTemplate, setEditingTemplate] = useState(null)
   const [selectedRunId, setSelectedRunId] = useState("")
+  const [selectedIncidentId, setSelectedIncidentId] = useState(initialChecklistView === "incidents" ? initialRunId : "")
   const selectedRun = runs.find((run) => run.id === selectedRunId)
   const activeTemplates = templates.filter((template) => template.status === "active")
   const visibleRuns = runs.filter((run) => run.status !== "cancelled" && canSeeChecklistRun(run, user, profiles))
@@ -595,24 +602,26 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
     ["today", "Hoy"],
     ...(canViewChecklistLibrary ? [["templates", "Checklists"]] : []),
     ...(canCreateChecklists || editingTemplate ? [["create", editingTemplate ? "Editar checklist" : "Crear checklist"]] : []),
-    ...(canViewChecklistLibrary ? [["approvals", "Aprobaciones"], ["reports", "Reportes"]] : [])
+    ...(canViewChecklistLibrary ? [["incidents", "Incidencias"], ["approvals", "Aprobaciones"], ["reports", "Reportes"]] : [])
   ]
 
   async function refresh() {
     setLoading(true)
     if (canViewChecklistLibrary) await generateDueChecklistRuns(TODAY)
-    const [templateResult, runResult, requestResult, suggestionResult, profileResult] = await Promise.all([
+    const [templateResult, runResult, incidentResult, requestResult, suggestionResult, profileResult] = await Promise.all([
       getChecklistTemplates(),
       getChecklistRuns(),
+      getChecklistIncidents(),
       getChecklistChangeRequests(),
       getChecklistTemplateSuggestions(),
       getChecklistProfiles()
     ])
-    if (templateResult.error || runResult.error || requestResult.error || suggestionResult.error) {
-      setMessage(templateResult.error?.message || runResult.error?.message || requestResult.error?.message || suggestionResult.error?.message || "No se pudieron cargar checklists.")
+    if (templateResult.error || runResult.error || incidentResult.error || requestResult.error || suggestionResult.error) {
+      setMessage(templateResult.error?.message || runResult.error?.message || incidentResult.error?.message || requestResult.error?.message || suggestionResult.error?.message || "No se pudieron cargar checklists.")
     } else {
       setTemplates(templateResult.data || [])
       setRuns(markOverdueRuns(runResult.data || []))
+      setIncidents(incidentResult.data || [])
       setChangeRequests(requestResult.data || [])
       setSuggestions(suggestionResult.data || [])
     }
@@ -625,15 +634,21 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   }, [])
 
   useEffect(() => {
-    if (!initialRunId) return
+    if (!initialRunId || initialChecklistView === "incidents") return
     setSection("today")
     setSelectedRunId(initialRunId)
-  }, [initialRunId])
+  }, [initialRunId, initialChecklistView])
 
   useEffect(() => {
     if (initialChecklistView !== "approvals") return
     setSection("approvals")
   }, [initialChecklistView])
+
+  useEffect(() => {
+    if (initialChecklistView !== "incidents") return
+    setSection("incidents")
+    if (initialRunId) setSelectedIncidentId(initialRunId)
+  }, [initialChecklistView, initialRunId])
 
   async function saveTemplate(form, items, options = {}) {
     if (!form.title.trim()) return setMessage("No se puede guardar una checklist sin titulo.")
@@ -768,6 +783,13 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
     refresh()
   }
 
+  async function updateIncidentStatus(incidentId, status, notes = "") {
+    const result = await updateChecklistIncidentStatus(incidentId, status, notes)
+    if (result.error) return setMessage(result.error.message || "No se pudo actualizar la incidencia.")
+    setMessage(status === "resolved" ? "Incidencia resuelta." : "Incidencia actualizada.")
+    refresh()
+  }
+
   async function completeRun(runId) {
     const result = await completeChecklistRun(runId)
     if (result.error) return setMessage(result.error.message || "Completa los items obligatorios antes de finalizar.")
@@ -857,6 +879,16 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
           onCancel={() => { setEditingTemplate(null); setSection("templates") }}
           onSave={saveTemplate}
           approvalMode={isSupervisorOnly}
+        />
+      )}
+      {section === "incidents" && canViewChecklistLibrary && (
+        <ChecklistIncidentsView
+          incidents={incidents}
+          profiles={profiles}
+          selectedIncidentId={selectedIncidentId}
+          userRole={userRole}
+          onSelect={setSelectedIncidentId}
+          onStatus={updateIncidentStatus}
         />
       )}
       {section === "approvals" && canViewChecklistLibrary && (
@@ -1129,6 +1161,11 @@ function ChecklistTemplateWizard({ editingTemplate, profiles, onCancel, onSave, 
 
 function ChecklistBuilderItem({ item, index, onUpdate, onMove, onDuplicate, onDelete }) {
   const [advanced, setAdvanced] = useState(false)
+  function toggleNotifyRole(role) {
+    const current = Array.isArray(item.notify_roles) ? item.notify_roles : ["admin", "gerente_general", "gerente"]
+    const next = current.includes(role) ? current.filter((value) => value !== role) : [...current, role]
+    onUpdate(index, "notify_roles", next.length ? next : ["admin"])
+  }
   return (
     <article className="checklist-builder-item">
       <div className="tasks-form-grid">
@@ -1137,7 +1174,42 @@ function ChecklistBuilderItem({ item, index, onUpdate, onMove, onDuplicate, onDe
         <label className="tasks-checkbox checklist-touch-toggle"><input type="checkbox" checked={item.is_required !== false} onChange={(event) => onUpdate(index, "is_required", event.target.checked)} />Obligatorio</label>
       </div>
       <div className="checklist-actions compact"><button type="button" className="tasks-link" onClick={() => setAdvanced((current) => !current)}>{advanced ? "Ocultar avanzado" : "Avanzado"}</button><button type="button" className="tasks-link" onClick={() => onDuplicate(index)}>Duplicar</button><button type="button" className="tasks-link" onClick={() => onMove(index, -1)}>Subir</button><button type="button" className="tasks-link" onClick={() => onMove(index, 1)}>Bajar</button><button type="button" className="tasks-link danger" onClick={onDelete}>Eliminar</button></div>
-      {advanced && <div className="checklist-advanced"><div className="checklist-flags"><label className="tasks-checkbox"><input type="checkbox" checked={Boolean(item.requires_photo)} onChange={(event) => onUpdate(index, "requires_photo", event.target.checked)} />Requiere foto</label><label className="tasks-checkbox"><input type="checkbox" checked={Boolean(item.requires_comment)} onChange={(event) => onUpdate(index, "requires_comment", event.target.checked)} />Requiere comentario</label><label className="tasks-checkbox"><input type="checkbox" checked={Boolean(item.require_comment_on_no)} onChange={(event) => onUpdate(index, "require_comment_on_no", event.target.checked)} />Si responde No, comentario obligatorio</label><label className="tasks-checkbox"><input type="checkbox" checked={Boolean(item.require_photo_on_no)} onChange={(event) => onUpdate(index, "require_photo_on_no", event.target.checked)} />Si responde No, foto obligatoria</label><label className="tasks-checkbox"><input type="checkbox" checked={Boolean(item.generate_incident_on_no)} onChange={(event) => onUpdate(index, "generate_incident_on_no", event.target.checked)} />Si responde No, generar incidencia</label></div><div className="tasks-form-grid"><Field label="Seccion"><input value={item.section || item.rule_config?.section || ""} onChange={(event) => onUpdate(index, "section", event.target.value)} placeholder="Baños, Salón, Barra..." /></Field><Field label="Puntos"><input type="number" min="0" value={item.score_points} onChange={(event) => onUpdate(index, "score_points", event.target.value)} /></Field><Field label="Descripcion"><textarea value={item.description || ""} onChange={(event) => onUpdate(index, "description", event.target.value)} /></Field><Field label="Opciones (una por linea)"><textarea value={Array.isArray(item.options) ? item.options.join("\n") : item.options || ""} onChange={(event) => onUpdate(index, "options", event.target.value)} placeholder={"Operativo\nRequiere mantenimiento\nFuera de servicio"} /></Field></div></div>}
+      {advanced && (
+        <div className="checklist-advanced">
+          <div className="checklist-flags">
+            <label className="tasks-checkbox"><input type="checkbox" checked={Boolean(item.requires_photo)} onChange={(event) => onUpdate(index, "requires_photo", event.target.checked)} />Requiere foto</label>
+            <label className="tasks-checkbox"><input type="checkbox" checked={Boolean(item.requires_comment)} onChange={(event) => onUpdate(index, "requires_comment", event.target.checked)} />Requiere comentario</label>
+            <label className="tasks-checkbox"><input type="checkbox" checked={Boolean(item.require_comment_on_no)} onChange={(event) => onUpdate(index, "require_comment_on_no", event.target.checked)} />Si responde No, comentario obligatorio</label>
+            <label className="tasks-checkbox"><input type="checkbox" checked={Boolean(item.require_photo_on_no)} onChange={(event) => onUpdate(index, "require_photo_on_no", event.target.checked)} />Si responde No, foto obligatoria</label>
+          </div>
+          <div className="tasks-form-grid">
+            <Field label="Seccion"><input value={item.section || item.rule_config?.section || ""} onChange={(event) => onUpdate(index, "section", event.target.value)} placeholder="Baños, Salon, Barra..." /></Field>
+            <Field label="Puntos"><input type="number" min="0" value={item.score_points} onChange={(event) => onUpdate(index, "score_points", event.target.value)} /></Field>
+            <Field label="Descripcion"><textarea value={item.description || ""} onChange={(event) => onUpdate(index, "description", event.target.value)} /></Field>
+            <Field label="Opciones (una por linea)"><textarea value={Array.isArray(item.options) ? item.options.join("\n") : item.options || ""} onChange={(event) => onUpdate(index, "options", event.target.value)} placeholder={"Operativo\nRequiere mantenimiento\nFuera de servicio"} /></Field>
+          </div>
+          <div className="checklist-incident-config">
+            <strong>Incidencia automatica</strong>
+            <div className="checklist-flags">
+              <label className="tasks-checkbox"><input type="checkbox" checked={Boolean(item.triggers_incident || item.generate_incident_on_no)} onChange={(event) => { onUpdate(index, "triggers_incident", event.target.checked); onUpdate(index, "generate_incident_on_no", event.target.checked); if (event.target.checked && !item.expected_response) onUpdate(index, "expected_response", item.response_type === "checkbox" ? "checked" : "si") }} />Activar alerta si este item falla</label>
+              <label className="tasks-checkbox"><input type="checkbox" disabled checked={Boolean(item.create_task_on_fail)} onChange={(event) => onUpdate(index, "create_task_on_fail", event.target.checked)} />Crear tarea correctiva automaticamente (Proximamente)</label>
+            </div>
+            <div className="tasks-form-grid">
+              <Field label="Respuesta esperada">
+                {item.response_type === "checkbox" ? (
+                  <select value={item.expected_response || "checked"} onChange={(event) => onUpdate(index, "expected_response", event.target.value)}><option value="checked">Si / completado</option><option value="unchecked">No / sin marcar</option></select>
+                ) : item.response_type === "select" ? (
+                  <select value={item.expected_response || ""} onChange={(event) => onUpdate(index, "expected_response", event.target.value)}><option value="">Seleccionar</option>{(Array.isArray(item.options) ? item.options : String(item.options || "").split(/\n|,/).map((value) => value.trim()).filter(Boolean)).map((option) => <option value={option} key={option}>{option}</option>)}</select>
+                ) : (
+                  <input value={item.expected_response || ""} onChange={(event) => onUpdate(index, "expected_response", event.target.value)} placeholder={item.response_type === "yes_no" ? "si" : "Opcional"} />
+                )}
+              </Field>
+              <Field label="Severidad"><select value={item.incident_severity || "medium"} onChange={(event) => onUpdate(index, "incident_severity", event.target.value)}>{CHECKLIST_INCIDENT_SEVERITIES.map(([id, label]) => <option value={id} key={id}>{label}</option>)}</select></Field>
+            </div>
+            <div className="checklist-flags">{CHECKLIST_INCIDENT_NOTIFY_ROLES.map(([role, label]) => <label className="tasks-checkbox" key={role}><input type="checkbox" checked={(item.notify_roles || ["admin", "gerente_general", "gerente"]).includes(role)} onChange={() => toggleNotifyRole(role)} />{label}</label>)}</div>
+          </div>
+        </div>
+      )}
     </article>
   )
 }
@@ -1222,16 +1294,26 @@ function ChecklistRunItem({ item, index = 0, disabled, onSave }) {
   }
   const options = Array.isArray(item.options) ? item.options : []
   const answeredNo = String(draft.response_text || "").toLowerCase() === "no"
+  const incidentWillTrigger = checklistItemWouldFail(item, draft)
   const needsComment = item.requires_comment || (item.require_comment_on_no && answeredNo)
   const needsPhoto = item.response_type === "photo" || item.requires_photo || (item.require_photo_on_no && answeredNo)
+  const needsIncidentComment = incidentWillTrigger && !draft.comment
+  function saveCritical(next) {
+    if (checklistItemWouldFail(item, next) && !String(next.comment || "").trim()) {
+      setDraft(next)
+      return
+    }
+    save(next)
+  }
   return (
     <div className="checklist-run-item form-question">
       <div className="tasks-panel-title"><div><strong>{index + 1}. {item.title}</strong><p className="tasks-muted">{friendlyResponseType(item.response_type)} · {item.score_points} pts</p></div><span className={itemHasAnswer(draft) ? "checklist-answer-state done" : "checklist-answer-state"}>{itemHasAnswer(draft) ? "Listo" : item.is_required ? "Obligatorio" : "Opcional"}</span></div>
-      {item.response_type === "yes_no" && <div className="checklist-choice-row native"><label className={draft.response_text === "si" ? "selected" : ""}><input type="radio" disabled={disabled} checked={draft.response_text === "si"} onChange={() => { const next = { ...draft, response_text: "si", checked: true }; setDraft(next); save(next) }} />Si</label><label className={draft.response_text === "no" ? "selected danger" : ""}><input type="radio" disabled={disabled} checked={draft.response_text === "no"} onChange={() => { const next = { ...draft, response_text: "no", checked: false }; setDraft(next); save(next) }} />No</label></div>}
-      {item.response_type === "checkbox" && <label className="checklist-inline-check"><input type="checkbox" disabled={disabled} checked={draft.checked} onChange={(event) => applyChange("checked", event.target.checked)} /><span>Completado</span></label>}
+      {incidentWillTrigger && <p className="tasks-warning">Esto generara una incidencia para gerencia.</p>}
+      {item.response_type === "yes_no" && <div className="checklist-choice-row native"><label className={draft.response_text === "si" ? "selected" : ""}><input type="radio" disabled={disabled} checked={draft.response_text === "si"} onChange={() => { const next = { ...draft, response_text: "si", checked: true }; setDraft(next); saveCritical(next) }} />Si</label><label className={draft.response_text === "no" ? "selected danger" : ""}><input type="radio" disabled={disabled} checked={draft.response_text === "no"} onChange={() => { const next = { ...draft, response_text: "no", checked: false }; setDraft(next); saveCritical(next) }} />No</label></div>}
+      {item.response_type === "checkbox" && <label className="checklist-inline-check"><input type="checkbox" disabled={disabled} checked={draft.checked} onChange={(event) => { const next = { ...draft, checked: event.target.checked }; setDraft(next); saveCritical(next) }} /><span>Completado</span></label>}
       {["short_text", "text", "signature"].includes(item.response_type) && <Field label={friendlyResponseType(item.response_type)}><input disabled={disabled} value={draft.response_text} onChange={(event) => applyChange("response_text", event.target.value)} /></Field>}
       {item.response_type === "long_text" && <Field label="Respuesta"><textarea disabled={disabled} value={draft.response_text} onChange={(event) => applyChange("response_text", event.target.value)} /></Field>}
-      {item.response_type === "select" && <Field label="Seleccion"><select disabled={disabled} value={draft.response_text} onChange={(event) => { const next = { ...draft, response_text: event.target.value }; setDraft(next); save(next) }}><option value="">Seleccionar</option>{options.map((option) => <option key={option} value={option}>{option}</option>)}</select></Field>}
+      {item.response_type === "select" && <Field label="Seleccion"><select disabled={disabled} value={draft.response_text} onChange={(event) => { const next = { ...draft, response_text: event.target.value }; setDraft(next); saveCritical(next) }}><option value="">Seleccionar</option>{options.map((option) => <option key={option} value={option}>{option}</option>)}</select></Field>}
       {item.response_type === "multi_select" && <div className="checklist-option-grid">{options.map((option) => <label key={option} className="tasks-checkbox"><input disabled={disabled} type="checkbox" checked={(draft.response_json?.selected || []).includes(option)} onChange={() => toggleMulti(option)} />{option}</label>)}</div>}
       {["number", "temperature"].includes(item.response_type) && <Field label={item.response_type === "temperature" ? "Temperatura" : "Numero"}><input disabled={disabled} type="number" step="any" value={draft.response_number} onChange={(event) => applyChange("response_number", event.target.value)} /></Field>}
       {item.response_type === "date" && <Field label="Fecha"><input disabled={disabled} type="date" value={draft.response_date} onChange={(event) => applyChange("response_date", event.target.value)} /></Field>}
@@ -1239,7 +1321,64 @@ function ChecklistRunItem({ item, index = 0, disabled, onSave }) {
       {item.response_type === "rating" && <div className="checklist-rating">{[1, 2, 3, 4, 5].map((value) => <button key={value} type="button" disabled={disabled} className={Number(draft.response_number) >= value ? "selected" : ""} onClick={() => { const next = { ...draft, response_number: value }; setDraft(next); save(next) }}>★</button>)}</div>}
       {item.response_type === "acknowledgement" && <label className="tasks-checkbox checklist-touch-toggle"><input disabled={disabled} type="checkbox" checked={draft.checked} onChange={(event) => { const next = { ...draft, checked: event.target.checked, response_text: event.target.checked ? "acepto" : "" }; setDraft(next); save(next) }} />He leido y comprendo este procedimiento</label>}
       {needsPhoto && <Field label="Fotografia / evidencia"><input disabled={disabled} type="file" accept="image/*" capture="environment" onChange={(event) => readEvidenceFile(event, (photo_url) => { const next = { ...draft, photo_url }; setDraft(next); save(next) })} />{draft.photo_url && <img className="checklist-evidence-preview" src={draft.photo_url} alt="Evidencia" />}</Field>}
-      {needsComment && <Field label="Comentario"><textarea disabled={disabled} value={draft.comment} onChange={(event) => applyChange("comment", event.target.value)} /></Field>}
+      {(needsComment || incidentWillTrigger) && <Field label={incidentWillTrigger ? "Describe que esta pasando" : "Comentario"}><textarea disabled={disabled} value={draft.comment} onChange={(event) => { const next = { ...draft, comment: event.target.value }; setDraft(next); if (!checklistItemWouldFail(item, next) || next.comment.trim()) save(next) }} /></Field>}
+      {needsIncidentComment && <p className="tasks-warning">Agrega un comentario para guardar la incidencia.</p>}
+    </div>
+  )
+}
+
+function ChecklistIncidentsView({ incidents, profiles, selectedIncidentId, userRole, onSelect, onStatus }) {
+  const [filter, setFilter] = useState("open")
+  const [notes, setNotes] = useState("")
+  const visible = incidents.filter((incident) => !filter || incident.status === filter)
+  const selected = incidents.find((incident) => incident.id === selectedIncidentId) || visible[0]
+  const canDismiss = ["admin", "gerente_general", "gerente"].includes(userRole)
+  const openCount = incidents.filter((incident) => ["open", "acknowledged", "in_progress"].includes(incident.status)).length
+  const criticalCount = incidents.filter((incident) => incident.severity === "critical" && incident.status !== "resolved" && incident.status !== "dismissed").length
+  return (
+    <div className="checklist-approvals-layout">
+      <article className="tasks-panel">
+        <div className="tasks-panel-title"><div><h2>Incidencias</h2><p className="tasks-muted">{openCount} abiertas · {criticalCount} criticas</p></div></div>
+        <div className="tasks-filters">
+          <select value={filter} onChange={(event) => setFilter(event.target.value)}>
+            <option value="">Todas</option>
+            {CHECKLIST_INCIDENT_STATUSES.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+          </select>
+        </div>
+        <div className="checklists-card-grid">
+          {visible.map((incident) => (
+            <button type="button" className={selected?.id === incident.id ? "checklist-approval-card selected" : "checklist-approval-card"} key={incident.id} onClick={() => { onSelect(incident.id); setNotes("") }}>
+              <div className="tasks-card-badges"><Badge type="priority" value={incident.severity} /><Badge type="status" value={incident.status} /></div>
+              <strong>{incident.title}</strong>
+              <small>{incident.checklist_runs?.checklist_templates?.title || "Checklist"} · {incident.area || "Sin area"} · {profileDisplayName(profiles, incident.reported_by)}</small>
+              <small>{new Date(incident.created_at).toLocaleString("es-GT")}</small>
+            </button>
+          ))}
+          {!visible.length && <FriendlyEmpty title="No hay incidencias." text="Las alertas de checklists apareceran aqui." />}
+        </div>
+      </article>
+
+      {selected && (
+        <article className="tasks-panel checklist-approval-detail">
+          <div className="tasks-panel-title"><div><h2>{selected.title}</h2><p className="tasks-muted">{selected.area || "Sin area"} · {new Date(selected.created_at).toLocaleString("es-GT")}</p></div><Badge type="priority" value={selected.severity} /></div>
+          <div className="checklist-review-summary">
+            <div><span>Estado</span><strong>{incidentStatusLabel(selected.status)}</strong></div>
+            <div><span>Reportado por</span><strong>{profileDisplayName(profiles, selected.reported_by)}</strong></div>
+            <div><span>Checklist</span><strong>{selected.checklist_runs?.checklist_templates?.title || "Checklist"}</strong></div>
+            <div><span>Item</span><strong>{selected.checklist_run_items?.title || "Item"}</strong></div>
+          </div>
+          <p>{selected.description || "Sin descripcion adicional."}</p>
+          {selected.checklist_run_items?.photo_url && <img className="checklist-evidence-preview" src={selected.checklist_run_items.photo_url} alt="Evidencia de incidencia" />}
+          {selected.resolution_notes && <p className="tasks-success">{selected.resolution_notes}</p>}
+          <Field label="Notas de resolucion"><textarea value={notes} onChange={(event) => setNotes(event.target.value)} /></Field>
+          <div className="checklist-actions">
+            <button type="button" className="tasks-secondary" onClick={() => onStatus(selected.id, "acknowledged", notes)}>Reconocer</button>
+            <button type="button" className="tasks-secondary" onClick={() => onStatus(selected.id, "in_progress", notes)}>Marcar en proceso</button>
+            <button type="button" className="tasks-primary" onClick={() => onStatus(selected.id, "resolved", notes)}>Resolver</button>
+            {canDismiss && <button type="button" className="tasks-link danger" onClick={() => onStatus(selected.id, "dismissed", notes)}>Descartar</button>}
+          </div>
+        </article>
+      )}
     </div>
   )
 }
@@ -1446,12 +1585,26 @@ function CompactChecklistRun({ run }) {
 }
 
 function emptyChecklistItem() {
-  return { id: `item-${Date.now()}`, title: "", description: "", section: "", response_type: "yes_no", is_required: true, requires_photo: false, requires_comment: false, require_comment_on_no: false, require_photo_on_no: false, generate_incident_on_no: false, options: "", score_points: 1 }
+  return { id: `item-${Date.now()}`, title: "", description: "", section: "", response_type: "yes_no", is_required: true, requires_photo: false, requires_comment: false, require_comment_on_no: false, require_photo_on_no: false, generate_incident_on_no: false, triggers_incident: false, expected_response: "si", incident_severity: "medium", notify_roles: ["admin", "gerente_general", "gerente"], create_task_on_fail: false, options: "", score_points: 1 }
 }
 
 function itemHasAnswer(item) {
   const jsonValue = item.response_json && Object.keys(item.response_json).length > 0
   return Boolean(item.checked || item.response_text || item.response_number != null || item.response_date || item.response_time || item.photo_url || jsonValue || item.completed_at)
+}
+
+function checklistItemWouldFail(item, draft) {
+  if (!(item.triggers_incident || item.generate_incident_on_no)) return false
+  const expected = String(item.expected_response || (item.generate_incident_on_no ? "si" : "")).trim().toLowerCase()
+  const responseType = item.response_type || "checkbox"
+  if (["checkbox", "acknowledgement"].includes(responseType)) {
+    if (!expected || ["true", "checked", "si", "sí", "yes", "1"].includes(expected)) return !draft.checked
+    if (["false", "unchecked", "no", "0"].includes(expected)) return Boolean(draft.checked)
+  }
+  if (responseType === "yes_no") return String(draft.response_text || "").trim().toLowerCase() !== (expected || "si")
+  if (responseType === "select") return Boolean(expected) && String(draft.response_text || "").trim().toLowerCase() !== expected
+  if (["number", "temperature"].includes(responseType)) return item.is_required && (draft.response_number === "" || draft.response_number == null)
+  return Boolean(expected) && String(draft.response_text || "").trim().toLowerCase() !== expected
 }
 
 function checklistItemSection(item, index) {
@@ -1522,6 +1675,10 @@ function friendlySuggestionType(value) {
 function suggestionStatusLabel(value) {
   const labels = { pending: "Pendiente", approved: "Aprobada", rejected: "Rechazada", applied: "Aplicada" }
   return labels[value] || value
+}
+
+function incidentStatusLabel(value) {
+  return CHECKLIST_INCIDENT_STATUSES.find(([id]) => id === value)?.[1] || value
 }
 
 function canSeeChecklistRun(run, user, profiles) {
@@ -1608,7 +1765,7 @@ function CompactTask({ task, employees }) {
 }
 
 function Badge({ type, value }) {
-  const labels = { low: "Baja", medium: "Media", high: "Alta", critical: "Crítica", easy: "Fácil", hard: "Difícil", expert: "Experta", pending: "Pendiente", in_progress: "En proceso", pending_review: "En revision", completed: "Completada", late: "Atrasada", overdue: "Atrasada", rejected: "Devuelta", cancelled: "Cancelada", review_required: "Requiere revisión" }
+  const labels = { low: "Baja", medium: "Media", high: "Alta", critical: "Crítica", easy: "Fácil", hard: "Difícil", expert: "Experta", pending: "Pendiente", open: "Abierta", acknowledged: "Reconocida", in_progress: "En proceso", resolved: "Resuelta", dismissed: "Descartada", pending_review: "En revision", completed: "Completada", late: "Atrasada", overdue: "Atrasada", rejected: "Devuelta", cancelled: "Cancelada", review_required: "Requiere revisión" }
   return <span className={`tasks-badge ${type}-${value}`}>{labels[value] || value}</span>
 }
 

@@ -2,6 +2,7 @@ import { supabase } from "../lib/supabase"
 
 const TEMPLATE_SELECT = "*, checklist_template_items(*)"
 const RUN_SELECT = "*, checklist_templates(title, description, frequency, shift_context), checklist_run_items(*)"
+const INCIDENT_SELECT = "*, checklist_runs(run_date, area, checklist_templates(title)), checklist_run_items(title, response_type, checked, response_text, response_number, photo_url, comment), profiles!checklist_incidents_reported_by_fkey(full_name, username)"
 
 function orderTemplate(template) {
   return template ? {
@@ -41,6 +42,7 @@ function templatePayload(payload) {
 }
 
 function itemPayload(item, index, templateId) {
+  const triggersIncident = Boolean(item.triggers_incident || item.generate_incident_on_no)
   return {
     template_id: templateId,
     item_order: index,
@@ -52,7 +54,12 @@ function itemPayload(item, index, templateId) {
     requires_comment: Boolean(item.requires_comment),
     require_comment_on_no: Boolean(item.require_comment_on_no),
     require_photo_on_no: Boolean(item.require_photo_on_no),
-    generate_incident_on_no: Boolean(item.generate_incident_on_no),
+    generate_incident_on_no: Boolean(item.generate_incident_on_no || (triggersIncident && item.expected_response === "si")),
+    expected_response: item.expected_response?.trim() || null,
+    triggers_incident: triggersIncident,
+    incident_severity: item.incident_severity || "medium",
+    notify_roles: Array.isArray(item.notify_roles) && item.notify_roles.length ? item.notify_roles : ["admin", "gerente_general", "gerente"],
+    create_task_on_fail: Boolean(item.create_task_on_fail),
     options: parseOptions(item.options),
     rule_config: { ...(item.rule_config || {}), section: item.section || item.rule_config?.section || "" },
     score_points: Math.max(0, Number(item.score_points || 0))
@@ -92,7 +99,12 @@ function requestPayload(payload, items) {
       requires_comment: Boolean(item.requires_comment),
       require_comment_on_no: Boolean(item.require_comment_on_no),
       require_photo_on_no: Boolean(item.require_photo_on_no),
-      generate_incident_on_no: Boolean(item.generate_incident_on_no),
+      generate_incident_on_no: Boolean(item.generate_incident_on_no || item.triggers_incident),
+      expected_response: item.expected_response?.trim() || null,
+      triggers_incident: Boolean(item.triggers_incident || item.generate_incident_on_no),
+      incident_severity: item.incident_severity || "medium",
+      notify_roles: Array.isArray(item.notify_roles) && item.notify_roles.length ? item.notify_roles : ["admin", "gerente_general", "gerente"],
+      create_task_on_fail: Boolean(item.create_task_on_fail),
       options: parseOptions(item.options),
       rule_config: { ...(item.rule_config || {}), section: item.section || item.rule_config?.section || "" },
       score_points: Math.max(0, Number(item.score_points || 0))
@@ -344,7 +356,26 @@ export async function updateChecklistRunItem(runItemId, payload) {
     .single()
   if (error) return { data: null, error }
   if (data?.run_id) await supabase.rpc("recalculate_checklist_run_points", { p_run_id: data.run_id })
+  await supabase.rpc("evaluate_checklist_run_item_incident", { run_item_id: runItemId })
   return { data, error: null }
+}
+
+export async function getChecklistIncidents(filters = {}) {
+  let query = supabase.from("checklist_incidents").select(INCIDENT_SELECT)
+  if (filters.status) query = query.eq("status", filters.status)
+  if (filters.severity) query = query.eq("severity", filters.severity)
+  const { data, error } = await query.order("created_at", { ascending: false })
+  return { data: data || [], error }
+}
+
+export async function updateChecklistIncidentStatus(id, status, resolutionNotes = "") {
+  const result = await supabase.rpc("update_checklist_incident_status", {
+    p_incident_id: id,
+    p_status: status,
+    p_resolution_notes: resolutionNotes || null
+  })
+  window.dispatchEvent(new CustomEvent("notifications-updated"))
+  return result
 }
 
 export async function startChecklistRun(runId) {
