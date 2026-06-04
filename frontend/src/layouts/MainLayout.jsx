@@ -106,7 +106,6 @@ const accountHeaderStyle = {
 
 const mainStyle = {
   position: "relative",
-  zIndex: 1,
   flex: 1,
   minWidth: 0,
   padding: "28px",

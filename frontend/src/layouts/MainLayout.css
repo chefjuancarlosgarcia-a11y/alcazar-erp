@@ -49,6 +49,11 @@
   min-height: 44px;
 }
 
+.app-layout:has(.recipes-backdrop) .app-content {
+  position: relative;
+  z-index: 90;
+}
+
 .device-tablet .app-main table,
 .device-mobile .app-main table {
   display: block;
