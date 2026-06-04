@@ -42,6 +42,7 @@ function serializeRecipe(recipe) {
     recipe_type: recipe.recipeType || recipe.recipe_type || "subrecipe",
     pos_category_id: recipe.posCategoryId || recipe.pos_category_id || "",
     production_area_id: recipe.productionAreaId || recipe.production_area_id || "",
+    output_inventory_item_id: recipe.outputInventoryItemId || recipe.output_inventory_item_id || null,
     yield_quantity: Number(recipe.yieldQuantity ?? recipe.yield_quantity ?? 1),
     yield_unit: recipe.yieldUnit || recipe.yield_unit || "",
     image_url: recipe.imageUrl || recipe.image_url || "",
@@ -122,7 +123,14 @@ export async function createRecipe(recipe, ingredients) {
   debugRecipe("create standard_recipes/recipe_ingredients request", payload)
   const result = await supabase.rpc("save_standard_recipe", payload)
   debugRecipe("create standard_recipes/recipe_ingredients response", result)
-  if (result.error) console.error("Supabase recipe create error:", result.error)
+  if (result.error) {
+    console.error("Supabase recipe create error:", result.error)
+    return result
+  }
+  if (recipe.outputInventoryItemId || recipe.output_inventory_item_id) {
+    const outputResult = await setRecipeOutputInventoryItem(result.data.id, recipe.outputInventoryItemId || recipe.output_inventory_item_id)
+    if (outputResult.error) return { data: result.data, error: outputResult.error }
+  }
   return result
 }
 
@@ -135,8 +143,20 @@ export async function updateRecipe(id, recipe, ingredients) {
   debugRecipe("update standard_recipes/recipe_ingredients request", payload)
   const result = await supabase.rpc("save_standard_recipe", payload)
   debugRecipe("update standard_recipes/recipe_ingredients response", result)
-  if (result.error) console.error("Supabase recipe update error:", result.error)
+  if (result.error) {
+    console.error("Supabase recipe update error:", result.error)
+    return result
+  }
+  const outputResult = await setRecipeOutputInventoryItem(id, recipe.outputInventoryItemId || recipe.output_inventory_item_id || null)
+  if (outputResult.error) return { data: result.data, error: outputResult.error }
   return result
+}
+
+export function setRecipeOutputInventoryItem(recipeId, outputInventoryItemId) {
+  return supabase.rpc("set_standard_recipe_output_inventory_item", {
+    p_recipe_id: recipeId,
+    p_output_inventory_item_id: outputInventoryItemId || null
+  })
 }
 
 export function deactivateRecipe(id) {

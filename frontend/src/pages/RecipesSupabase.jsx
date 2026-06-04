@@ -26,6 +26,7 @@ const EMPTY_RECIPE = {
   notes: "",
   active: true,
   ingredients: [],
+  outputInventoryItemId: "",
   posProductId: "",
   availableInPOS: false,
   salePrice: ""
@@ -138,6 +139,7 @@ function RecipesSupabase() {
       preparationSteps: normalizePreparationSteps(recipe.preparationSteps || recipe.preparation_steps || []),
       notes: recipe.notes || "",
       active: recipe.active,
+      outputInventoryItemId: recipe.output_inventory_item_id || "",
       posProductId: product?.id || "",
       availableInPOS: Boolean(product),
       salePrice: String(product?.price || ""),
@@ -304,6 +306,7 @@ function RecipesSupabase() {
         preparationSteps: recipe.preparationSteps,
         notes: "Importada desde Excel",
         active: true,
+        outputInventoryItemId: recipe.outputInventoryItemId || "",
         ingredients: recipe.ingredients.map((ingredient) => {
           const catalog = inventory.find((entry) => entry.id === ingredient.inventoryItemId)
           return normalizeRecipeIngredient({ ...ingredient, wastePercentage: ingredient.wastePercentage || "0" }, catalog, itemConversions)
@@ -583,6 +586,7 @@ function RecipeFormV2({ form: initialForm, areas, inventory, itemConversions, se
               <Field label="Categoría POS"><input value={form.posCategoryId} onChange={(event) => setForm({ ...form, posCategoryId: event.target.value })} placeholder="pizzas, barra..." /></Field>
               <Field label="Rendimiento"><input type="number" min="0.001" step="any" value={form.yieldQuantity} onChange={(event) => setForm({ ...form, yieldQuantity: event.target.value })} /></Field>
               <Field label="Unidad rendimiento"><input value={form.yieldUnit} onChange={(event) => setForm({ ...form, yieldUnit: event.target.value })} /></Field>
+              <Field label="Producto terminado"><select value={form.outputInventoryItemId || ""} onChange={(event) => setForm({ ...form, outputInventoryItemId: event.target.value })}><option value="">Sin producto asociado</option>{inventory.map((item) => <option key={item.id} value={item.id}>{item.name} ({item.base_unit})</option>)}</select></Field>
               {form.recipeType === "final_product" && <Field label="Producto POS existente"><select disabled={!form.availableInPOS} value={form.posProductId} onChange={(event) => setForm({ ...form, posProductId: event.target.value })}><option value="">Crear producto nuevo</option>{posProducts.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}</select></Field>}
               {form.recipeType === "final_product" && <Field label="Disponible en POS"><label className="recipe-checkbox"><input type="checkbox" checked={form.availableInPOS} onChange={(event) => setForm({ ...form, availableInPOS: event.target.checked })} />Crear o actualizar producto vendible</label></Field>}
               {form.recipeType === "final_product" && form.availableInPOS && <Field label="Precio de venta"><input type="number" min="0.01" step="0.01" value={form.salePrice} onChange={(event) => setForm({ ...form, salePrice: event.target.value })} /></Field>}
@@ -781,6 +785,7 @@ function RecipeForm({ form: initialForm, areas, inventory, posProducts, saving, 
           <Field label="Categoría POS"><input value={form.posCategoryId} onChange={(event) => setForm({ ...form, posCategoryId: event.target.value })} placeholder="pizzas, barra..." /></Field>
           <Field label="Rendimiento"><input type="number" min="0.001" step="any" value={form.yieldQuantity} onChange={(event) => setForm({ ...form, yieldQuantity: event.target.value })} /></Field>
           <Field label="Unidad rendimiento"><input value={form.yieldUnit} onChange={(event) => setForm({ ...form, yieldUnit: event.target.value })} /></Field>
+          <Field label="Producto terminado"><select value={form.outputInventoryItemId || ""} onChange={(event) => setForm({ ...form, outputInventoryItemId: event.target.value })}><option value="">Sin producto asociado</option>{inventory.map((item) => <option key={item.id} value={item.id}>{item.name} ({item.base_unit})</option>)}</select></Field>
           <Field label="Imagen de receta">
             <div className="recipe-image-upload">
               {form.imageUrl ? <img src={form.imageUrl} alt="" /> : <span>Sin imagen</span>}
@@ -1550,7 +1555,8 @@ function normalizeUnit(unit) {
 
 function formatRecipeNumber(value) {
   const number = Number(value || 0)
-  return Number.isInteger(number) ? String(number) : number.toFixed(4).replace(/0+$/, "").replace(/\.$/, "")
+  if (!Number.isFinite(number)) return "0.000"
+  return number.toFixed(Math.abs(number) >= 1 ? 2 : 3)
 }
 
 function areaName(areas, areaId) {
