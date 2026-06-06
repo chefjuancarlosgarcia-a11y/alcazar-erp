@@ -81,7 +81,7 @@ async function fetchOrders(filters = {}) {
     filters
   )
   const { data, error } = await query.order("created_at", { ascending: false })
-  return { data: data || [], error }
+  return { data: Array.isArray(data) ? data.filter((row) => row && typeof row === "object") : [], error }
 }
 
 async function fetchOrdersByRange(range) {
@@ -92,7 +92,7 @@ async function fetchOrdersByRange(range) {
     .gte("created_at", range.start)
     .lte("created_at", range.end)
     .order("created_at", { ascending: false })
-  return { data: data || [], error }
+  return { data: Array.isArray(data) ? data.filter((row) => row && typeof row === "object") : [], error }
 }
 
 async function fetchProducts() {
@@ -258,7 +258,7 @@ export async function getTopProducts(filters = {}) {
   const ordersResult = await fetchOrders(filters)
   if (ordersResult.error) return empty([], ordersResult.error)
   const grouped = new Map()
-  ordersResult.data.flatMap((order) => order.items || []).filter((item) => item.status !== "cancelled").forEach((item) => {
+  ordersResult.data.flatMap((order) => Array.isArray(order.items) ? order.items : []).filter((item) => item && item.status !== "cancelled").forEach((item) => {
     const row = grouped.get(item.product_id) || { productId: item.product_id, product: item.product_name, quantity: 0, sales: 0 }
     row.quantity += number(item.quantity)
     row.sales += number(item.total_price)
@@ -271,7 +271,7 @@ export async function getSalesByWaiter(filters = {}) {
   const ordersResult = await fetchOrders(filters)
   if (ordersResult.error) return empty([], ordersResult.error)
   const grouped = new Map()
-  ordersResult.data.filter((order) => matchesShift(order.created_at, filters.shift)).forEach((order) => {
+  ;(Array.isArray(ordersResult.data) ? ordersResult.data : []).filter((order) => order && matchesShift(order.created_at, filters.shift)).forEach((order) => {
     const waiter = order.waiter_name || "Sin asignar"
     const row = grouped.get(waiter) || { waiter, orders: 0, sales: 0, averageTicket: 0 }
     row.orders += 1
@@ -345,7 +345,7 @@ function isInRange(value, range) {
 
 export async function getFixedCosts() {
   const { data, error } = await supabase.from("fixed_costs").select("*").order("category", { ascending: true }).order("name", { ascending: true })
-  return empty(data || [], error)
+  return empty(Array.isArray(data) ? data.filter((row) => row && typeof row === "object") : [], error)
 }
 
 export async function saveFixedCost(cost) {
@@ -423,16 +423,20 @@ export async function getProductionReport(filters = {}) {
 }
 
 export async function getInventoryReport(filters = {}) {
+  console.info("[InventarioCritico] Consultando Supabase", { filters })
   const [stock, movements] = await Promise.all([
     supabase.from("area_inventory").select("*, item:inventory_items(id,name,category,base_unit), area:areas(id,name)"),
     withDates(supabase.from("inventory_movements").select("*, item:inventory_items(name), from_area:areas!inventory_movements_from_area_id_fkey(name), to_area:areas!inventory_movements_to_area_id_fkey(name)"), filters)
       .order("created_at", { ascending: false }).limit(100)
   ])
-  if (stock.error || movements.error) return empty({ low: [], out: [], stock: [], movements: [], consumption: [], transfers: [] }, stock.error || movements.error)
-  let stocks = stock.data || []
+  if (stock.error || movements.error) {
+    console.error("[InventarioCritico] Error de consulta Supabase", { stockError: stock.error, movementsError: movements.error })
+    return empty({ low: [], out: [], stock: [], movements: [], consumption: [], transfers: [] }, stock.error || movements.error)
+  }
+  let stocks = Array.isArray(stock.data) ? stock.data.filter((row) => row && typeof row === "object") : []
   if (filters.areaId) stocks = stocks.filter((row) => row.area_id === filters.areaId)
   if (filters.category) stocks = stocks.filter((row) => row.item?.category === filters.category)
-  let rows = movements.data || []
+  let rows = Array.isArray(movements.data) ? movements.data.filter((row) => row && typeof row === "object") : []
   if (filters.areaId) rows = rows.filter((row) => row.from_area_id === filters.areaId || row.to_area_id === filters.areaId)
   if (filters.movementType) rows = rows.filter((row) => row.movement_type === filters.movementType)
   const consumption = new Map()
@@ -440,14 +444,16 @@ export async function getInventoryReport(filters = {}) {
     const name = row.item?.name || row.item_id
     consumption.set(name, number(consumption.get(name)) + number(row.quantity))
   })
-  return empty({
+  const report = {
     low: stocks.filter((row) => number(row.quantity) > 0 && number(row.quantity) <= number(row.minimum_quantity)),
     out: stocks.filter((row) => number(row.quantity) <= 0),
     stock: stocks,
     movements: rows,
     consumption: [...consumption].map(([item, quantity]) => ({ item, quantity })).sort((a, b) => b.quantity - a.quantity),
     transfers: rows.filter((row) => row.movement_type === "transfer")
-  })
+  }
+  console.info("[InventarioCritico] Datos normalizados", { stock: stocks.length, movements: rows.length, low: report.low.length, out: report.out.length })
+  return empty(report)
 }
 
 export async function getRequisitionReport(filters = {}) {
@@ -486,7 +492,7 @@ export async function getRequisitionReport(filters = {}) {
 export async function getFoodCostReport() {
   const productsResult = await fetchProducts()
   if (productsResult.error) return empty([], productsResult.error)
-  const rows = productsResult.data.filter((product) => product.active && product.recipe_id).map((product) => {
+  const rows = (Array.isArray(productsResult.data) ? productsResult.data : []).filter((product) => product?.active && product.recipe_id).map((product) => {
     const price = number(product.price)
     const cost = number(product.recipe?.estimated_cost)
     const foodCostPercent = price ? (cost / price) * 100 : 0
@@ -500,8 +506,10 @@ export async function getFoodCostReport() {
 export async function getMenuEngineeringReport(filters = {}) {
   const [top, food] = await Promise.all([getTopProducts(filters), getFoodCostReport()])
   if (top.error || food.error) return empty([], top.error || food.error)
-  const salesByProduct = new Map(top.data.map((row) => [row.productId, row]))
-  const rows = food.data.map((row) => {
+  const safeTop = Array.isArray(top.data) ? top.data.filter(Boolean) : []
+  const safeFood = Array.isArray(food.data) ? food.data.filter(Boolean) : []
+  const salesByProduct = new Map(safeTop.map((row) => [row.productId, row]))
+  const rows = safeFood.map((row) => {
     const sales = salesByProduct.get(row.productId) || { quantity: 0, sales: 0 }
     return { ...row, quantity: sales.quantity, sales: sales.sales, estimatedProfit: row.grossMargin * sales.quantity }
   })

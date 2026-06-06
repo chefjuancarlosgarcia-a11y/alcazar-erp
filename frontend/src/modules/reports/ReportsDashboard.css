@@ -78,6 +78,9 @@
 .alert-card.critical, .alert-card.high { border-color: #7f1d1d; }
 .alert-card.medium { border-color: #a16207; }
 .reports-empty { padding: 22px; border: 1px dashed #334155; border-radius: 11px; color: #94a3b8; text-align: center; }
+.reports-inventory-error { display: grid; gap: 10px; padding: 18px; border: 1px solid #7f1d1d; border-radius: 12px; background: #29151b; color: #fecaca; }
+.reports-inventory-error span { color: #fda4af; }
+.reports-inventory-error button { width: fit-content; padding: 9px 14px; border: 1px solid #be123c; border-radius: 9px; background: #9f1239; color: #fff1f2; font-weight: 800; cursor: pointer; }
 @media (max-width: 1180px) {
   .executive-kpi-grid { grid-template-columns: repeat(2, minmax(190px, 1fr)); }
   .fixed-cost-form { grid-template-columns: 1fr 1fr; }

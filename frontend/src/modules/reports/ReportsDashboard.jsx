@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { Component, useEffect, useMemo, useState } from "react"
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
 import * as XLSX from "xlsx"
@@ -51,6 +51,7 @@ function ReportsDashboard() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [fixedForm, setFixedForm] = useState(EMPTY_FIXED_COST)
+  const [tabReloadKey, setTabReloadKey] = useState(0)
 
   useEffect(() => {
     if (!canView) return
@@ -58,19 +59,36 @@ function ReportsDashboard() {
     const timer = window.setTimeout(async () => {
       setLoading(true)
       setError("")
-      const result = await loadExecutiveReport(tab, filters)
-      if (!mounted) return
-      setData(result.data)
-      setError(result.error || "")
-      setLoading(false)
+      console.info(`[DashboardEjecutivo:${tab}] Iniciando carga`, { filters })
+      try {
+        const result = await loadExecutiveReport(tab, filters)
+        if (!mounted) return
+        console.info(`[DashboardEjecutivo:${tab}] Carga finalizada`, { error: result?.error || "", dataType: Array.isArray(result?.data) ? "array" : typeof result?.data })
+        setData(result?.data ?? null)
+        setError(result?.error || "")
+      } catch (loadError) {
+        if (!mounted) return
+        console.error(`[DashboardEjecutivo:${tab}] Error durante la carga`, loadError)
+        setData(null)
+        setError(loadError?.message || "No fue posible cargar el reporte.")
+      } finally {
+        if (mounted) setLoading(false)
+      }
     }, 0)
     return () => {
       mounted = false
       window.clearTimeout(timer)
     }
-  }, [canView, tab, filters])
+  }, [canView, tab, filters, tabReloadKey])
 
-  const rowsToExport = useMemo(() => exportRows(tab, data), [tab, data])
+  const rowsToExport = useMemo(() => {
+    try {
+      return exportRows(tab, data)
+    } catch (exportError) {
+      console.error(`[DashboardEjecutivo:${tab}] Error preparando exportación`, exportError)
+      return []
+    }
+  }, [tab, data])
 
   if (!canView) {
     return <section className="reports-page executive"><Empty text="No tienes permiso para ver esta seccion." /></section>
@@ -89,6 +107,21 @@ function ReportsDashboard() {
     setData(refreshed.data)
   }
 
+  function changeTab(nextTab) {
+    if (nextTab === tab) return
+    setData(null)
+    setError("")
+    setLoading(true)
+    setTab(nextTab)
+  }
+
+  function retryTab() {
+    setData(null)
+    setError("")
+    setLoading(true)
+    setTabReloadKey((current) => current + 1)
+  }
+
   return (
     <section className="reports-page executive">
       <header className="reports-header hero">
@@ -104,12 +137,19 @@ function ReportsDashboard() {
       </header>
 
       <nav className="reports-tabs executive-tabs">
-        {TABS.map(([key, label]) => <button key={key} className={tab === key ? "active" : ""} type="button" onClick={() => setTab(key)}>{label}</button>)}
+        {TABS.map(([key, label]) => <button key={key} className={tab === key ? "active" : ""} type="button" onClick={() => changeTab(key)}>{label}</button>)}
       </nav>
 
       {!["executive", "fixedCosts"].includes(tab) && <GlobalFilters filters={filters} onChange={(field, value) => setFilters((current) => ({ ...current, [field]: value }))} showCategory={tab === "menu"} showCollaborator={["waiters", "comparison"].includes(tab)} />}
-      {error && <div className="reports-warning">Consulta parcial: {error}. Se muestran los datos disponibles.</div>}
-      {loading ? <div className="reports-loading">Cargando indicadores ejecutivos...</div> : <ExecutiveContent tab={tab} data={data} filters={filters} fixedForm={fixedForm} setFixedForm={setFixedForm} submitFixedCost={submitFixedCost} />}
+      <ReportTabBoundary key={`${tab}-${tabReloadKey}`} tab={tab} onRetry={retryTab}>
+        {loading
+          ? <div className="reports-loading">Cargando {currentTabLabel(tab).toLowerCase()}...</div>
+          : error
+            ? <ReportTabError tab={tab} error={error} onRetry={retryTab} />
+            : tab === "inventory"
+              ? <CriticalInventory data={data} />
+              : <ExecutiveContent tab={tab} data={data} filters={filters} fixedForm={fixedForm} setFixedForm={setFixedForm} submitFixedCost={submitFixedCost} />}
+      </ReportTabBoundary>
     </section>
   )
 }
@@ -155,7 +195,7 @@ function ExecutiveContent(props) {
   if (props.tab === "fixedCosts") return <FixedCosts rows={props.data} form={props.fixedForm} setForm={props.setFixedForm} onSubmit={props.submitFixedCost} />
   if (props.tab === "payroll") return <PayrollReport data={props.data} />
   if (props.tab === "menu") return <MenuReport rows={filterMenuRows(props.data, props.filters)} />
-  return <CriticalInventory data={props.data} />
+  return <Empty />
 }
 
 function ExecutiveDashboard({ data }) {
@@ -207,15 +247,16 @@ function SalesReport({ data }) {
 }
 
 function WaiterSales({ rows }) {
-  const filtered = rows || []
+  const filtered = safeRows(rows)
   return <Panel title="Ventas por colaborador"><DataTable headers={["Ranking", "Nombre", "Ventas generadas", "Ordenes", "Ticket promedio"]} rows={filtered.map((row, index) => [`#${index + 1}`, row.waiter, money(row.sales), row.orders, money(row.averageTicket)])} /></Panel>
 }
 
 function WaiterComparison({ rows }) {
+  const safe = safeRows(rows)
   return <div className="reports-grid">
-    <Panel title="Ventas"><BarChart rows={rows || []} labelKey="waiter" valueKey="sales" /></Panel>
-    <Panel title="Ticket promedio"><BarChart rows={rows || []} labelKey="waiter" valueKey="averageTicket" /></Panel>
-    <Panel title="Ordenes atendidas"><BarChart rows={rows || []} labelKey="waiter" valueKey="orders" /></Panel>
+    <Panel title="Ventas"><BarChart rows={safe} labelKey="waiter" valueKey="sales" /></Panel>
+    <Panel title="Ticket promedio"><BarChart rows={safe} labelKey="waiter" valueKey="averageTicket" /></Panel>
+    <Panel title="Ordenes atendidas"><BarChart rows={safe} labelKey="waiter" valueKey="orders" /></Panel>
   </div>
 }
 
@@ -228,14 +269,15 @@ function PurchasesReport({ data }) {
       <KPI title="Compras del año" value={money(s.yearTotal)} />
     </div>
     <div className="reports-grid">
-      <Panel title="Compras por proveedor"><DataTable headers={["Proveedor", "Monto", "% total"]} rows={(data.bySupplier || []).map((row) => [row.name, money(row.amount), `${row.percent.toFixed(1)}%`])} /></Panel>
-      <Panel title="Compras por categoria"><PieList rows={data.byCategory || []} /></Panel>
+      <Panel title="Compras por proveedor"><DataTable headers={["Proveedor", "Monto", "% total"]} rows={safeRows(data.bySupplier).map((row) => [row.name, money(row.amount), `${finiteNumber(row.percent).toFixed(1)}%`])} /></Panel>
+      <Panel title="Compras por categoria"><PieList rows={safeRows(data.byCategory)} /></Panel>
     </div>
   </div>
 }
 
 function FixedCosts({ rows, form, setForm, onSubmit }) {
-  const activeRows = (rows || []).filter((row) => row.active)
+  const safe = safeRows(rows)
+  const activeRows = safe.filter((row) => row.active)
   const total = activeRows.reduce((sum, row) => sum + Number(row.monthly_amount || 0), 0)
   return <div className="reports-stack">
     <div className="reports-kpis"><KPI title="Costo fijo mensual total" value={money(total)} /><KPI title="Costo fijo anual proyectado" value={money(total * 12)} /></div>
@@ -247,7 +289,7 @@ function FixedCosts({ rows, form, setForm, onSubmit }) {
       <label><input type="checkbox" checked={form.active} onChange={(event) => setForm({ ...form, active: event.target.checked })} /> Activo</label>
       <button className="primary" type="submit">Guardar costo</button>
     </form>
-    <Panel title="Costos fijos registrados"><DataTable headers={["Nombre", "Categoria", "Monto mensual", "Inicio", "Estado"]} rows={(rows || []).map((row) => [row.name, fixedCategoryLabel(row.category), money(row.monthly_amount), row.start_date || "-", row.active ? "Activo" : "Inactivo"])} /></Panel>
+    <Panel title="Costos fijos registrados"><DataTable headers={["Nombre", "Categoria", "Monto mensual", "Inicio", "Estado"]} rows={safe.map((row) => [row.name, fixedCategoryLabel(row.category), money(row.monthly_amount), row.start_date || "-", row.active ? "Activo" : "Inactivo"])} /></Panel>
   </div>
 }
 
@@ -264,31 +306,81 @@ function PayrollReport({ data }) {
 
 function MenuReport({ rows }) {
   const labels = { star: "ESTRELLA", cow: "VACA", horse: "VACA", puzzle: "ROMPECABEZAS", dog: "PERRO" }
-  return <Panel title="Analisis de menu"><DataTable headers={["Producto", "Categoria", "Unidades", "Ventas", "Costo", "Utilidad", "Clasificacion"]} rows={(rows || []).map((row) => [row.product, row.category, row.quantity, money(row.revenue ?? row.sales), money(row.cost * row.quantity), money(row.profit ?? row.estimatedProfit), labels[row.classification] || row.classification])} /></Panel>
+  return <Panel title="Analisis de menu"><DataTable headers={["Producto", "Categoria", "Unidades", "Ventas", "Costo", "Utilidad", "Clasificacion"]} rows={safeRows(rows).map((row) => [row.product, row.category, row.quantity, money(row.revenue ?? row.sales), money(Number(row.cost || 0) * Number(row.quantity || 0)), money(row.profit ?? row.estimatedProfit), labels[row.classification] || row.classification])} /></Panel>
+}
+
+class ReportTabBoundary extends Component {
+  constructor(props) {
+    super(props)
+    this.state = { error: null }
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error }
+  }
+
+  componentDidCatch(error, info) {
+    console.error(`[DashboardEjecutivo:${this.props.tab}] Error de renderizado capturado`, error, info)
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="reports-inventory-error" role="alert">
+          <strong>No se pudo mostrar {currentTabLabel(this.props.tab)}.</strong>
+          <span>{this.state.error.message || "Ocurrió un error inesperado al renderizar los datos."}</span>
+          <button type="button" onClick={this.props.onRetry}>Reintentar</button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
+function ReportTabError({ tab, error, onRetry }) {
+  console.error(`[DashboardEjecutivo:${tab}] Consulta fallida`, error)
+  return (
+    <div className="reports-inventory-error" role="alert">
+      <strong>No se pudo cargar {currentTabLabel(tab)}.</strong>
+      <span>{error || "La consulta no devolvió datos válidos."}</span>
+      <button type="button" onClick={onRetry}>Reintentar</button>
+    </div>
+  )
 }
 
 function CriticalInventory({ data }) {
-  const rows = [...(data.out || []), ...(data.low || [])]
-  return <Panel title="Inventario critico"><DataTable headers={["Producto", "Area", "Stock actual", "Stock minimo", "Estado"]} rows={rows.map((row) => [row.item?.name || "-", row.area?.name || row.area_id, `${numberText(row.quantity)} ${row.item?.base_unit || ""}`, numberText(row.minimum_quantity), <StockState key={`${row.item_id}-${row.area_id}`} row={row} />])} /></Panel>
+  const out = Array.isArray(data?.out) ? data.out.filter((row) => row && typeof row === "object") : []
+  const low = Array.isArray(data?.low) ? data.low.filter((row) => row && typeof row === "object") : []
+  const rows = [...out, ...low]
+  console.info("[InventarioCritico] Render", { hasData: Boolean(data), out: out.length, low: low.length })
+
+  if (!rows.length) {
+    return <Panel title="Inventario critico"><Empty text="No hay productos críticos actualmente" /></Panel>
+  }
+
+  return <Panel title="Inventario critico"><DataTable headers={["Producto", "Area", "Stock actual", "Stock minimo", "Estado"]} rows={rows.map((row, index) => [row.item?.name || "Producto sin nombre", row.area?.name || row.area_id || "Sin área", `${numberText(row.quantity)} ${row.item?.base_unit || ""}`, numberText(row.minimum_quantity), <StockState key={`${row.item_id || index}-${row.area_id || "area"}`} row={row} />])} /></Panel>
 }
 
 function BarChart({ rows, labelKey, valueKey }) {
-  if (!rows.length) return <Empty />
-  const max = Math.max(...rows.map((row) => Number(row[valueKey] || 0)), 1)
-  return <div className="bar-chart">{rows.slice(0, 12).map((row) => <div className="bar-row" key={row[labelKey]}><span>{row[labelKey]}</span><div><i style={{ width: `${(Number(row[valueKey] || 0) / max) * 100}%` }} /></div><strong>{valueKey === "orders" ? Number(row[valueKey] || 0) : money(row[valueKey])}</strong></div>)}</div>
+  const safe = safeRows(rows)
+  if (!safe.length) return <Empty />
+  const max = Math.max(...safe.map((row) => finiteNumber(row[valueKey])), 1)
+  return <div className="bar-chart">{safe.slice(0, 12).map((row, index) => <div className="bar-row" key={row[labelKey] || index}><span>{row[labelKey] || "-"}</span><div><i style={{ width: `${(finiteNumber(row[valueKey]) / max) * 100}%` }} /></div><strong>{valueKey === "orders" ? finiteNumber(row[valueKey]) : money(row[valueKey])}</strong></div>)}</div>
 }
 
 function PieList({ rows }) {
-  if (!rows.length) return <Empty />
+  const safe = safeRows(rows)
+  if (!safe.length) return <Empty />
   return <div className="pie-list">
-    <div className="pie-visual" style={{ background: pieGradient(rows) }} />
-    <DataTable headers={["Categoria", "Monto", "%"]} rows={rows.map((row) => [row.name, money(row.amount), `${row.percent.toFixed(1)}%`])} />
+    <div className="pie-visual" style={{ background: pieGradient(safe) }} />
+    <DataTable headers={["Categoria", "Monto", "%"]} rows={safe.map((row) => [row.name, money(row.amount), `${finiteNumber(row.percent).toFixed(1)}%`])} />
   </div>
 }
 
 function DataTable({ headers, rows, emptyText = "Sin datos suficientes todavia." }) {
-  if (!rows.length) return <Empty text={emptyText} />
-  return <div className="reports-table-scroll"><table className="reports-table"><thead><tr>{headers.map((header) => <th key={header}>{header}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}</tr>)}</tbody></table></div>
+  const safe = safeRows(rows).filter(Array.isArray)
+  if (!safe.length) return <Empty text={emptyText} />
+  return <div className="reports-table-scroll"><table className="reports-table"><thead><tr>{safeList(headers).map((header) => <th key={header}>{header}</th>)}</tr></thead><tbody>{safe.map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell ?? "-"}</td>)}</tr>)}</tbody></table></div>
 }
 
 function KPI({ title, value, tone = "" }) { return <article className={`report-kpi ${tone}`}><span>{title}</span><strong>{value}</strong></article> }
@@ -315,24 +407,39 @@ function exportRows(tab, data) {
       { Indicador: "Ordenes mes", Valor: c.month?.orders || 0 }
     ]
   }
-  if (tab === "sales") return (data.byDay || []).map((row) => ({ Periodo: row.date, Ordenes: row.orders, Ventas: row.sales, TicketPromedio: row.averageTicket }))
-  if (tab === "waiters" || tab === "comparison") return data.map((row, index) => ({ Ranking: index + 1, Colaborador: row.waiter, Ventas: row.sales, Ordenes: row.orders, TicketPromedio: row.averageTicket }))
-  if (tab === "purchases") return (data.rows || []).map((row) => ({ Orden: row.orderNumber, Proveedor: row.supplier, Estado: row.status, Total: row.total, Fecha: row.created_at }))
-  if (tab === "fixedCosts") return data.map((row) => ({ Nombre: row.name, Categoria: fixedCategoryLabel(row.category), MontoMensual: row.monthly_amount, Activo: row.active }))
-  if (tab === "payroll") return (data.rows || []).map((row) => ({ Colaborador: row.employee, Departamento: row.department, Monto: row.amount }))
-  if (tab === "menu") return data.map((row) => ({ Producto: row.product, Categoria: row.category, Unidades: row.quantity, Ventas: row.revenue ?? row.sales, Utilidad: row.profit ?? row.estimatedProfit, Clasificacion: row.classification }))
-  if (tab === "inventory") return [...(data.out || []), ...(data.low || [])].map((row) => ({ Producto: row.item?.name, Area: row.area?.name || row.area_id, StockActual: row.quantity, StockMinimo: row.minimum_quantity }))
+  if (tab === "sales") return safeRows(data.byDay).map((row) => ({ Periodo: row.date, Ordenes: row.orders, Ventas: row.sales, TicketPromedio: row.averageTicket }))
+  if (tab === "waiters" || tab === "comparison") return safeRows(data).map((row, index) => ({ Ranking: index + 1, Colaborador: row.waiter, Ventas: row.sales, Ordenes: row.orders, TicketPromedio: row.averageTicket }))
+  if (tab === "purchases") return safeRows(data.rows).map((row) => ({ Orden: row.orderNumber, Proveedor: row.supplier, Estado: row.status, Total: row.total, Fecha: row.created_at }))
+  if (tab === "fixedCosts") return safeRows(data).map((row) => ({ Nombre: row.name, Categoria: fixedCategoryLabel(row.category), MontoMensual: row.monthly_amount, Activo: row.active }))
+  if (tab === "payroll") return safeRows(data.rows).map((row) => ({ Colaborador: row.employee, Departamento: row.department, Monto: row.amount }))
+  if (tab === "menu") return safeRows(data).map((row) => ({ Producto: row.product, Categoria: row.category, Unidades: row.quantity, Ventas: row.revenue ?? row.sales, Utilidad: row.profit ?? row.estimatedProfit, Clasificacion: row.classification }))
+  if (tab === "inventory") return [...safeRows(data.out), ...safeRows(data.low)].map((row) => ({ Producto: row.item?.name, Area: row.area?.name || row.area_id, StockActual: row.quantity, StockMinimo: row.minimum_quantity }))
   return []
 }
 
 function filterWaiters(rows, filters = {}) {
   const term = String(filters.collaborator || "").trim().toLowerCase()
-  return term ? (rows || []).filter((row) => String(row.waiter || "").toLowerCase().includes(term)) : (rows || [])
+  const safe = safeRows(rows)
+  return term ? safe.filter((row) => String(row.waiter || "").toLowerCase().includes(term)) : safe
 }
 
 function filterMenuRows(rows, filters = {}) {
   const term = String(filters.category || "").trim().toLowerCase()
-  return term ? (rows || []).filter((row) => String(row.category || "").toLowerCase().includes(term)) : (rows || [])
+  const safe = safeRows(rows)
+  return term ? safe.filter((row) => String(row.category || "").toLowerCase().includes(term)) : safe
+}
+
+function safeList(value) {
+  return Array.isArray(value) ? value.filter((entry) => entry != null) : []
+}
+
+function safeRows(value) {
+  return safeList(value).filter((entry) => typeof entry === "object")
+}
+
+function finiteNumber(value) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : 0
 }
 
 function exportExcel(rows, tab) {
