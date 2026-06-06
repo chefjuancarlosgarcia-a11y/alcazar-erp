@@ -13,7 +13,7 @@ const navigationItems = [
   { module: "hr", to: "/hr", label: "Recursos Humanos", submenu: "hr" },
   { module: "tasks", to: "/tasks", label: "Tareas" },
   { module: "reports", to: "/reports", label: "Reportes" },
-  { module: "settings", to: "/settings", label: "Configuración" }
+  { module: "settings", to: "/settings", label: "Configuración", submenu: "settings" }
 ]
 
 const inventorySubmenu = [
@@ -43,16 +43,22 @@ const posSubmenu = [
   { roles: ["admin", "gerente", "gerente_general", "gerente_operaciones"], to: "/pos?section=croquis", label: "Croquis del restaurante" }
 ]
 
+const settingsSubmenu = [
+  { roles: ["admin", "gerente_general"], to: "/settings", label: "Branding y roles" },
+  { roles: ["admin", "gerente_general", "supervisor"], to: "/settings/tickets", label: "Diseno de Tickets" }
+]
+
 function Sidebar({ compact = false, mobile = false, onNavigate }) {
   const { user, canAccess, logout } = useAuth()
   const branding = useAppBranding()
   const location = useLocation()
-  const [openSubmenu, setOpenSubmenu] = useState(location.pathname === "/inventory" ? "inventory" : location.pathname === "/hr" ? "hr" : location.pathname === "/pos" ? "pos" : null)
-  const visibleSubmenu = ["/inventory", "/hr", "/pos"].includes(location.pathname) ? openSubmenu : null
+  const [openSubmenu, setOpenSubmenu] = useState(location.pathname === "/inventory" ? "inventory" : location.pathname === "/hr" ? "hr" : location.pathname === "/pos" ? "pos" : location.pathname.startsWith("/settings") ? "settings" : null)
+  const visibleSubmenu = ["/inventory", "/hr", "/pos"].includes(location.pathname) || location.pathname.startsWith("/settings") ? openSubmenu : null
   const allowedItems = navigationItems.filter((item) => canAccess(item.module))
   const allowedInventorySubmenu = inventorySubmenu.filter((item) => item.roles.includes(user?.role))
   const allowedPosSubmenu = posSubmenu.filter((item) => item.roles.includes(user?.role))
   const allowedHrSubmenu = hrSubmenu.filter((item) => item.roles.includes(user?.role))
+  const allowedSettingsSubmenu = settingsSubmenu.filter((item) => item.roles.includes(user?.role))
 
   function isMainActive(item) {
     if (item.to === "/dashboard") return location.pathname === "/dashboard" || location.pathname === "/"
@@ -121,7 +127,7 @@ function Sidebar({ compact = false, mobile = false, onNavigate }) {
             <NavLink
               className={`erp-sidebar-link ${isMainActive(item) ? "active" : ""}`}
               to={item.to}
-              end={!["/inventory", "/production", "/pos", "/hr"].includes(item.to)}
+              end={!["/inventory", "/production", "/pos", "/hr", "/settings"].includes(item.to)}
               onClick={(event) => handleMainClick(item, event)}
               style={() => ({
                 ...linkStyle,
@@ -134,6 +140,7 @@ function Sidebar({ compact = false, mobile = false, onNavigate }) {
             {item.module === "inventory" && renderSubmenu("inventory", allowedInventorySubmenu)}
             {item.module === "pos" && renderSubmenu("pos", allowedPosSubmenu)}
             {item.module === "hr" && renderSubmenu("hr", allowedHrSubmenu)}
+            {item.module === "settings" && renderSubmenu("settings", allowedSettingsSubmenu)}
           </div>
         ))}
       </nav>

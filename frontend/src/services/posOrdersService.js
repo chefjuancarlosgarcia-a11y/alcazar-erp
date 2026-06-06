@@ -1,7 +1,7 @@
 import { supabase } from "../lib/supabase"
 import { formatSupabaseError, withTimeout } from "./productionTicketsService"
 
-const orderSelect = `*, items:pos_order_items(*)`
+const orderSelect = `*, items:pos_order_items(*), customer:customers(*), customer_address:customer_addresses(*)`
 
 function mapOrderItem(row) {
   if (!row) return null
@@ -127,11 +127,41 @@ export async function createOrGetOpenOrder(tableData, currentUser) {
       table_name: tableData.tableName || `Mesa ${tableData.mesaNumero || ""}`,
       area_id: tableData.areaId || null,
       area_name: tableData.areaName || tableData.areaNombre || null,
+      sales_channel: tableData.salesChannel || "dine_in",
+      customer_id: tableData.customerId || null,
+      customer_address_id: tableData.customerAddressId || null,
+      delivery_notes: tableData.deliveryNotes || null,
+      assigned_driver_id: tableData.assignedDriverId || null,
+      external_source: tableData.externalSource || null,
+      external_order_id: tableData.externalOrderId || null,
       waiter_id: currentUser.id,
       waiter_name: currentUser.name || currentUser.username || "POS",
       status: "open"
     }).select(orderSelect).single(),
     "crear orden POS"
+  )
+}
+
+export async function updateOrderNotes(orderId, notes = "") {
+  return queryOrder(
+    supabase.from("pos_orders").update({ notes: notes || null }).eq("id", orderId).select(orderSelect).single(),
+    "guardar notas de orden POS"
+  )
+}
+
+export async function updateOrderSalesChannel(orderId, payload = {}) {
+  return queryOrder(
+    supabase.from("pos_orders").update({
+      sales_channel: payload.salesChannel || "dine_in",
+      customer_id: payload.customerId || null,
+      customer_address_id: payload.customerAddressId || null,
+      delivery_notes: payload.deliveryNotes || null,
+      assigned_driver_id: payload.assignedDriverId || null,
+      external_source: payload.externalSource || null,
+      external_order_id: payload.externalOrderId || null,
+      notes: payload.notes || null
+    }).eq("id", orderId).select(orderSelect).single(),
+    "guardar canal de venta POS"
   )
 }
 

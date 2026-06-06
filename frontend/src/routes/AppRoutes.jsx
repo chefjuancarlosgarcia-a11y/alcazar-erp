@@ -9,10 +9,12 @@ import ForgotPassword from "../pages/ForgotPassword"
 import ForgotUser from "../pages/ForgotUser"
 import UpdatePassword from "../pages/UpdatePassword"
 import POS from "../pages/POS"
+import Cashier from "../pages/Cashier"
 import CashManagement from "../pages/CashManagement"
 import Production from "../pages/Production"
 import Reports from "../pages/Reports"
 import Settings from "../pages/Settings"
+import TicketTemplateSettings from "../pages/TicketTemplateSettings"
 import Account from "../pages/Account"
 import Tasks from "../pages/Tasks"
 import Kiosk from "../pages/Kiosk"
@@ -38,8 +40,9 @@ function AppRoutes() {
           <Route path="/dashboard" element={<ProtectedRoute module="dashboard"><Dashboard /></ProtectedRoute>} />
           <Route path="/inventory" element={<ProtectedRoute module="inventory"><Inventory /></ProtectedRoute>} />
           <Route path="/pos" element={<ProtectedRoute module="pos"><POS /></ProtectedRoute>} />
-          <Route path="/cash" element={<ProtectedRoute module="cash"><CashManagement /></ProtectedRoute>} />
-          <Route path="/cashier" element={<ProtectedRoute module="cash"><CashManagement /></ProtectedRoute>} />
+          <Route path="/cash" element={<ProtectedRoute module="cash"><Cashier /></ProtectedRoute>} />
+          <Route path="/cashier" element={<ProtectedRoute module="cash"><Cashier /></ProtectedRoute>} />
+          <Route path="/cash-control" element={<ProtectedRoute module="cash"><CashManagement /></ProtectedRoute>} />
           <Route path="/production" element={<ProtectedRoute><Production /></ProtectedRoute>} />
           <Route path="/production/:areaId" element={<ProtectedRoute><Production /></ProtectedRoute>} />
           <Route path="/kds" element={<ProtectedRoute><Production /></ProtectedRoute>} />
@@ -48,6 +51,7 @@ function AppRoutes() {
           <Route path="/tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
           <Route path="/reports" element={<ProtectedRoute module="reports"><Reports /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute module="settings"><Settings /></ProtectedRoute>} />
+          <Route path="/settings/tickets" element={<ProtectedRoute module="settings"><TicketTemplateSettings /></ProtectedRoute>} />
           <Route path="/account" element={<ProtectedRoute><Account /></ProtectedRoute>} />
           <Route path="*" element={<DefaultRedirect />} />
         </Route>

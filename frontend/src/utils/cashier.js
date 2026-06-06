@@ -142,7 +142,11 @@ function notifyCashiers(preBill) {
   parseArray("users")
     .filter((user) => ["Cajero", "Caja", "Administrador", "Gerente General", "Supervisor"].includes(user.rol))
     .forEach((user) => ids.add(user.id || user.username))
-  ids.forEach((userId) => addNotification(userId, "payment_request", "Nueva solicitud de cobro", `${preBill.tableName} lista para cobro.`, preBill.id))
+  const title = preBill.salesChannel === "delivery" ? "Nuevo delivery por cobrar" : "Nueva solicitud de cobro"
+  const message = preBill.salesChannel === "delivery"
+    ? `${preBill.delivery?.customerName || preBill.tableName} · ${preBill.delivery?.paymentMethod || "Pago pendiente"} · Q${Number(preBill.total || 0).toFixed(2)}`
+    : `${preBill.tableName} lista para cobro.`
+  ids.forEach((userId) => addNotification(userId, "payment_request", title, message, preBill.id))
 }
 
 function notifyManagers(type, title, message, relatedId) {
@@ -233,6 +237,9 @@ function normalizePOSOrderForCashier(order, waiter) {
     subtotal,
     total: money(order.total ?? subtotal),
     items,
+    salesChannel: order.salesChannel || order.sales_channel || "dine_in",
+    delivery: order.delivery || null,
+    deliveryNotes: order.deliveryNotes || order.delivery_notes || "",
     source: "supabase_pos",
     createdAt: order.created_at || order.createdAt || new Date().toISOString()
   }
@@ -257,6 +264,9 @@ export function createPreBillFromPOSOrder(order, waiter, options = {}) {
     tipSuggested: money(subtotal * 0.1),
     total: subtotal,
     peopleCount: options.peopleCount || "",
+    salesChannel: normalizedOrder.salesChannel,
+    delivery: normalizedOrder.delivery,
+    deliveryNotes: normalizedOrder.deliveryNotes,
     source: "supabase_pos"
   }
   const preBill = existing

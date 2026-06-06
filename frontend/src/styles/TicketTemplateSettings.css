@@ -1,0 +1,247 @@
+.ticket-settings-page {
+  display: grid;
+  gap: 16px;
+  color: #e5edf7;
+}
+
+.ticket-settings-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+  padding: 18px;
+  border: 1px solid #253347;
+  border-radius: 8px;
+  background: #0f172a;
+}
+
+.ticket-settings-header p,
+.ticket-settings-header span {
+  margin: 0;
+  color: #94a3b8;
+}
+
+.ticket-settings-header h1 {
+  margin: 3px 0 6px;
+  font-size: 30px;
+}
+
+.ticket-settings-layout {
+  display: grid;
+  grid-template-columns: minmax(360px, 520px) minmax(360px, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.ticket-settings-panel,
+.ticket-preview-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #253347;
+  border-radius: 8px;
+  background: #0f172a;
+}
+
+.ticket-settings-panel details {
+  border: 1px solid #223146;
+  border-radius: 8px;
+  background: #111827;
+  overflow: hidden;
+}
+
+.ticket-settings-panel summary {
+  cursor: pointer;
+  padding: 12px;
+  color: #f8fafc;
+  font-weight: 850;
+}
+
+.ticket-settings-panel details[open] summary {
+  border-bottom: 1px solid #223146;
+}
+
+.ticket-field,
+.ticket-checkbox {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+}
+
+.ticket-field span,
+.ticket-checkbox span {
+  color: #bfd1e8;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.ticket-field input,
+.ticket-field select,
+.ticket-field textarea {
+  width: 100%;
+  min-height: 38px;
+  padding: 9px 10px;
+  border: 1px solid #334155;
+  border-radius: 7px;
+  background: #0b1220;
+  color: #f8fafc;
+}
+
+.ticket-field textarea {
+  min-height: 78px;
+  resize: vertical;
+}
+
+.ticket-checkbox {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+}
+
+.ticket-checkbox input {
+  width: 17px;
+  height: 17px;
+}
+
+.ticket-checkbox-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px;
+  padding: 6px;
+}
+
+.ticket-settings-actions {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 0 0;
+  background: #0f172a;
+}
+
+.ticket-settings-page button {
+  min-height: 38px;
+  padding: 9px 12px;
+  border: 1px solid #334155;
+  border-radius: 7px;
+  background: #1f2937;
+  color: #f8fafc;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.ticket-settings-page button[type="submit"],
+.ticket-settings-header button {
+  border-color: #0f766e;
+  background: #0d9488;
+  color: #022c22;
+}
+
+.ticket-settings-page button:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
+.ticket-settings-success,
+.ticket-settings-error,
+.ticket-settings-readonly,
+.ticket-settings-help {
+  padding: 11px 12px;
+  border-radius: 8px;
+  border: 1px solid #0f766e;
+  background: #042f2e;
+  color: #ccfbf1;
+}
+
+.ticket-settings-help {
+  display: grid;
+  gap: 3px;
+}
+
+.ticket-settings-help span {
+  color: #99f6e4;
+  font-size: 13px;
+}
+
+.ticket-settings-error {
+  border-color: #ef4444;
+  background: #450a0a;
+  color: #fecaca;
+}
+
+.ticket-settings-readonly,
+.ticket-settings-note {
+  border-color: #f59e0b;
+  background: #451a03;
+  color: #fde68a;
+}
+
+.ticket-quick-modes {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #223146;
+  border-radius: 8px;
+  background: #111827;
+}
+
+.ticket-quick-modes strong {
+  color: #f8fafc;
+}
+
+.ticket-quick-modes div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.ticket-quick-modes button {
+  min-height: 34px;
+  padding: 7px 10px;
+}
+
+.ticket-settings-note {
+  margin: 10px 12px 12px;
+  padding: 10px;
+  border-radius: 7px;
+}
+
+.ticket-preview-panel {
+  position: sticky;
+  top: 16px;
+}
+
+.ticket-preview-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: #cbd5e1;
+}
+
+.ticket-preview-panel iframe {
+  width: 100%;
+  min-height: 760px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #fff;
+}
+
+@media (max-width: 1100px) {
+  .ticket-settings-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .ticket-preview-panel {
+    position: static;
+  }
+}
+
+@media (max-width: 680px) {
+  .ticket-settings-header {
+    display: grid;
+  }
+
+  .ticket-checkbox-grid {
+    grid-template-columns: 1fr;
+  }
+}

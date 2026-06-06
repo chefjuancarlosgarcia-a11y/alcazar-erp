@@ -8,6 +8,7 @@ import { createStockRequisition } from "../utils/posProduction"
 import { createPreBillFromPOSOrder, createSplitBill, printPreBill as markPreBillPrinted, sendPreBillToCashier } from "../utils/cashier"
 import { printPreCheck } from "../services/posPrintService"
 import { getProductionAreas } from "../services/areasService"
+import { savePOSCustomerFromDelivery, searchPOSCustomers } from "../services/posCustomersService"
 import { getActiveRecipes, getPOSRecipeLink } from "../services/recipesService"
 import {
   createOrUpdatePOSProductFromRecipe,
@@ -33,6 +34,7 @@ import {
   requestOrderBill,
   sendOrderToCashier,
   sendOrderToProduction,
+  updateOrderSalesChannel,
   updateOrderItemNotes,
   updateOrderItemQuantity
 } from "../services/posOrdersService"
@@ -40,8 +42,15 @@ import "./POS.css"
 
 const POS_CATEGORIES_KEY = "posCategories"
 const POS_LAYOUT_KEY = "posLayout"
+const LEGACY_POS_AREAS_KEY = "posRestaurantAreas"
+const POS_LAYOUT_SYNC_EVENT = "pos-layout-updated"
 const DEFAULT_LAYOUT_SETTINGS = { snapToGrid: true, gridSize: 24, zoom: 1 }
 const TABLE_TIME_THRESHOLDS = { normalMinutes: 60, criticalMinutes: 90 }
+const SALES_CHANNELS = [
+  { id: "dine_in", label: "Salón", tableLabel: "Mesa" },
+  { id: "delivery", label: "Delivery", tableLabel: "Delivery" },
+  { id: "takeout", label: "Para llevar", tableLabel: "Para llevar" }
+]
 const DEFAULT_POS_CATEGORIES = [
   { id: "entradas", name: "Entradas", description: "", productionAreaId: "cocina", active: true, sortOrder: 1, color: "#0ea5a4", icon: "🥗" },
   { id: "pizzas", name: "Pizzas", description: "Pizzas de la casa", productionAreaId: "pizzeria", active: true, sortOrder: 2, color: "#f97316", icon: "🍕" },
@@ -78,6 +87,15 @@ const CATEGORY_QUICK_OPTIONS = [
 
 function normalizeId(value) {
   return String(value || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
+}
+
+function normalizeText(value) {
+  return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim()
+}
+
+function isSalesChannelName(value) {
+  const normalized = normalizeText(value)
+  return ["delivery", "domicilio", "para llevar", "parallevar", "takeout", "take away"].some((channel) => normalized.includes(channel))
 }
 
 function productInitials(name) {
@@ -128,11 +146,11 @@ function formatTableDuration(minutes) {
 }
 
 const POS_STEPS = [
-  { id: 1, label: "Mesa" },
-  { id: 2, label: "Personas" },
+  { id: 1, label: "Canal" },
+  { id: 2, label: "Cliente" },
   { id: 3, label: "Productos" },
-  { id: 4, label: "Enviar" },
-  { id: 5, label: "Cobrar" }
+  { id: 4, label: "Cobro" },
+  { id: 5, label: "Confirmación" }
 ]
 
 function getOrderItemAssignment(notes) {
@@ -273,11 +291,16 @@ const emptyMesaForm = {
 const emptyDeliveryForm = {
   tipoOrden: "Domicilio",
   cliente: "",
+  correo: "",
   nit: "",
   telefono: "",
+  whatsapp: "",
   direccion1: "",
   direccion2: "",
   referencias: "",
+  mapsLink: "",
+  repartidor: "",
+  notasEntrega: "",
   formaPago: "",
   fechaProgramada: "",
   horaProgramada: ""
@@ -352,13 +375,22 @@ function normalizeLayoutArea(area, index, layoutTables = []) {
   }
 }
 
+function normalizeLayoutAreas(areas = []) {
+  return (Array.isArray(areas) ? areas : [])
+    .map((area, index) => normalizeLayoutArea(area, index))
+    .filter((area) => !isSalesChannelName(area.nombre || area.name || area.id))
+    .map((area, index) => ({ ...area, sortOrder: Number(area.sortOrder || index + 1) }))
+}
+
 function loadPosLayout() {
   try {
     const stored = JSON.parse(localStorage.getItem(POS_LAYOUT_KEY) || "null")
     if (stored?.areas && Array.isArray(stored.areas)) {
       const tables = Array.isArray(stored.tables) ? stored.tables : []
       return {
-        areas: stored.areas.map((area, index) => normalizeLayoutArea(area, index, tables)),
+        areas: stored.areas
+          .map((area, index) => normalizeLayoutArea(area, index, tables))
+          .filter((area) => !isSalesChannelName(area.nombre || area.name || area.id)),
         settings: { ...DEFAULT_LAYOUT_SETTINGS, ...(stored.settings || {}) }
       }
     }
@@ -366,9 +398,9 @@ function loadPosLayout() {
     // Use the previous POS storage as a migration source below.
   }
   try {
-    const legacyAreas = JSON.parse(localStorage.getItem("posRestaurantAreas") || "[]")
+    const legacyAreas = JSON.parse(localStorage.getItem(LEGACY_POS_AREAS_KEY) || "[]")
     return {
-      areas: (Array.isArray(legacyAreas) ? legacyAreas : []).map((area, index) => normalizeLayoutArea(area, index)),
+      areas: normalizeLayoutAreas(legacyAreas),
       settings: DEFAULT_LAYOUT_SETTINGS
     }
   } catch {
@@ -377,11 +409,20 @@ function loadPosLayout() {
 }
 
 function buildPosLayoutPayload(areas, settings) {
+  const physicalAreas = normalizeLayoutAreas(areas)
   return {
-    areas: areas.map(({ mesas, ...area }) => ({ ...area, mesasTotales: mesas.length })),
-    tables: areas.flatMap((area) => area.mesas.map((table, index) => normalizeLayoutTable(table, area.id, index))),
+    areas: physicalAreas.map(({ mesas, ...area }) => ({ ...area, mesasTotales: mesas.length })),
+    tables: physicalAreas.flatMap((area) => area.mesas.map((table, index) => normalizeLayoutTable(table, area.id, index))),
     settings
   }
+}
+
+function syncPosLayoutStorage(areas, settings) {
+  const physicalAreas = normalizeLayoutAreas(areas)
+  localStorage.setItem(POS_LAYOUT_KEY, JSON.stringify(buildPosLayoutPayload(physicalAreas, settings)))
+  localStorage.setItem(LEGACY_POS_AREAS_KEY, JSON.stringify(physicalAreas))
+  window.dispatchEvent(new CustomEvent(POS_LAYOUT_SYNC_EVENT, { detail: { areas: physicalAreas, settings } }))
+  return physicalAreas
 }
 
 function TableWithChairs({ table, selected = false, editing = false, zoom = 1, onPointerDown, onClick, showSelectLabel = false }) {
@@ -485,15 +526,25 @@ function POS() {
   const [mesaForm, setMesaForm] = useState(emptyMesaForm)
   const [mesaError, setMesaError] = useState("")
   const [layoutMessage, setLayoutMessage] = useState("")
+  const [layoutError, setLayoutError] = useState("")
   const [draggingTableId, setDraggingTableId] = useState(null)
   const floorPlanRef = useRef(null)
   const [ordenMesa, setOrdenMesa] = useState(null)
+  const [salesChannel, setSalesChannel] = useState("dine_in")
   const [personasOrden, setPersonasOrden] = useState("1")
   const [posStep, setPosStep] = useState(1)
   const [seatNames, setSeatNames] = useState(["Persona 1"])
   const [selectedAssignment, setSelectedAssignment] = useState("Mesa completa")
   const [deliveryForm, setDeliveryForm] = useState(emptyDeliveryForm)
   const [deliveryErrors, setDeliveryErrors] = useState({})
+  const [selectedCustomer, setSelectedCustomer] = useState(null)
+  const [selectedCustomerAddress, setSelectedCustomerAddress] = useState(null)
+  const [customerSearch, setCustomerSearch] = useState("")
+  const [customerResults, setCustomerResults] = useState([])
+  const [customerMessage, setCustomerMessage] = useState("")
+  const [savingCustomer, setSavingCustomer] = useState(false)
+  const [showDeliveryModal, setShowDeliveryModal] = useState(false)
+  const [creatingDeliveryOrder, setCreatingDeliveryOrder] = useState(false)
   const [ordenError, setOrdenError] = useState("")
   const [ordenMessage, setOrdenMessage] = useState("")
   const [realtimeNotice, setRealtimeNotice] = useState("")
@@ -512,6 +563,7 @@ function POS() {
   const [showTechnicalAudit, setShowTechnicalAudit] = useState(false)
   const [collapsedOrderSections, setCollapsedOrderSections] = useState({ served: true, closed: true, activity: true, previous: true, audit: true })
   const realtimeNoticeTimerRef = useRef(null)
+  const productSearchRef = useRef(null)
 
   const activeCategories = useMemo(() => posCategories.filter((category) => category.active !== false).sort((a, b) => Number(a.sortOrder) - Number(b.sortOrder)), [posCategories])
   const finalRecipes = standardRecipes.filter((recipe) => recipe.recipe_type === "final_product" && recipe.active !== false)
@@ -555,7 +607,8 @@ function POS() {
   const puedeAdministrarCategorias = CATEGORY_ADMIN_ROLES.includes(user?.role)
   const puedeEditarOrdenes = ["admin", "gerente", "gerente_general", "gerente_operaciones", "supervisor", "rrhh"].includes(user?.role)
   const puedeVerAuditoria = ["admin", "gerente", "gerente_general", "gerente_operaciones", "supervisor"].includes(user?.role)
-  const esMesaDelivery = ordenMesa ? esPedidoDomicilioParaLlevar(ordenMesa.areaNombre) || esPedidoDomicilioParaLlevar(ordenMesa.mesaNumero) : false
+  const esCanalCliente = salesChannel !== "dine_in" || (ordenMesa ? esPedidoDomicilioParaLlevar(ordenMesa.areaNombre) || esPedidoDomicilioParaLlevar(ordenMesa.mesaNumero) : false)
+  const esMesaDelivery = salesChannel === "delivery"
   const esOrdenProgramada = Boolean(deliveryForm.fechaProgramada || deliveryForm.horaProgramada)
   const mesaKeyActual = ordenMesa ? obtenerMesaKey(ordenMesa.areaId, ordenMesa.mesaId) : ""
   const historialMesaActual = mesaKeyActual ? ordenesEnviadas.filter((ordenItem) => ordenItem.mesaKey === mesaKeyActual && ordenItem.id !== currentOrder?.id).slice(0, 5) : []
@@ -576,6 +629,10 @@ function POS() {
       .map((mesa) => ({ area, mesa }))
   )
   const selectedLayoutTable = areaActiva?.mesas?.find((mesa) => mesa.id === ordenMesa?.mesaId)
+  const activeSalesChannel = SALES_CHANNELS.find((channel) => channel.id === salesChannel) || SALES_CHANNELS[0]
+  const deliveryDataReady = salesChannel !== "delivery"
+    || Boolean(deliveryForm.cliente.trim() && (deliveryForm.telefono.trim() || deliveryForm.whatsapp.trim()) && deliveryForm.direccion1.trim() && deliveryForm.formaPago)
+  const canRequestCashier = Boolean(currentOrder && sentItems.length > 0 && draftItems.length === 0 && ordenMesa && deliveryDataReady)
   const activeMinutes = currentOrder ? minutosTranscurridos(currentOrder.created_at) : null
   const readyItemsCount = orden.filter((item) => item.status === "ready").length
   const serviceEventTypes = ["item_added", "sent_to_production", "production_ready", "production_served", "bill_requested", "sent_to_cashier", "order_paid"]
@@ -702,8 +759,7 @@ function POS() {
   }, [posCategories, activeCategories, categoriaActiva])
 
   useEffect(() => {
-    localStorage.setItem(POS_LAYOUT_KEY, JSON.stringify(buildPosLayoutPayload(areasRestaurante, layoutSettings)))
-    localStorage.setItem("posRestaurantAreas", JSON.stringify(areasRestaurante))
+    syncPosLayoutStorage(areasRestaurante, layoutSettings)
   }, [areasRestaurante, layoutSettings])
 
   function obtenerMesaKey(areaId, mesaId) {
@@ -725,16 +781,12 @@ function POS() {
   }
 
   function normalizarTexto(texto) {
-    return String(texto || "")
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .toLowerCase()
-      .trim()
+    return normalizeText(texto)
   }
 
   function esPedidoDomicilioParaLlevar(texto) {
     const normalizado = normalizarTexto(texto)
-    return normalizado.includes("pedidos a domicilio o para llevar")
+    return isSalesChannelName(normalizado) || normalizado.includes("pedidos a domicilio o para llevar")
   }
 
   function seleccionarCategoriaProducto(categoryId) {
@@ -828,9 +880,15 @@ function POS() {
     setPosCategories(ordered.map((category, position) => ({ ...category, sortOrder: position + 1 })))
   }
 
-  function guardarAreas(nextAreas) {
-    setAreasRestaurante(nextAreas)
-    if (!areaActivaId && nextAreas.length > 0) setAreaActivaId(nextAreas.find((area) => area.active !== false)?.id || nextAreas[0].id)
+  function guardarAreas(nextAreas, message = "Plano sincronizado con POS.") {
+    const syncedAreas = syncPosLayoutStorage(nextAreas, layoutSettings)
+    setAreasRestaurante(syncedAreas)
+    setLayoutError("")
+    if (message) setLayoutMessage(message)
+    if (!areaActivaId && syncedAreas.length > 0) setAreaActivaId(syncedAreas.find((area) => area.active !== false)?.id || syncedAreas[0].id)
+    if (areaActivaId && !syncedAreas.some((area) => area.id === areaActivaId && area.active !== false)) {
+      setAreaActivaId(syncedAreas.find((area) => area.active !== false)?.id || null)
+    }
   }
 
   function guardarArea(event) {
@@ -838,12 +896,14 @@ function POS() {
     const faltantes = {}
     const areaName = areaForm.name.trim()
     if (!areaName) faltantes.name = "Nombre del area"
+    if (isSalesChannelName(areaName)) faltantes.name = "Delivery y Para llevar son canales de venta, no areas fisicas"
     if (Number(areaForm.width) < 400) faltantes.width = "Ancho minimo 400 px"
     if (Number(areaForm.height) < 300) faltantes.height = "Alto minimo 300 px"
-    if (areasRestaurante.some((area) => area.id !== editandoAreaId && area.nombre.toLowerCase() === areaName.toLowerCase())) {
+    if (areasRestaurante.some((area) => area.id !== editandoAreaId && normalizeText(area.nombre) === normalizeText(areaName))) {
       faltantes.name = "Ya existe un area con ese nombre"
     }
     setAreaErrors(faltantes)
+    setLayoutError(Object.keys(faltantes).length > 0 ? "No se pudo guardar el area. Revisa los campos marcados." : "")
     if (Object.keys(faltantes).length > 0) return
 
     if (editandoAreaId) {
@@ -851,7 +911,7 @@ function POS() {
         area.id === editandoAreaId
           ? { ...area, name: areaName, nombre: areaName, description: areaForm.description.trim(), width: Number(areaForm.width), height: Number(areaForm.height), active: areaForm.active }
           : area
-      ))
+      ), "Area guardada y sincronizada con POS.")
     } else {
       const nuevaArea = {
         id: `${normalizeId(areaName) || "area"}-${Date.now()}`,
@@ -866,7 +926,7 @@ function POS() {
         mesas: []
       }
 
-      guardarAreas([...areasRestaurante, nuevaArea])
+      guardarAreas([...areasRestaurante, nuevaArea], "Area creada y sincronizada con POS.")
       setAreaActivaId(nuevaArea.id)
     }
     setAreaForm(emptyAreaForm)
@@ -886,15 +946,26 @@ function POS() {
     })
     setMostrarAreaForm(true)
     setAreaErrors({})
+    setLayoutError("")
   }
 
-  function desactivarArea(areaId) {
+  function eliminarArea(areaId) {
     const area = areasRestaurante.find((item) => item.id === areaId)
     if (!area) return
-    if ((area.mesas || []).some((mesa) => mesaTieneOrdenesActivas(area.id, mesa.id)) && !window.confirm("Esta area tiene ordenes activas. Deseas desactivarla de todos modos?")) return
-    const nextAreas = areasRestaurante.map((item) => item.id === areaId ? { ...item, active: false } : item)
-    guardarAreas(nextAreas)
-    if (areaActivaId === areaId) setAreaActivaId(nextAreas.find((item) => item.active !== false)?.id || null)
+    if ((area.mesas || []).some((mesa) => mesaTieneOrdenesActivas(area.id, mesa.id))) {
+      setLayoutMessage("")
+      setLayoutError("No se puede eliminar el area porque tiene ordenes activas.")
+      return
+    }
+    if ((area.mesas || []).length > 0) {
+      setLayoutMessage("")
+      setLayoutError("No se puede eliminar el area porque todavia tiene mesas. Elimina o mueve las mesas primero.")
+      return
+    }
+    const nextAreas = areasRestaurante
+      .filter((item) => item.id !== areaId)
+      .map((item, index) => ({ ...item, sortOrder: index + 1 }))
+    guardarAreas(nextAreas, "Area eliminada y POS sincronizado.")
     if (ordenMesa?.areaId === areaId) setOrdenMesa(null)
     setMesaSeleccionada(null)
   }
@@ -913,24 +984,34 @@ function POS() {
   }
 
   function agregarMesa() {
-    if (!areaActiva) return
-    const siguienteNumero = String((areaActiva.mesas?.length || 0) + 1)
+    const selectedArea = areasRestaurante.find((area) => area.id === areaActiva?.id && area.active !== false)
+    if (!selectedArea) {
+      setLayoutMessage("")
+      setLayoutError("Crea o selecciona un area antes de agregar mesas.")
+      setMostrarAreaForm(true)
+      return
+    }
+    const currentTables = selectedArea.mesas || []
+    const siguienteNumero = String(currentTables.length + 1)
     const nuevaMesa = normalizeLayoutTable({
-      id: `mesa-${areaActiva.id}-${siguienteNumero}`,
+      id: `mesa-${selectedArea.id}-${Date.now()}`,
       name: `M${siguienteNumero}`,
       numero: siguienteNumero,
       capacity: 4,
       status: "disponible",
       shape: "square",
-      x: 14 + ((areaActiva.mesas?.length || 0) % 4) * 18,
-      y: 16 + Math.floor((areaActiva.mesas?.length || 0) / 4) * 20
-    }, areaActiva.id)
-    actualizarArea(areaActiva.id, (area) => ({
-      ...area,
-      mesasTotales: (area.mesas?.length || 0) + 1,
-      mesas: [...(area.mesas || []), nuevaMesa]
-    }))
+      x: 14 + (currentTables.length % 4) * 18,
+      y: 16 + Math.floor(currentTables.length / 4) * 20
+    }, selectedArea.id)
+    const nextAreas = areasRestaurante.map((area) => (
+      area.id === selectedArea.id
+        ? { ...area, mesasTotales: currentTables.length + 1, mesas: [...currentTables, nuevaMesa] }
+        : area
+    ))
+    guardarAreas(nextAreas, `Mesa ${nuevaMesa.name} creada en ${selectedArea.nombre}.`)
+    setAreaActivaId(selectedArea.id)
     seleccionarMesaParaEditar(nuevaMesa)
+    setLayoutError("")
   }
 
   function seleccionarMesaParaEditar(mesa) {
@@ -985,6 +1066,7 @@ function POS() {
     setAreaActivaId(destinationId)
     setMesaSeleccionada(updatedTable.id)
     setMesaError("")
+    setLayoutError("")
     setLayoutMessage("Mesa guardada.")
   }
 
@@ -999,6 +1081,8 @@ function POS() {
     if (ordenMesa?.mesaId === mesaId) setOrdenMesa(null)
     setMesaSeleccionada(null)
     setMesaForm(emptyMesaForm)
+    setLayoutError("")
+    setLayoutMessage("Mesa eliminada.")
   }
 
   function duplicarMesa() {
@@ -1015,6 +1099,8 @@ function POS() {
     const copy = normalizeLayoutTable({ ...source, id: `mesa-${areaActiva.id}-${normalizeId(copyName)}`, name: copyName, x: Math.min(91, source.x + 9), y: Math.min(88, source.y + 9) }, areaActiva.id)
     actualizarArea(areaActiva.id, (area) => ({ ...area, mesas: [...area.mesas, copy], mesasTotales: area.mesas.length + 1 }))
     seleccionarMesaParaEditar(copy)
+    setLayoutError("")
+    setLayoutMessage("Mesa duplicada.")
   }
 
   function iniciarArrastreMesa(event, mesa) {
@@ -1045,13 +1131,15 @@ function POS() {
   function terminarArrastreMesa() {
     if (!draggingTableId) return
     setDraggingTableId(null)
-    setLayoutMessage("Posicion guardada.")
+    setLayoutError("")
+    setLayoutMessage("Posicion guardada y sincronizada.")
   }
 
   function guardarLayoutManual() {
-    localStorage.setItem(POS_LAYOUT_KEY, JSON.stringify(buildPosLayoutPayload(areasRestaurante, layoutSettings)))
-    localStorage.setItem("posRestaurantAreas", JSON.stringify(areasRestaurante))
-    setLayoutMessage("Layout guardado.")
+    const syncedAreas = syncPosLayoutStorage(areasRestaurante, layoutSettings)
+    setAreasRestaurante(syncedAreas)
+    setLayoutError("")
+    setLayoutMessage("Plano guardado y sincronizado con POS.")
   }
 
   function estadoMesaPorOrden(order) {
@@ -1129,10 +1217,15 @@ function POS() {
   async function seleccionarMesaOperacion(mesa) {
     if (!areaActiva) return
     const selectedTable = { areaId: areaActiva.id, mesaId: mesa.id, areaNombre: areaActiva.nombre, mesaNumero: mesa.name || mesa.numero }
+    setSalesChannel("dine_in")
     setOrdenMesa(selectedTable)
     setOrdenError("")
     setOrdenMessage("")
     setOrderDetail(null)
+    setCurrentOrder(null)
+    setActiveOrderId("")
+    setOrden([])
+    setOrderEvents([])
     setTrasladoActivo(false)
     setMesaDestinoId("")
     setPersonasOrden("1")
@@ -1161,6 +1254,74 @@ function POS() {
     }
   }
 
+  async function seleccionarCanalVenta(channelId) {
+    const channel = SALES_CHANNELS.find((item) => item.id === channelId) || SALES_CHANNELS[0]
+    setSalesChannel(channel.id)
+    if (channel.id === "dine_in") {
+      if (ordenMesa?.isSalesChannel) {
+        setOrdenMesa(null)
+        setCurrentOrder(null)
+        setActiveOrderId("")
+        setOrden([])
+        setOrderEvents([])
+      }
+      setDeliveryErrors({})
+      setSelectedCustomer(null)
+      setSelectedCustomerAddress(null)
+      setCustomerResults([])
+      setCustomerMessage("")
+      return
+    }
+
+    const selectedTable = {
+      areaId: "sales-channel",
+      mesaId: `sales-channel-${channel.id}-${Date.now()}`,
+      areaNombre: "Canal de venta",
+      mesaNumero: channel.tableLabel,
+      isSalesChannel: true
+    }
+    setOrdenMesa(selectedTable)
+    setOrdenError("")
+    setOrdenMessage("")
+    setOrderDetail(null)
+    setCurrentOrder(null)
+    setActiveOrderId("")
+    setOrden([])
+    setOrderEvents([])
+    setTrasladoActivo(false)
+    setMesaDestinoId("")
+    setPersonasOrden("1")
+    setSeatNames(["Cliente"])
+    setSelectedAssignment("Mesa completa")
+    setDeliveryForm((current) => ({
+      ...current,
+      tipoOrden: channel.id === "delivery" ? "Domicilio" : channel.id === "online" ? "Online" : "Para llevar"
+    }))
+    setPosStep(2)
+    if (channel.id === "delivery") {
+      setShowDeliveryModal(true)
+      setOrdenMessage("Completa los datos de delivery para crear el pedido.")
+      return
+    }
+    try {
+      const order = await cargarMesaDesdeSupabase(selectedTable)
+      if (order) {
+        await recordOrderEvent(order.id, "sales_channel_selected", `${channel.label} seleccionado en POS.`)
+        const events = await getTableOrderEvents(selectedTable.mesaId)
+        if (!events.error) setOrderEvents(events.data || [])
+      } else {
+        setOrdenMessage(`${channel.label} listo. Agrega productos para iniciar orden.`)
+      }
+    } catch (error) {
+      console.error("Supabase POS sales channel order error:", error)
+      setActiveOrderId("")
+      setCurrentOrder(null)
+      setOrden([])
+      setOrderEvents([])
+      setOrdenError(`No se pudo iniciar el canal de venta: ${error.message}`)
+    }
+  }
+
   function actualizarCantidadPersonas(value) {
     const count = Math.max(1, Math.min(30, Number(value) || 1))
     const nextNames = Array.from({ length: count }, (_, index) => seatNames[index] || `Persona ${index + 1}`)
@@ -1185,14 +1346,199 @@ function POS() {
     })
   }
 
+  async function buscarClientePOS(term = customerSearch) {
+    const result = await searchPOSCustomers(term)
+    if (result.error) {
+      setCustomerMessage(`No se pudo buscar cliente: ${result.message || result.error.message}`)
+      return
+    }
+    setCustomerResults(result.data || [])
+    setCustomerMessage((result.data || []).length ? "" : "No se encontraron clientes.")
+  }
+
+  function seleccionarClientePOS(customer, address = null) {
+    const defaultAddress = address || customer.addresses?.find((item) => item.is_default) || customer.addresses?.[0] || null
+    setSelectedCustomer(customer)
+    setSelectedCustomerAddress(defaultAddress)
+    setDeliveryForm((current) => ({
+      ...current,
+      cliente: customer.full_name || current.cliente,
+      correo: customer.email || current.correo,
+      telefono: customer.phone || current.telefono,
+      direccion1: defaultAddress?.address || current.direccion1,
+      referencias: defaultAddress?.reference || current.referencias,
+      mapsLink: defaultAddress?.google_maps_url || current.mapsLink,
+      direccion2: defaultAddress?.notes || current.direccion2
+    }))
+    setCustomerMessage("Cliente cargado.")
+    setCustomerResults([])
+  }
+
+  async function guardarClientePOS() {
+    setSavingCustomer(true)
+    try {
+      const result = await savePOSCustomerFromDelivery(deliveryForm)
+      if (result.error) throw new Error(result.message || result.error.message)
+      setSelectedCustomer(result.data.customer)
+      setSelectedCustomerAddress(result.data.address)
+      setCustomerMessage("Cliente guardado.")
+      return result.data
+    } catch (error) {
+      setCustomerMessage(`No se pudo guardar cliente: ${error.message}`)
+      return null
+    } finally {
+      setSavingCustomer(false)
+    }
+  }
+
+  async function crearPedidoDeliveryDesdeModal() {
+    if (creatingDeliveryOrder) return
+    setCreatingDeliveryOrder(true)
+    setOrdenError("")
+    setOrdenMessage("")
+    try {
+      const errores = validarDelivery()
+      setDeliveryErrors(errores)
+      if (Object.keys(errores).length > 0) {
+        throw new Error(`Faltan campos requeridos: ${Object.values(errores).join(", ")}.`)
+      }
+      const saved = await guardarClientePOS()
+      if (!saved?.customer?.id) throw new Error("No se pudo guardar el cliente.")
+      const selectedTable = ordenMesa?.isSalesChannel ? ordenMesa : {
+        areaId: "sales-channel",
+        mesaId: `sales-channel-delivery-${Date.now()}`,
+        areaNombre: "Canal de venta",
+        mesaNumero: "Delivery",
+        isSalesChannel: true
+      }
+      setOrdenMesa(selectedTable)
+      const created = await createOrGetOpenOrder({
+        tableId: selectedTable.mesaId,
+        tableName: "Delivery",
+        areaId: selectedTable.areaId,
+        areaName: selectedTable.areaNombre,
+        salesChannel: "delivery",
+        customerId: saved.customer.id,
+        customerAddressId: saved.address?.id,
+        deliveryNotes: buildDeliveryInfoText()
+      }, user)
+      if (created.error) throw new Error(created.message || created.error.message)
+      if (!created.data?.id) throw new Error("Supabase no devolvió la orden delivery creada.")
+      setCurrentOrder(created.data)
+      setActiveOrderId(created.data.id)
+      setOrden(created.data.items || [])
+      setOrderEvents([])
+      setShowDeliveryModal(false)
+      setPosStep(3)
+      setOrdenMessage("Listo para agregar productos.")
+      window.setTimeout(() => productSearchRef.current?.focus(), 80)
+    } catch (error) {
+      setOrdenError(`No se pudo crear el pedido delivery: ${error.message}`)
+    } finally {
+      setCreatingDeliveryOrder(false)
+    }
+  }
+
+  async function ensureCustomerForSalesChannel() {
+    if (salesChannel === "dine_in") return { customer: null, address: null }
+    const errores = validarDelivery()
+    setDeliveryErrors(errores)
+    if (Object.keys(errores).length > 0) {
+      throw new Error(`Faltan campos requeridos: ${Object.values(errores).join(", ")}.`)
+    }
+    if (selectedCustomer?.id && (salesChannel !== "delivery" || selectedCustomerAddress?.id)) {
+      return { customer: selectedCustomer, address: selectedCustomerAddress }
+    }
+    const hasCustomerData = [
+      deliveryForm.cliente,
+      deliveryForm.telefono,
+      deliveryForm.whatsapp,
+      deliveryForm.correo,
+      deliveryForm.direccion1
+    ].some((value) => String(value || "").trim())
+    if (salesChannel !== "delivery" && !hasCustomerData) {
+      return { customer: null, address: null }
+    }
+    const saved = await guardarClientePOS()
+    if (!saved?.customer?.id) throw new Error("Guarda o selecciona el cliente antes de continuar.")
+    return saved
+  }
+
+  function buildDeliveryInfoText(form = deliveryForm) {
+    const lines = [
+      `Canal: ${form.tipoOrden || "Domicilio"}`,
+      form.cliente && `Nombre: ${form.cliente}`,
+      form.correo && `Correo: ${form.correo}`,
+      form.telefono && `Telefono: ${form.telefono}`,
+      form.whatsapp && `WhatsApp: ${form.whatsapp}`,
+      form.nit && `NIT: ${form.nit}`,
+      form.tipoOrden === "Domicilio" && form.direccion1 && `Direccion: ${form.direccion1}`,
+      form.tipoOrden === "Domicilio" && form.direccion2 && `Direccion 2: ${form.direccion2}`,
+      form.tipoOrden === "Domicilio" && form.referencias && `Referencia: ${form.referencias}`,
+      form.tipoOrden === "Domicilio" && form.mapsLink && `Maps: ${form.mapsLink}`,
+      form.tipoOrden === "Domicilio" && form.repartidor && `Repartidor: ${form.repartidor}`,
+      form.notasEntrega && `Notas: ${form.notasEntrega}`,
+      `Total: Q${totalOrden.toFixed(2)}`,
+      form.formaPago && `Forma de pago: ${form.formaPago}`,
+      (form.fechaProgramada || form.horaProgramada) && `Programada: ${form.fechaProgramada || "sin fecha"} ${form.horaProgramada || "sin hora"}`
+    ]
+    return lines.filter(Boolean).join("\n")
+  }
+
+  async function copyDeliveryText(kind = "all") {
+    const text = kind === "address"
+      ? [deliveryForm.direccion1, deliveryForm.direccion2, deliveryForm.referencias, deliveryForm.mapsLink].filter(Boolean).join("\n")
+      : buildDeliveryInfoText()
+    if (!text.trim()) {
+      setOrdenError("No hay informacion de delivery para copiar.")
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(text)
+      setOrdenError("")
+      setOrdenMessage(kind === "address" ? "Direccion copiada." : "Datos de delivery copiados.")
+    } catch (error) {
+      setOrdenError(`No se pudo copiar: ${error.message}`)
+    }
+  }
+
+  async function pasteDeliveryFromClipboard() {
+    try {
+      const text = await navigator.clipboard.readText()
+      if (!text.trim()) return
+      const mapsMatch = text.match(/https?:\/\/\S*(?:maps|goo\.gl|waze)\S*/i)
+      const phoneMatch = text.match(/(?:\+?502\s*)?\d[\d\s-]{6,}\d/)
+      const cleanParts = text
+        .replace(mapsMatch?.[0] || "", "")
+        .split(/[,;\n]+/)
+        .map((part) => part.trim())
+        .filter(Boolean)
+      const inferredName = cleanParts.find((part) => !/\d/.test(part) && part.length <= 60)
+      const inferredAddress = cleanParts.find((part) => part !== inferredName && /zona|calle|avenida|av\.|casa|edificio|condominio|colonia|km|lote|nivel|apart/i.test(part))
+      const notes = cleanParts.filter((part) => part !== inferredName && part !== inferredAddress && part !== phoneMatch?.[0]).join(", ")
+      setDeliveryForm((current) => ({
+        ...current,
+        cliente: current.cliente || inferredName || "",
+        telefono: current.telefono || phoneMatch?.[0]?.replace(/\s+/g, " ").trim() || "",
+        direccion1: current.direccion1 || inferredAddress || "",
+        mapsLink: current.mapsLink || mapsMatch?.[0] || "",
+        referencias: [current.referencias, notes || text.trim()].filter(Boolean).join("\n")
+      }))
+      setOrdenError("")
+      setOrdenMessage("Texto pegado y separado automaticamente. Revisa los campos antes de enviar.")
+    } catch (error) {
+      setOrdenError(`No se pudo leer el portapapeles: ${error.message}`)
+    }
+  }
+
   function validarDelivery() {
-    if (!esMesaDelivery) return {}
+    if (salesChannel !== "delivery") return {}
     const faltantes = {}
     if (!deliveryForm.cliente.trim()) faltantes.cliente = "Nombre del cliente"
-    if (!deliveryForm.telefono.trim()) faltantes.telefono = "Teléfono / WhatsApp"
+    if (!deliveryForm.telefono.trim() && !deliveryForm.whatsapp.trim()) faltantes.telefono = "Telefono o WhatsApp"
     if (!deliveryForm.formaPago) faltantes.formaPago = "Forma de pago"
     if (deliveryForm.tipoOrden === "Domicilio" && !deliveryForm.direccion1.trim()) {
-      faltantes.direccion1 = "Dirección de entrega 1"
+      faltantes.direccion1 = "Direccion de entrega"
     }
     return faltantes
   }
@@ -1383,18 +1729,35 @@ function POS() {
     let itemSaved = false
     try {
       let orderId = activeOrderId
+      const customerData = await ensureCustomerForSalesChannel()
       if (!orderId) {
         const created = await createOrGetOpenOrder({
           tableId: ordenMesa.mesaId,
-          tableName: `Mesa ${ordenMesa.mesaNumero}`,
+          tableName: ordenMesa.isSalesChannel ? ordenMesa.mesaNumero : `Mesa ${ordenMesa.mesaNumero}`,
           areaId: ordenMesa.areaId,
-          areaName: ordenMesa.areaNombre
+          areaName: ordenMesa.areaNombre,
+          salesChannel,
+          customerId: customerData.customer?.id,
+          customerAddressId: customerData.address?.id,
+          deliveryNotes: salesChannel === "delivery" ? buildDeliveryInfoText() : null,
+          externalSource: salesChannel === "online" ? "wix" : null
         }, user)
         if (created.error) throw new Error(created.message || created.error.message)
         if (!created.data?.id) throw new Error("Supabase no devolvió la orden creada. Verifica la migración 010_pos_orders.sql.")
         orderId = created.data.id
         setCurrentOrder(created.data)
         setActiveOrderId(orderId)
+      } else if (salesChannel !== "dine_in") {
+        const channelResult = await updateOrderSalesChannel(orderId, {
+          salesChannel,
+          customerId: customerData.customer?.id,
+          customerAddressId: customerData.address?.id,
+          deliveryNotes: salesChannel === "delivery" ? buildDeliveryInfoText() : null,
+          externalSource: salesChannel === "online" ? "wix" : null,
+          notes: buildDeliveryInfoText()
+        })
+        if (channelResult.error) throw new Error(channelResult.message || channelResult.error.message)
+        setCurrentOrder(channelResult.data)
       }
       const existe = orden.find((ordenItem) => ordenItem.id === productToAdd.id && (ordenItem.modificaciones || "") === notas && ordenItem.status === "draft")
       if (existe) {
@@ -1493,6 +1856,19 @@ function POS() {
       }
 
       if (!activeOrderId) throw new Error("No existe una orden abierta en Supabase para esta mesa.")
+      if (salesChannel !== "dine_in") {
+        const customerData = await ensureCustomerForSalesChannel()
+        const notesResult = await updateOrderSalesChannel(activeOrderId, {
+          salesChannel,
+          customerId: customerData.customer?.id,
+          customerAddressId: customerData.address?.id,
+          deliveryNotes: salesChannel === "delivery" ? buildDeliveryInfoText() : null,
+          externalSource: salesChannel === "online" ? "wix" : null,
+          notes: buildDeliveryInfoText()
+        })
+        if (notesResult.error) throw new Error(notesResult.message || notesResult.error.message)
+        setCurrentOrder(notesResult.data)
+      }
       console.log("STEP 3 draftItems", draftItems)
       console.log("STEP 4 calling transactional RPC", activeOrderId)
       const result = await sendOrderToProduction(activeOrderId)
@@ -1500,12 +1876,21 @@ function POS() {
       console.log("STEP 5 RPC completed", result.data)
       setProductionErrors([])
       setDeliveryErrors({})
-      if (esMesaDelivery) setDeliveryForm(emptyDeliveryForm)
 
       // Show success toast
       showToast("Orden enviada correctamente a cocina.", "success", 1500)
 
-      setOrdenMessage(`Orden enviada a producción. Inventario descontado. Tickets creados: ${(result.data.ticket_ids || []).length}.`)
+      let finalMessage = `Orden enviada a producción. Inventario descontado. Tickets creados: ${(result.data.ticket_ids || []).length}.`
+      if (salesChannel === "delivery") {
+        const refreshedDelivery = await getOrderWithItems(activeOrderId)
+        if (refreshedDelivery.error) throw new Error(refreshedDelivery.message || refreshedDelivery.error.message)
+        await enviarCuentaACajaInterno(refreshedDelivery.data, { skipDraftCheck: true })
+        finalMessage = `${finalMessage} Solicitud de cobro delivery enviada automáticamente a caja.`
+        showToast("Delivery enviado a cocina y caja.", "success", 1800)
+      }
+
+      if (esCanalCliente) setDeliveryForm(emptyDeliveryForm)
+      setOrdenMessage(finalMessage)
       setOrdenError("")
       window.dispatchEvent(new Event("production-tickets-updated"))
       window.dispatchEvent(new Event("inventory-updated"))
@@ -1528,6 +1913,10 @@ function POS() {
         setSeatNames(["Persona 1"])
         setSelectedAssignment("Mesa completa")
         setDeliveryForm(emptyDeliveryForm)
+        setSelectedCustomer(null)
+        setSelectedCustomerAddress(null)
+        setCustomerResults([])
+        setCustomerMessage("")
       }, 1500)
     } catch (error) {
       console.error("SEND ORDER ERROR", error)
@@ -1727,14 +2116,33 @@ function POS() {
 
   function buildCashierOrder(order = currentOrder) {
     if (!order) return null
+    const isDeliveryOrder = (order.sales_channel || salesChannel) === "delivery"
+    const deliveryContact = isDeliveryOrder
+      ? {
+          customerName: deliveryForm.cliente || selectedCustomer?.full_name || order.customer?.full_name || "",
+          email: deliveryForm.correo || selectedCustomer?.email || order.customer?.email || "",
+          phone: deliveryForm.telefono || selectedCustomer?.phone || order.customer?.phone || "",
+          whatsapp: deliveryForm.whatsapp || selectedCustomer?.whatsapp || "",
+          nit: deliveryForm.nit || selectedCustomer?.tax_id || order.customer?.notes || "",
+          address: deliveryForm.direccion1 || selectedCustomerAddress?.address || order.customer_address?.address || "",
+          address2: deliveryForm.direccion2 || selectedCustomerAddress?.notes || order.customer_address?.notes || "",
+          reference: deliveryForm.referencias || selectedCustomerAddress?.reference || order.customer_address?.reference || "",
+          mapsLink: deliveryForm.mapsLink || selectedCustomerAddress?.google_maps_url || order.customer_address?.google_maps_url || "",
+          paymentMethod: deliveryForm.formaPago || "",
+          deliveryNotes: deliveryForm.notasEntrega || order.delivery_notes || "",
+          deliveryStatus: order.delivery_status || "pending"
+        }
+      : null
     return {
       ...order,
       items: order.items?.length ? order.items : orden,
-      tableName: order.tableName || `Mesa ${ordenMesa?.mesaNumero || order.mesa || ""}`,
+      tableName: isDeliveryOrder ? `Delivery - ${deliveryContact.customerName || "Cliente"}` : order.tableName || `Mesa ${ordenMesa?.mesaNumero || order.mesa || ""}`,
       waiterName: order.usuarioNombre || user?.name || user?.username || "POS",
       peopleCount: personasOrden,
       mesaId: order.mesaId || ordenMesa?.mesaId,
-      areaId: order.areaId || ordenMesa?.areaId
+      areaId: order.areaId || ordenMesa?.areaId,
+      salesChannel: order.sales_channel || salesChannel,
+      delivery: deliveryContact
     }
   }
 
@@ -1745,9 +2153,31 @@ function POS() {
     return bridge.preBill
   }
 
+  async function enviarCuentaACajaInterno(order, options = {}) {
+    const { skipDraftCheck = false } = options
+    if (!skipDraftCheck && draftItems.length) throw new Error("Envía o quita los productos nuevos antes de enviar a caja.")
+    if (!deliveryDataReady) throw new Error("Completa los datos obligatorios de delivery antes de enviar a caja.")
+    if (order.status === "open") {
+      const requested = await requestOrderBill(order.id)
+      if (requested.error) throw new Error(requested.message || requested.error.message)
+    }
+    const refreshed = await getOrderWithItems(order.id)
+    if (refreshed.error) throw new Error(refreshed.message || refreshed.error.message)
+    const preBill = createPreBillFromPOSOrder(buildCashierOrder(refreshed.data), user, { peopleCount: personasOrden })
+    if (!preBill.ok) throw new Error(preBill.message)
+    if (refreshed.data.status !== "sent_to_cashier") {
+      const result = await sendOrderToCashier(order.id)
+      if (result.error) throw new Error(result.message || result.error.message)
+    }
+    const sent = sendPreBillToCashier(preBill.preBill.id, user)
+    if (!sent.ok) throw new Error(sent.message || "No se pudo notificar a caja.")
+    return sent.preBill
+  }
+
   async function solicitarCuenta(order) {
     try {
       if (draftItems.length) throw new Error("Envía o quita los productos nuevos antes de solicitar cobro.")
+      if (!deliveryDataReady) throw new Error("Completa los datos obligatorios de delivery antes de solicitar cobro.")
       const result = order.status === "open" ? await requestOrderBill(order.id) : { error: null }
       if (result.error) throw new Error(result.message || result.error.message)
       const refreshed = await getOrderWithItems(order.id)
@@ -1775,7 +2205,7 @@ function POS() {
       const preBill = createPreBillFromPOSOrder(buildCashierOrder(refreshed.data), user, { peopleCount: personasOrden })
       if (!preBill.ok) throw new Error(preBill.message)
       markPreBillPrinted(preBill.preBill.id, user)
-      printPreCheck({ ...buildCashierOrder(refreshed.data), peopleCount: personasOrden })
+      await printPreCheck({ ...buildCashierOrder(refreshed.data), peopleCount: personasOrden })
       await cargarMesaDesdeSupabase(ordenMesa, order.id)
       setOrdenMessage("Precuenta impresa. La mesa queda esperando pago.")
       setOrdenError("")
@@ -1787,21 +2217,7 @@ function POS() {
 
   async function enviarCuentaACaja(order) {
     try {
-      if (draftItems.length) throw new Error("Envía o quita los productos nuevos antes de enviar a caja.")
-      if (order.status === "open") {
-        const requested = await requestOrderBill(order.id)
-        if (requested.error) throw new Error(requested.message || requested.error.message)
-      }
-      const refreshed = await getOrderWithItems(order.id)
-      if (refreshed.error) throw new Error(refreshed.message || refreshed.error.message)
-      const preBill = createPreBillFromPOSOrder(buildCashierOrder(refreshed.data), user, { peopleCount: personasOrden })
-      if (!preBill.ok) throw new Error(preBill.message)
-      if (refreshed.data.status !== "sent_to_cashier") {
-        const result = await sendOrderToCashier(order.id)
-        if (result.error) throw new Error(result.message || result.error.message)
-      }
-      const sent = sendPreBillToCashier(preBill.preBill.id, user)
-      if (!sent.ok) throw new Error(sent.message || "No se pudo notificar a caja.")
+      await enviarCuentaACajaInterno(order)
       await cargarMesaDesdeSupabase(ordenMesa, order.id)
       setOrdenMessage("Solicitud enviada a caja. Estado: cobro solicitado.")
       setOrdenError("")
@@ -2253,8 +2669,8 @@ function POS() {
             <section style={floorPlanSectionStyle}>
               <div style={layoutToolbarStyle}>
                 <div style={buttonRowStyle}>
-                  <button type="button" onClick={agregarMesa} style={primaryButtonStyle} disabled={!areaActiva || !editandoCroquis}>+ Mesa</button>
-                  <button type="button" onClick={() => { setMostrarAreaForm((actual) => !actual); setEditandoAreaId(null); setAreaForm(emptyAreaForm); setAreaErrors({}) }} style={secondaryButtonStyle}>+ Area / nivel</button>
+                  <button type="button" onClick={() => { setMostrarAreaForm((actual) => !actual); setEditandoAreaId(null); setAreaForm(emptyAreaForm); setAreaErrors({}); setLayoutError("") }} style={primaryButtonStyle}>Crear Área</button>
+                  <button type="button" onClick={agregarMesa} style={areaActiva && editandoCroquis ? secondaryButtonStyle : disabledButtonStyle} disabled={!areaActiva || !editandoCroquis}>Agregar Mesa</button>
                   <button type="button" onClick={() => setEditandoCroquis((actual) => !actual)} style={editandoCroquis ? activeTabStyle : secondaryButtonStyle}>
                     {editandoCroquis ? "Modo edicion" : "Modo operacion"}
                   </button>
@@ -2268,10 +2684,11 @@ function POS() {
                   <span style={zoomValueStyle}>{Math.round(layoutSettings.zoom * 100)}%</span>
                   <button type="button" title="Acercar" onClick={() => setLayoutSettings((actual) => ({ ...actual, zoom: Math.min(1.4, Number((actual.zoom + 0.1).toFixed(1))) }))} style={smallButtonStyle}>+</button>
                   <button type="button" onClick={() => setLayoutSettings((actual) => ({ ...actual, zoom: 1 }))} style={secondaryButtonStyle}>Reset</button>
-                  <button type="button" onClick={guardarLayoutManual} style={secondaryButtonStyle}>Guardar layout</button>
+                  <button type="button" onClick={guardarLayoutManual} style={secondaryButtonStyle}>Guardar Plano</button>
                 </div>
               </div>
               {layoutMessage && <div style={successInlineStyle}>{layoutMessage}</div>}
+              {layoutError && <div style={errorBoxStyle}>{layoutError}</div>}
               {mostrarAreaForm && (
                 <form onSubmit={guardarArea} style={areaFormStyle}>
                   {Object.keys(areaErrors).length > 0 && <div style={errorBoxStyle}>Faltan campos requeridos: {Object.values(areaErrors).join(", ")}.</div>}
@@ -2280,20 +2697,40 @@ function POS() {
                   <label style={fieldStackStyle}><span style={fieldTitleStyle}>Ancho del plano</span><input type="number" min="400" value={areaForm.width} onChange={(e) => setAreaForm((actual) => ({ ...actual, width: e.target.value }))} style={areaErrors.width ? inputErrorStyle : inputStyle} /></label>
                   <label style={fieldStackStyle}><span style={fieldTitleStyle}>Alto del plano</span><input type="number" min="300" value={areaForm.height} onChange={(e) => setAreaForm((actual) => ({ ...actual, height: e.target.value }))} style={areaErrors.height ? inputErrorStyle : inputStyle} /></label>
                   {editandoAreaId && <label style={snapToggleStyle}><input type="checkbox" checked={areaForm.active} onChange={(e) => setAreaForm((actual) => ({ ...actual, active: e.target.checked }))} />Area activa</label>}
-                  <button type="submit" style={primaryButtonStyle}>{editandoAreaId ? "Guardar área" : "Crear área"}</button>
+                  <button type="submit" style={primaryButtonStyle}>{editandoAreaId ? "Guardar Área" : "Crear Área"}</button>
                 </form>
               )}
 
-              <div style={tabsStyle}>
-                {[...areasRestaurante].sort((a, b) => Number(a.sortOrder) - Number(b.sortOrder)).map((area) => (
-                  <div key={area.id} style={areaTabGroupStyle}>
-                    <button type="button" disabled={area.active === false} onClick={() => { setAreaActivaId(area.id); setMesaSeleccionada(null) }} style={areaActiva?.id === area.id ? activeTabStyle : area.active === false ? disabledButtonStyle : tabStyle}>{area.nombre}</button>
-                    <button type="button" onClick={() => moverArea(area.id, -1)} style={smallButtonStyle} title="Subir">↑</button>
-                    <button type="button" onClick={() => moverArea(area.id, 1)} style={smallButtonStyle} title="Bajar">↓</button>
-                    <button type="button" onClick={() => editarArea(area)} style={smallButtonStyle}>Editar</button>
-                    {area.active !== false && <button type="button" onClick={() => desactivarArea(area.id)} style={dangerMiniButtonStyle}>Desactivar</button>}
+              <div style={croquisGuideStyle}>
+                <span><strong>1.</strong> Crea un area completa.</span>
+                <span><strong>2.</strong> Selecciona el area.</span>
+                <span><strong>3.</strong> Agrega y acomoda sus mesas.</span>
+              </div>
+
+              <div style={areaNavigatorStyle}>
+                <div style={areaTabsOnlyStyle}>
+                  {[...areasRestaurante].sort((a, b) => Number(a.sortOrder) - Number(b.sortOrder)).map((area) => (
+                    <button
+                      key={area.id}
+                      type="button"
+                      disabled={area.active === false}
+                      onClick={() => { setAreaActivaId(area.id); setMesaSeleccionada(null); setLayoutError("") }}
+                      style={areaActiva?.id === area.id ? activeTabStyle : area.active === false ? disabledButtonStyle : tabStyle}
+                    >
+                      {area.nombre} ({area.mesas?.length || 0})
+                    </button>
+                  ))}
+                </div>
+                {areaActiva && (
+                  <div style={selectedAreaActionsStyle}>
+                    <strong>{areaActiva.nombre}</strong>
+                    <span>{areaActiva.mesas?.length || 0} mesa(s)</span>
+                    <button type="button" onClick={() => moverArea(areaActiva.id, -1)} style={smallButtonStyle} title="Mover area a la izquierda">↑</button>
+                    <button type="button" onClick={() => moverArea(areaActiva.id, 1)} style={smallButtonStyle} title="Mover area a la derecha">↓</button>
+                    <button type="button" onClick={() => editarArea(areaActiva)} style={smallButtonStyle}>Editar Área</button>
+                    <button type="button" onClick={() => eliminarArea(areaActiva.id)} style={dangerMiniButtonStyle}>Eliminar Área</button>
                   </div>
-                ))}
+                )}
               </div>
 
               {areaActiva ? (
@@ -2403,6 +2840,7 @@ function POS() {
               <main className="pos-menu-panel" style={menuPanelStyle}>
                 <div className="pos-catalog-search" style={catalogSearchStyle}>
                   <input
+                    ref={productSearchRef}
                     type="search"
                     placeholder="Buscar producto..."
                     value={productSearch}
@@ -2422,18 +2860,30 @@ function POS() {
                 <section className="pos-floor-panel" style={floorPlanSectionStyle}>
                   <div style={headerStyle}>
                     <div>
-                      <h2 style={{ margin: 0 }}>Croquis del restaurante</h2>
-                      <p style={mutedStyle}>Selecciona una mesa para asociarla a la orden actual.</p>
+                      <h2 style={{ margin: 0 }}>Canal de venta</h2>
+                      <p style={mutedStyle}>{salesChannel === "dine_in" ? "Selecciona una mesa para asociarla a la orden actual." : "Este pedido no usa area fisica del croquis."}</p>
                     </div>
                   </div>
 
                   <div style={tabsStyle}>
-                    {activeFloorAreas.map((area) => (
-                      <button key={area.id} type="button" onClick={() => { setAreaActivaId(area.id); setMesaSeleccionada(null) }} style={areaActiva?.id === area.id ? activeTabStyle : tabStyle}>{area.nombre}</button>
+                    {SALES_CHANNELS.map((channel) => (
+                      <button key={channel.id} type="button" onClick={() => seleccionarCanalVenta(channel.id)} style={activeSalesChannel.id === channel.id ? activeTabStyle : tabStyle}>
+                        {channel.label}
+                      </button>
                     ))}
                   </div>
 
-                  {areaActiva ? (
+                  {salesChannel === "dine_in" && (
+                    <div style={tabsStyle}>
+                      {activeFloorAreas.map((area) => (
+                        <button key={area.id} type="button" onClick={() => { setAreaActivaId(area.id); setMesaSeleccionada(null) }} style={areaActiva?.id === area.id ? activeTabStyle : tabStyle}>{area.nombre}</button>
+                      ))}
+                    </div>
+                  )}
+
+                  {salesChannel !== "dine_in" ? (
+                    <div style={emptyPlanStyle}>{activeSalesChannel.label} seleccionado como canal de venta.</div>
+                  ) : areaActiva ? (
                     <div style={floorPlanLayoutStyle}>
                       <div className="pos-floor-canvas" style={{ ...floorPlanStyle, minHeight: `${Math.max(360, areaActiva.height || 520)}px` }}>
                         {areaActiva.mesas.map((mesa, index) => (
@@ -2459,8 +2909,8 @@ function POS() {
                     <>
                       <div className="pos-step-heading">
                         <span>Paso 2</span>
-                        <h2>Configura la mesa</h2>
-                        <p>Indica cuántas personas hay y usa nombres para identificar sus consumos.</p>
+                        <h2>{ordenMesa?.isSalesChannel ? "Configura el cliente" : "Configura la mesa"}</h2>
+                        <p>{ordenMesa?.isSalesChannel ? "Captura los datos necesarios para el canal seleccionado." : "Indica cuántas personas hay y usa nombres para identificar sus consumos."}</p>
                       </div>
                       <div className="pos-people-count">
                         <label htmlFor="pos-people-count">¿Cuántas personas hay en esta mesa?</label>
@@ -2516,14 +2966,14 @@ function POS() {
                 <h2 className="pos-order-title">Orden actual</h2>
                 <div className="pos-table-summary" style={selectedTableStyle}>
                   <div style={historyHeaderStyle}>
-                    <strong>{ordenMesa ? `Mesa ${ordenMesa.mesaNumero}` : "Selecciona una mesa"}</strong>
+                    <strong>{ordenMesa ? (ordenMesa.isSalesChannel ? ordenMesa.mesaNumero : `Mesa ${ordenMesa.mesaNumero}`) : "Selecciona una mesa"}</strong>
                     {ordenMesa && <span style={{ ...tableStateBadgeStyle, ...tableStatusStyles[estadoMesaPorOrden(currentOrder)] }}>{etiquetaEstadoMesa(estadoMesaPorOrden(currentOrder))}</span>}
                   </div>
                   {ordenMesa && <p style={mutedStyle}>{ordenMesa.areaNombre}</p>}
                   {ordenMesa && (
                     <div style={tableSummaryGridStyle}>
                       <label style={summaryMetricStyle}>
-                        <small>Personas / capacidad {selectedLayoutTable?.capacity || selectedLayoutTable?.capacidad || "-"}</small>
+                        <small>{ordenMesa.isSalesChannel ? "Clientes" : `Personas / capacidad ${selectedLayoutTable?.capacity || selectedLayoutTable?.capacidad || "-"}`}</small>
                         <input type="number" min="1" max="30" value={personasOrden} onChange={(e) => actualizarCantidadPersonas(e.target.value)} style={compactInputStyle} />
                       </label>
                       <div style={summaryMetricStyle}><small>Mesero</small><strong>{currentOrder?.usuarioNombre || user?.name || posSession?.name || "Sin asignar"}</strong></div>
@@ -2535,20 +2985,18 @@ function POS() {
                   {ordenMesa && <div className="pos-next-action"><small>Siguiente paso</small><strong>{nextServiceAction}</strong></div>}
                   {ordenMesa && <button type="button" onClick={refreshSelectedTableLive} style={secondaryButtonStyle}>Actualizar</button>}
                 </div>
-                {ordenMesa && (
+                {ordenMesa && orden.length === 0 && (
+                  <div className="pos-friendly-empty">Agrega productos para iniciar la orden.</div>
+                )}
+                {ordenMesa && orden.length > 0 && (
                   <div className="pos-order-primary-actions">
-                    <button type="button" className="pos-order-send" disabled={!draftItems.length || sendingOrder} onClick={handleSendOrderToProduction}>
+                    {draftItems.length > 0 && <button type="button" className="pos-order-send" disabled={sendingOrder} onClick={handleSendOrderToProduction}>
                       {sendingOrder ? "Enviando..." : "Enviar cocina"}
-                    </button>
-                    <button type="button" disabled={!currentOrder || draftItems.length > 0 || !sentItems.length} onClick={() => solicitarCuenta(currentOrder)}>
-                      Solicitar cobro
-                    </button>
-                    <button type="button" disabled={!currentOrder || draftItems.length > 0 || !sentItems.length} onClick={() => imprimirPrecuenta(currentOrder)}>
-                      Imprimir precuenta
-                    </button>
-                    <button type="button" disabled={!currentOrder || draftItems.length > 0 || !sentItems.length} onClick={() => enviarCuentaACaja(currentOrder)}>
-                      Enviar a caja
-                    </button>
+                    </button>}
+                    {canRequestCashier && <button type="button" onClick={() => solicitarCuenta(currentOrder)}>Solicitar cobro</button>}
+                    {canRequestCashier && <button type="button" onClick={() => imprimirPrecuenta(currentOrder)}>Imprimir precuenta</button>}
+                    {canRequestCashier && <button type="button" onClick={() => enviarCuentaACaja(currentOrder)}>Enviar a caja</button>}
+                    {!draftItems.length && !canRequestCashier && <div className="pos-friendly-empty">Completa los datos requeridos antes de enviar a caja.</div>}
                   </div>
                 )}
                 {ordenMesa && (
@@ -2719,40 +3167,102 @@ function POS() {
                     })}
                   </div>
                 )}
-                {esMesaDelivery && (
+                {salesChannel === "delivery" && !showDeliveryModal && (
                   <div style={deliveryPanelStyle}>
-                    <strong>Datos de cliente</strong>
+                    <div style={deliveryHeaderStyle}>
+                      <div>
+                        <strong>Cliente / entrega</strong>
+                        <p style={mutedStyle}>Estado Delivery: {currentOrder?.delivery_status || "pending"}</p>
+                      </div>
+                      <button type="button" onClick={() => setShowDeliveryModal(true)} style={smallButtonStyle}>Editar</button>
+                    </div>
+                    <div style={deliverySummaryCardsStyle}>
+                      <div><small>Cliente</small><strong>{deliveryForm.cliente || selectedCustomer?.full_name || "-"}</strong></div>
+                      <div><small>Telefono</small><strong>{deliveryForm.telefono || deliveryForm.whatsapp || selectedCustomer?.phone || "-"}</strong></div>
+                      <div><small>Direccion</small><strong>{deliveryForm.direccion1 || selectedCustomerAddress?.address || "-"}</strong></div>
+                      <div><small>Pago</small><strong>{deliveryForm.formaPago || "-"}</strong></div>
+                    </div>
+                    {deliveryForm.referencias && <p style={mutedStyle}>Referencia: {deliveryForm.referencias}</p>}
+                    {deliveryForm.notasEntrega && <p style={mutedStyle}>Notas: {deliveryForm.notasEntrega}</p>}
+                  </div>
+                )}
+                {esCanalCliente && salesChannel !== "delivery" && (
+                  <div style={deliveryPanelStyle}>
+                    <div style={deliveryHeaderStyle}>
+                      <div>
+                        <strong>{deliveryForm.tipoOrden === "Domicilio" ? "Datos de delivery" : "Datos para llevar"}</strong>
+                        <p style={mutedStyle}>{deliveryForm.tipoOrden === "Domicilio" ? "Contacto, direccion y ubicacion del cliente." : "Contacto del cliente para retiro."}</p>
+                      </div>
+                      <div style={buttonRowStyle}>
+                        <button type="button" onClick={() => copyDeliveryText("all")} style={smallButtonStyle}>Copiar datos</button>
+                        {deliveryForm.tipoOrden === "Domicilio" && <button type="button" onClick={() => copyDeliveryText("address")} style={smallButtonStyle}>Copiar direccion</button>}
+                        <button type="button" onClick={pasteDeliveryFromClipboard} style={smallButtonStyle}>Pegar rapido</button>
+                        {deliveryForm.mapsLink && <button type="button" onClick={() => window.open(deliveryForm.mapsLink, "_blank", "noopener,noreferrer")} style={smallButtonStyle}>Abrir Maps</button>}
+                        <button type="button" disabled={savingCustomer} onClick={guardarClientePOS} style={savingCustomer ? disabledButtonStyle : smallButtonStyle}>{savingCustomer ? "Guardando..." : "Guardar cliente"}</button>
+                      </div>
+                    </div>
                     {Object.keys(deliveryErrors).length > 0 && (
                       <div style={errorBoxStyle}>Faltan campos requeridos: {Object.values(deliveryErrors).join(", ")}.</div>
                     )}
-                    <select value={deliveryForm.tipoOrden} onChange={(e) => actualizarDelivery("tipoOrden", e.target.value)} style={inputStyle}>
-                      <option value="Domicilio">Domicilio</option>
-                      <option value="Para llevar">Para llevar</option>
-                    </select>
-                    <input placeholder="Nombre del cliente" value={deliveryForm.cliente} onChange={(e) => actualizarDelivery("cliente", e.target.value)} style={deliveryErrors.cliente ? inputErrorStyle : inputStyle} />
-                    <input placeholder="NIT" value={deliveryForm.nit} onChange={(e) => actualizarDelivery("nit", e.target.value)} style={inputStyle} />
-                    <input placeholder="Teléfono / WhatsApp" value={deliveryForm.telefono} onChange={(e) => actualizarDelivery("telefono", e.target.value)} style={deliveryErrors.telefono ? inputErrorStyle : inputStyle} />
-                    {deliveryForm.tipoOrden === "Domicilio" && (
-                      <>
-                        <input placeholder="Dirección de entrega 1" value={deliveryForm.direccion1} onChange={(e) => actualizarDelivery("direccion1", e.target.value)} style={deliveryErrors.direccion1 ? inputErrorStyle : inputStyle} />
-                        <input placeholder="Dirección de entrega 2" value={deliveryForm.direccion2} onChange={(e) => actualizarDelivery("direccion2", e.target.value)} style={inputStyle} />
-                        <textarea placeholder="Referencias de dirección" value={deliveryForm.referencias} onChange={(e) => actualizarDelivery("referencias", e.target.value)} style={textAreaStyle} />
-                      </>
+                    <div style={deliverySearchStyle}>
+                      <input placeholder="Buscar cliente por nombre o telefono" value={customerSearch} onChange={(e) => setCustomerSearch(e.target.value)} style={inputStyle} />
+                      <button type="button" onClick={() => buscarClientePOS()} style={secondaryButtonStyle}>Buscar cliente</button>
+                    </div>
+                    {customerMessage && <div style={successInlineStyle}>{customerMessage}</div>}
+                    {customerResults.length > 0 && (
+                      <div style={customerResultsStyle}>
+                        {customerResults.map((customer) => (
+                          <article key={customer.id} style={customerResultStyle}>
+                            <button type="button" onClick={() => seleccionarClientePOS(customer)} style={secondaryButtonStyle}>
+                              {customer.full_name} {customer.phone ? `- ${customer.phone}` : ""}
+                            </button>
+                            {(customer.addresses || []).map((address) => (
+                              <button key={address.id} type="button" onClick={() => seleccionarClientePOS(customer, address)} style={smallButtonStyle}>
+                                {address.label || "Direccion"}: {address.address}
+                              </button>
+                            ))}
+                          </article>
+                        ))}
+                      </div>
                     )}
-                    <select value={deliveryForm.formaPago} onChange={(e) => actualizarDelivery("formaPago", e.target.value)} style={deliveryErrors.formaPago ? inputErrorStyle : inputStyle}>
-                      <option value="">Forma de pago</option>
-                      <option value="Efectivo">Efectivo</option>
-                      <option value="POS">POS</option>
-                      <option value="Link">Link</option>
-                      <option value="Transferencia">Transferencia</option>
-                    </select>
-                    <input type="date" value={deliveryForm.fechaProgramada} onChange={(e) => actualizarDelivery("fechaProgramada", e.target.value)} style={inputStyle} />
-                    <input type="time" value={deliveryForm.horaProgramada} onChange={(e) => actualizarDelivery("horaProgramada", e.target.value)} style={inputStyle} />
+                    <div style={deliveryGridStyle}>
+                      <label style={fieldStackStyle}><span style={fieldTitleStyle}>Tipo</span><select value={deliveryForm.tipoOrden} onChange={(e) => actualizarDelivery("tipoOrden", e.target.value)} style={inputStyle}>
+                        <option value="Domicilio">Domicilio</option>
+                        <option value="Para llevar">Para llevar</option>
+                      </select></label>
+                      <label style={fieldStackStyle}><span style={fieldTitleStyle}>Nombre</span><input placeholder="Nombre del cliente" value={deliveryForm.cliente} onChange={(e) => actualizarDelivery("cliente", e.target.value)} style={deliveryErrors.cliente ? inputErrorStyle : inputStyle} /></label>
+                      <label style={fieldStackStyle}><span style={fieldTitleStyle}>Correo</span><input type="email" placeholder="correo@cliente.com" value={deliveryForm.correo} onChange={(e) => actualizarDelivery("correo", e.target.value)} style={inputStyle} /></label>
+                      <label style={fieldStackStyle}><span style={fieldTitleStyle}>Telefono</span><input placeholder="Telefono" value={deliveryForm.telefono} onChange={(e) => actualizarDelivery("telefono", e.target.value)} style={deliveryErrors.telefono ? inputErrorStyle : inputStyle} /></label>
+                      <label style={fieldStackStyle}><span style={fieldTitleStyle}>WhatsApp</span><input placeholder="WhatsApp" value={deliveryForm.whatsapp} onChange={(e) => actualizarDelivery("whatsapp", e.target.value)} style={deliveryErrors.telefono ? inputErrorStyle : inputStyle} /></label>
+                      <label style={fieldStackStyle}><span style={fieldTitleStyle}>NIT</span><input placeholder="NIT / CF" value={deliveryForm.nit} onChange={(e) => actualizarDelivery("nit", e.target.value)} style={inputStyle} /></label>
+                    </div>
+                    {deliveryForm.tipoOrden === "Domicilio" && (
+                      <div style={deliveryGridStyle}>
+                        <label style={{ ...fieldStackStyle, gridColumn: "1 / -1" }}><span style={fieldTitleStyle}>Direccion</span><input placeholder="Direccion de entrega" value={deliveryForm.direccion1} onChange={(e) => actualizarDelivery("direccion1", e.target.value)} style={deliveryErrors.direccion1 ? inputErrorStyle : inputStyle} /></label>
+                        <label style={{ ...fieldStackStyle, gridColumn: "1 / -1" }}><span style={fieldTitleStyle}>Direccion adicional</span><input placeholder="Apartamento, zona, colonia, nivel..." value={deliveryForm.direccion2} onChange={(e) => actualizarDelivery("direccion2", e.target.value)} style={inputStyle} /></label>
+                        <label style={{ ...fieldStackStyle, gridColumn: "1 / -1" }}><span style={fieldTitleStyle}>Referencias</span><textarea placeholder="Color de casa, punto de referencia, instrucciones al repartidor..." value={deliveryForm.referencias} onChange={(e) => actualizarDelivery("referencias", e.target.value)} style={textAreaStyle} /></label>
+                        <label style={{ ...fieldStackStyle, gridColumn: "1 / -1" }}><span style={fieldTitleStyle}>Link Google Maps</span><input placeholder="https://maps.google.com/..." value={deliveryForm.mapsLink} onChange={(e) => actualizarDelivery("mapsLink", e.target.value)} style={inputStyle} /></label>
+                        <label style={fieldStackStyle}><span style={fieldTitleStyle}>Repartidor</span><input placeholder="Opcional" value={deliveryForm.repartidor} onChange={(e) => actualizarDelivery("repartidor", e.target.value)} style={inputStyle} /></label>
+                        <label style={{ ...fieldStackStyle, gridColumn: "1 / -1" }}><span style={fieldTitleStyle}>Notas de entrega</span><textarea placeholder="Indicaciones internas para entrega" value={deliveryForm.notasEntrega} onChange={(e) => actualizarDelivery("notasEntrega", e.target.value)} style={textAreaStyle} /></label>
+                      </div>
+                    )}
+                    <div style={deliveryGridStyle}>
+                      <label style={fieldStackStyle}><span style={fieldTitleStyle}>Forma de pago</span><select value={deliveryForm.formaPago} onChange={(e) => actualizarDelivery("formaPago", e.target.value)} style={deliveryErrors.formaPago ? inputErrorStyle : inputStyle}>
+                        <option value="">Forma de pago</option>
+                        <option value="Efectivo">Efectivo</option>
+                        <option value="POS">POS</option>
+                        <option value="Link">Link</option>
+                        <option value="Transferencia">Transferencia</option>
+                      </select></label>
+                      <label style={fieldStackStyle}><span style={fieldTitleStyle}>Fecha programada</span><input type="date" value={deliveryForm.fechaProgramada} onChange={(e) => actualizarDelivery("fechaProgramada", e.target.value)} style={inputStyle} /></label>
+                      <label style={fieldStackStyle}><span style={fieldTitleStyle}>Hora programada</span><input type="time" value={deliveryForm.horaProgramada} onChange={(e) => actualizarDelivery("horaProgramada", e.target.value)} style={inputStyle} /></label>
+                    </div>
                     <div style={deliverySummaryStyle}>
                       {esOrdenProgramada
                         ? `Orden programada para: ${deliveryForm.fechaProgramada || "sin fecha"} ${deliveryForm.horaProgramada || "sin hora"}`
                         : "Orden inmediata"}
                     </div>
+                    {buildDeliveryInfoText().trim() && <pre style={deliveryPreviewStyle}>{buildDeliveryInfoText()}</pre>}
                   </div>
                 )}
                 {(!currentOrder || orden.length === 0) && <div className="pos-friendly-empty">No hay platillos en esta orden.</div>}
@@ -2831,7 +3341,11 @@ function POS() {
                   </div>
                   <div style={buttonRowStyle}>
                     {draftItems.length > 0 && <button className="pos-order-cancel" type="button" disabled={sendingOrder} onClick={handleClearDraftItems} style={sendingOrder ? disabledButtonStyle : secondaryButtonStyle}>Cancelar orden</button>}
-                    <button className="pos-order-send" type="button" disabled={!draftItems.length || sendingOrder} onClick={handleSendOrderToProduction} style={!draftItems.length || sendingOrder ? disabledButtonStyle : primaryButtonStyle}>{sendingOrder ? "Enviando..." : "Enviar cocina"}</button>
+                    {draftItems.length > 0 ? (
+                      <button className="pos-order-send" type="button" disabled={sendingOrder} onClick={handleSendOrderToProduction} style={sendingOrder ? disabledButtonStyle : primaryButtonStyle}>{sendingOrder ? "Enviando..." : "Enviar cocina"}</button>
+                    ) : (
+                      <div className="pos-friendly-empty">Agrega productos para iniciar la orden.</div>
+                    )}
                   </div>
                   {posStep === 4 && <button className="pos-next-step-button" type="button" disabled={!sentItems.length} onClick={() => setPosStep(5)}>Continuar a cobro</button>}
                   {posStep === 5 && (
@@ -2839,7 +3353,7 @@ function POS() {
                       <strong>Forma de cobro</strong>
                       <span>Prepara la solicitud para Caja. La mesa queda pendiente de cobro.</span>
                       <div>
-                        <button type="button" onClick={() => enviarCuentaACaja(currentOrder)}>Cobrar mesa completa</button>
+                        {canRequestCashier && <button type="button" onClick={() => enviarCuentaACaja(currentOrder)}>Cobrar mesa completa</button>}
                         <button type="button" onClick={prepararCobroPorPersona}>Cobrar por persona</button>
                         <button type="button" onClick={dividirCuentaIgual}>Dividir partes iguales</button>
                         <button type="button" onClick={() => imprimirPrecuenta(currentOrder)}>Imprimir precuenta</button>
@@ -2848,9 +3362,9 @@ function POS() {
                   )}
                   {!draftItems.length && currentOrder?.status === "open" && sentItems.length > 0 && (
                     <div style={quickActionsStyle}>
-                      <button className="pos-order-charge" type="button" onClick={() => solicitarCuenta(currentOrder)} style={secondaryButtonStyle}>Solicitar cobro</button>
+                      {canRequestCashier && <button className="pos-order-charge" type="button" onClick={() => solicitarCuenta(currentOrder)} style={secondaryButtonStyle}>Solicitar cobro</button>}
                       <button type="button" onClick={() => imprimirPrecuenta(currentOrder)} style={secondaryButtonStyle}>Imprimir precuenta</button>
-                      <button type="button" onClick={() => enviarCuentaACaja(currentOrder)} style={primaryButtonStyle}>Enviar a caja</button>
+                      {canRequestCashier && <button type="button" onClick={() => enviarCuentaACaja(currentOrder)} style={primaryButtonStyle}>Enviar a caja</button>}
                     </div>
                   )}
                   {currentOrder?.status === "awaiting_bill" && (
@@ -2934,6 +3448,75 @@ function POS() {
                   <button type="button" onClick={() => { setItemPendiente(null); setModificacionesPendientes("") }} style={dangerButtonStyle}>Cancelar</button>
                 </div>
               </div>
+            </div>
+          )}
+          {showDeliveryModal && (
+            <div style={modalOverlayStyle}>
+              <form
+                style={deliveryWizardModalStyle}
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  crearPedidoDeliveryDesdeModal()
+                }}
+              >
+                <div style={historyHeaderStyle}>
+                  <div>
+                    <small style={mutedStyle}>Paso 2 de 5 · Cliente</small>
+                    <h2 style={{ margin: 0 }}>Crear pedido Delivery</h2>
+                  </div>
+                  <button type="button" onClick={() => setShowDeliveryModal(false)} style={secondaryButtonStyle}>Cerrar</button>
+                </div>
+                <div style={deliveryWizardStepsStyle}>
+                  {["Canal", "Cliente", "Productos", "Cobro", "Confirmacion"].map((step, index) => (
+                    <span key={step} style={index === 1 ? activeWizardStepStyle : wizardStepStyle}>{index + 1}. {step}</span>
+                  ))}
+                </div>
+                {Object.keys(deliveryErrors).length > 0 && (
+                  <div style={errorBoxStyle}>Faltan campos requeridos: {Object.values(deliveryErrors).join(", ")}.</div>
+                )}
+                {ordenError && <div style={errorBoxStyle}>{ordenError}</div>}
+                <div style={deliverySearchStyle}>
+                  <input placeholder="Buscar cliente por nombre o telefono" value={customerSearch} onChange={(e) => setCustomerSearch(e.target.value)} style={inputStyle} />
+                  <button type="button" onClick={() => buscarClientePOS()} style={secondaryButtonStyle}>Buscar</button>
+                </div>
+                {customerResults.length > 0 && (
+                  <div style={customerResultsStyle}>
+                    {customerResults.map((customer) => (
+                      <article key={customer.id} style={customerResultStyle}>
+                        <button type="button" onClick={() => seleccionarClientePOS(customer)} style={secondaryButtonStyle}>
+                          {customer.full_name} {customer.phone ? `- ${customer.phone}` : ""}
+                        </button>
+                        {(customer.addresses || []).map((address) => (
+                          <button key={address.id} type="button" onClick={() => seleccionarClientePOS(customer, address)} style={smallButtonStyle}>
+                            {address.label || "Direccion"}: {address.address}
+                          </button>
+                        ))}
+                      </article>
+                    ))}
+                  </div>
+                )}
+                <div style={deliveryWizardGridStyle}>
+                  <label style={fieldStackStyle}><span style={fieldTitleStyle}>Nombre</span><input autoFocus placeholder="Nombre del cliente" value={deliveryForm.cliente} onChange={(e) => actualizarDelivery("cliente", e.target.value)} style={deliveryErrors.cliente ? inputErrorStyle : inputStyle} /></label>
+                  <label style={fieldStackStyle}><span style={fieldTitleStyle}>Telefono</span><input placeholder="Telefono o WhatsApp" value={deliveryForm.telefono} onChange={(e) => actualizarDelivery("telefono", e.target.value)} style={deliveryErrors.telefono ? inputErrorStyle : inputStyle} /></label>
+                  <label style={{ ...fieldStackStyle, gridColumn: "1 / -1" }}><span style={fieldTitleStyle}>Direccion</span><input placeholder="Direccion de entrega" value={deliveryForm.direccion1} onChange={(e) => actualizarDelivery("direccion1", e.target.value)} style={deliveryErrors.direccion1 ? inputErrorStyle : inputStyle} /></label>
+                  <label style={{ ...fieldStackStyle, gridColumn: "1 / -1" }}><span style={fieldTitleStyle}>Referencia</span><input placeholder="Color de casa, punto cercano, indicaciones rapidas" value={deliveryForm.referencias} onChange={(e) => actualizarDelivery("referencias", e.target.value)} style={inputStyle} /></label>
+                  <label style={fieldStackStyle}><span style={fieldTitleStyle}>Metodo de pago</span><select value={deliveryForm.formaPago} onChange={(e) => actualizarDelivery("formaPago", e.target.value)} style={deliveryErrors.formaPago ? inputErrorStyle : inputStyle}>
+                    <option value="">Seleccionar</option>
+                    <option value="Efectivo">Efectivo</option>
+                    <option value="POS">POS</option>
+                    <option value="Link">Link</option>
+                    <option value="Transferencia">Transferencia</option>
+                  </select></label>
+                  <label style={{ ...fieldStackStyle, gridColumn: "1 / -1" }}><span style={fieldTitleStyle}>Notas</span><textarea placeholder="Notas de entrega o cocina" value={deliveryForm.notasEntrega} onChange={(e) => actualizarDelivery("notasEntrega", e.target.value)} style={textAreaStyle} /></label>
+                </div>
+                <div style={buttonRowStyle}>
+                  <button type="button" onClick={pasteDeliveryFromClipboard} style={secondaryButtonStyle}>Pegar rapido</button>
+                  <button type="button" onClick={() => copyDeliveryText("all")} style={secondaryButtonStyle}>Copiar datos</button>
+                  <button type="submit" disabled={creatingDeliveryOrder} style={creatingDeliveryOrder ? disabledButtonStyle : primaryButtonStyle}>
+                    {creatingDeliveryOrder ? "Creando..." : "Crear Pedido"}
+                  </button>
+                </div>
+              </form>
             </div>
           )}
         </>
@@ -3043,6 +3626,10 @@ const catalogSearchStyle = { display: "grid", gap: "6px", padding: "12px", borde
 const tabsStyle = { display: "flex", flexWrap: "wrap", gap: "8px" }
 const tabIconStyle = { display: "inline-flex", marginRight: "7px", fontWeight: 900 }
 const areaTabGroupStyle = { display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }
+const croquisGuideStyle = { display: "flex", flexWrap: "wrap", gap: "10px", padding: "10px 12px", borderRadius: "8px", border: "1px solid #1f3b4d", background: "#0b1826", color: "#cbd5e1", fontSize: ".88rem" }
+const areaNavigatorStyle = { display: "grid", gap: "10px", padding: "10px", borderRadius: "8px", border: "1px solid #243244", background: "#0b1220" }
+const areaTabsOnlyStyle = { display: "flex", flexWrap: "wrap", gap: "8px" }
+const selectedAreaActionsStyle = { display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center", paddingTop: "10px", borderTop: "1px solid #1f2937", color: "#cbd5e1" }
 const tabStyle = { ...secondaryButtonStyle }
 const activeTabStyle = { ...primaryButtonStyle }
 const floorPlanSectionStyle = { display: "grid", gap: "12px", padding: "16px", borderRadius: "8px", border: "1px solid #334155", background: "#0f172a" }
@@ -3153,11 +3740,23 @@ const auditBoxStyle = { display: "grid", gap: "3px", padding: "8px", borderRadiu
 const editSentModifierStyle = { display: "grid", gap: "8px", width: "100%", marginTop: "8px" }
 const modalOverlayStyle = { position: "fixed", inset: 0, background: "rgba(2, 6, 23, .72)", display: "grid", placeItems: "center", zIndex: 40, padding: "20px" }
 const modifierModalStyle = { width: "min(560px, 100%)", display: "grid", gap: "14px", padding: "20px", borderRadius: "14px", border: "1px solid #334155", background: "#0f172a", boxShadow: "0 24px 60px rgba(0,0,0,.38)" }
+const deliveryWizardModalStyle = { width: "min(720px, 100%)", maxHeight: "92vh", overflow: "auto", display: "grid", gap: "14px", padding: "20px", borderRadius: "14px", border: "1px solid #0ea5a4", background: "#0f172a", boxShadow: "0 24px 60px rgba(0,0,0,.42)" }
+const deliveryWizardStepsStyle = { display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: "7px" }
+const wizardStepStyle = { padding: "8px", borderRadius: "8px", border: "1px solid #334155", color: "#94a3b8", textAlign: "center", fontSize: ".78rem", fontWeight: 800 }
+const activeWizardStepStyle = { ...wizardStepStyle, borderColor: "#0ea5a4", background: "#042f2e", color: "#99f6e4" }
+const deliveryWizardGridStyle = { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "10px" }
 const modifierDishHeaderStyle = { display: "flex", gap: "12px", alignItems: "center" }
 const modifierDishImageStyle = { width: "96px", height: "76px", objectFit: "cover", borderRadius: "10px", border: "1px solid #334155" }
 const transferPanelStyle = { display: "grid", gap: "8px", padding: "10px", borderRadius: "10px", border: "1px solid #0ea5a4", background: "#082f2e" }
 const deliveryPanelStyle = { display: "grid", gap: "10px", padding: "12px", borderRadius: "10px", border: "1px solid #0ea5a4", background: "#082f2e", marginBottom: "12px" }
+const deliveryHeaderStyle = { display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "flex-start", flexWrap: "wrap" }
+const deliverySearchStyle = { display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: "8px", alignItems: "center" }
+const customerResultsStyle = { display: "grid", gap: "8px", padding: "8px", borderRadius: "8px", border: "1px solid #134e4a", background: "#042f2e" }
+const customerResultStyle = { display: "flex", flexWrap: "wrap", gap: "6px", alignItems: "center" }
+const deliveryGridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "9px" }
+const deliverySummaryCardsStyle = { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "8px" }
 const deliverySummaryStyle = { padding: "10px", borderRadius: "8px", background: "#0f172a", color: "#d1fae5", fontWeight: 700 }
+const deliveryPreviewStyle = { margin: 0, whiteSpace: "pre-wrap", padding: "10px", borderRadius: "8px", border: "1px solid #134e4a", background: "#041f1e", color: "#ccfbf1", fontSize: ".78rem", lineHeight: 1.45 }
 const orderSectionStyle = { display: "grid", gap: "8px", marginBottom: "14px", padding: "10px", borderRadius: "10px", border: "1px solid #253347", background: "#111827" }
 const orderFooterStyle = { position: "sticky", bottom: 0, display: "grid", gap: "10px", marginTop: "14px", padding: "12px 0 4px", background: "#0f172a" }
 const orderItemStyle = { display: "grid", gap: "8px", padding: "10px 0", borderBottom: "1px solid #334155" }

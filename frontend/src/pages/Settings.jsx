@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { Link } from "react-router-dom"
 import { DEFAULT_BRANDING_SETTINGS, getBrandingSettings, saveBrandingSettings } from "../services/appSettingsService"
 import RolesManagement from "./RolesManagement"
 import "./Settings.css"
@@ -27,6 +28,9 @@ function Settings() {
         <button className={`settings-tab ${activeTab === "roles" ? "active" : ""}`} onClick={() => setActiveTab("roles")}>
           Roles de Usuario
         </button>
+        <Link className="settings-tab" to="/settings/tickets">
+          Diseno de Tickets
+        </Link>
       </nav>
 
       <div className="settings-content">

@@ -115,7 +115,9 @@ function Cashier() {
   const session = getOpenCashSession(user)
   const summary = getCashSummary(session)
   const requests = store.preBills.filter((bill) => bill.status === "sent_to_cashier")
-  const selectedBill = store.preBills.find((bill) => String(bill.id) === String(selectedBillId)) || requests[0]
+  const selectedBill = selectedBillId
+    ? store.preBills.find((bill) => String(bill.id) === String(selectedBillId) && bill.status !== "paid")
+    : requests[0]
 
   useEffect(() => {
     function refresh() {
@@ -138,10 +140,20 @@ function Cashier() {
   }
 
   function openCharge(bill) {
-    beginPayment(bill.id, user)
+    const result = beginPayment(bill.id, user)
+    if (!result.ok) {
+      refresh(`Error en Caja > Solicitudes de cobro > Cobrar: ${result.message || "No se pudo iniciar el cobro."}`)
+      return
+    }
     setSelectedBillId(bill.id)
     setTab("charge")
     setStore(loadStore())
+  }
+
+  function completeCharge(message = "Pago completado correctamente.") {
+    setSelectedBillId("")
+    setTab("dashboard")
+    refresh(message)
   }
 
   const cashierAlerts = useOperationalAlerts({
@@ -195,7 +207,7 @@ function Cashier() {
 
       {tab === "dashboard" && <CashierDashboard session={session} summary={summary} requests={requests} payments={visibleStore.payments} onOpenCharge={openCharge} onRefresh={refresh} user={user} highlightedIds={cashierAlerts.highlightedIds} />}
       {tab === "requests" && <PaymentRequests bills={requests} onOpenCharge={openCharge} onRefresh={refresh} user={user} highlightedIds={cashierAlerts.highlightedIds} />}
-      {tab === "charge" && <ChargePanel key={selectedBill?.id || "empty"} bill={selectedBill} splitBills={store.splitBills} session={session} requests={visibleStore.authorizations} user={user} onRefresh={refresh} />}
+      {tab === "charge" && <ChargePanel key={selectedBill?.id || "empty"} bill={selectedBill} splitBills={store.splitBills} session={session} requests={visibleStore.authorizations} user={user} onRefresh={refresh} onPaymentComplete={completeCharge} />}
       {tab === "register" && <CashRegister session={session} summary={summary} user={user} onRefresh={refresh} />}
       {tab === "movements" && <MovementsPanel session={session} movements={visibleStore.movements} authorizations={visibleStore.authorizations} user={user} onRefresh={refresh} />}
       {tab === "closures" && <Closures sessions={visibleStore.sessions} />}
@@ -253,6 +265,8 @@ function PaymentRequests({ bills, onOpenCharge, onRefresh, user, highlightedIds 
           <article id={`cashier-request-${bill.id}`} className={`cashier-request ${bill.problem ? "problem" : ""} ${highlightedIds?.has(String(bill.id)) ? "new-alert" : ""}`} key={bill.id}>
             <header><h3>{bill.tableName}</h3><span>{highlightedIds?.has(String(bill.id)) ? "Nuevo" : bill.status === "sent_to_cashier" ? "En caja" : "Precuenta"}</span></header>
             <p>Mesero: {bill.waiterName}</p>
+            {bill.salesChannel === "delivery" && <DeliveryBillSummary bill={bill} compact />}
+            <small>{billItemSummary(bill)}</small>
             <strong>Q{Number(bill.total).toFixed(2)}</strong>
             <small>Solicitada: {formatDate(bill.sentAt || bill.createdAt)} · {waitingMinutes(bill)} min</small>
             {bill.problem && <p className="cashier-alert">{bill.problemReason}</p>}
@@ -284,14 +298,14 @@ function PaymentRequests({ bills, onOpenCharge, onRefresh, user, highlightedIds 
 function RequestRow({ bill, isNew = false, onCharge }) {
   return (
     <div className={`cashier-row ${isNew ? "new-alert" : ""}`}>
-      <div><strong>{bill.tableName}</strong><span>{bill.waiterName} · {waitingMinutes(bill)} min esperando</span></div>
+      <div><strong>{bill.tableName}</strong><span>{bill.salesChannel === "delivery" ? `${bill.delivery?.phone || "Sin telefono"} · ${bill.delivery?.paymentMethod || "Pago pendiente"}` : bill.waiterName} · {waitingMinutes(bill)} min esperando</span></div>
       <strong>Q{Number(bill.total).toFixed(2)}</strong>
       <button type="button" onClick={onCharge}>Cobrar</button>
     </div>
   )
 }
 
-function ChargePanel({ bill, splitBills, session, requests, user, onRefresh }) {
+function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onPaymentComplete }) {
   const [tip, setTip] = useState(bill ? String(bill.tipSuggested || 0) : "0")
   const [discount, setDiscount] = useState("0")
   const [methods, setMethods] = useState([{ method: "cash", amount: bill ? String(bill.total) : "", reference: "" }])
@@ -299,6 +313,7 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh }) {
   const [splitConfig, setSplitConfig] = useState("2")
   const [splitId, setSplitId] = useState("")
   const [message, setMessage] = useState("")
+  const [processingPayment, setProcessingPayment] = useState(false)
   const splitBill = splitBills.find((split) => String(split.preBillId) === String(bill?.id))
   const split = splitBill?.splits.find((part) => part.id === splitId)
   const subtotal = Number(split?.subtotal ?? bill?.subtotal ?? 0)
@@ -314,34 +329,50 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh }) {
     setMethods((current) => [...current, { method: "card", amount: "", reference: "" }])
   }
 
-  function submit() {
-    const result = confirmPayment({
-      preBillId: bill.id,
-      splitId,
-      tipAmount: Number(tip),
-      discountAmount: Number(discount),
-      methods,
-      authorizationId: approvedAuthorization?.id || "",
-      authorizedBy: approvedAuthorization?.approvedBy || ""
-    }, user)
-    if (result.requiresAuthorization) {
-      createAuthorizationRequest("Descuento o cortesía", result.message, Number(discount), user)
-      setMessage("Solicitud de autorización enviada. Espera aprobación para cobrar.")
-      onRefresh("")
-      return
-    }
-    setMessage(result.ok ? result.allPaid ? "Pago completado. Mesa liberada." : "Pago parcial registrado. Hay partes pendientes." : result.message)
-    if (result.ok) {
-      onRefresh("")
-      if (result.allPaid) {
-        try {
-          const printed = printFinalCheck(bill, result.payment)
-          if (!printed) setMessage("Pago completado. Mesa liberada. No se pudo abrir la impresión automática.")
-        } catch (error) {
-          console.error("[Cashier] Error imprimiendo cuenta final.", error)
-          setMessage("Pago completado. Mesa liberada. La impresión falló, puedes abrir el recibo desde Últimos cobros.")
-        }
+  async function submit() {
+    if (processingPayment) return
+    setProcessingPayment(true)
+    setMessage("Procesando pago...")
+    try {
+      const result = confirmPayment({
+        preBillId: bill.id,
+        splitId,
+        tipAmount: Number(tip),
+        discountAmount: Number(discount),
+        methods,
+        authorizationId: approvedAuthorization?.id || "",
+        authorizedBy: approvedAuthorization?.approvedBy || ""
+      }, user)
+      if (result.requiresAuthorization) {
+        createAuthorizationRequest("Descuento o cortesía", result.message, Number(discount), user)
+        setMessage("Caja > Cobrar mesa > Confirmar pago: solicitud de autorización enviada. Espera aprobación para cobrar.")
+        onRefresh("")
+        return
       }
+      if (!result.ok) {
+        setMessage(`Error en Caja > Cobrar mesa > Confirmar pago: ${result.message || "No se pudo registrar el pago."}`)
+        return
+      }
+      if (!result.allPaid) {
+        setMessage("Pago parcial registrado. Hay partes pendientes.")
+        onRefresh("Pago parcial registrado. Hay partes pendientes.")
+        return
+      }
+
+      let finalMessage = "Pago completado correctamente. Orden liberada."
+      try {
+        const printed = await printFinalCheck(bill, result.payment)
+        if (!printed) finalMessage = "Pago completado correctamente. No se pudo abrir la impresión automática."
+      } catch (error) {
+        console.error("[Cashier] Error imprimiendo cuenta final.", error)
+        finalMessage = `Pago completado correctamente. Error en Caja > Cobrar mesa > Impresión final: ${error.message || "la impresión falló"}`
+      }
+      onPaymentComplete(finalMessage)
+    } catch (error) {
+      console.error("[Cashier] Error confirmando pago.", error)
+      setMessage(`Error en Caja > Cobrar mesa > Confirmar pago: ${error.message || "No se pudo completar la transacción."}`)
+    } finally {
+      setProcessingPayment(false)
     }
   }
 
@@ -358,6 +389,7 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh }) {
     <div className="cashier-charge-layout">
       <article className="cashier-panel">
         <div className="cashier-panel-title"><h2>{bill.tableName}</h2><span>{bill.waiterName}</span></div>
+        {bill.salesChannel === "delivery" && <DeliveryBillSummary bill={bill} />}
         <div className="cashier-items">
           {bill.items.map((item) => <div key={item.lineId || item.id}><span>{item.cantidad} x {item.nombre}</span><strong>Q{(item.precio * item.cantidad).toFixed(2)}</strong></div>)}
         </div>
@@ -391,7 +423,7 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh }) {
         <p className="cashier-change">Pagado: Q{paid.toFixed(2)} · Vuelto: Q{change.toFixed(2)}</p>
         {approvedAuthorization && <div className="cashier-approved">Autorización aprobada por {approvedAuthorization.approvedBy}</div>}
         {message && <div className="cashier-feedback">{message}</div>}
-        <button type="button" onClick={submit}>Confirmar pago</button>
+        <button type="button" disabled={processingPayment} onClick={submit}>{processingPayment ? "Procesando..." : "Confirmar pago"}</button>
       </article>
       <article className="cashier-panel cashier-split">
         <h2>Dividir cuenta</h2>
@@ -553,6 +585,21 @@ function Summary({ summary }) {
   return <div className="cashier-summary"><p>Efectivo <strong>Q{summary.cashSales.toFixed(2)}</strong></p><p>Tarjeta <strong>Q{summary.cardSales.toFixed(2)}</strong></p><p>Transferencia / QR <strong>Q{(summary.transferSales + summary.qrSales).toFixed(2)}</strong></p><p>Esperado <strong>Q{summary.expectedCash.toFixed(2)}</strong></p></div>
 }
 
+function DeliveryBillSummary({ bill, compact = false }) {
+  const delivery = bill.delivery || {}
+  return (
+    <div className={compact ? "cashier-delivery-summary compact" : "cashier-delivery-summary"}>
+      <span><strong>Cliente</strong>{delivery.customerName || "-"}</span>
+      <span><strong>Telefono</strong>{delivery.phone || delivery.whatsapp || "-"}</span>
+      <span><strong>Direccion</strong>{delivery.address || "-"}</span>
+      {!compact && delivery.reference && <span><strong>Referencia</strong>{delivery.reference}</span>}
+      {!compact && delivery.mapsLink && <span><strong>Maps</strong>{delivery.mapsLink}</span>}
+      <span><strong>Pago</strong>{delivery.paymentMethod || "-"}</span>
+      {!compact && delivery.deliveryNotes && <span><strong>Notas</strong>{delivery.deliveryNotes}</span>}
+    </div>
+  )
+}
+
 function Empty({ text }) {
   return <p className="cashier-empty">{text}</p>
 }
@@ -563,6 +610,13 @@ function loadStore() {
 
 function waitingMinutes(bill) {
   return Math.max(0, Math.floor((Date.now() - new Date(bill.sentAt || bill.createdAt).getTime()) / 60000))
+}
+
+function billItemSummary(bill) {
+  const items = bill.items || []
+  if (!items.length) return "Sin productos"
+  const firstItems = items.slice(0, 3).map((item) => `${item.cantidad}x ${item.nombre}`).join(", ")
+  return items.length > 3 ? `${firstItems} +${items.length - 3} mas` : firstItems
 }
 
 function formatDate(date) {

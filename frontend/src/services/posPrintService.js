@@ -1,3 +1,6 @@
+import { getActiveTicketTemplate, getCachedTicketTemplate } from "./ticketTemplatesService"
+import { renderTicketHtml } from "./ticketRenderer"
+
 const DEFAULT_RESTAURANT_NAME = "Alcazar Restaurante"
 
 function money(value) {
@@ -78,7 +81,28 @@ function printHtml(html) {
   return true
 }
 
-export function printPreCheck(order, options = {}) {
+function ticketTypeFor(order, fallback) {
+  const channel = order?.salesChannel || order?.sales_channel
+  if (channel === "delivery") return "delivery"
+  if (channel === "takeout") return "takeout"
+  return fallback
+}
+
+async function getPrintableTemplate(ticketType) {
+  const cached = getCachedTicketTemplate(ticketType)
+  const result = await getActiveTicketTemplate(ticketType)
+  if (result.source === "local" && !cached && !result.data?.id) return null
+  return result.data
+}
+
+export async function printPreCheck(order, options = {}) {
+  const ticketType = options.ticketType || ticketTypeFor(order, "prebill")
+  try {
+    const template = options.template || await getPrintableTemplate(ticketType)
+    if (template) return printHtml(renderTicketHtml(order, template, ticketType))
+  } catch (error) {
+    console.warn("[POS Print] Se usara fallback de precuenta.", error)
+  }
   const width = options.paperWidth || "80mm"
   const items = orderItems(order)
   const subtotal = Number(order?.subtotal ?? order?.total ?? items.reduce((sum, item) => sum + itemQuantity(item) * itemPrice(item), 0))
@@ -104,7 +128,14 @@ export function printPreCheck(order, options = {}) {
   }))
 }
 
-export function printFinalCheck(order, payment = {}, options = {}) {
+export async function printFinalCheck(order, payment = {}, options = {}) {
+  const ticketType = options.ticketType || ticketTypeFor(order, "final_bill")
+  try {
+    const template = options.template || await getPrintableTemplate(ticketType)
+    if (template) return printHtml(renderTicketHtml(order, template, ticketType, payment))
+  } catch (error) {
+    console.warn("[POS Print] Se usara fallback de cuenta final.", error)
+  }
   const width = options.paperWidth || "80mm"
   const items = orderItems(order)
   const subtotal = Number(order?.subtotal ?? items.reduce((sum, item) => sum + itemQuantity(item) * itemPrice(item), 0))
