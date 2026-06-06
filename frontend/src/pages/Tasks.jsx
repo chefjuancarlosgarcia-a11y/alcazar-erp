@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
 import { getActiveAreas } from "../services/areasService"
@@ -779,8 +779,15 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
 
   async function updateRunItem(itemId, payload) {
     const result = await updateChecklistRunItem(itemId, payload)
-    if (result.error) return setMessage(result.error.message || "No se pudo guardar el progreso.")
-    refresh()
+    if (result.error) {
+      setMessage(result.error.message || "No se pudo guardar el progreso.")
+      return result
+    }
+    setRuns((current) => current.map((run) => ({
+      ...run,
+      checklist_run_items: (run.checklist_run_items || []).map((item) => item.id === itemId ? { ...item, ...result.data } : item)
+    })))
+    return result
   }
 
   async function updateIncidentStatus(incidentId, status, notes = "") {
@@ -1274,16 +1281,35 @@ function ChecklistGuidedRun({ run, profiles, onClose, onUpdateItem, onComplete, 
 
 function ChecklistRunItem({ item, index = 0, disabled, onSave }) {
   const [draft, setDraft] = useState(() => ({ checked: item.checked, response_text: item.response_text || "", response_number: item.response_number ?? "", response_date: item.response_date || "", response_time: item.response_time || "", response_json: item.response_json || {}, photo_url: item.photo_url || "", comment: item.comment || "" }))
-  function update(field, value) {
-    setDraft((current) => ({ ...current, [field]: value }))
+  const [saveStatus, setSaveStatus] = useState("")
+  const saveTimerRef = useRef(null)
+  const latestDraftRef = useRef(draft)
+
+  useEffect(() => () => window.clearTimeout(saveTimerRef.current), [])
+
+  async function save(next = latestDraftRef.current) {
+    window.clearTimeout(saveTimerRef.current)
+    setSaveStatus("saving")
+    const result = await onSave(next)
+    setSaveStatus(result?.error ? "error" : "saved")
+    if (!result?.error) {
+      window.clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = window.setTimeout(() => setSaveStatus(""), 1800)
+    }
+    return result
   }
-  function save(next = draft) {
-    onSave(next)
+
+  function scheduleSave(next) {
+    window.clearTimeout(saveTimerRef.current)
+    setSaveStatus("pending")
+    saveTimerRef.current = window.setTimeout(() => save(next), 650)
   }
+
   function applyChange(field, value) {
     const next = { ...draft, [field]: value }
     setDraft(next)
-    save(next)
+    latestDraftRef.current = next
+    scheduleSave(next)
   }
   function toggleMulti(option) {
     const current = Array.isArray(draft.response_json?.selected) ? draft.response_json.selected : []
@@ -1307,21 +1333,21 @@ function ChecklistRunItem({ item, index = 0, disabled, onSave }) {
   }
   return (
     <div className="checklist-run-item form-question">
-      <div className="tasks-panel-title"><div><strong>{index + 1}. {item.title}</strong><p className="tasks-muted">{friendlyResponseType(item.response_type)} · {item.score_points} pts</p></div><span className={itemHasAnswer(draft) ? "checklist-answer-state done" : "checklist-answer-state"}>{itemHasAnswer(draft) ? "Listo" : item.is_required ? "Obligatorio" : "Opcional"}</span></div>
+      <div className="tasks-panel-title"><div><strong>{index + 1}. {item.title}</strong><p className="tasks-muted">{friendlyResponseType(item.response_type)} · {item.score_points} pts</p></div><span className={itemHasAnswer(draft) ? "checklist-answer-state done" : "checklist-answer-state"}>{saveStatus === "pending" ? "Pendiente" : saveStatus === "saving" ? "Guardando..." : saveStatus === "saved" ? "Guardado" : saveStatus === "error" ? "Error al guardar" : itemHasAnswer(draft) ? "Listo" : item.is_required ? "Obligatorio" : "Opcional"}</span></div>
       {incidentWillTrigger && <p className="tasks-warning">Esto generara una incidencia para gerencia.</p>}
       {item.response_type === "yes_no" && <div className="checklist-choice-row native"><label className={draft.response_text === "si" ? "selected" : ""}><input type="radio" disabled={disabled} checked={draft.response_text === "si"} onChange={() => { const next = { ...draft, response_text: "si", checked: true }; setDraft(next); saveCritical(next) }} />Si</label><label className={draft.response_text === "no" ? "selected danger" : ""}><input type="radio" disabled={disabled} checked={draft.response_text === "no"} onChange={() => { const next = { ...draft, response_text: "no", checked: false }; setDraft(next); saveCritical(next) }} />No</label></div>}
       {item.response_type === "checkbox" && <label className="checklist-inline-check"><input type="checkbox" disabled={disabled} checked={draft.checked} onChange={(event) => { const next = { ...draft, checked: event.target.checked }; setDraft(next); saveCritical(next) }} /><span>Completado</span></label>}
-      {["short_text", "text", "signature"].includes(item.response_type) && <Field label={friendlyResponseType(item.response_type)}><input disabled={disabled} value={draft.response_text} onChange={(event) => applyChange("response_text", event.target.value)} /></Field>}
-      {item.response_type === "long_text" && <Field label="Respuesta"><textarea disabled={disabled} value={draft.response_text} onChange={(event) => applyChange("response_text", event.target.value)} /></Field>}
+      {["short_text", "text", "signature"].includes(item.response_type) && <Field label={friendlyResponseType(item.response_type)}><input disabled={disabled} value={draft.response_text} onChange={(event) => applyChange("response_text", event.target.value)} onBlur={() => save()} /></Field>}
+      {item.response_type === "long_text" && <Field label="Respuesta"><textarea disabled={disabled} value={draft.response_text} onChange={(event) => applyChange("response_text", event.target.value)} onBlur={() => save()} /></Field>}
       {item.response_type === "select" && <Field label="Seleccion"><select disabled={disabled} value={draft.response_text} onChange={(event) => { const next = { ...draft, response_text: event.target.value }; setDraft(next); saveCritical(next) }}><option value="">Seleccionar</option>{options.map((option) => <option key={option} value={option}>{option}</option>)}</select></Field>}
       {item.response_type === "multi_select" && <div className="checklist-option-grid">{options.map((option) => <label key={option} className="tasks-checkbox"><input disabled={disabled} type="checkbox" checked={(draft.response_json?.selected || []).includes(option)} onChange={() => toggleMulti(option)} />{option}</label>)}</div>}
-      {["number", "temperature"].includes(item.response_type) && <Field label={item.response_type === "temperature" ? "Temperatura" : "Numero"}><input disabled={disabled} type="number" step="any" value={draft.response_number} onChange={(event) => applyChange("response_number", event.target.value)} /></Field>}
-      {item.response_type === "date" && <Field label="Fecha"><input disabled={disabled} type="date" value={draft.response_date} onChange={(event) => applyChange("response_date", event.target.value)} /></Field>}
-      {item.response_type === "time" && <Field label="Hora"><input disabled={disabled} type="time" value={draft.response_time} onChange={(event) => applyChange("response_time", event.target.value)} /></Field>}
+      {["number", "temperature"].includes(item.response_type) && <Field label={item.response_type === "temperature" ? "Temperatura" : "Numero"}><input disabled={disabled} type="number" step="any" value={draft.response_number} onChange={(event) => applyChange("response_number", event.target.value)} onBlur={() => save()} /></Field>}
+      {item.response_type === "date" && <Field label="Fecha"><input disabled={disabled} type="date" value={draft.response_date} onChange={(event) => applyChange("response_date", event.target.value)} onBlur={() => save()} /></Field>}
+      {item.response_type === "time" && <Field label="Hora"><input disabled={disabled} type="time" value={draft.response_time} onChange={(event) => applyChange("response_time", event.target.value)} onBlur={() => save()} /></Field>}
       {item.response_type === "rating" && <div className="checklist-rating">{[1, 2, 3, 4, 5].map((value) => <button key={value} type="button" disabled={disabled} className={Number(draft.response_number) >= value ? "selected" : ""} onClick={() => { const next = { ...draft, response_number: value }; setDraft(next); save(next) }}>★</button>)}</div>}
       {item.response_type === "acknowledgement" && <label className="tasks-checkbox checklist-touch-toggle"><input disabled={disabled} type="checkbox" checked={draft.checked} onChange={(event) => { const next = { ...draft, checked: event.target.checked, response_text: event.target.checked ? "acepto" : "" }; setDraft(next); save(next) }} />He leido y comprendo este procedimiento</label>}
       {needsPhoto && <Field label="Fotografia / evidencia"><input disabled={disabled} type="file" accept="image/*" capture="environment" onChange={(event) => readEvidenceFile(event, (photo_url) => { const next = { ...draft, photo_url }; setDraft(next); save(next) })} />{draft.photo_url && <img className="checklist-evidence-preview" src={draft.photo_url} alt="Evidencia" />}</Field>}
-      {(needsComment || incidentWillTrigger) && <Field label={incidentWillTrigger ? "Describe que esta pasando" : "Comentario"}><textarea disabled={disabled} value={draft.comment} onChange={(event) => { const next = { ...draft, comment: event.target.value }; setDraft(next); if (!checklistItemWouldFail(item, next) || next.comment.trim()) save(next) }} /></Field>}
+      {(needsComment || incidentWillTrigger) && <Field label={incidentWillTrigger ? "Describe que esta pasando" : "Comentario"}><textarea disabled={disabled} value={draft.comment} onChange={(event) => { const next = { ...draft, comment: event.target.value }; setDraft(next); latestDraftRef.current = next; if (!checklistItemWouldFail(item, next) || next.comment.trim()) scheduleSave(next) }} onBlur={() => save()} /></Field>}
       {needsIncidentComment && <p className="tasks-warning">Agrega un comentario para guardar la incidencia.</p>}
     </div>
   )

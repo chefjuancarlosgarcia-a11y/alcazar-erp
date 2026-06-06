@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
+import PaginationControls from "../components/PaginationControls"
+import { pageItems } from "../utils/pagination"
 import { useAuth } from "../context/AuthContext"
 import { getActiveAreas } from "../services/areasService"
 import { getActiveInventoryItems } from "../services/inventoryService"
@@ -316,9 +318,12 @@ function InternalProduction() {
 }
 
 function BatchList({ batches, canManage, onComplete, onCancel, showAll = false }) {
+  const [page, setPage] = useState(1)
+  const pagedBatches = pageItems(batches, page)
+
   return (
     <div className="inventory-production-list">
-      {batches.map((batch) => (
+      {pagedBatches.map((batch) => (
         <article className="inventory-area-selected" key={batch.id}>
           <header>
             <div>
@@ -342,6 +347,7 @@ function BatchList({ batches, canManage, onComplete, onCancel, showAll = false }
           {!showAll && canManage && <div className="inventory-row-actions"><button type="button" className="primary" onClick={() => onComplete(batch.id)}>Completar produccion</button><button type="button" className="danger" onClick={() => onCancel(batch.id)}>Cancelar</button></div>}
         </article>
       ))}
+      <PaginationControls page={page} total={batches.length} onChange={setPage} />
       {!batches.length && <p className="inventory-empty">No hay producciones para mostrar.</p>}
     </div>
   )

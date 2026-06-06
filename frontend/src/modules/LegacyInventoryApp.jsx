@@ -1004,10 +1004,12 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
   }, [authenticatedUser?.role])
 
   useEffect(() => {
+    if (!["proveedores", "ordenes"].includes(seccionActiva)) return
     cargarProveedoresSupabase()
-  }, [cargarProveedoresSupabase])
+  }, [cargarProveedoresSupabase, seccionActiva])
 
   useEffect(() => {
+    if (seccionActiva !== "ordenes") return undefined
     let isMounted = true
 
     async function cargarInventarioOrdenManual() {
@@ -1034,7 +1036,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
     return () => {
       isMounted = false
     }
-  }, [])
+  }, [seccionActiva])
 
   useEffect(() => {
     return () => {
@@ -1164,6 +1166,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
   }, [ordenesCompraManual])
 
   useEffect(() => {
+    if (seccionActiva !== "ordenes") return undefined
     let active = true
     getPurchaseOrders().then(({ data, error }) => {
       if (!active || error || !data?.length) return
@@ -1175,7 +1178,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
     return () => {
       active = false
     }
-  }, [])
+  }, [seccionActiva])
 
   useEffect(() => {
     localStorage.setItem("recetas", JSON.stringify(recetas))

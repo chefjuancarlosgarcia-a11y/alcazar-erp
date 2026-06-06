@@ -130,7 +130,7 @@ function Production() {
     kdsDebug("fuente de comandas: Supabase production_tickets", { areaId: selectedArea })
     const initialRefresh = window.setTimeout(refreshTickets, 0)
     const interval = window.setInterval(() => setClock((current) => current + 1), 30000)
-    const refreshInterval = window.setInterval(refreshTickets, 5000)
+    const refreshInterval = window.setInterval(refreshTickets, 60000)
     window.addEventListener("production-tickets-updated", refreshTickets)
     return () => {
       window.clearTimeout(initialRefresh)

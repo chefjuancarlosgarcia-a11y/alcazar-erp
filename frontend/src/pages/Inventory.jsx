@@ -1,10 +1,12 @@
+import { lazy, Suspense } from "react"
 import { useSearchParams } from "react-router-dom"
-import LegacyInventoryApp from "../modules/LegacyInventoryApp"
 import InventoryBase from "./InventoryBase"
 import InventoryItemConversions from "./InventoryItemConversions"
 import InternalProduction from "./InternalProduction"
 import RequisitionsSupabase from "./RequisitionsSupabase"
 import RecipesSupabase from "./RecipesSupabase"
+
+const LegacyInventoryApp = lazy(() => import("../modules/LegacyInventoryApp"))
 
 const allowedSections = new Set([
   "inventario",
@@ -47,7 +49,7 @@ function Inventory() {
     return <InventoryItemConversions />
   }
 
-  return <LegacyInventoryApp initialSeccion={initialSeccion} initialPurchaseOrderView={orderView} initialPurchaseOrderId={orderId} hideLegacyNavigation />
+  return <Suspense fallback={<p>Cargando módulo...</p>}><LegacyInventoryApp initialSeccion={initialSeccion} initialPurchaseOrderView={orderView} initialPurchaseOrderId={orderId} hideLegacyNavigation /></Suspense>
 }
 
 export default Inventory

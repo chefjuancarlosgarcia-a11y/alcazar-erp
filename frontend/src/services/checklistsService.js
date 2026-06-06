@@ -355,8 +355,6 @@ export async function updateChecklistRunItem(runItemId, payload) {
     .select("*")
     .single()
   if (error) return { data: null, error }
-  if (data?.run_id) await supabase.rpc("recalculate_checklist_run_points", { p_run_id: data.run_id })
-  await supabase.rpc("evaluate_checklist_run_item_incident", { run_item_id: runItemId })
   return { data, error: null }
 }
 

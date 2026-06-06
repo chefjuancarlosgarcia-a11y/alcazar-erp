@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import PaginationControls from "../components/PaginationControls"
+import { pageItems } from "../utils/pagination"
 import * as XLSX from "xlsx"
 import { useAuth } from "../context/AuthContext"
 import { getActiveAreas } from "../services/areasService"
@@ -78,6 +80,7 @@ function RecipesSupabase() {
   const [importReadError, setImportReadError] = useState("")
   const [importReading, setImportReading] = useState(false)
   const [importProgress, setImportProgress] = useState("")
+  const [page, setPage] = useState(1)
 
   const manager = ["admin", "ceo", "gerente_general", "gerente"].includes(user?.role)
   const canCreate = manager || (user?.role === "supervisor" && Boolean(user?.areaId))
@@ -115,6 +118,7 @@ function RecipesSupabase() {
     const term = query.trim().toLowerCase()
     return !term || [recipe.name, areaName(areas, recipe.production_area_id)].some((value) => String(value).toLowerCase().includes(term))
   }), [areas, query, recipes, typeFilter])
+  const pagedRecipes = pageItems(filtered, page)
 
   function openNew() {
     setForm({
@@ -381,7 +385,7 @@ function RecipesSupabase() {
       </div>
       <div className="recipes-grid">
         {loading && <p className="recipes-empty">Cargando recetas...</p>}
-        {!loading && filtered.map((recipe) => {
+        {!loading && pagedRecipes.map((recipe) => {
           const posProduct = posProducts.find((product) => String(product.recipeId) === String(recipe.id))
           return (
           <article className="recipe-card" key={recipe.id}>
@@ -405,6 +409,7 @@ function RecipesSupabase() {
         })}
         {!loading && !filtered.length && <p className="recipes-empty">No hay recetas registradas para esta selección.</p>}
       </div>
+      {!loading && <PaginationControls page={page} total={filtered.length} onChange={setPage} />}
       {importDraft && <RecipeImportModal draft={importDraft} inventory={inventory} importing={importing} setDraft={setImportDraft} onIngredientChange={updateImportIngredient} onImport={importRecipesFromDraft} onClose={() => setImportDraft(null)} />}
       {form && <RecipeFormV2 form={form} areas={productionAreas} inventory={inventory} itemConversions={itemConversions} setItemConversions={setItemConversions} posProducts={posProducts} saving={saving} onClose={() => setForm(null)} onSave={saveRecipe} />}
       {detail && <RecipeDetailV2 recipe={detail} areas={areas} onClose={() => setDetail(null)} />}

@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import PaginationControls from "../components/PaginationControls"
+import { pageItems } from "../utils/pagination"
 import { useAuth } from "../context/AuthContext"
 import { supabase } from "../lib/supabase"
 import { getActiveAreas } from "../services/areasService"
@@ -86,6 +88,7 @@ function RequisitionsSupabase() {
   const [requesters, setRequesters] = useState([])
   const [loading, setLoading] = useState(true)
   const [workingId, setWorkingId] = useState("")
+  const [page, setPage] = useState(1)
   const [tab, setTab] = useState("all")
   const [filters, setFilters] = useState({ date: "", fromAreaId: "", toAreaId: "", priority: "", search: "" })
   const [formRequest, setFormRequest] = useState(null)
@@ -142,6 +145,7 @@ function RequisitionsSupabase() {
     return !term || [request.requisition_number, request.requestedByName, areaName(areas, request.to_area_id)]
       .some((value) => String(value || "").toLowerCase().includes(term))
   }), [areas, filters, requisitions, tab])
+  const pagedRequests = pageItems(visibleRequests, page)
 
   function openNew() {
     setFormRequest({
@@ -274,7 +278,7 @@ function RequisitionsSupabase() {
 
       <div className="requisitions-list">
         {loading && <p className="requisitions-empty">Cargando requisiciones...</p>}
-        {!loading && visibleRequests.map((request) => (
+        {!loading && pagedRequests.map((request) => (
           <article className="requisition-card" key={request.id}>
             <div className="requisition-summary">
               <strong>{request.requisition_number}</strong>
@@ -302,6 +306,7 @@ function RequisitionsSupabase() {
             </div>
           </article>
         ))}
+        {!loading && <PaginationControls page={page} total={visibleRequests.length} onChange={setPage} />}
         {!loading && !visibleRequests.length && <p className="requisitions-empty">No hay requisiciones para esta selección.</p>}
       </div>
 

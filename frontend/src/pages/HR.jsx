@@ -1,9 +1,11 @@
-import LegacyInventoryApp from "../modules/LegacyInventoryApp"
+import { lazy, Suspense } from "react"
 import ProfileManagement from "./ProfileManagement"
 import ScheduleManagement from "./ScheduleManagement"
 import AttendanceTerminal from "../components/AttendanceTerminal"
 import { useLocation } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
+
+const LegacyInventoryApp = lazy(() => import("../modules/LegacyInventoryApp"))
 
 function HR() {
   const location = useLocation()
@@ -27,7 +29,7 @@ function HR() {
     return <AttendanceTerminal />
   }
 
-  return <LegacyInventoryApp initialSeccion={selectedSection} hideLegacyNavigation focusEmployeeId={profileId} editFocusedEmployee={editProfile} />
+  return <Suspense fallback={<p>Cargando módulo...</p>}><LegacyInventoryApp initialSeccion={selectedSection} hideLegacyNavigation focusEmployeeId={profileId} editFocusedEmployee={editProfile} /></Suspense>
 }
 
 export default HR

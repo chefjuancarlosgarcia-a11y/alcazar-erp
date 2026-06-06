@@ -3,6 +3,8 @@ import { useAuth } from "../context/AuthContext"
 import useSupabaseRealtime from "../hooks/useSupabaseRealtime"
 import InfoTooltip from "../components/InfoTooltip"
 import InventoryImportModal from "../components/InventoryImportModal"
+import PaginationControls from "../components/PaginationControls"
+import { pageItems } from "../utils/pagination"
 import { getActiveAreas } from "../services/areasService"
 import {
   adjustAreaInventory,
@@ -127,6 +129,7 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
   const [legacyItems, setLegacyItems] = useState(readLegacyItems)
   const [providerOptions, setProviderOptions] = useState([])
   const realtimeTimerRef = useRef(null)
+  const realtimeRefreshRef = useRef(null)
 
   function refreshFromRealtime(showMovementNotice = false) {
     if (showMovementNotice) {
@@ -134,7 +137,8 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
       window.clearTimeout(realtimeTimerRef.current)
       realtimeTimerRef.current = window.setTimeout(() => setRealtimeNotice(""), 3500)
     }
-    refresh()
+    window.clearTimeout(realtimeRefreshRef.current)
+    realtimeRefreshRef.current = window.setTimeout(refreshOperationalData, 350)
   }
 
   const stockRealtime = useSupabaseRealtime({
@@ -153,7 +157,10 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
     refresh()
   }, [])
 
-  useEffect(() => () => window.clearTimeout(realtimeTimerRef.current), [])
+  useEffect(() => () => {
+    window.clearTimeout(realtimeTimerRef.current)
+    window.clearTimeout(realtimeRefreshRef.current)
+  }, [])
 
   async function refresh() {
     setLoading(true)
@@ -175,6 +182,19 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
     }
     setProviderOptions(uniqueProviderNames(suppliersResult.data || []))
     setLoading(false)
+  }
+
+  async function refreshOperationalData() {
+    const [itemsResult, movementsResult] = await Promise.all([
+      getInventoryItems(),
+      getInventoryMovements({ limit: 100 })
+    ])
+    if (itemsResult.error || movementsResult.error) {
+      setError("No se pudo actualizar el inventario en vivo.")
+      return
+    }
+    setItems(itemsResult.data || [])
+    setMovements(movementsResult.data || [])
   }
 
   function openCreate() {
@@ -555,6 +575,8 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
 }
 
 function InventoryCatalog({ loading, items, areas, query, setQuery, areaFilter, setAreaFilter, canManage, onEdit, onDeactivate, onAdjust }) {
+  const [page, setPage] = useState(1)
+  const pagedItems = pageItems(items, page)
   const totalInvestment = items.reduce((total, item) => (
     total + Number(item.totalQuantity || 0) * Number(item.cost_per_base_unit || 0)
   ), 0)
@@ -573,7 +595,7 @@ function InventoryCatalog({ loading, items, areas, query, setQuery, areaFilter, 
       </div>
       <div className="inventory-table">
         <div className="inventory-table-head"><span>Producto</span><span>Unidad</span><span>Stock área</span><span>Stock total</span><span>Valor</span><span>Mínimo</span><span>Estado</span><span>Acciones</span></div>
-        {loading ? <p className="inventory-empty">Cargando inventario...</p> : items.map((item) => {
+        {loading ? <p className="inventory-empty">Cargando inventario...</p> : pagedItems.map((item) => {
           const areaStock = areaFilter === "todos" ? item.totalQuantity : stockOf(item, areaFilter)
           const minimum = areaFilter === "todos" ? minimumOf(item, "almacen") : minimumOf(item, areaFilter)
           const investment = Number(item.totalQuantity || 0) * Number(item.cost_per_base_unit || 0)
@@ -599,6 +621,7 @@ function InventoryCatalog({ loading, items, areas, query, setQuery, areaFilter, 
         })}
         {!loading && !items.length && <p className="inventory-empty">No hay productos registrados para esta selección.</p>}
       </div>
+      {!loading && <PaginationControls page={page} total={items.length} onChange={setPage} />}
     </>
   )
 }
@@ -610,6 +633,7 @@ function AreaStockDashboard({ items, areas, initialAreaId, canManage, onAdjust }
   const [statusFilter, setStatusFilter] = useState("todos")
   const [showWithoutStock, setShowWithoutStock] = useState(false)
   const [previewItem, setPreviewItem] = useState(null)
+  const [page, setPage] = useState(1)
 
   const selectedArea = areas.find((area) => area.id === selectedAreaId)
     || areas.find((area) => area.id === "almacen")
@@ -628,6 +652,7 @@ function AreaStockDashboard({ items, areas, initialAreaId, canManage, onAdjust }
       || (statusFilter === "agotados" && quantity <= 0)
     return matchesText && hasOperationalStock && matchesStatus
   })
+  const pagedItems = pageItems(visibleItems, page)
   const stockedCount = activeItems.filter((item) => stockOf(item, selectedArea.id) > 0).length
   const lowCount = activeItems.filter((item) => stockOf(item, selectedArea.id) > 0 && minimumOf(item, selectedArea.id) > 0 && stockOf(item, selectedArea.id) <= minimumOf(item, selectedArea.id)).length
   const emptyCount = activeItems.filter((item) => stockOf(item, selectedArea.id) <= 0).length
@@ -668,7 +693,7 @@ function AreaStockDashboard({ items, areas, initialAreaId, canManage, onAdjust }
         </div>
       </header>
       <div className="inventory-area-list">
-        {visibleItems.map((item) => (
+        {pagedItems.map((item) => (
           <article className="inventory-area-line" key={item.id}>
             <button type="button" className="inventory-area-image-button" onClick={() => setPreviewItem(item)} aria-label={`Ampliar imagen de ${item.name}`}>
               <ProductImage item={item} />
@@ -687,6 +712,7 @@ function AreaStockDashboard({ items, areas, initialAreaId, canManage, onAdjust }
           </p>
         )}
       </div>
+      <PaginationControls page={page} total={visibleItems.length} onChange={setPage} />
     </section>
     {previewItem && (
       <div className="inventory-image-lightbox" role="presentation" onClick={() => setPreviewItem(null)}>
@@ -704,8 +730,10 @@ function AreaStockDashboard({ items, areas, initialAreaId, canManage, onAdjust }
 }
 
 function MovementsTable({ movements, items, areas, loading }) {
+  const [page, setPage] = useState(1)
+  const pagedMovements = pageItems(movements, page)
   return <div className="inventory-movements">
-    {loading ? <p className="inventory-empty">Cargando movimientos...</p> : movements.map((movement) => (
+    {loading ? <p className="inventory-empty">Cargando movimientos...</p> : pagedMovements.map((movement) => (
       <article key={movement.id}>
         <div><strong>{items[movement.item_id]?.name || "Producto"}</strong><small>{movement.movement_type}</small></div>
         <span>{areas[movement.from_area_id] || "-"} → {areas[movement.to_area_id] || "-"}</span>
@@ -716,6 +744,7 @@ function MovementsTable({ movements, items, areas, loading }) {
       </article>
     ))}
     {!loading && !movements.length && <p className="inventory-empty">No hay movimientos registrados.</p>}
+    {!loading && <PaginationControls page={page} total={movements.length} onChange={setPage} />}
   </div>
 }
 

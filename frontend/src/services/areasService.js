@@ -1,4 +1,5 @@
 import { supabase } from "../lib/supabase"
+import { cachedQuery, invalidateQueryCache } from "./queryCache"
 
 function normalizeArea(area) {
   return area ? {
@@ -39,15 +40,15 @@ async function fetchAreas(query) {
 }
 
 export function getAreas() {
-  return fetchAreas(supabase.from("areas").select("*"))
+  return cachedQuery("areas:all", () => fetchAreas(supabase.from("areas").select("*")), 300000)
 }
 
 export function getActiveAreas() {
-  return fetchAreas(supabase.from("areas").select("*").eq("active", true))
+  return cachedQuery("areas:active", () => fetchAreas(supabase.from("areas").select("*").eq("active", true)), 300000)
 }
 
 export function getProductionAreas() {
-  return fetchAreas(supabase.from("areas").select("*").eq("active", true).eq("is_production_area", true))
+  return cachedQuery("areas:production", () => fetchAreas(supabase.from("areas").select("*").eq("active", true).eq("is_production_area", true)), 300000)
 }
 
 export async function createArea(area) {
@@ -56,6 +57,7 @@ export async function createArea(area) {
     .insert({ id: area.id, ...serializeArea(area) })
     .select("*")
     .single()
+  if (!error) invalidateQueryCache("areas:")
   return { data: normalizeArea(data), error }
 }
 
@@ -66,6 +68,7 @@ export async function updateArea(id, updates) {
     .eq("id", id)
     .select("*")
     .single()
+  if (!error) invalidateQueryCache("areas:")
   return { data: normalizeArea(data), error }
 }
 
