@@ -9,6 +9,12 @@ import {
   validateAttendancePinAvailable
 } from "../services/attendanceService"
 import {
+  deleteEmployeeCustomSchedule,
+  getEmployeeCustomSchedules,
+  getShiftTypes,
+  saveEmployeeCustomSchedule
+} from "../services/schedulesService"
+import {
   PROFILE_ROLES,
   PROFILE_STATUSES,
   canAssignUserRole,
@@ -81,6 +87,16 @@ const STATUS_NAMES = {
 }
 
 const PIN_ERROR = "El PIN ya esta asignado a otro usuario."
+const SHIFT_MANAGER_ROLES = ["admin", "gerente_general", "rrhh", "recursos_humanos"]
+const WEEKDAY_OPTIONS = [
+  [0, "Domingo"],
+  [1, "Lunes"],
+  [2, "Martes"],
+  [3, "Miercoles"],
+  [4, "Jueves"],
+  [5, "Viernes"],
+  [6, "Sabado"]
+]
 
 function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
   const { user, refreshProfile } = useAuth()
@@ -108,6 +124,9 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
   const [pinGeneratedAutomatically, setPinGeneratedAutomatically] = useState(false)
   const [saving, setSaving] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [shiftTypes, setShiftTypes] = useState([])
+  const [customSchedules, setCustomSchedules] = useState([])
+  const [customScheduleForm, setCustomScheduleForm] = useState(null)
   
   // Dynamic roles state
   const [dynamicRoles, setDynamicRoles] = useState([])
@@ -123,6 +142,7 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
   const [createdRoleKey, setCreatedRoleKey] = useState("")
 
   const canManage = canManageUsers(user)
+  const canManageSpecialSchedules = SHIFT_MANAGER_ROLES.includes(user?.role)
   const assignableRoles = useMemo(() => {
     const availableRoleKeys = dynamicRoles.map((r) => r.role_key)
     const allowed = getAllowedAssignableRoles(user)
@@ -143,6 +163,7 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
     loadProfiles({ silent: true })
     loadAreas()
     loadRoles()
+    loadShiftTypes()
   }, [])
 
   useEffect(() => {
@@ -199,6 +220,25 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
     } finally {
       setRolesLoading(false)
     }
+  }
+
+  async function loadShiftTypes() {
+    const { data } = await getShiftTypes(false)
+    setShiftTypes(data || [])
+  }
+
+  async function loadCustomSchedules(profileId) {
+    if (!profileId) {
+      setCustomSchedules([])
+      return
+    }
+    const { data, error: schedulesError } = await getEmployeeCustomSchedules(profileId)
+    if (schedulesError) {
+      setModalError("No se pudieron cargar los turnos especiales.")
+      setCustomSchedules([])
+      return
+    }
+    setCustomSchedules(data || [])
   }
 
   async function createNewRole() {
@@ -281,6 +321,8 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
     })
     setError("")
     setMessage("")
+    setCustomScheduleForm(null)
+    loadCustomSchedules(profile.id)
   }
 
   function openCreate() {
@@ -465,6 +507,65 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
       setEditingProfile(null)
       setModalMessage("")
     }, 700)
+  }
+
+  async function saveSpecialSchedule(event) {
+    event?.preventDefault?.()
+    if (!editingProfile || !customScheduleForm || !canManageSpecialSchedules) return
+    if (!customScheduleForm.shift_type_id) {
+      setModalError("Selecciona un tipo de turno.")
+      return
+    }
+    const payload = {
+      ...customScheduleForm,
+      profile_id: editingProfile.id
+    }
+    const { error: saveError } = await saveEmployeeCustomSchedule(payload)
+    if (saveError) {
+      setModalError(saveError.message || "No se pudo guardar el turno especial.")
+      return
+    }
+    setCustomScheduleForm(null)
+    setModalMessage("Turno especial guardado.")
+    await loadCustomSchedules(editingProfile.id)
+  }
+
+  async function deleteSpecialSchedule(schedule) {
+    if (!canManageSpecialSchedules || !window.confirm("Deseas eliminar este turno especial?")) return
+    const { error: deleteError } = await deleteEmployeeCustomSchedule(schedule.id)
+    if (deleteError) {
+      setModalError(deleteError.message || "No se pudo eliminar el turno especial.")
+      return
+    }
+    setModalMessage("Turno especial eliminado.")
+    await loadCustomSchedules(editingProfile.id)
+  }
+
+  function startSpecialSchedule(schedule = null) {
+    setCustomScheduleForm(schedule ? {
+      id: schedule.id,
+      profile_id: schedule.profile_id,
+      shift_type_id: schedule.shift_type_id || "",
+      weekday: schedule.weekday ?? "",
+      specific_date: schedule.specific_date || "",
+      start_date: schedule.start_date || "",
+      end_date: schedule.end_date || "",
+      start_time: trimTime(schedule.start_time),
+      end_time: trimTime(schedule.end_time),
+      notes: schedule.notes || "",
+      status: schedule.status || "active"
+    } : emptyCustomSchedule(editingProfile?.id))
+    setModalError("")
+  }
+
+  function applySpecialShiftType(value) {
+    const type = shiftTypes.find((item) => item.id === value)
+    setCustomScheduleForm((current) => ({
+      ...current,
+      shift_type_id: value,
+      start_time: type?.start_time ? trimTime(type.start_time) : current.start_time,
+      end_time: type?.end_time ? trimTime(type.end_time) : current.end_time
+    }))
   }
 
   function finishSaveWithError(nextError) {
@@ -814,6 +915,63 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
                 </div>
               </FormSection>
 
+              <FormSection title="Horario extraordinario / Turnos especiales">
+                <div className="profiles-special-schedules">
+                  {customSchedules.map((schedule) => (
+                    <article className="profiles-special-row" key={schedule.id}>
+                      <span className="profiles-special-dot" style={{ background: schedule.shift_types?.color || "#14b8a6" }} />
+                      <div>
+                        <strong>{schedule.shift_types?.name || "Turno especial"}</strong>
+                        <small>{specialScheduleLabel(schedule)} · {schedule.status === "active" ? "Activo" : "Inactivo"}</small>
+                        {schedule.notes && <em>{schedule.notes}</em>}
+                      </div>
+                      {canManageSpecialSchedules && <button type="button" className="profiles-secondary" onClick={() => startSpecialSchedule(schedule)} disabled={saving}>Editar</button>}
+                      {canManageSpecialSchedules && <button type="button" className="profiles-secondary danger" onClick={() => deleteSpecialSchedule(schedule)} disabled={saving}>Eliminar</button>}
+                    </article>
+                  ))}
+                  {!customSchedules.length && <p className="profiles-empty inline">Sin turnos especiales configurados.</p>}
+                </div>
+
+                {canManageSpecialSchedules && !customScheduleForm && (
+                  <button type="button" className="profiles-secondary" onClick={() => startSpecialSchedule()} disabled={saving}>Agregar turno especial</button>
+                )}
+
+                {canManageSpecialSchedules && customScheduleForm && (
+                  <div className="profiles-special-form">
+                    <div className="profiles-form-grid">
+                      <Field label="Tipo de turno">
+                        <select value={customScheduleForm.shift_type_id} onChange={(event) => applySpecialShiftType(event.target.value)} required disabled={saving}>
+                          <option value="">Selecciona tipo</option>
+                          {shiftTypes.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}
+                        </select>
+                      </Field>
+                      <Field label="Dia de la semana">
+                        <select value={customScheduleForm.weekday} onChange={(event) => setCustomScheduleForm({ ...customScheduleForm, weekday: event.target.value })} disabled={saving}>
+                          <option value="">Sin dia fijo</option>
+                          {WEEKDAY_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                        </select>
+                      </Field>
+                      <Field label="Fecha especifica"><input type="date" value={customScheduleForm.specific_date} onChange={(event) => setCustomScheduleForm({ ...customScheduleForm, specific_date: event.target.value })} disabled={saving} /></Field>
+                      <Field label="Fecha de inicio"><input type="date" value={customScheduleForm.start_date} onChange={(event) => setCustomScheduleForm({ ...customScheduleForm, start_date: event.target.value })} disabled={saving} /></Field>
+                      <Field label="Fecha final"><input type="date" value={customScheduleForm.end_date} onChange={(event) => setCustomScheduleForm({ ...customScheduleForm, end_date: event.target.value })} disabled={saving} /></Field>
+                      <Field label="Estado">
+                        <select value={customScheduleForm.status} onChange={(event) => setCustomScheduleForm({ ...customScheduleForm, status: event.target.value })} disabled={saving}>
+                          <option value="active">Activo</option>
+                          <option value="inactive">Inactivo</option>
+                        </select>
+                      </Field>
+                      <Field label="Hora entrada"><input type="time" value={customScheduleForm.start_time} onChange={(event) => setCustomScheduleForm({ ...customScheduleForm, start_time: event.target.value })} disabled={saving} /></Field>
+                      <Field label="Hora salida"><input type="time" value={customScheduleForm.end_time} onChange={(event) => setCustomScheduleForm({ ...customScheduleForm, end_time: event.target.value })} disabled={saving} /></Field>
+                    </div>
+                    <Field label="Motivo / nota"><textarea value={customScheduleForm.notes} onChange={(event) => setCustomScheduleForm({ ...customScheduleForm, notes: event.target.value })} disabled={saving} /></Field>
+                    <div className="profiles-special-actions">
+                      <button type="button" className="profiles-secondary" onClick={() => setCustomScheduleForm(null)} disabled={saving}>Cancelar turno especial</button>
+                      <button type="button" className="profiles-primary" onClick={saveSpecialSchedule} disabled={saving}>Guardar turno especial</button>
+                    </div>
+                  </div>
+                )}
+              </FormSection>
+
               <FormSection title="Documentos / imagenes">
                 <div className="profiles-form-grid">
                   <Field label="Avatar URL"><input value={form.avatar_url} onChange={(event) => updateField("avatar_url", event.target.value)} disabled={currentIsReadOnly || saving} /></Field>
@@ -1037,6 +1195,36 @@ function normalizeUsername(value) {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9._-]+/g, "")
+}
+
+function trimTime(value) {
+  return String(value || "").slice(0, 5)
+}
+
+function emptyCustomSchedule(profileId) {
+  return {
+    profile_id: profileId || "",
+    shift_type_id: "",
+    weekday: "",
+    specific_date: "",
+    start_date: "",
+    end_date: "",
+    start_time: "",
+    end_time: "",
+    notes: "",
+    status: "active"
+  }
+}
+
+function specialScheduleLabel(schedule) {
+  const parts = []
+  if (schedule.specific_date) parts.push(schedule.specific_date)
+  if (schedule.weekday !== null && schedule.weekday !== undefined) {
+    parts.push(WEEKDAY_OPTIONS.find(([value]) => Number(value) === Number(schedule.weekday))?.[1] || `Dia ${schedule.weekday}`)
+  }
+  if (schedule.start_date || schedule.end_date) parts.push(`${schedule.start_date || "Sin inicio"} a ${schedule.end_date || "indefinido"}`)
+  if (schedule.start_time || schedule.end_time) parts.push(`${trimTime(schedule.start_time) || "--:--"} - ${trimTime(schedule.end_time) || "--:--"}`)
+  return parts.length ? parts.join(" · ") : "Sin vigencia definida"
 }
 
 function databaseError(error) {

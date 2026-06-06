@@ -69,6 +69,11 @@
   cursor: not-allowed;
 }
 
+.schedule-secondary.danger {
+  border-color: #7f1d1d;
+  color: #fecaca;
+}
+
 .schedule-success,
 .schedule-error {
   padding: 12px 14px;
@@ -144,6 +149,12 @@
   gap: 10px;
 }
 
+.schedule-results {
+  margin: -6px 0 0;
+  color: #94a3b8;
+  font-size: 13px;
+}
+
 .schedule-toolbar label,
 .schedule-modal label {
   display: grid;
@@ -166,6 +177,10 @@
   background: #081425;
   color: #e6eef8;
   box-sizing: border-box;
+}
+
+.schedule-modal input[type="color"] {
+  padding: 4px;
 }
 
 .schedule-check {
@@ -503,6 +518,41 @@
 
 .schedule-modal footer {
   justify-content: end;
+}
+
+.shift-types-modal {
+  width: min(760px, 100%);
+}
+
+.shift-types-list {
+  display: grid;
+  gap: 9px;
+}
+
+.shift-type-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #24344a;
+  border-radius: 10px;
+  background: #111c2d;
+}
+
+.shift-type-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+}
+
+.shift-type-row div {
+  display: grid;
+  gap: 3px;
+}
+
+.shift-type-row small {
+  color: #94a3b8;
 }
 
 @media (max-width: 1080px) {

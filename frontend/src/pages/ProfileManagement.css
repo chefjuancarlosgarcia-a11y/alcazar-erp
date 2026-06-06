@@ -73,6 +73,11 @@
   color: #fca5a5;
 }
 
+.profiles-secondary.danger {
+  border-color: #7f1d1d;
+  color: #fca5a5;
+}
+
 .profiles-actions button:disabled {
   opacity: .55;
   cursor: not-allowed;
@@ -111,7 +116,8 @@
 .profiles-filters input,
 .profiles-filters select,
 .profiles-field input,
-.profiles-field select {
+.profiles-field select,
+.profiles-field textarea {
   width: 100%;
   padding: 11px 12px;
   border: 1px solid #334155;
@@ -333,10 +339,16 @@
 
 .profiles-field input:disabled,
 .profiles-field select:disabled,
+.profiles-field textarea:disabled,
 .profiles-secondary:disabled,
 .profiles-primary:disabled {
   opacity: .6;
   cursor: not-allowed;
+}
+
+.profiles-field textarea {
+  min-height: 72px;
+  resize: vertical;
 }
 
 .profiles-attendance-panel {
@@ -432,6 +444,53 @@
   font-size: 13px;
 }
 
+.profiles-special-schedules,
+.profiles-special-form {
+  display: grid;
+  gap: 10px;
+}
+
+.profiles-special-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #24344a;
+  border-radius: 8px;
+  background: #101b2d;
+}
+
+.profiles-special-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+}
+
+.profiles-special-row div {
+  display: grid;
+  gap: 3px;
+}
+
+.profiles-special-row small,
+.profiles-special-row em {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.profiles-special-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+.profiles-empty.inline {
+  margin: 0;
+  padding: 12px;
+  border-radius: 8px;
+}
+
 .profiles-modal-actions {
   position: sticky;
   bottom: 0;
@@ -486,6 +545,7 @@
   .profiles-filters,
   .profiles-form-grid,
   .profiles-attendance-fields,
+  .profiles-special-row,
   .profiles-row {
     grid-template-columns: 1fr;
   }
@@ -562,4 +622,3 @@
   border-color: #2dd4bf;
   box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.1);
 }
-
