@@ -1,0 +1,42 @@
+.erp-sidebar .erp-sidebar-link,
+.erp-sidebar .erp-sidebar-link:visited,
+.erp-sidebar .erp-sidebar-subitem,
+.erp-sidebar .erp-sidebar-subitem:visited {
+  border-color: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+.erp-sidebar .erp-sidebar-link:hover:not(.active),
+.erp-sidebar .erp-sidebar-subitem:hover:not(.active) {
+  background: rgba(148, 163, 184, 0.06) !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.erp-sidebar .erp-sidebar-link:focus,
+.erp-sidebar .erp-sidebar-link:focus-visible,
+.erp-sidebar .erp-sidebar-link:active,
+.erp-sidebar .erp-sidebar-subitem:focus,
+.erp-sidebar .erp-sidebar-subitem:focus-visible,
+.erp-sidebar .erp-sidebar-subitem:active {
+  border-color: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+.erp-sidebar .erp-sidebar-link.active,
+.erp-sidebar .erp-sidebar-link[aria-current="page"] {
+  background: rgba(20, 184, 166, 0.14) !important;
+  border-color: rgba(20, 184, 166, 0.62) !important;
+  box-shadow: inset 3px 0 0 var(--sidebar-accent, #14b8a6) !important;
+  color: #f0fdfa !important;
+}
+
+.erp-sidebar .erp-sidebar-subitem.active,
+.erp-sidebar .erp-sidebar-subitem[aria-current="page"] {
+  background: rgba(30, 41, 59, 0.72) !important;
+  border-color: rgba(20, 184, 166, 0.32) !important;
+  box-shadow: none !important;
+  color: #e6eef8 !important;
+}

@@ -165,6 +165,7 @@ function addNotification(userId, type, title, message, relatedTicketId) {
   })
   localStorage.setItem(NOTIFICATIONS_KEY, JSON.stringify(notifications))
   window.dispatchEvent(new Event("task-notifications-updated"))
+  window.dispatchEvent(new Event("notifications-updated"))
 }
 
 function notifyManagers(type, title, message, ticketId) {

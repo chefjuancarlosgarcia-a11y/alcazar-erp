@@ -28,6 +28,8 @@ export function mapPOSProductFromSupabase(row) {
     active: row.active === true,
     estado: row.active === true ? "activo" : "inactivo",
     productionReady: row.production_ready === true,
+    isTestItem: row.is_test_item === true,
+    is_test_item: row.is_test_item === true,
     recipe: row.recipe,
     productionArea: row.production_area
   }
@@ -43,6 +45,7 @@ function serializeProduct(product) {
     category_name: product.categoryName || product.categoria || product.category_name || null,
     recipe_id: product.recipeId || product.recipe_id || null,
     production_area_id: product.productionAreaId || product.areaProduccion || product.production_area_id || null,
+    is_test_item: product.isTestItem === true || product.is_test_item === true,
     active: product.active ?? product.estado === "activo",
     sort_order: Number(product.sortOrder ?? product.sort_order ?? 0)
   }
@@ -114,4 +117,3 @@ export async function createOrUpdatePOSProductFromRecipe(recipe, productId = nul
   })
   return { data: mapPOSProductFromSupabase(data), error }
 }
-

@@ -134,6 +134,7 @@ function addNotification(userId, type, title, message, relatedId) {
   })
   saveArray(NOTIFICATIONS_KEY, notifications)
   window.dispatchEvent(new Event("task-notifications-updated"))
+  window.dispatchEvent(new Event("notifications-updated"))
 }
 
 function notifyCashiers(preBill) {
@@ -141,7 +142,7 @@ function notifyCashiers(preBill) {
   parseArray("users")
     .filter((user) => ["Cajero", "Caja", "Administrador", "Gerente General", "Supervisor"].includes(user.rol))
     .forEach((user) => ids.add(user.id || user.username))
-  ids.forEach((userId) => addNotification(userId, "bill_sent_to_cashier", "Nueva solicitud de cobro", `${preBill.tableName} lista para cobro.`, preBill.id))
+  ids.forEach((userId) => addNotification(userId, "payment_request", "Nueva solicitud de cobro", `${preBill.tableName} lista para cobro.`, preBill.id))
 }
 
 function notifyManagers(type, title, message, relatedId) {
@@ -206,6 +207,67 @@ export function createPreBill(orderId, waiter) {
   audit("create_prebill", "preBill", preBill.id, order, nextOrder, waiter)
   emit()
   return { ok: true, preBill }
+}
+
+function normalizePOSOrderForCashier(order, waiter) {
+  const items = nonCancelledItems(order).map((item) => ({
+    ...item,
+    lineId: item.lineId || item.id,
+    id: item.productId || item.product_id || item.id,
+    nombre: item.nombre || item.productName || item.product_name,
+    cantidad: Number(item.cantidad ?? item.quantity ?? 0),
+    precio: Number(item.precio ?? item.unitPrice ?? item.unit_price ?? 0),
+    status: item.status || "served"
+  }))
+  const subtotal = money(Number(order?.subtotal ?? order?.total ?? items.reduce((sum, item) => sum + item.precio * item.cantidad, 0)))
+  return {
+    id: order.id,
+    areaId: order.areaId || order.area_id,
+    mesaId: order.mesaId || order.tableId || order.table_id,
+    mesa: order.mesa || order.tableName || order.table_name,
+    tableName: order.tableName || order.table_name || tableName(order),
+    usuario: order.waiterId || order.waiter_id || actorId(waiter),
+    usuarioNombre: order.usuarioNombre || order.waiterName || order.waiter_name || actorName(waiter),
+    status: order.status || "awaiting_bill",
+    estado: order.estado || "esperando cuenta",
+    subtotal,
+    total: money(order.total ?? subtotal),
+    items,
+    source: "supabase_pos",
+    createdAt: order.created_at || order.createdAt || new Date().toISOString()
+  }
+}
+
+export function createPreBillFromPOSOrder(order, waiter, options = {}) {
+  if (!order?.id) return { ok: false, message: "Orden POS no encontrada." }
+  const normalizedOrder = normalizePOSOrderForCashier(order, waiter)
+  const existing = getOrderPreBill(normalizedOrder.id)
+  const items = nonCancelledItems(normalizedOrder)
+  const subtotal = money(items.reduce((total, item) => total + Number(item.precio) * Number(item.cantidad), 0))
+  const base = {
+    orderId: normalizedOrder.id,
+    tableId: normalizedOrder.mesaId,
+    tableName: normalizedOrder.tableName,
+    waiterId: normalizedOrder.usuario,
+    waiterName: normalizedOrder.usuarioNombre,
+    items,
+    subtotal,
+    discounts: 0,
+    taxes: 0,
+    tipSuggested: money(subtotal * 0.1),
+    total: subtotal,
+    peopleCount: options.peopleCount || "",
+    source: "supabase_pos"
+  }
+  const preBill = existing
+    ? { ...existing, ...base, status: existing.status === "paid" ? existing.status : existing.status || "draft" }
+    : { id: id("prebill"), ...base, status: "draft", createdAt: new Date().toISOString(), printedAt: "", sentAt: "" }
+  saveArray(PRE_BILLS_KEY, [preBill, ...loadPreBills().filter((bill) => bill.id !== preBill.id)])
+  const storedOrder = { ...normalizedOrder, status: preBill.status === "sent_to_cashier" ? "sent_to_cashier" : "awaiting_bill", estado: preBill.status === "sent_to_cashier" ? "en caja" : "esperando cuenta", preBillId: preBill.id }
+  saveArray(ORDERS_KEY, [storedOrder, ...loadOrders().filter((item) => String(item.id) !== String(storedOrder.id))])
+  audit(existing ? "sync_prebill" : "create_prebill", "preBill", preBill.id, existing || null, preBill, waiter)
+  emit()
+  return { ok: true, preBill, order: storedOrder, existing: Boolean(existing) }
 }
 
 export function printPreBill(preBillId, user) {
@@ -293,6 +355,9 @@ export function openCashSession(user, openingAmount) {
     closedAt: "",
     expectedCash: amount,
     countedCash: "",
+    cashCountDetail: null,
+    billsSubtotal: null,
+    coinsSubtotal: null,
     difference: "",
     notes: ""
   }
@@ -468,7 +533,7 @@ export function confirmPayment(data, user) {
   if (!preBill || preBill.status === "paid") return { ok: false, message: "La precuenta no está disponible para cobro." }
   const order = loadOrders().find((entry) => String(entry.id) === String(preBill.orderId))
   const legacyReady = ["preparada", "entregada"].includes(order?.estado)
-  const unfinished = (order?.items || []).some((item) => !["prepared", "served", "paid", "cancelled"].includes(item.status) && !legacyReady)
+  const unfinished = order?.source === "supabase_pos" ? false : (order?.items || []).some((item) => !["prepared", "served", "paid", "cancelled"].includes(item.status) && !legacyReady)
   if (unfinished) return { ok: false, message: "No puedes cobrar: hay productos que aún no están preparados o servidos." }
   const splitBill = loadSplitBills().find((split) => String(split.preBillId) === String(preBill.id))
   const splitPart = data.splitId ? splitBill?.splits.find((split) => String(split.id) === String(data.splitId)) : null
@@ -598,7 +663,8 @@ export function closeCashSession(sessionId, countedCash, notes, user) {
   if (!session) return { ok: false, message: "Caja abierta no encontrada." }
   if (String(session.cashierId) !== String(actorId(user)) && !canAuthorizeFinance(user)) return { ok: false, message: "No puedes cerrar la caja de otro usuario." }
   const summary = getCashSummary(session)
-  const counted = money(countedCash)
+  const cashCountDetail = typeof countedCash === "object" && countedCash !== null ? countedCash : null
+  const counted = money(cashCountDetail?.total ?? countedCash)
   const difference = money(counted - summary.expectedCash)
   if (difference !== 0 && !String(notes || "").trim()) return { ok: false, message: "La diferencia requiere una observación obligatoria." }
   const closed = {
@@ -607,6 +673,9 @@ export function closeCashSession(sessionId, countedCash, notes, user) {
     closedAt: new Date().toISOString(),
     expectedCash: summary.expectedCash,
     countedCash: counted,
+    cashCountDetail: cashCountDetail?.denominations || null,
+    billsSubtotal: cashCountDetail ? money(cashCountDetail.billsSubtotal) : null,
+    coinsSubtotal: cashCountDetail ? money(cashCountDetail.coinsSubtotal) : null,
     difference,
     notes: String(notes || "").trim(),
     summary

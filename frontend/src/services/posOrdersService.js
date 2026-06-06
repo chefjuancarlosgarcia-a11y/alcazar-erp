@@ -20,6 +20,8 @@ function mapOrderItem(row) {
     productionAreaId: row.production_area_id || "",
     areaProduccion: row.production_area_id || "",
     productionReady: row.production_ready === true,
+    isTestItem: row.is_test_item === true,
+    is_test_item: row.is_test_item === true,
     inventoryConsumed: row.inventory_consumed === true,
     ticketId: row.production_ticket_id || "",
     modificaciones: row.notes || "",
@@ -146,6 +148,7 @@ export async function addItemToOrder(orderId, product, quantity = 1, notes = "")
       recipe_id: product.recipeId || product.recipe_id,
       production_area_id: product.productionAreaId || product.production_area_id || product.areaProduccion,
       production_ready: product.productionReady === true,
+      is_test_item: product.isTestItem === true || product.is_test_item === true,
       notes: notes || null,
       modifiers: notes ? [notes] : []
     }).select().single(),

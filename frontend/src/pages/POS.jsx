@@ -2,7 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useLocation } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
 import useSupabaseRealtime from "../hooks/useSupabaseRealtime"
+import { useToast } from "../hooks/useToast"
+import { ToastContainer } from "../components/ToastContainer"
 import { createStockRequisition } from "../utils/posProduction"
+import { createPreBillFromPOSOrder, createSplitBill, printPreBill as markPreBillPrinted, sendPreBillToCashier } from "../utils/cashier"
+import { printPreCheck } from "../services/posPrintService"
 import { getProductionAreas } from "../services/areasService"
 import { getActiveRecipes, getPOSRecipeLink } from "../services/recipesService"
 import {
@@ -37,6 +41,7 @@ import "./POS.css"
 const POS_CATEGORIES_KEY = "posCategories"
 const POS_LAYOUT_KEY = "posLayout"
 const DEFAULT_LAYOUT_SETTINGS = { snapToGrid: true, gridSize: 24, zoom: 1 }
+const TABLE_TIME_THRESHOLDS = { normalMinutes: 60, criticalMinutes: 90 }
 const DEFAULT_POS_CATEGORIES = [
   { id: "entradas", name: "Entradas", description: "", productionAreaId: "cocina", active: true, sortOrder: 1, color: "#0ea5a4", icon: "🥗" },
   { id: "pizzas", name: "Pizzas", description: "Pizzas de la casa", productionAreaId: "pizzeria", active: true, sortOrder: 2, color: "#f97316", icon: "🍕" },
@@ -75,6 +80,70 @@ function normalizeId(value) {
   return String(value || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
 }
 
+function productInitials(name) {
+  return String(name || "Producto").trim().split(/\s+/).slice(0, 2).map((part) => part.charAt(0).toUpperCase()).join("")
+}
+
+function tableStatusLabel(status) {
+  return {
+    disponible: "Disponible",
+    ocupada: "Ocupada",
+    en_servicio: "Ocupada",
+    nuevos_sin_enviar: "Pendiente",
+    esperando_cuenta: "Por cobrar",
+    pago_en_proceso: "Cobrando",
+    pagada: "Pagada",
+    problema: "Problema",
+    en_produccion: "En cocina",
+    lista_para_servir: "Lista",
+    reservada: "Reservada",
+    limpieza: "Limpieza",
+    inactiva: "Inactiva"
+  }[status] || status
+}
+
+function tableTrafficState(status, activeMinutes = 0) {
+  if (["inactiva", "limpieza", "cerrada", "fuera_servicio"].includes(status)) return "disabled"
+  if (["esperando_cuenta", "pago_en_proceso"].includes(status)) return "payment"
+  if (status === "disponible" || status === "pagada") return "free"
+  if (Number(activeMinutes || 0) >= TABLE_TIME_THRESHOLDS.normalMinutes) return "late"
+  return "active"
+}
+
+function tableTrafficLabel(traffic, status) {
+  return {
+    free: "Disponible",
+    active: "En servicio",
+    payment: "Esperando pago",
+    late: "Tiempo excedido",
+    disabled: tableStatusLabel(status)
+  }[traffic] || tableStatusLabel(status)
+}
+
+function formatTableDuration(minutes) {
+  const totalMinutes = Math.max(0, Math.floor(Number(minutes || 0)))
+  const hours = Math.floor(totalMinutes / 60)
+  const remainingMinutes = totalMinutes % 60
+  return hours > 0 ? `${hours}h ${remainingMinutes}m` : `${remainingMinutes}m`
+}
+
+const POS_STEPS = [
+  { id: 1, label: "Mesa" },
+  { id: 2, label: "Personas" },
+  { id: 3, label: "Productos" },
+  { id: 4, label: "Enviar" },
+  { id: 5, label: "Cobrar" }
+]
+
+function getOrderItemAssignment(notes) {
+  const match = String(notes || "").match(/^\[Para: ([^\]]+)\]\s*/)
+  return match?.[1] || "Mesa completa"
+}
+
+function getOrderItemInstructions(notes) {
+  return String(notes || "").replace(/^\[Para: [^\]]+\]\s*/, "").trim()
+}
+
 const POS_DEBUG = import.meta.env.DEV
 
 function posDebug(label, payload) {
@@ -93,6 +162,10 @@ function productCategoryId(product) {
   return product?.categoriaId || product?.categoryId || product?.category_id || normalizeId(product?.categoria)
 }
 
+function isTestProduct(product) {
+  return product?.isTestItem === true || product?.is_test_item === true
+}
+
 function getProductProductionState(product, recipes, areas, categories) {
   const recipeId = productRecipeId(product)
   const areaId = productProductionAreaId(product)
@@ -102,8 +175,9 @@ function getProductProductionState(product, recipes, areas, categories) {
   const area = areas.find((entry) => entry.id === areaId)
   const category = categories.find((entry) => entry.id === categoryId && entry.active !== false)
   const active = product?.estado === "activo" || product?.active === true
+  const testItem = isTestProduct(product)
   const issues = []
-  if (!recipe) issues.push("Sin receta válida")
+  if (!testItem && !recipe) issues.push("Sin receta válida")
   if (!area) issues.push("Sin área válida")
   if (!category) issues.push("Sin categoría activa")
   if (active && product?.productionReady !== true) issues.push("No validado para producción")
@@ -116,6 +190,7 @@ function getProductProductionState(product, recipes, areas, categories) {
     link,
     area,
     category,
+    testItem,
     issues,
     productionReady: active && product?.productionReady === true && issues.length === 0
   }
@@ -166,7 +241,8 @@ const emptyItemForm = {
   tiempoPreparacion: "",
   costoEstimado: "",
   ingredientesRelacionados: "",
-  recipeId: ""
+  recipeId: "",
+  isTestItem: false
 }
 
 const emptyCategoryForm = {
@@ -308,9 +384,15 @@ function buildPosLayoutPayload(areas, settings) {
   }
 }
 
-function TableWithChairs({ table, selected = false, editing = false, zoom = 1, onPointerDown, onClick }) {
+function TableWithChairs({ table, selected = false, editing = false, zoom = 1, onPointerDown, onClick, showSelectLabel = false }) {
   const capacity = Math.max(1, Number(table.capacity ?? table.capacidad ?? 1))
   const status = table.status || table.estado || "disponible"
+  const traffic = tableTrafficState(status, table.activeMinutes)
+  const trafficLabel = tableTrafficLabel(traffic, status)
+  const tableName = table.name || `M${table.numero}`
+  const activeTimeLabel = table.activeMinutes != null ? formatTableDuration(table.activeMinutes) : ""
+  const orderTotalLabel = Number(table.orderTotal || 0) > 0 ? `Q${Number(table.orderTotal).toFixed(0)}` : ""
+  const tableMeta = [`${capacity} pax`, orderTotalLabel].filter(Boolean).join(" · ")
   const shape = table.shape || "square"
   const radiusX = shape === "rectangular" ? 56 : shape === "round" ? 47 : 46
   const radiusY = shape === "rectangular" ? 39 : shape === "round" ? 47 : 40
@@ -321,7 +403,7 @@ function TableWithChairs({ table, selected = false, editing = false, zoom = 1, o
       : tableSurfaceStyle
   return (
     <button
-      className={`pos-floor-table ${selected ? "selected" : ""} state-${status}`}
+      className={`pos-floor-table ${selected ? "selected" : ""} state-${status} traffic-${traffic}`}
       type="button"
       onPointerDown={onPointerDown}
       onClick={onClick}
@@ -347,12 +429,13 @@ function TableWithChairs({ table, selected = false, editing = false, zoom = 1, o
           />
         )
       })}
-      <span style={{ ...surfaceStyle, ...tableStatusStyles[status] }}>
-        <strong>{table.name || `M${table.numero}`}</strong>
-        <small>{capacity} pax</small>
-        {table.orderTotal > 0 && <small>Q{Number(table.orderTotal).toFixed(0)}</small>}
-        {table.activeMinutes != null && <small>{table.activeMinutes} min</small>}
-        {table.readyCount > 0 && <small style={tableReadyCountStyle}>{table.readyCount} listo(s)</small>}
+      <span className="pos-table-surface" style={{ ...surfaceStyle, ...tableStatusStyles[status] }}>
+        <small className="pos-table-status-label">{trafficLabel}</small>
+        <strong className="pos-table-name">{tableName}</strong>
+        {activeTimeLabel && <small className="pos-table-time">{activeTimeLabel}</small>}
+        <small className="pos-table-meta">{tableMeta}</small>
+        {table.readyCount > 0 && <small className="pos-table-ready-count" style={tableReadyCountStyle}>{table.readyCount} listo(s)</small>}
+        {showSelectLabel && <small className="pos-table-select-label">{selected ? "Seleccionada" : "Seleccionar mesa"}</small>}
       </span>
     </button>
   )
@@ -363,6 +446,7 @@ function POS() {
   const { user } = useAuth()
   const params = new URLSearchParams(location.search)
   const section = params.get("section") || "pos"
+  const { toasts, showToast, dismissToast } = useToast()
 
   const [items, setItems] = useState([])
   const [itemsLoading, setItemsLoading] = useState(true)
@@ -405,6 +489,9 @@ function POS() {
   const floorPlanRef = useRef(null)
   const [ordenMesa, setOrdenMesa] = useState(null)
   const [personasOrden, setPersonasOrden] = useState("1")
+  const [posStep, setPosStep] = useState(1)
+  const [seatNames, setSeatNames] = useState(["Persona 1"])
+  const [selectedAssignment, setSelectedAssignment] = useState("Mesa completa")
   const [deliveryForm, setDeliveryForm] = useState(emptyDeliveryForm)
   const [deliveryErrors, setDeliveryErrors] = useState({})
   const [ordenError, setOrdenError] = useState("")
@@ -423,7 +510,7 @@ function POS() {
   const [modificacionActualTexto, setModificacionActualTexto] = useState("")
   const [edicionEnviada, setEdicionEnviada] = useState(null)
   const [showTechnicalAudit, setShowTechnicalAudit] = useState(false)
-  const [collapsedOrderSections, setCollapsedOrderSections] = useState({ served: true, closed: true })
+  const [collapsedOrderSections, setCollapsedOrderSections] = useState({ served: true, closed: true, activity: true, previous: true, audit: true })
   const realtimeNoticeTimerRef = useRef(null)
 
   const activeCategories = useMemo(() => posCategories.filter((category) => category.active !== false).sort((a, b) => Number(a.sortOrder) - Number(b.sortOrder)), [posCategories])
@@ -450,6 +537,17 @@ function POS() {
     ...sectionItem,
     items: orden.filter((item) => sectionItem.statuses.includes(item.status || "draft"))
   }))
+  const orderAssignmentGroups = useMemo(() => {
+    const groups = new Map()
+    orden.filter((item) => item.status !== "cancelled").forEach((item) => {
+      const assignment = getOrderItemAssignment(item.modificaciones)
+      const current = groups.get(assignment) || { name: assignment, items: 0, subtotal: 0 }
+      current.items += Number(item.cantidad || 0)
+      current.subtotal += Number(item.precio || 0) * Number(item.cantidad || 0)
+      groups.set(assignment, current)
+    })
+    return [...groups.values()]
+  }, [orden])
   const activeFloorAreas = areasRestaurante.filter((area) => area.active !== false).sort((a, b) => Number(a.sortOrder) - Number(b.sortOrder))
   const areaActiva = areasRestaurante.find((area) => area.id === areaActivaId && area.active !== false) || activeFloorAreas[0] || null
   const mesaSeleccionadaActual = areaActiva?.mesas?.find((mesa) => mesa.id === mesaSeleccionada) || null
@@ -469,7 +567,7 @@ function POS() {
   })
   const selectedRecipe = finalRecipes.find((recipe) => String(recipe.id) === String(productRecipeId(form)))
   const selectedProductionArea = productionAreas.find((area) => area.id === productProductionAreaId(form))
-  const formReadyForValidation = Boolean(selectedRecipe && selectedProductionArea && form.estado === "activo")
+  const formReadyForValidation = Boolean((form.isTestItem || selectedRecipe) && selectedProductionArea && form.estado === "activo")
   const storedLocalPOSProducts = readLegacyPOSProducts()
   const localPOSProducts = storedLocalPOSProducts.filter((product) => !product.supabaseProductId)
   const mesasDestinoDisponibles = activeFloorAreas.flatMap((area) =>
@@ -1037,6 +1135,10 @@ function POS() {
     setOrderDetail(null)
     setTrasladoActivo(false)
     setMesaDestinoId("")
+    setPersonasOrden("1")
+    setSeatNames(["Persona 1"])
+    setSelectedAssignment("Mesa completa")
+    setPosStep(2)
     if (!esPedidoDomicilioParaLlevar(areaActiva.nombre) && !esPedidoDomicilioParaLlevar(mesa.numero)) {
       setDeliveryErrors({})
     }
@@ -1057,6 +1159,20 @@ function POS() {
       setOrderEvents([])
       setOrdenError(`No se pudo cargar la orden de la mesa: ${error.message}`)
     }
+  }
+
+  function actualizarCantidadPersonas(value) {
+    const count = Math.max(1, Math.min(30, Number(value) || 1))
+    const nextNames = Array.from({ length: count }, (_, index) => seatNames[index] || `Persona ${index + 1}`)
+    setPersonasOrden(String(count))
+    setSeatNames(nextNames)
+    if (selectedAssignment !== "Mesa completa" && !nextNames.includes(selectedAssignment)) {
+      setSelectedAssignment("Mesa completa")
+    }
+  }
+
+  function actualizarNombrePersona(index, value) {
+    setSeatNames((current) => current.map((name, seatIndex) => seatIndex === index ? value : name))
   }
 
   function actualizarDelivery(campo, valor) {
@@ -1113,18 +1229,17 @@ function POS() {
     const faltantes = {}
     const recipeId = productRecipeId(form)
     const productionAreaId = productProductionAreaId(form)
-    if (!form.nombre.trim()) faltantes.nombre = "Nombre del item"
+    if (!form.nombre.trim()) faltantes.nombre = "Nombre del platillo"
     if (!form.categoriaId) faltantes.categoria = "Categoría POS"
     if (form.estado === "activo" && !activeCategories.some((category) => category.id === form.categoriaId)) faltantes.categoria = "Categoría POS activa"
     if (!form.precio || Number(form.precio) <= 0) faltantes.precio = "Precio de venta"
     if (!form.descripcion.trim()) faltantes.descripcion = "Descripción"
-    if (!form.imagen) faltantes.imagen = "Imagen del item"
     if (!form.estado) faltantes.estado = "Estado"
     if (!productionAreaId || (form.estado === "activo" && !productionAreas.some((area) => area.id === productionAreaId))) faltantes.areaProduccion = "Área de producción válida"
     if (!form.tiempoPreparacion.trim()) faltantes.tiempoPreparacion = "Tiempo estimado de preparación"
-    if (form.estado === "activo" && !finalRecipes.some((recipe) => String(recipe.id) === String(recipeId))) faltantes.recipeId = "Receta final activa válida"
+    if (!form.isTestItem && form.estado === "activo" && !finalRecipes.some((recipe) => String(recipe.id) === String(recipeId))) faltantes.recipeId = "Receta final activa válida"
     const recipe = finalRecipes.find((entry) => String(entry.id) === String(recipeId))
-    if (form.estado === "activo" && recipe && recipe.production_area_id !== productionAreaId) faltantes.areaProduccion = "Área que coincida con la receta"
+    if (!form.isTestItem && form.estado === "activo" && recipe && recipe.production_area_id !== productionAreaId) faltantes.areaProduccion = "Área que coincida con la receta"
     return faltantes
   }
 
@@ -1151,6 +1266,8 @@ function POS() {
       productionAreaId,
       production_area_id: productionAreaId,
       areaProduccion: productionAreaId,
+      isTestItem: form.isTestItem === true,
+      is_test_item: form.isTestItem === true,
       active: form.estado === "activo",
       productionReady: false,
       costoEstimado: form.costoEstimado ? Number(form.costoEstimado) : "",
@@ -1163,7 +1280,7 @@ function POS() {
     })
 
     const selectedFinalRecipe = finalRecipes.find((recipe) => String(recipe.id) === String(recipeId))
-    const savedResult = item.active
+    const savedResult = item.active && !item.isTestItem
       ? await createOrUpdatePOSProductFromRecipe({
           ...selectedFinalRecipe,
           id: recipeId,
@@ -1197,7 +1314,7 @@ function POS() {
     setEditandoId(null)
     setMostrarFormulario(false)
     setErrores({})
-    setOrdenError("Producto POS guardado y validado para producción.")
+    setOrdenError(item.isTestItem ? "Platillo de prueba guardado. Se enviará a KDS sin consumir inventario." : "Platillo guardado y validado para producción.")
   }
 
   function editarItem(item) {
@@ -1213,7 +1330,8 @@ function POS() {
       recipe_id: recipeId,
       areaProduccion: productionAreaId,
       productionAreaId,
-      production_area_id: productionAreaId
+      production_area_id: productionAreaId,
+      isTestItem: isTestProduct(item)
     })
     setEditandoId(item.id)
     setMostrarFormulario(true)
@@ -1249,17 +1367,19 @@ function POS() {
       mesa: ordenMesa,
       ordenActual: orden
     })
-    setItemPendiente(item)
-    setModificacionesPendientes("")
+    confirmarAgregarItem("", item)
   }
 
-  async function confirmarAgregarItem(modificaciones = "") {
-    if (!itemPendiente) return
+  async function confirmarAgregarItem(modificaciones = "", productOverride = itemPendiente) {
+    const productToAdd = productOverride || itemPendiente
+    if (!productToAdd) return
     if (!ordenMesa) {
       setOrdenError("Selecciona una mesa antes de agregar productos.")
       return
     }
-    const notas = modificaciones.trim()
+    const assignment = selectedAssignment || "Mesa completa"
+    const instructions = modificaciones.trim()
+    const notas = `${assignment === "Mesa completa" ? "" : `[Para: ${assignment}] `}${instructions}`.trim()
     let itemSaved = false
     try {
       let orderId = activeOrderId
@@ -1276,12 +1396,12 @@ function POS() {
         setCurrentOrder(created.data)
         setActiveOrderId(orderId)
       }
-      const existe = orden.find((ordenItem) => ordenItem.id === itemPendiente.id && (ordenItem.modificaciones || "") === notas && ordenItem.status === "draft")
+      const existe = orden.find((ordenItem) => ordenItem.id === productToAdd.id && (ordenItem.modificaciones || "") === notas && ordenItem.status === "draft")
       if (existe) {
         const result = await updateOrderItemQuantity(existe.lineId, existe.cantidad + 1, existe.precio)
         if (result.error) throw new Error(result.message || result.error.message)
       } else {
-        const result = await addItemToOrder(orderId, itemPendiente, 1, notas)
+        const result = await addItemToOrder(orderId, productToAdd, 1, notas)
         if (result.error) throw new Error(result.message || result.error.message)
       }
       await cargarMesaDesdeSupabase(ordenMesa, orderId)
@@ -1297,9 +1417,9 @@ function POS() {
     setOrdenMessage("Producto agregado.")
     setOrdenError("")
     posDebug("orderItem creado", {
-      productId: itemPendiente.id,
-      recipeId: productRecipeId(itemPendiente),
-      productionAreaId: productProductionAreaId(itemPendiente),
+      productId: productToAdd.id,
+      recipeId: productRecipeId(productToAdd),
+      productionAreaId: productProductionAreaId(productToAdd),
       cantidad: 1,
       mesa: ordenMesa
     })
@@ -1381,6 +1501,10 @@ function POS() {
       setProductionErrors([])
       setDeliveryErrors({})
       if (esMesaDelivery) setDeliveryForm(emptyDeliveryForm)
+
+      // Show success toast
+      showToast("Orden enviada correctamente a cocina.", "success", 1500)
+
       setOrdenMessage(`Orden enviada a producción. Inventario descontado. Tickets creados: ${(result.data.ticket_ids || []).length}.`)
       setOrdenError("")
       window.dispatchEvent(new Event("production-tickets-updated"))
@@ -1391,10 +1515,25 @@ function POS() {
         console.error("POS order sent but history refresh failed:", refreshError)
         setOrdenMessage(`Orden enviada a producción. Inventario descontado. No se pudo refrescar el historial: ${refreshError.message}`)
       }
+
+      // Auto-return to step 1 after 1.5 seconds
+      setTimeout(() => {
+        setPosStep(1)
+        setOrdenMesa(null)
+        setCurrentOrder(null)
+        setActiveOrderId("")
+        setOrden([])
+        setOrderEvents([])
+        setPersonasOrden("1")
+        setSeatNames(["Persona 1"])
+        setSelectedAssignment("Mesa completa")
+        setDeliveryForm(emptyDeliveryForm)
+      }, 1500)
     } catch (error) {
       console.error("SEND ORDER ERROR", error)
       setOrdenMessage("")
       setOrdenError(error?.message || "Error desconocido enviando orden.")
+      showToast(error?.message || "Error al enviar orden", "error", 3000)
     } finally {
       console.log("END send order")
       setSendingOrder(false)
@@ -1586,31 +1725,116 @@ function POS() {
     setOrdenError(`Requisición creada para ${error.stockError.itemName} hacia ${error.stockError.areaName}.`)
   }
 
+  function buildCashierOrder(order = currentOrder) {
+    if (!order) return null
+    return {
+      ...order,
+      items: order.items?.length ? order.items : orden,
+      tableName: order.tableName || `Mesa ${ordenMesa?.mesaNumero || order.mesa || ""}`,
+      waiterName: order.usuarioNombre || user?.name || user?.username || "POS",
+      peopleCount: personasOrden,
+      mesaId: order.mesaId || ordenMesa?.mesaId,
+      areaId: order.areaId || ordenMesa?.areaId
+    }
+  }
+
+  async function ensureCashierPreBill(order = currentOrder) {
+    const latest = order?.items?.length ? order : activeOrderId ? (await getOrderWithItems(activeOrderId)).data : order
+    const bridge = createPreBillFromPOSOrder(buildCashierOrder(latest), user, { peopleCount: personasOrden })
+    if (!bridge.ok) throw new Error(bridge.message || "No se pudo preparar la solicitud de cobro.")
+    return bridge.preBill
+  }
+
   async function solicitarCuenta(order) {
     try {
-      const result = await requestOrderBill(order.id)
+      if (draftItems.length) throw new Error("Envía o quita los productos nuevos antes de solicitar cobro.")
+      const result = order.status === "open" ? await requestOrderBill(order.id) : { error: null }
       if (result.error) throw new Error(result.message || result.error.message)
+      const refreshed = await getOrderWithItems(order.id)
+      if (refreshed.error) throw new Error(refreshed.message || refreshed.error.message)
+      const preBill = createPreBillFromPOSOrder(buildCashierOrder(refreshed.data), user, { peopleCount: personasOrden })
+      if (!preBill.ok) throw new Error(preBill.message)
       await cargarMesaDesdeSupabase(ordenMesa, order.id)
-      setOrdenMessage("Cuenta solicitada. Lista para enviar a caja.")
+      setOrdenMessage("Cobro solicitado. Puedes imprimir precuenta o enviar a caja.")
       setOrdenError("")
+      showToast("Cobro solicitado.", "success", 1800)
     } catch (error) {
       setOrdenError(`No se pudo solicitar la cuenta: ${error.message}`)
     }
   }
 
-  function imprimirPrecuenta(order) {
-    setOrdenError(`No se imprimió ${order.tableName || "la orden"}: Caja aún requiere migración a pos_orders.`)
+  async function imprimirPrecuenta(order) {
+    try {
+      if (draftItems.length) throw new Error("Envía o quita los productos nuevos antes de imprimir la precuenta.")
+      if (order.status === "open") {
+        const requested = await requestOrderBill(order.id)
+        if (requested.error) throw new Error(requested.message || requested.error.message)
+      }
+      const refreshed = await getOrderWithItems(order.id)
+      if (refreshed.error) throw new Error(refreshed.message || refreshed.error.message)
+      const preBill = createPreBillFromPOSOrder(buildCashierOrder(refreshed.data), user, { peopleCount: personasOrden })
+      if (!preBill.ok) throw new Error(preBill.message)
+      markPreBillPrinted(preBill.preBill.id, user)
+      printPreCheck({ ...buildCashierOrder(refreshed.data), peopleCount: personasOrden })
+      await cargarMesaDesdeSupabase(ordenMesa, order.id)
+      setOrdenMessage("Precuenta impresa. La mesa queda esperando pago.")
+      setOrdenError("")
+      showToast("Precuenta impresa.", "success", 1800)
+    } catch (error) {
+      setOrdenError(`No se pudo imprimir precuenta: ${error.message}`)
+    }
   }
 
   async function enviarCuentaACaja(order) {
     try {
-      const result = await sendOrderToCashier(order.id)
-      if (result.error) throw new Error(result.message || result.error.message)
+      if (draftItems.length) throw new Error("Envía o quita los productos nuevos antes de enviar a caja.")
+      if (order.status === "open") {
+        const requested = await requestOrderBill(order.id)
+        if (requested.error) throw new Error(requested.message || requested.error.message)
+      }
+      const refreshed = await getOrderWithItems(order.id)
+      if (refreshed.error) throw new Error(refreshed.message || refreshed.error.message)
+      const preBill = createPreBillFromPOSOrder(buildCashierOrder(refreshed.data), user, { peopleCount: personasOrden })
+      if (!preBill.ok) throw new Error(preBill.message)
+      if (refreshed.data.status !== "sent_to_cashier") {
+        const result = await sendOrderToCashier(order.id)
+        if (result.error) throw new Error(result.message || result.error.message)
+      }
+      const sent = sendPreBillToCashier(preBill.preBill.id, user)
+      if (!sent.ok) throw new Error(sent.message || "No se pudo notificar a caja.")
       await cargarMesaDesdeSupabase(ordenMesa, order.id)
-      setOrdenMessage("Cuenta enviada a caja.")
+      setOrdenMessage("Solicitud enviada a caja. Estado: cobro solicitado.")
       setOrdenError("")
+      showToast("Solicitud enviada a caja.", "success", 1800)
     } catch (error) {
       setOrdenError(`No se pudo enviar a caja: ${error.message}`)
+    }
+  }
+
+  async function prepararCobroPorPersona() {
+    try {
+      const preBill = await ensureCashierPreBill(currentOrder)
+      const amounts = orderAssignmentGroups.map((group) => group.subtotal).filter((amount) => amount > 0)
+      if (amounts.length < 2) throw new Error("Necesitas al menos dos personas con consumo para dividir por silla/persona.")
+      const split = createSplitBill(preBill.id, "custom", { amounts }, user)
+      if (!split.ok) throw new Error(split.message)
+      await enviarCuentaACaja(currentOrder)
+      setOrdenMessage("Cobro por persona preparado y enviado a caja.")
+    } catch (error) {
+      setOrdenError(`No se pudo preparar cobro por persona: ${error.message}`)
+    }
+  }
+
+  async function dividirCuentaIgual() {
+    try {
+      const preBill = await ensureCashierPreBill(currentOrder)
+      const count = Math.max(2, Number(window.prompt("¿En cuántas partes?", personasOrden || "2")) || 2)
+      const split = createSplitBill(preBill.id, "equal", { count }, user)
+      if (!split.ok) throw new Error(split.message)
+      await enviarCuentaACaja(currentOrder)
+      setOrdenMessage(`Cuenta dividida en ${count} partes y enviada a caja.`)
+    } catch (error) {
+      setOrdenError(`No se pudo dividir la cuenta: ${error.message}`)
     }
   }
 
@@ -1791,14 +2015,19 @@ function POS() {
 
   return (
     <section style={pageStyle}>
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       {section === "agregar-item" ? (
-        <>
-          <header style={headerStyle}>
-            <h1>Agregar Item</h1>
+        <div className="pos-dish-manager">
+          <header className="pos-dish-manager-header" style={headerStyle}>
+            <div>
+              <p className="pos-operation-eyebrow">Catálogo del punto de venta</p>
+              <h1>Agregar Platillo</h1>
+              <p>Crea platillos visuales, edítalos y publícalos en el POS.</p>
+            </div>
             <div style={buttonRowStyle}>
               {user?.role === "admin" && localPOSProducts.length > 0 && <button type="button" disabled={migratingLocalProducts} onClick={migrateLocalPOSProducts} style={secondaryButtonStyle}>{migratingLocalProducts ? "Migrando..." : "Migrar productos POS locales"}</button>}
               <button type="button" onClick={() => { setMostrarFormulario((actual) => !actual); setEditandoId(null); setForm(emptyActiveItemForm()); setErrores({}); setOrdenError("") }} style={primaryButtonStyle}>
-                + Nuevo producto POS
+                + Nuevo platillo
               </button>
             </div>
           </header>
@@ -1807,12 +2036,19 @@ function POS() {
           {ordenError && <div style={errorBoxStyle}>{ordenError}</div>}
 
           {mostrarFormulario && (
-            <form onSubmit={guardarItem} style={formCardStyle}>
+            <form className="pos-dish-form" onSubmit={guardarItem} style={formCardStyle}>
+              <div className="pos-dish-form-heading">
+                <div><span>{editandoId ? "Editando platillo" : "Nuevo platillo"}</span><h2>{form.nombre || "Configura el platillo"}</h2></div>
+                <label className="pos-test-toggle">
+                  <input type="checkbox" checked={form.isTestItem === true} onChange={(event) => setForm((current) => ({ ...current, isTestItem: event.target.checked, recipeId: event.target.checked ? "" : current.recipeId }))} />
+                  <span><strong>🧪 Platillo manual / prueba</strong><small>Va a KDS, aparece en órdenes y no consume inventario.</small></span>
+                </label>
+              </div>
               {Object.keys(errores).length > 0 && (
                 <div style={errorBoxStyle}>Faltan campos requeridos: {Object.values(errores).join(", ")}.</div>
               )}
               <div style={formGridStyle}>
-                <input placeholder="Nombre del item" value={form.nombre} onChange={(e) => actualizarCampo("nombre", e.target.value)} style={errores.nombre ? inputErrorStyle : inputStyle} />
+                <input placeholder="Nombre del platillo" value={form.nombre} onChange={(e) => actualizarCampo("nombre", e.target.value)} style={errores.nombre ? inputErrorStyle : inputStyle} />
                 <select value={form.categoriaId} onChange={(e) => seleccionarCategoriaProducto(e.target.value)} style={errores.categoria ? inputErrorStyle : inputStyle}>
                   <option value="">Categoría POS</option>
                   {posCategories.filter((category) => category.active !== false || category.id === form.categoriaId).sort((a, b) => a.sortOrder - b.sortOrder).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
@@ -1821,11 +2057,12 @@ function POS() {
                 <select value={form.estado} onChange={(e) => actualizarCampo("estado", e.target.value)} style={errores.estado ? inputErrorStyle : inputStyle}><option value="activo">Activo</option><option value="inactivo">Inactivo</option></select>
                 <input placeholder="Código/SKU opcional" value={form.sku} onChange={(e) => actualizarCampo("sku", e.target.value)} style={inputStyle} />
                 <select value={form.areaProduccion} onChange={(e) => actualizarCampo("areaProduccion", e.target.value)} style={errores.areaProduccion ? inputErrorStyle : inputStyle}>
-                  <option value="">Área de producción</option>
+                  <option value="">{form.isTestItem ? "Destino KDS" : "Área de producción"}</option>
                   {productionAreas.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}
                 </select>
                 <select
                   value={form.recipeId}
+                  disabled={form.isTestItem === true}
                   onChange={(e) => {
                     const recipe = finalRecipes.find((entry) => String(entry.id) === e.target.value)
                     setForm((actual) => ({ ...actual, recipeId: e.target.value, areaProduccion: recipe?.production_area_id || actual.areaProduccion }))
@@ -1838,7 +2075,7 @@ function POS() {
                   }}
                   style={errores.recipeId ? inputErrorStyle : inputStyle}
                 >
-                  <option value="">Receta estandarizada conectada</option>
+                  <option value="">{form.isTestItem ? "No requiere receta estandarizada" : "Receta estandarizada conectada"}</option>
                   {finalRecipes.map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.name}</option>)}
                 </select>
                 <input placeholder="Tiempo estimado de preparación" value={form.tiempoPreparacion} onChange={(e) => actualizarCampo("tiempoPreparacion", e.target.value)} style={errores.tiempoPreparacion ? inputErrorStyle : inputStyle} />
@@ -1846,40 +2083,45 @@ function POS() {
               </div>
               <textarea placeholder="Descripción" value={form.descripcion} onChange={(e) => actualizarCampo("descripcion", e.target.value)} style={errores.descripcion ? textAreaErrorStyle : textAreaStyle} />
               <textarea placeholder="Ingredientes relacionados si aplica" value={form.ingredientesRelacionados} onChange={(e) => actualizarCampo("ingredientesRelacionados", e.target.value)} style={textAreaStyle} />
-              <input type="file" accept="image/*" onChange={cargarImagen} style={errores.imagen ? inputErrorStyle : inputStyle} />
-              {form.imagen && <img src={form.imagen} alt={form.nombre || "Item"} style={previewStyle} />}
+              <input type="file" accept="image/*" onChange={cargarImagen} style={inputStyle} />
+              {form.imagen ? <img src={form.imagen} alt={form.nombre || "Platillo"} style={previewStyle} /> : <div className="pos-dish-image-empty">{productInitials(form.nombre)}</div>}
               <div style={readinessPanelStyle}>
                 <strong>Estado producción</strong>
-                <span style={selectedRecipe ? availableStyle : unavailableStyle}>{selectedRecipe ? `✓ Receta conectada: ${selectedRecipe.name}` : "✗ Sin receta válida"}</span>
-                <span style={selectedProductionArea ? availableStyle : unavailableStyle}>{selectedProductionArea ? `✓ Área producción: ${selectedProductionArea.name}` : "✗ Sin área válida"}</span>
+                {form.isTestItem ? <span className="pos-test-badge">🧪 PRUEBA · sin receta ni consumo</span> : <span style={selectedRecipe ? availableStyle : unavailableStyle}>{selectedRecipe ? `✓ Receta conectada: ${selectedRecipe.name}` : "✗ Sin receta válida"}</span>}
+                <span style={selectedProductionArea ? availableStyle : unavailableStyle}>{selectedProductionArea ? `✓ ${form.isTestItem ? "Destino KDS" : "Área producción"}: ${selectedProductionArea.name}` : "✗ Sin área válida"}</span>
                 <span style={formReadyForValidation ? availableStyle : unavailableStyle}>{formReadyForValidation ? "✓ Se validará vínculo Supabase al guardar" : "✗ Configuración incompleta"}</span>
               </div>
               <div style={buttonRowStyle}>
-                <button type="submit" style={primaryButtonStyle}>{editandoId ? "Guardar cambios" : "Agregar item"}</button>
+                <button type="submit" style={primaryButtonStyle}>{editandoId ? "Guardar cambios" : "Agregar platillo"}</button>
                 <button type="button" onClick={() => { setMostrarFormulario(false); setEditandoId(null); setForm(emptyActiveItemForm()); setErrores({}) }} style={secondaryButtonStyle}>Cancelar</button>
               </div>
             </form>
           )}
 
-          <div style={itemListStyle}>
+          <div className="pos-dish-grid" style={itemListStyle}>
                 {items.map((item) => {
                   const state = getProductProductionState(item, finalRecipes, productionAreas, activeCategories)
                   return (
-                  <article key={item.id} style={itemRowStyle}>
-                <img src={item.imagen} alt={item.nombre} style={thumbStyle} />
-                <div style={{ flex: 1 }}>
+                  <article className="pos-dish-card" key={item.id} style={itemRowStyle}>
+                {item.imagen ? <img src={item.imagen} alt={item.nombre} style={thumbStyle} /> : <div className="pos-dish-card-placeholder">{productInitials(item.nombre)}</div>}
+                <div className="pos-dish-card-copy" style={{ flex: 1 }}>
+                  <span className="pos-product-category">{item.categoria}</span>
                   <h3 style={{ margin: "0 0 4px" }}>{item.nombre}</h3>
-                  <p style={mutedStyle}>{item.categoria} · {productionAreas.find((area) => area.id === productProductionAreaId(item))?.name || productProductionAreaId(item)} · Q{item.precio.toFixed(2)} · {item.estado}</p>
+                  {isTestProduct(item) && <span className="pos-test-badge">🧪 PRUEBA</span>}
+                  <p style={mutedStyle}>{productionAreas.find((area) => area.id === productProductionAreaId(item))?.name || productProductionAreaId(item)} · Q{item.precio.toFixed(2)} · {item.estado}</p>
                   <ProductionBadges state={state} />
                 </div>
-                <button type="button" onClick={() => editarItem(item)} style={secondaryButtonStyle}>Editar</button>
-                {state.active && <button type="button" onClick={() => desactivarItem(item)} style={dangerMiniButtonStyle}>Desactivar</button>}
-                {user?.role === "admin" && <button type="button" onClick={() => openProductDiagnostic(item)} style={secondaryButtonStyle}>Diagnóstico producto POS</button>}
+                <div className="pos-dish-card-actions">
+                  <button type="button" onClick={() => editarItem(item)} style={secondaryButtonStyle}>Editar platillo</button>
+                  {state.active && <button type="button" onClick={() => desactivarItem(item)} style={dangerMiniButtonStyle}>Eliminar del POS</button>}
+                  {user?.role === "admin" && <button type="button" onClick={() => openProductDiagnostic(item)} style={secondaryButtonStyle}>Diagnóstico</button>}
+                </div>
               </article>
                   )
                 })}
+                {!itemsLoading && items.length === 0 && <div className="pos-friendly-empty">No hay platillos registrados.</div>}
           </div>
-        </>
+        </div>
       ) : section === "categorias" ? (
         puedeAdministrarCategorias ? (
           <>
@@ -2139,15 +2381,30 @@ function POS() {
           {realtimeNotice && <div style={liveNoticeStyle}>{realtimeNotice}</div>}
           {itemsLoading && <div style={mutedStyle}>Cargando productos POS desde Supabase...</div>}
           {invalidActiveProducts.length > 0 && (
-            <div style={warningBoxStyle}>{invalidActiveProducts.length} producto(s) activo(s) no se mostrarán para venta porque no están listos para producción. Corrígelos en Agregar Item.</div>
+            <div style={warningBoxStyle}>{invalidActiveProducts.length} producto(s) activo(s) no se mostrarán para venta porque no están listos para producción. Corrígelos en Agregar Platillo.</div>
           )}
 
-          <div className="pos-operation-shell" style={posShellStyle}>
+          <nav className="pos-stepper" aria-label="Flujo del punto de venta">
+            {POS_STEPS.map((step) => (
+              <button
+                className={`${posStep === step.id ? "active" : ""} ${posStep > step.id ? "complete" : ""}`}
+                type="button"
+                key={step.id}
+                disabled={(step.id > 1 && !ordenMesa) || (step.id === 4 && !orden.length) || (step.id === 5 && !sentItems.length)}
+                onClick={() => setPosStep(step.id)}
+              >
+                <span>{step.id}</span>
+                {step.label}
+              </button>
+            ))}
+          </nav>
+
+          <div className={`pos-operation-shell pos-step-${posStep}`} style={posShellStyle}>
               <main className="pos-menu-panel" style={menuPanelStyle}>
                 <div className="pos-catalog-search" style={catalogSearchStyle}>
                   <input
                     type="search"
-                    placeholder="Buscar producto para agregar..."
+                    placeholder="Buscar producto..."
                     value={productSearch}
                     onChange={(event) => setProductSearch(event.target.value)}
                     style={inputStyle}
@@ -2156,7 +2413,7 @@ function POS() {
                 </div>
                 <div className="pos-category-strip" style={tabsStyle}>
                   {activeCategories.map((category) => (
-                    <button key={category.id} type="button" onClick={() => setCategoriaActiva(category.id)} style={categoriaActiva === category.id ? activeTabStyle : tabStyle}>
+                    <button className={`pos-category-button ${categoriaActiva === category.id ? "active" : ""}`} key={category.id} type="button" onClick={() => setCategoriaActiva(category.id)} style={categoriaActiva === category.id ? activeTabStyle : tabStyle}>
                       {category.icon && <span style={tabIconStyle}>{category.icon}</span>}
                       {category.name}
                     </button>
@@ -2188,6 +2445,7 @@ function POS() {
                             }}
                             selected={ordenMesa?.mesaId === mesa.id}
                             onClick={() => seleccionarMesaOperacion(mesa)}
+                            showSelectLabel
                           />
                         ))}
                       </div>
@@ -2196,16 +2454,50 @@ function POS() {
                     <div style={emptyPlanStyle}>Agrega un área para crear el croquis del restaurante.</div>
                   )}
                 </section>
+                <section className="pos-people-panel">
+                  {ordenMesa ? (
+                    <>
+                      <div className="pos-step-heading">
+                        <span>Paso 2</span>
+                        <h2>Configura la mesa</h2>
+                        <p>Indica cuántas personas hay y usa nombres para identificar sus consumos.</p>
+                      </div>
+                      <div className="pos-people-count">
+                        <label htmlFor="pos-people-count">¿Cuántas personas hay en esta mesa?</label>
+                        <input id="pos-people-count" type="number" min="1" max="30" value={personasOrden} onChange={(event) => actualizarCantidadPersonas(event.target.value)} />
+                      </div>
+                      <div className="pos-seat-grid">
+                        {seatNames.map((name, index) => (
+                          <label key={`seat-${index}`}>
+                            <span>Persona {index + 1}</span>
+                            <input value={name} onChange={(event) => actualizarNombrePersona(index, event.target.value)} placeholder={`Persona ${index + 1}`} />
+                          </label>
+                        ))}
+                      </div>
+                      <div className="pos-step-actions">
+                        <button type="button" onClick={() => setPosStep(1)}>Cambiar mesa</button>
+                        <button className="primary" type="button" onClick={() => setPosStep(3)}>Continuar a productos</button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="pos-friendly-empty">No hay mesa seleccionada. Escoge una mesa para iniciar.</div>
+                  )}
+                </section>
                 <div className="pos-menu-grid" style={menuGridStyle}>
                   {itemsCategoria.map((item) => (
                     <article className="pos-product-card" key={item.id} style={menuCardStyle}>
-                      <img src={item.imagen} alt={item.nombre} style={menuImageStyle} />
-                      <h3>{item.nombre}</h3>
-                      <p style={mutedStyle}>Q{item.precio.toFixed(2)}</p>
-                      <p style={mutedStyle}>Producción: {productionAreas.find((area) => area.id === productProductionAreaId(item))?.name || productProductionAreaId(item)}</p>
-                      <span style={readyMenuBadgeStyle}>Listo para producción</span>
-                      <p style={item.estado === "activo" ? availableStyle : unavailableStyle}>{item.estado === "activo" ? "Disponible" : "No disponible"}</p>
-                      <button type="button" disabled={item.estado !== "activo" || mesaBloqueadaPorCobro} onClick={() => agregarAOrden(item)} style={{ ...(item.estado === "activo" && !mesaBloqueadaPorCobro ? primaryButtonStyle : disabledButtonStyle), width: "100%" }}>Agregar</button>
+                      {item.imagen
+                        ? <img className="pos-product-image" src={item.imagen} alt={item.nombre} style={menuImageStyle} />
+                        : <div className="pos-product-placeholder">{productInitials(item.nombre)}</div>}
+                      <div className="pos-product-copy">
+                        <span className="pos-product-category">{posCategories.find((category) => category.id === productCategoryId(item))?.name || item.categoria || "Producto"}</span>
+                        {isTestProduct(item) && <span className="pos-test-badge">🧪 PRUEBA</span>}
+                        <h3>{item.nombre}</h3>
+                        <strong className="pos-product-price">Q{item.precio.toFixed(2)}</strong>
+                      </div>
+                      <p className="pos-product-production" style={mutedStyle}>Producción: {productionAreas.find((area) => area.id === productProductionAreaId(item))?.name || productProductionAreaId(item)}</p>
+                      <p className="pos-product-availability" style={item.estado === "activo" ? availableStyle : unavailableStyle}>{item.estado === "activo" ? "Disponible" : "No disponible"}</p>
+                      <button className="pos-add-product" type="button" disabled={item.estado !== "activo" || mesaBloqueadaPorCobro} onClick={() => agregarAOrden(item)} style={{ ...(item.estado === "activo" && !mesaBloqueadaPorCobro ? primaryButtonStyle : disabledButtonStyle), width: "100%" }}>Agregar</button>
                     </article>
                   ))}
                   {itemsCategoria.length === 0 && (
@@ -2216,6 +2508,11 @@ function POS() {
                 </div>
               </main>
               <aside className="pos-current-order" style={orderPanelStyle}>
+                <div className="pos-step-context">
+                  <small>Paso {posStep} de 5</small>
+                  <strong>{POS_STEPS.find((step) => step.id === posStep)?.label}</strong>
+                  <span>{posStep === 3 ? "Agrega productos y asígnalos a la mesa o a una persona." : posStep === 4 ? "Revisa los productos pendientes antes de enviarlos." : posStep === 5 ? "Cobra la mesa completa o revisa los subtotales por persona." : "Completa este paso para continuar."}</span>
+                </div>
                 <h2 className="pos-order-title">Orden actual</h2>
                 <div className="pos-table-summary" style={selectedTableStyle}>
                   <div style={historyHeaderStyle}>
@@ -2227,7 +2524,7 @@ function POS() {
                     <div style={tableSummaryGridStyle}>
                       <label style={summaryMetricStyle}>
                         <small>Personas / capacidad {selectedLayoutTable?.capacity || selectedLayoutTable?.capacidad || "-"}</small>
-                        <input type="number" min="1" value={personasOrden} onChange={(e) => setPersonasOrden(e.target.value)} style={compactInputStyle} />
+                        <input type="number" min="1" max="30" value={personasOrden} onChange={(e) => actualizarCantidadPersonas(e.target.value)} style={compactInputStyle} />
                       </label>
                       <div style={summaryMetricStyle}><small>Mesero</small><strong>{currentOrder?.usuarioNombre || user?.name || posSession?.name || "Sin asignar"}</strong></div>
                       <div style={summaryMetricStyle}><small>Tiempo</small><strong>{activeMinutes == null ? "-" : `${activeMinutes} min`}</strong></div>
@@ -2238,6 +2535,35 @@ function POS() {
                   {ordenMesa && <div className="pos-next-action"><small>Siguiente paso</small><strong>{nextServiceAction}</strong></div>}
                   {ordenMesa && <button type="button" onClick={refreshSelectedTableLive} style={secondaryButtonStyle}>Actualizar</button>}
                 </div>
+                {ordenMesa && (
+                  <div className="pos-order-primary-actions">
+                    <button type="button" className="pos-order-send" disabled={!draftItems.length || sendingOrder} onClick={handleSendOrderToProduction}>
+                      {sendingOrder ? "Enviando..." : "Enviar cocina"}
+                    </button>
+                    <button type="button" disabled={!currentOrder || draftItems.length > 0 || !sentItems.length} onClick={() => solicitarCuenta(currentOrder)}>
+                      Solicitar cobro
+                    </button>
+                    <button type="button" disabled={!currentOrder || draftItems.length > 0 || !sentItems.length} onClick={() => imprimirPrecuenta(currentOrder)}>
+                      Imprimir precuenta
+                    </button>
+                    <button type="button" disabled={!currentOrder || draftItems.length > 0 || !sentItems.length} onClick={() => enviarCuentaACaja(currentOrder)}>
+                      Enviar a caja
+                    </button>
+                  </div>
+                )}
+                {ordenMesa && (
+                  <div className="pos-secondary-toggle-row">
+                    <button type="button" onClick={() => setCollapsedOrderSections((current) => ({ ...current, activity: !current.activity }))}>
+                      {collapsedOrderSections.activity ? "Ver actividad" : "Ocultar actividad"}
+                    </button>
+                    <button type="button" onClick={() => setCollapsedOrderSections((current) => ({ ...current, previous: !current.previous }))}>
+                      {collapsedOrderSections.previous ? "Ver anteriores" : "Ocultar anteriores"}
+                    </button>
+                    {puedeVerAuditoria && <button type="button" onClick={() => setCollapsedOrderSections((current) => ({ ...current, audit: !current.audit }))}>
+                      {collapsedOrderSections.audit ? "Ver auditoría" : "Ocultar auditoría"}
+                    </button>}
+                  </div>
+                )}
                 {ordenError && <div style={errorBoxStyle}>{ordenError}</div>}
                 {ordenMessage && <div style={successInlineStyle}>{ordenMessage}</div>}
                 {productionErrors.length > 0 && (
@@ -2255,7 +2581,7 @@ function POS() {
                     ))}
                   </div>
                 )}
-                {ordenMesa && (
+                {ordenMesa && !collapsedOrderSections.activity && (
                   <div className="pos-service-activity" style={historyPanelStyle}>
                     <strong>Actividad de servicio</strong>
                     {!currentOrder || serviceEvents.length === 0 ? (
@@ -2268,7 +2594,7 @@ function POS() {
                     ))}
                   </div>
                 )}
-                {ordenMesa && puedeVerAuditoria && (
+                {ordenMesa && puedeVerAuditoria && !collapsedOrderSections.audit && (
                   <div className="pos-technical-audit" style={historyPanelStyle}>
                     <button type="button" onClick={() => setShowTechnicalAudit((current) => !current)} style={secondaryButtonStyle}>
                       {showTechnicalAudit ? "Ocultar" : "Mostrar"} historial técnico / auditoría
@@ -2282,7 +2608,7 @@ function POS() {
                     ))}
                   </div>
                 )}
-                {ordenMesa && (
+                {ordenMesa && !collapsedOrderSections.previous && (
                   <div className="pos-previous-orders" style={historyPanelStyle}>
                     <div style={historyHeaderStyle}>
                       <strong>Órdenes anteriores de esta mesa</strong>
@@ -2429,7 +2755,18 @@ function POS() {
                     </div>
                   </div>
                 )}
-                {(!currentOrder || orden.length === 0) && <p style={mutedStyle}>Mesa disponible. Agrega productos para iniciar orden.</p>}
+                {(!currentOrder || orden.length === 0) && <div className="pos-friendly-empty">No hay platillos en esta orden.</div>}
+                {orderAssignmentGroups.length > 0 && (
+                  <section className="pos-person-subtotals">
+                    <strong>Consumo por persona</strong>
+                    {orderAssignmentGroups.map((group) => (
+                      <div key={group.name}>
+                        <span>{group.name} <small>{group.items} producto(s)</small></span>
+                        <strong>Q{group.subtotal.toFixed(2)}</strong>
+                      </div>
+                    ))}
+                  </section>
+                )}
                 {orderSections.filter((sectionItem) => sectionItem.items.length > 0).map((sectionItem) => (
                   <section className={`pos-order-section section-${sectionItem.id}`} key={sectionItem.id} style={orderSectionStyle}>
                     <div style={historyHeaderStyle}>
@@ -2450,15 +2787,17 @@ function POS() {
                       const editable = item.status === "draft"
                       const inProduction = ["sent_to_production", "in_production"].includes(item.status)
                       return (
-                        <div key={item.lineId} style={orderItemStyle}>
+                        <div className="pos-current-order-item" key={item.lineId} style={orderItemStyle}>
                           <div style={historyHeaderStyle}>
                             <strong>{item.nombre}</strong>
                             <span style={{ ...orderItemBadgeStyle, ...getOrderItemStatusStyle(item.status) }}>{getOrderItemStatusLabel(item.status)}</span>
                           </div>
+                          {isTestProduct(item) && <span className="pos-test-badge">🧪 PRUEBA · sin consumo</span>}
+                          <span className="pos-assignment-badge">Para: {getOrderItemAssignment(item.modificaciones)}</span>
                           <span>{item.cantidad} x Q{item.precio.toFixed(2)} = Q{(item.precio * item.cantidad).toFixed(2)}</span>
                           <small style={mutedStyle}>Area: {area?.name || item.productionAreaId || "Sin area"} | Receta: {recipe?.name || "Sin receta"}</small>
                           {inProduction && <small style={timerStyle}>Enviado hace {minutosTranscurridos(item.updated_at || item.created_at)} min</small>}
-                          {item.modificaciones && <small style={modifierTextStyle}>Modificaciones: {item.modificaciones}</small>}
+                          {getOrderItemInstructions(item.modificaciones) && <small style={modifierTextStyle}>Modificaciones: {getOrderItemInstructions(item.modificaciones)}</small>}
                           {editable && editandoModificacionLineId === item.lineId ? (
                             <div style={editSentModifierStyle}>
                               <textarea value={modificacionActualTexto} onChange={(e) => setModificacionActualTexto(e.target.value)} style={textAreaStyle} />
@@ -2491,19 +2830,34 @@ function POS() {
                     <div style={totalStyle}>Total: Q{totalOrden.toFixed(2)}</div>
                   </div>
                   <div style={buttonRowStyle}>
-                    {draftItems.length > 0 && <button type="button" disabled={sendingOrder} onClick={handleClearDraftItems} style={sendingOrder ? disabledButtonStyle : secondaryButtonStyle}>Quitar productos nuevos</button>}
-                    <button type="button" disabled={!draftItems.length || sendingOrder} onClick={handleSendOrderToProduction} style={!draftItems.length || sendingOrder ? disabledButtonStyle : primaryButtonStyle}>{sendingOrder ? "Enviando..." : "Enviar a cocina"}</button>
+                    {draftItems.length > 0 && <button className="pos-order-cancel" type="button" disabled={sendingOrder} onClick={handleClearDraftItems} style={sendingOrder ? disabledButtonStyle : secondaryButtonStyle}>Cancelar orden</button>}
+                    <button className="pos-order-send" type="button" disabled={!draftItems.length || sendingOrder} onClick={handleSendOrderToProduction} style={!draftItems.length || sendingOrder ? disabledButtonStyle : primaryButtonStyle}>{sendingOrder ? "Enviando..." : "Enviar cocina"}</button>
                   </div>
+                  {posStep === 4 && <button className="pos-next-step-button" type="button" disabled={!sentItems.length} onClick={() => setPosStep(5)}>Continuar a cobro</button>}
+                  {posStep === 5 && (
+                    <div className="pos-payment-prep">
+                      <strong>Forma de cobro</strong>
+                      <span>Prepara la solicitud para Caja. La mesa queda pendiente de cobro.</span>
+                      <div>
+                        <button type="button" onClick={() => enviarCuentaACaja(currentOrder)}>Cobrar mesa completa</button>
+                        <button type="button" onClick={prepararCobroPorPersona}>Cobrar por persona</button>
+                        <button type="button" onClick={dividirCuentaIgual}>Dividir partes iguales</button>
+                        <button type="button" onClick={() => imprimirPrecuenta(currentOrder)}>Imprimir precuenta</button>
+                      </div>
+                    </div>
+                  )}
                   {!draftItems.length && currentOrder?.status === "open" && sentItems.length > 0 && (
                     <div style={quickActionsStyle}>
-                      <button type="button" onClick={() => solicitarCuenta(currentOrder)} style={secondaryButtonStyle}>Solicitar cuenta</button>
-                      <button type="button" disabled style={disabledButtonStyle} title="Disponible después de solicitar cuenta">Enviar a caja</button>
+                      <button className="pos-order-charge" type="button" onClick={() => solicitarCuenta(currentOrder)} style={secondaryButtonStyle}>Solicitar cobro</button>
+                      <button type="button" onClick={() => imprimirPrecuenta(currentOrder)} style={secondaryButtonStyle}>Imprimir precuenta</button>
+                      <button type="button" onClick={() => enviarCuentaACaja(currentOrder)} style={primaryButtonStyle}>Enviar a caja</button>
                     </div>
                   )}
                   {currentOrder?.status === "awaiting_bill" && (
                     <div style={quickActionsStyle}>
-                      <button type="button" onClick={() => enviarCuentaACaja(currentOrder)} style={primaryButtonStyle}>Enviar a caja</button>
-                      <button type="button" disabled style={disabledButtonStyle} title="Función pendiente de configuración">Dividir cuenta</button>
+                      <button type="button" onClick={() => imprimirPrecuenta(currentOrder)} style={secondaryButtonStyle}>Imprimir precuenta</button>
+                      <button className="pos-order-charge" type="button" onClick={() => enviarCuentaACaja(currentOrder)} style={primaryButtonStyle}>Enviar a caja</button>
+                      <button type="button" onClick={dividirCuentaIgual} style={secondaryButtonStyle}>Dividir cuenta</button>
                     </div>
                   )}
                   {currentOrder?.status === "sent_to_cashier" && <div style={cashierStatusStyle}>En Caja · esperando cobro final</div>}
@@ -2561,6 +2915,13 @@ function POS() {
                     <p style={mutedStyle}>Q{Number(itemPendiente.precio || 0).toFixed(2)}</p>
                   </div>
                 </div>
+                <label className="pos-assignment-select">
+                  <span>¿Para quién es?</span>
+                  <select value={selectedAssignment} onChange={(event) => setSelectedAssignment(event.target.value)}>
+                    <option value="Mesa completa">Mesa completa</option>
+                    {seatNames.map((name, index) => <option key={`assignment-${index}`} value={name || `Persona ${index + 1}`}>{name || `Persona ${index + 1}`}</option>)}
+                  </select>
+                </label>
                 <textarea
                   value={modificacionesPendientes}
                   onChange={(e) => setModificacionesPendientes(e.target.value)}
@@ -2604,6 +2965,15 @@ function POS() {
 }
 
 function ProductionBadges({ state }) {
+  if (state.testItem) {
+    return (
+      <div style={readinessBadgesStyle}>
+        <span className="pos-test-badge">🧪 PRUEBA</span>
+        <span style={state.area ? readyBadgeStyle : invalidBadgeStyle}>{state.area ? "✓ Destino KDS configurado" : "✗ Sin destino KDS"}</span>
+        <span style={state.productionReady ? readyBadgeStyle : invalidBadgeStyle}>{state.productionReady ? "✓ Envío KDS sin consumo" : "✗ No enviará a KDS"}</span>
+      </div>
+    )
+  }
   return (
     <div style={readinessBadgesStyle}>
       <span style={state.recipe ? readyBadgeStyle : invalidBadgeStyle}>{state.recipe ? "✓ Receta conectada" : "✗ Sin receta"}</span>
@@ -2762,7 +3132,6 @@ const emptyCatalogStyle = { gridColumn: "1 / -1", padding: "20px", borderRadius:
 const menuImageStyle = { width: "100%", aspectRatio: "4 / 3", objectFit: "cover", borderRadius: "10px", background: "#111827" }
 const availableStyle = { color: "#34d399", fontWeight: 700 }
 const unavailableStyle = { color: "#f87171", fontWeight: 700 }
-const readyMenuBadgeStyle = { display: "inline-block", padding: "5px 8px", borderRadius: "999px", background: "#052e24", border: "1px solid #166534", color: "#86efac", fontSize: ".74rem", fontWeight: 800 }
 const orderPanelStyle = { position: "sticky", top: "20px", padding: "16px", borderRadius: "12px", border: "1px solid #334155", background: "#0f172a" }
 const selectedTableStyle = { display: "grid", gap: "8px", padding: "12px", borderRadius: "10px", border: "1px solid #334155", background: "#111827", marginBottom: "12px" }
 const tableStateBadgeStyle = { padding: "5px 9px", borderRadius: "999px", border: "1px solid #334155", color: "#f8fafc", fontSize: ".74rem", fontWeight: 800 }
@@ -2805,4 +3174,3 @@ const categoryIdentityStyle = { display: "flex", alignItems: "center", gap: "9px
 const categorySwatchStyle = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: "32px", height: "32px", borderRadius: "7px", color: "#fff", fontWeight: 900 }
 
 export default POS
-

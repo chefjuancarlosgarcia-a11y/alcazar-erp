@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { useAuth } from "../context/AuthContext"
 import {
   PAYMENT_METHODS,
+  PRE_BILLS_KEY,
   approveAuthorization,
   beginPayment,
   canAccessCashier,
@@ -26,6 +27,9 @@ import {
   registerCashMovement,
   returnPreBillToWaiter
 } from "../utils/cashier"
+import { printFinalCheck } from "../services/posPrintService"
+import useOperationalAlerts from "../hooks/useOperationalAlerts"
+import OperationalAlertToast from "../components/OperationalAlertToast"
 import "./Cashier.css"
 
 const TABS = [
@@ -37,6 +41,58 @@ const TABS = [
   ["closures", "Cierres"],
   ["reports", "Reportes"]
 ]
+
+const BILL_DENOMINATIONS = [
+  { key: "Q200", label: "Q200", value: 200 },
+  { key: "Q100", label: "Q100", value: 100 },
+  { key: "Q50", label: "Q50", value: 50 },
+  { key: "Q20", label: "Q20", value: 20 },
+  { key: "Q10", label: "Q10", value: 10 },
+  { key: "Q5", label: "Q5", value: 5 },
+  { key: "Q1", label: "Q1", value: 1 }
+]
+
+const COIN_DENOMINATIONS = [
+  { key: "M1", label: "Q1.00", value: 1 },
+  { key: "M050", label: "Q0.50", value: 0.5 },
+  { key: "M025", label: "Q0.25", value: 0.25 },
+  { key: "M010", label: "Q0.10", value: 0.1 },
+  { key: "M005", label: "Q0.05", value: 0.05 }
+]
+
+const CASH_DENOMINATION_DEFAULTS = Object.fromEntries([...BILL_DENOMINATIONS, ...COIN_DENOMINATIONS].map((item) => [item.key, ""]))
+
+function denominationSubtotal(denominations, counts) {
+  return denominations.reduce((total, item) => total + Number(counts[item.key] || 0) * item.value, 0)
+}
+
+function DenominationGroup({ title, denominations, counts, onChange }) {
+  return (
+    <section className="cashier-denomination-group">
+      <h3>{title}</h3>
+      <div className="cashier-denomination-grid">
+        {denominations.map((item) => {
+          const quantity = Number(counts[item.key] || 0)
+          return (
+            <label className="cashier-denomination" key={item.key}>
+              <span>{item.label}</span>
+              <input
+                type="number"
+                inputMode="numeric"
+                min="0"
+                step="1"
+                placeholder="0"
+                value={counts[item.key]}
+                onChange={(event) => onChange(item.key, event.target.value)}
+              />
+              <small>Q{(quantity * item.value).toFixed(2)}</small>
+            </label>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
 
 function Cashier() {
   const { user } = useAuth()
@@ -65,8 +121,15 @@ function Cashier() {
     function refresh() {
       setStore(loadStore())
     }
+    function refreshFromStorage(event) {
+      if (!event.key || event.key === PRE_BILLS_KEY) refresh()
+    }
     window.addEventListener("cashier-updated", refresh)
-    return () => window.removeEventListener("cashier-updated", refresh)
+    window.addEventListener("storage", refreshFromStorage)
+    return () => {
+      window.removeEventListener("cashier-updated", refresh)
+      window.removeEventListener("storage", refreshFromStorage)
+    }
   }, [])
 
   function refresh(message = "") {
@@ -80,6 +143,24 @@ function Cashier() {
     setTab("charge")
     setStore(loadStore())
   }
+
+  const cashierAlerts = useOperationalAlerts({
+    scope: "cashier",
+    enabled: canAccessCashier(user),
+    items: requests,
+    getId: (bill) => bill.id,
+    getAlert: (bill) => ({
+      icon: "$",
+      title: `${bill.tableName} solicita cobro`,
+      message: `${bill.waiterName || "Mesero"} · Q${Number(bill.total || 0).toFixed(2)} · ${waitingMinutes(bill)} min esperando`,
+      soundType: "cashier",
+      onView: () => {
+        setSelectedBillId(bill.id)
+        setTab("requests")
+        document.getElementById(`cashier-request-${bill.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" })
+      }
+    })
+  })
 
   if (!canAccessCashier(user)) {
     return <section className="cashier-page"><article className="cashier-open-card"><h1>Caja</h1><p>No tienes acceso al módulo de Caja.</p></article></section>
@@ -99,12 +180,21 @@ function Cashier() {
       </header>
 
       <nav className="cashier-tabs" aria-label="Caja">
-        {TABS.map(([id, label]) => <button key={id} type="button" className={tab === id ? "active" : ""} onClick={() => setTab(id)}>{label}</button>)}
+        {TABS.map(([id, label]) => (
+          <button key={id} type="button" className={tab === id ? "active" : ""} onClick={() => setTab(id)}>
+            {label}
+            {id === "requests" && requests.length > 0 && <b>{requests.length}</b>}
+          </button>
+        ))}
       </nav>
       {feedback && <div className="cashier-feedback">{feedback}</div>}
+      <OperationalAlertToast
+        alerts={cashierAlerts.toasts}
+        onDismiss={cashierAlerts.dismissToast}
+      />
 
-      {tab === "dashboard" && <CashierDashboard session={session} summary={summary} requests={requests} payments={visibleStore.payments} onOpenCharge={openCharge} onRefresh={refresh} user={user} />}
-      {tab === "requests" && <PaymentRequests bills={requests} onOpenCharge={openCharge} onRefresh={refresh} user={user} />}
+      {tab === "dashboard" && <CashierDashboard session={session} summary={summary} requests={requests} payments={visibleStore.payments} onOpenCharge={openCharge} onRefresh={refresh} user={user} highlightedIds={cashierAlerts.highlightedIds} />}
+      {tab === "requests" && <PaymentRequests bills={requests} onOpenCharge={openCharge} onRefresh={refresh} user={user} highlightedIds={cashierAlerts.highlightedIds} />}
       {tab === "charge" && <ChargePanel key={selectedBill?.id || "empty"} bill={selectedBill} splitBills={store.splitBills} session={session} requests={visibleStore.authorizations} user={user} onRefresh={refresh} />}
       {tab === "register" && <CashRegister session={session} summary={summary} user={user} onRefresh={refresh} />}
       {tab === "movements" && <MovementsPanel session={session} movements={visibleStore.movements} authorizations={visibleStore.authorizations} user={user} onRefresh={refresh} />}
@@ -114,7 +204,7 @@ function Cashier() {
   )
 }
 
-function CashierDashboard({ session, summary, requests, payments, onOpenCharge, onRefresh, user }) {
+function CashierDashboard({ session, summary, requests, payments, onOpenCharge, onRefresh, user, highlightedIds }) {
   const [openingAmount, setOpeningAmount] = useState("500")
   const completed = payments.filter((payment) => payment.status === "completed")
   if (!session) {
@@ -142,7 +232,7 @@ function CashierDashboard({ session, summary, requests, payments, onOpenCharge, 
       <div className="cashier-metrics">{cards.map(([label, value]) => <article key={label}><span>{label}</span><strong>{value}</strong></article>)}</div>
       <article className="cashier-panel">
         <div className="cashier-panel-title"><h2>Pagos pendientes</h2><span>{requests.length} solicitudes</span></div>
-        {requests.slice(0, 5).map((bill) => <RequestRow bill={bill} key={bill.id} onCharge={() => onOpenCharge(bill)} />)}
+        {requests.slice(0, 5).map((bill) => <RequestRow bill={bill} key={bill.id} isNew={highlightedIds?.has(String(bill.id))} onCharge={() => onOpenCharge(bill)} />)}
         {!requests.length && <Empty text="No hay mesas esperando cobro." />}
       </article>
       <article className="cashier-panel">
@@ -154,14 +244,14 @@ function CashierDashboard({ session, summary, requests, payments, onOpenCharge, 
   )
 }
 
-function PaymentRequests({ bills, onOpenCharge, onRefresh, user }) {
+function PaymentRequests({ bills, onOpenCharge, onRefresh, user, highlightedIds }) {
   return (
     <article className="cashier-panel">
       <div className="cashier-panel-title"><h2>Solicitudes de cobro</h2><span>{bills.length} activas</span></div>
       <div className="cashier-request-grid">
         {bills.map((bill) => (
-          <article className={`cashier-request ${bill.problem ? "problem" : ""}`} key={bill.id}>
-            <header><h3>{bill.tableName}</h3><span>{bill.status === "sent_to_cashier" ? "En caja" : "Precuenta"}</span></header>
+          <article id={`cashier-request-${bill.id}`} className={`cashier-request ${bill.problem ? "problem" : ""} ${highlightedIds?.has(String(bill.id)) ? "new-alert" : ""}`} key={bill.id}>
+            <header><h3>{bill.tableName}</h3><span>{highlightedIds?.has(String(bill.id)) ? "Nuevo" : bill.status === "sent_to_cashier" ? "En caja" : "Precuenta"}</span></header>
             <p>Mesero: {bill.waiterName}</p>
             <strong>Q{Number(bill.total).toFixed(2)}</strong>
             <small>Solicitada: {formatDate(bill.sentAt || bill.createdAt)} · {waitingMinutes(bill)} min</small>
@@ -191,9 +281,9 @@ function PaymentRequests({ bills, onOpenCharge, onRefresh, user }) {
   )
 }
 
-function RequestRow({ bill, onCharge }) {
+function RequestRow({ bill, isNew = false, onCharge }) {
   return (
-    <div className="cashier-row">
+    <div className={`cashier-row ${isNew ? "new-alert" : ""}`}>
       <div><strong>{bill.tableName}</strong><span>{bill.waiterName} · {waitingMinutes(bill)} min esperando</span></div>
       <strong>Q{Number(bill.total).toFixed(2)}</strong>
       <button type="button" onClick={onCharge}>Cobrar</button>
@@ -241,7 +331,18 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh }) {
       return
     }
     setMessage(result.ok ? result.allPaid ? "Pago completado. Mesa liberada." : "Pago parcial registrado. Hay partes pendientes." : result.message)
-    if (result.ok) onRefresh("")
+    if (result.ok) {
+      onRefresh("")
+      if (result.allPaid) {
+        try {
+          const printed = printFinalCheck(bill, result.payment)
+          if (!printed) setMessage("Pago completado. Mesa liberada. No se pudo abrir la impresión automática.")
+        } catch (error) {
+          console.error("[Cashier] Error imprimiendo cuenta final.", error)
+          setMessage("Pago completado. Mesa liberada. La impresión falló, puedes abrir el recibo desde Últimos cobros.")
+        }
+      }
+    }
   }
 
   function buildSplit() {
@@ -310,19 +411,47 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh }) {
 }
 
 function CashRegister({ session, summary, user, onRefresh }) {
-  const [counted, setCounted] = useState("")
+  const [cashCount, setCashCount] = useState(CASH_DENOMINATION_DEFAULTS)
   const [notes, setNotes] = useState("")
   if (!session) return <article className="cashier-panel"><Empty text="No existe una caja abierta para arquear." /></article>
-  const difference = Number(counted || 0) - summary.expectedCash
+  const billsSubtotal = denominationSubtotal(BILL_DENOMINATIONS, cashCount)
+  const coinsSubtotal = denominationSubtotal(COIN_DENOMINATIONS, cashCount)
+  const counted = Number((billsSubtotal + coinsSubtotal).toFixed(2))
+  const difference = Number((counted - summary.expectedCash).toFixed(2))
+
+  function updateCashCount(key, value) {
+    setCashCount((current) => ({ ...current, [key]: value }))
+  }
+
   return (
     <article className="cashier-panel cashier-register">
       <h2>Cierre / arqueo de caja</h2>
       <Summary summary={summary} />
-      <label>Efectivo contado<input type="number" min="0" step="0.01" value={counted} onChange={(event) => setCounted(event.target.value)} /></label>
-      <p className={difference === 0 ? "balance" : "difference"}>Diferencia: Q{difference.toFixed(2)}</p>
+      <div className="cashier-count-header">
+        <h3>Conteo de efectivo</h3>
+        <span>Ingresa cantidades por denominación</span>
+      </div>
+      <DenominationGroup title="Billetes" denominations={BILL_DENOMINATIONS} counts={cashCount} onChange={updateCashCount} />
+      <DenominationGroup title="Monedas" denominations={COIN_DENOMINATIONS} counts={cashCount} onChange={updateCashCount} />
+      <div className="cashier-count-subtotals">
+        <p>Subtotal billetes <strong>Q{billsSubtotal.toFixed(2)}</strong></p>
+        <p>Subtotal monedas <strong>Q{coinsSubtotal.toFixed(2)}</strong></p>
+        <p>Total contado <strong>Q{counted.toFixed(2)}</strong></p>
+      </div>
+      <div className="cashier-count-summary">
+        <p>Esperado <strong>Q{summary.expectedCash.toFixed(2)}</strong></p>
+        <p>Contado <strong>Q{counted.toFixed(2)}</strong></p>
+        <p className={difference === 0 ? "balance" : "difference"}>Diferencia <strong>Q{difference.toFixed(2)}</strong></p>
+      </div>
       <label>Observaciones<textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder={difference !== 0 ? "Motivo obligatorio de la diferencia" : "Notas del cierre"} /></label>
       <button type="button" onClick={() => {
-        const result = closeCashSession(session.id, counted, notes, user)
+        const detail = Object.fromEntries(Object.entries(cashCount).map(([key, value]) => [key, Number(value || 0)]))
+        const result = closeCashSession(session.id, {
+          total: counted,
+          billsSubtotal,
+          coinsSubtotal,
+          denominations: detail
+        }, notes, user)
         onRefresh(result.ok ? "Caja cerrada correctamente." : result.message)
       }}>Cerrar caja</button>
     </article>
@@ -394,7 +523,7 @@ function Closures({ sessions }) {
       <h2>Cierres de caja</h2>
       {sessions.filter((session) => session.status === "closed").map((session) => (
         <div className="cashier-row" key={session.id}>
-          <div><strong>{session.cashierName}</strong><span>{formatDate(session.closedAt)} · Esperado Q{Number(session.expectedCash).toFixed(2)}</span></div>
+          <div><strong>{session.cashierName}</strong><span>{formatDate(session.closedAt)} · Esperado Q{Number(session.expectedCash).toFixed(2)} · Contado Q{Number(session.countedCash || 0).toFixed(2)}</span></div>
           <strong className={session.difference === 0 ? "" : "negative"}>Diferencia Q{Number(session.difference).toFixed(2)}</strong>
         </div>
       ))}

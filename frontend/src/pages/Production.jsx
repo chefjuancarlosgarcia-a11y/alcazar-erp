@@ -3,6 +3,8 @@ import { useNavigate, useParams } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
 import { getProductionAreas } from "../services/areasService"
 import useSupabaseRealtime from "../hooks/useSupabaseRealtime"
+import useOperationalAlerts from "../hooks/useOperationalAlerts"
+import OperationalAlertToast from "../components/OperationalAlertToast"
 import {
   canAccessKDS,
   canSelectKDSArea,
@@ -57,6 +59,7 @@ function Production() {
   const [problemForm, setProblemForm] = useState({ reason: PROBLEM_REASONS[0], comment: "" })
   const [message, setMessage] = useState("")
   const [realtimeNotice, setRealtimeNotice] = useState("")
+  const [showAlertSettings, setShowAlertSettings] = useState(false)
   const boardRef = useRef(null)
   const noticeTimerRef = useRef(null)
   const defaultArea = getDefaultKDSArea(user, areas)
@@ -155,6 +158,36 @@ function Production() {
       navigate(`/production/${selectedArea}`, { replace: true })
     }
   }, [areaParam, navigate, requestedArea, selectedArea, user])
+
+  const productionAlerts = useOperationalAlerts({
+    scope: `kds:${selectedArea || "general"}`,
+    enabled: Boolean(selectedArea),
+    items: tickets.filter((ticket) => ticket.areaId === selectedArea && ticket.status === "pending"),
+    repeatItems: tickets.filter((ticket) => ticket.areaId === selectedArea && ticket.status === "pending"),
+    repeatIntervalMs: 12000,
+    getId: (ticket) => ticket.id,
+    getAlert: (ticket) => {
+      const isBar = /barra|bar/i.test(`${ticket.areaName} ${ticket.areaId}`)
+      return {
+        icon: isBar ? "B" : "K",
+        title: `Nueva orden en ${isBar ? "barra" : "cocina"} - ${ticket.tableName}`,
+        message: `${ticket.areaName} · ${(ticket.items || []).length} producto(s) · ${ticket.waiterName || "Mesero"}`,
+        soundType: isBar ? "bar" : "default",
+        onView: () => document.getElementById(`kds-ticket-${ticket.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" })
+      }
+    },
+    getRepeatAlert: (pendingTickets) => {
+      const first = pendingTickets[0]
+      const isBar = /barra|bar/i.test(`${first.areaName} ${first.areaId}`)
+      return {
+        icon: isBar ? "B" : "K",
+        title: `${pendingTickets.length} orden(es) sin aceptar`,
+        message: `${first.tableName} espera confirmación en ${first.areaName}. Toca "Comenzar preparación".`,
+        soundType: isBar ? "bar" : "default",
+        onView: () => document.getElementById(`kds-ticket-${first.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" })
+      }
+    }
+  })
 
   if (!canAccessKDS(user)) {
     return (
@@ -286,12 +319,22 @@ function Production() {
           <p className="kds-eyebrow">Operación en vivo</p>
           <h1>Producción</h1>
           <p className="kds-muted">Estación: {area?.name || selectedArea} · toca una comanda para avanzar su estado</p>
-          <p className="kds-session">{user?.name || user?.username} · {new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p>
-          <span className={`kds-live${realtimeActive ? " connected" : ""}`} title={ticketRealtime.error || ticketItemsRealtime.error || ""}>
-            <i />{realtimeActive ? "En vivo" : "Conectando..."}
-          </span>
+          <div className="kds-header-meta">
+            <span className="kds-session">{user?.name || user?.username} · {new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+            <span className={`kds-live${realtimeActive ? " connected" : ""}`} title={ticketRealtime.error || ticketItemsRealtime.error || ""}>
+              <i />{realtimeActive ? "En vivo" : "Conectando..."}
+            </span>
+          </div>
         </div>
         <div className="kds-header-actions">
+          <div className="kds-action-row">
+            <span className="kds-alert-count">{productionAlerts.pendingCount} alerta(s)</span>
+            <button type="button" className={`kds-fullscreen ${showAlertSettings ? "active" : ""}`} onClick={() => setShowAlertSettings((current) => !current)}>
+              Configuración
+            </button>
+            <button type="button" className="kds-fullscreen secondary" onClick={refreshTickets}>Actualizar tickets</button>
+            <button type="button" className="kds-fullscreen secondary" onClick={enterFullScreen}>Pantalla completa</button>
+          </div>
           {canSwitchArea && (
             <label className="kds-select-label">
               Área
@@ -300,13 +343,51 @@ function Production() {
               </select>
             </label>
           )}
-          <button type="button" className="kds-fullscreen" onClick={refreshTickets}>Actualizar tickets</button>
-          <button type="button" className="kds-fullscreen" onClick={enterFullScreen}>Pantalla completa</button>
+          {showAlertSettings && (
+            <div className="kds-alert-settings">
+              <div>
+                <strong>Alertas operativas</strong>
+                <span>Sonido local de esta terminal</span>
+              </div>
+              {!productionAlerts.audioUnlocked && <button type="button" onClick={productionAlerts.activateSound}>Activar sonido</button>}
+              <label>
+                <span>Sonido</span>
+                <input
+                  type="checkbox"
+                  checked={productionAlerts.settings.soundEnabled}
+                  onChange={(event) => productionAlerts.setSettings({ soundEnabled: event.target.checked })}
+                />
+              </label>
+              <label>
+                <span>Volumen</span>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={productionAlerts.settings.volume}
+                  onChange={(event) => productionAlerts.setSettings({ volume: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                <span>Tipo</span>
+                <select value={productionAlerts.settings.soundType} onChange={(event) => productionAlerts.setSettings({ soundType: event.target.value })}>
+                  <option value="default">Cocina</option>
+                  <option value="bar">Barra</option>
+                </select>
+              </label>
+              <button type="button" className="secondary" onClick={() => productionAlerts.playSound("test")}>Probar sonido</button>
+            </div>
+          )}
         </div>
       </header>
 
       {message && <div className="kds-feedback" role="status">{message}</div>}
       {realtimeNotice && <div className="kds-feedback live-notice" role="status">{realtimeNotice}</div>}
+      <OperationalAlertToast
+        alerts={productionAlerts.toasts}
+        onDismiss={productionAlerts.dismissToast}
+      />
 
       <div className="kds-metrics">
         <Metric title="Nuevas" value={active.filter((ticket) => ticket.status === "pending").length} tone="new" />
@@ -324,6 +405,7 @@ function Production() {
               <TicketCard
                 key={ticket.id}
                 ticket={ticket}
+                isNew={ticket.status === "pending" && productionAlerts.highlightedIds.has(String(ticket.id))}
                 onTransition={transition}
                 onProblem={() => { setProblemTicket(ticket); setProblemForm({ reason: PROBLEM_REASONS[0], comment: "" }) }}
                 onCancel={() => cancelTicket(ticket)}
@@ -381,12 +463,12 @@ function Metric({ title, value, tone = "" }) {
   return <article className={`kds-metric ${tone}`}><span>{title}</span><strong>{value}</strong></article>
 }
 
-function TicketCard({ ticket, onTransition, onProblem, onCancel }) {
+function TicketCard({ ticket, isNew = false, onTransition, onProblem, onCancel }) {
   const elapsed = getTicketElapsedMinutes(ticket)
   const timeStatus = getTicketTimeStatus(ticket)
   const entryTime = new Date(ticket.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
   return (
-    <article className={`kds-ticket status-${ticket.status} ${timeStatus} ${ticket.priority === "urgent" ? "urgent" : ""}`}>
+    <article id={`kds-ticket-${ticket.id}`} className={`kds-ticket status-${ticket.status} ${timeStatus} ${ticket.priority === "urgent" ? "urgent" : ""} ${isNew ? "new-alert" : ""}`}>
       <header>
         <div>
           <small className="kds-ticket-ref">COMANDA {String(ticket.id).slice(0, 6).toUpperCase()}</small>
@@ -396,6 +478,7 @@ function TicketCard({ ticket, onTransition, onProblem, onCancel }) {
         <strong className="kds-time">{elapsed} min</strong>
       </header>
       <div className="kds-badges">
+        {isNew && <span className="new">Nuevo</span>}
         {ticket.isDemo && <span>Demo</span>}
         <span className={`state ${ticket.status}`}>{statusLabel(ticket.status)}</span>
         <span className={`priority ${ticket.priority}`}>{priorityLabel(ticket.priority)}</span>
