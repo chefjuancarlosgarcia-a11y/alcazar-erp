@@ -3,10 +3,40 @@ import { supabase } from "../lib/supabase"
 const TEMPLATE_SELECT = "*, checklist_template_items(*)"
 const RUN_SELECT = "*, checklist_templates(title, description, frequency, shift_context), checklist_run_items(*)"
 const INCIDENT_SELECT = "*, checklist_runs(run_date, area, checklist_templates(title)), checklist_run_items(title, response_type, checked, response_text, response_number, photo_url, comment), profiles!checklist_incidents_reported_by_fkey(full_name, username)"
+const RRULE_DAY_TO_ISO = { MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6, SU: 7 }
+const ISO_TO_RRULE_DAY = { 1: "MO", 2: "TU", 3: "WE", 4: "TH", 5: "FR", 6: "SA", 7: "SU" }
+
+function normalizeRecurrenceDays(days) {
+  return [...new Set((Array.isArray(days) ? days : []).map((day) => Number(day)).filter((day) => ISO_TO_RRULE_DAY[day]))].sort((a, b) => a - b)
+}
+
+function parseRecurrenceDaysFromRule(rule) {
+  const match = String(rule || "").toUpperCase().match(/(?:^|;)BYDAY=([^;]+)/)
+  if (!match) return []
+  return normalizeRecurrenceDays(match[1].split(",").map((token) => RRULE_DAY_TO_ISO[token.trim()]))
+}
+
+function buildWeeklyRecurrenceRule(days) {
+  const normalized = normalizeRecurrenceDays(days)
+  if (!normalized.length) return null
+  return `FREQ=WEEKLY;BYDAY=${normalized.map((day) => ISO_TO_RRULE_DAY[day]).join(",")}`
+}
+
+function normalizeRecurrenceConfig(payload = {}) {
+  const trimmedRule = payload.recurrence_rule?.trim() || ""
+  const daysFromRule = parseRecurrenceDaysFromRule(trimmedRule)
+  const recurrence_days = daysFromRule.length ? daysFromRule : normalizeRecurrenceDays(payload.recurrence_days)
+  return {
+    recurrence_days,
+    recurrence_rule: recurrence_days.length ? buildWeeklyRecurrenceRule(recurrence_days) : (trimmedRule || null)
+  }
+}
 
 function orderTemplate(template) {
+  const recurrence = normalizeRecurrenceConfig(template || {})
   return template ? {
     ...template,
+    ...recurrence,
     checklist_template_items: [...(template.checklist_template_items || [])].sort((a, b) => Number(a.item_order || 0) - Number(b.item_order || 0))
   } : template
 }
@@ -19,6 +49,7 @@ function orderRun(run) {
 }
 
 function templatePayload(payload) {
+  const recurrence = normalizeRecurrenceConfig(payload)
   return {
     title: payload.title?.trim(),
     description: payload.description?.trim() || null,
@@ -32,9 +63,9 @@ function templatePayload(payload) {
     status: payload.status || "active",
     reminder_time: payload.reminder_time || null,
     due_time: payload.due_time || null,
-    recurrence_days: payload.recurrence_days || [],
+    recurrence_days: recurrence.recurrence_days,
     recurrence_month_day: payload.recurrence_month_day ? Number(payload.recurrence_month_day) : null,
-    recurrence_rule: payload.recurrence_rule?.trim() || null,
+    recurrence_rule: recurrence.recurrence_rule,
     skip_non_work_days: payload.skip_non_work_days !== false,
     auto_generate: Boolean(payload.auto_generate),
     requires_approval: payload.requires_approval !== false
@@ -67,6 +98,7 @@ function itemPayload(item, index, templateId) {
 }
 
 function requestPayload(payload, items) {
+  const recurrence = normalizeRecurrenceConfig(payload)
   return {
     template_id: payload.template_id || null,
     request_type: payload.request_type || (payload.template_id ? "update" : "create"),
@@ -83,9 +115,9 @@ function requestPayload(payload, items) {
     backup_profile_id: payload.backup_profile_id || null,
     reminder_time: payload.reminder_time || null,
     due_time: payload.due_time || null,
-    recurrence_days: payload.recurrence_days || [],
+    recurrence_days: recurrence.recurrence_days,
     recurrence_month_day: payload.recurrence_month_day ? Number(payload.recurrence_month_day) : null,
-    recurrence_rule: payload.recurrence_rule?.trim() || null,
+    recurrence_rule: recurrence.recurrence_rule,
     skip_non_work_days: payload.skip_non_work_days !== false,
     auto_generate: Boolean(payload.auto_generate),
     requires_approval: payload.requires_approval !== false,

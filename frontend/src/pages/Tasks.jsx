@@ -53,6 +53,7 @@ import {
   withComputedTaskStatus
 } from "../utils/tasks"
 import { normalizeRole } from "../utils/profilePermissions"
+import InfoTooltip from "../components/InfoTooltip"
 import "./Tasks.css"
 
 const TODAY = new Date().toISOString().slice(0, 10)
@@ -69,11 +70,32 @@ const ADMIN_TABS = [
 ]
 
 const CHECKLIST_AREAS = ["FOH", "BOH / Cocina", "Pizzeria", "Cafeteria", "Barra", "Caja", "Panaderia", "Reposteria", "Almacen", "Limpieza", "Oficina", "Recursos Humanos", "Administracion"]
+const CHECKLIST_AREA_LABELS = {
+  FOH: "FOH (Servicio)",
+  "BOH / Cocina": "BOH (Cocina)",
+  Pizzeria: "Pizzeria",
+  Cafeteria: "Cafeteria",
+  Barra: "Barra",
+  Caja: "Caja",
+  Panaderia: "Panaderia",
+  Reposteria: "Reposteria",
+  Almacen: "Almacen",
+  Limpieza: "Limpieza",
+  Oficina: "Oficina",
+  "Recursos Humanos": "Recursos Humanos",
+  Administracion: "Administracion"
+}
 const CHECKLIST_ROLES = ["admin", "gerente_general", "gerente", "supervisor", "encargado_almacen", "recursos_humanos", "cocina", "pizzeria", "barista", "bartender", "panadero", "repostero", "caja", "mesero", "limpieza", "mantenimiento", "colaborador"]
 const CHECKLIST_FREQUENCIES = [["manual", "Manual"], ["diaria", "Diaria"], ["semanal", "Semanal"], ["mensual", "Mensual"], ["apertura", "Apertura"], ["cierre", "Cierre"], ["por_turno", "Por turno"]]
 const CHECKLIST_CONTEXTS = [["general", "General"], ["apertura", "Apertura"], ["servicio", "Servicio"], ["cierre", "Cierre"], ["limpieza_profunda", "Limpieza profunda"], ["inventario", "Inventario"]]
 const CHECKLIST_RESPONSE_TYPES = [["yes_no", "Si / No"], ["checkbox", "Checkbox completado"], ["short_text", "Texto corto"], ["long_text", "Texto largo"], ["number", "Numero"], ["date", "Fecha"], ["time", "Hora"], ["photo", "Foto / evidencia"], ["rating", "Ranking 1 a 5"], ["select", "Lista desplegable"], ["multi_select", "Seleccion multiple"], ["signature", "Firma"], ["acknowledgement", "Lectura obligatoria"]]
 const CHECKLIST_WEEKDAYS = [[1, "Lunes"], [2, "Martes"], [3, "Miercoles"], [4, "Jueves"], [5, "Viernes"], [6, "Sabado"], [7, "Domingo"]]
+const CHECKLIST_ALL_WEEKDAYS = CHECKLIST_WEEKDAYS.map(([day]) => day)
+const CHECKLIST_WORKDAYS = [1, 2, 3, 4, 5]
+const CHECKLIST_WEEKEND_DAYS = [6, 7]
+const CHECKLIST_WEEKDAY_TO_RRULE = { 1: "MO", 2: "TU", 3: "WE", 4: "TH", 5: "FR", 6: "SA", 7: "SU" }
+const CHECKLIST_RRULE_TO_WEEKDAY = { MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6, SU: 7 }
+const CHECKLIST_WEEKDAY_SHORT = { 1: "Lun", 2: "Mar", 3: "Mie", 4: "Jue", 5: "Vie", 6: "Sab", 7: "Dom" }
 const CHECKLIST_SUGGESTION_TYPES = [["add_item", "Agregar item"], ["remove_item", "Eliminar item"], ["edit_item_text", "Editar texto de item"], ["change_order", "Cambiar orden"], ["change_frequency", "Cambiar frecuencia"], ["change_responsible", "Cambiar responsable"], ["change_evidence", "Cambiar evidencia requerida"], ["other", "Otro"]]
 const CHECKLIST_TEMPLATE_MANAGERS = ["admin", "gerente_general", "gerente", "supervisor"]
 const CHECKLIST_TEMPLATE_APPROVERS = ["admin", "gerente_general", "gerente"]
@@ -100,6 +122,96 @@ const EMPTY_TEMPLATE = {
   recurrence: "none",
   recommendedTimeBlock: "08:00",
   active: true
+}
+
+function normalizeChecklistWeekdays(days) {
+  return [...new Set((Array.isArray(days) ? days : []).map((day) => Number(day)).filter((day) => CHECKLIST_WEEKDAY_TO_RRULE[day]))].sort((a, b) => a - b)
+}
+
+function parseChecklistWeekdaysFromRRule(rule) {
+  const match = String(rule || "").toUpperCase().match(/(?:^|;)BYDAY=([^;]+)/)
+  if (!match) return []
+  return normalizeChecklistWeekdays(match[1].split(",").map((token) => CHECKLIST_RRULE_TO_WEEKDAY[token.trim()]))
+}
+
+function buildChecklistWeeklyRRule(days) {
+  const normalized = normalizeChecklistWeekdays(days)
+  if (!normalized.length) return ""
+  return `FREQ=WEEKLY;BYDAY=${normalized.map((day) => CHECKLIST_WEEKDAY_TO_RRULE[day]).join(",")}`
+}
+
+function summarizeChecklistWeekdays(days) {
+  const normalized = normalizeChecklistWeekdays(days)
+  return normalized.length ? normalized.map((day) => CHECKLIST_WEEKDAY_SHORT[day]).join(", ") : "Ninguno"
+}
+
+function checklistAreaLabel(area) {
+  return CHECKLIST_AREA_LABELS[area] || area || "Sin area"
+}
+
+function formatChecklistList(items, conjunction = "y") {
+  const safe = items.filter(Boolean)
+  if (!safe.length) return ""
+  if (safe.length === 1) return safe[0]
+  if (safe.length === 2) return `${safe[0]} ${conjunction} ${safe[1]}`
+  return `${safe.slice(0, -1).join(", ")} ${conjunction} ${safe[safe.length - 1]}`
+}
+
+function humanChecklistRecurrenceSummary(form) {
+  if (form.frequency === "semanal") {
+    const labels = normalizeChecklistWeekdays(form.recurrence_days).map((day) => CHECKLIST_WEEKDAYS.find(([id]) => id === day)?.[1]?.toLowerCase())
+    return labels.length ? `Esta checklist se ejecutara todos los ${formatChecklistList(labels)}.` : "Debe seleccionar al menos un dia de ejecucion."
+  }
+  if (form.frequency === "mensual") {
+    return form.recurrence_month_day ? `Esta checklist se ejecutara el dia ${form.recurrence_month_day} de cada mes.` : "Define el dia del mes en que debe ejecutarse."
+  }
+  if (form.frequency === "diaria") {
+    return "Esta checklist se ejecutara todos los dias."
+  }
+  if (form.frequency === "manual") {
+    return "Esta checklist es manual. Cambia la frecuencia a Semanal si quieres escoger dias especificos."
+  }
+  if (["apertura", "cierre", "por_turno"].includes(form.frequency)) {
+    return `Esta checklist se ejecutara por evento de ${friendlyChecklistLabel(CHECKLIST_FREQUENCIES, form.frequency).toLowerCase()}. Si quieres elegir dias, usa frecuencia semanal.`
+  }
+  return "Ajusta la programacion segun la frecuencia elegida."
+}
+
+function buildChecklistWizardForm(editingTemplate) {
+  const recurrenceRule = String(editingTemplate?.recurrence_rule || "").trim().toUpperCase()
+  const recurrenceDaysFromTemplate = normalizeChecklistWeekdays(editingTemplate?.recurrence_days || [])
+  const recurrenceDaysFromRule = parseChecklistWeekdaysFromRRule(recurrenceRule)
+  const legacyWeeklyAllDays = Boolean(
+    editingTemplate
+    && editingTemplate.frequency === "semanal"
+    && editingTemplate.auto_generate
+    && !recurrenceRule
+    && recurrenceDaysFromTemplate.length === 0
+  )
+  const recurrenceDays = legacyWeeklyAllDays
+    ? CHECKLIST_ALL_WEEKDAYS
+    : (recurrenceDaysFromTemplate.length ? recurrenceDaysFromTemplate : recurrenceDaysFromRule)
+
+  return {
+    title: editingTemplate?.title || "",
+    description: editingTemplate?.description || "",
+    area: editingTemplate?.area || CHECKLIST_AREAS[0],
+    assigned_role: editingTemplate?.assigned_role || "",
+    assigned_profile_id: editingTemplate?.assigned_profile_id || "",
+    supervisor_profile_id: editingTemplate?.supervisor_profile_id || "",
+    backup_profile_id: editingTemplate?.backup_profile_id || "",
+    frequency: editingTemplate?.frequency || "manual",
+    shift_context: editingTemplate?.shift_context || "general",
+    status: editingTemplate?.status || "active",
+    reminder_time: editingTemplate?.reminder_time || "",
+    due_time: editingTemplate?.due_time || "",
+    recurrence_days: recurrenceDays,
+    recurrence_month_day: editingTemplate?.recurrence_month_day || "",
+    recurrence_rule: recurrenceRule || buildChecklistWeeklyRRule(recurrenceDays),
+    skip_non_work_days: editingTemplate?.skip_non_work_days !== false,
+    auto_generate: Boolean(editingTemplate?.auto_generate),
+    requires_approval: editingTemplate?.requires_approval !== false
+  }
 }
 
 function Tasks() {
@@ -653,6 +765,9 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   async function saveTemplate(form, items, options = {}) {
     if (!form.title.trim()) return setMessage("No se puede guardar una checklist sin titulo.")
     if (!items.some((item) => item.title.trim())) return setMessage("Agrega al menos 1 item.")
+    if (form.frequency === "semanal" && !normalizeChecklistWeekdays(form.recurrence_days).length) {
+      return setMessage("Debe seleccionar al menos un dia de ejecucion para una checklist semanal.")
+    }
     setLoading(true)
     const cleanedItems = items.filter((item) => item.title.trim())
     if (isSupervisorOnly) {
@@ -881,6 +996,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       )}
       {section === "create" && (canCreateChecklists || editingTemplate) && (
         <ChecklistTemplateWizard
+          key={editingTemplate?.id || "new-checklist-template"}
           editingTemplate={editingTemplate}
           profiles={profiles}
           onCancel={() => { setEditingTemplate(null); setSection("templates") }}
@@ -1017,7 +1133,7 @@ function ChecklistTemplatesView({ templates, profiles, currentUser, userRole, on
       <article className="tasks-panel">
         <div className="tasks-panel-title"><div><h2>Checklists</h2><p className="tasks-muted">Biblioteca permanente de checklists operativas.</p></div></div>
         <div className="tasks-filters">
-          <select value={filters.area} onChange={(event) => setFilters((current) => ({ ...current, area: event.target.value }))}><option value="">Todas las areas</option>{CHECKLIST_AREAS.map((area) => <option key={area}>{area}</option>)}</select>
+          <select value={filters.area} onChange={(event) => setFilters((current) => ({ ...current, area: event.target.value }))}><option value="">Todas las areas</option>{CHECKLIST_AREAS.map((area) => <option key={area} value={area}>{checklistAreaLabel(area)}</option>)}</select>
           <select value={filters.frequency} onChange={(event) => setFilters((current) => ({ ...current, frequency: event.target.value }))}><option value="">Todas las frecuencias</option>{CHECKLIST_FREQUENCIES.map(([id, label]) => <option value={id} key={id}>{label}</option>)}</select>
           <select value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))}><option value="active">Activas</option><option value="inactive">Inactivas / Archivadas</option><option value="all">Todas</option></select>
         </div>
@@ -1025,7 +1141,7 @@ function ChecklistTemplatesView({ templates, profiles, currentUser, userRole, on
       <div className="checklists-card-grid">
         {filtered.map((template) => (
           <article className="checklist-template-card" key={template.id}>
-            <div className="checklist-card-top"><div><h3>{template.title}</h3><p>{template.area || "Todas las areas"} · {friendlyChecklistLabel(CHECKLIST_FREQUENCIES, template.frequency)}</p></div><span className="tasks-badge">{template.status === "active" ? "Activa" : "Inactiva"}</span></div>
+            <div className="checklist-card-top"><div><h3>{template.title}</h3><p>{template.area ? checklistAreaLabel(template.area) : "Todas las areas"} · {friendlyChecklistLabel(CHECKLIST_FREQUENCIES, template.frequency)}</p></div><span className="tasks-badge">{template.status === "active" ? "Activa" : "Inactiva"}</span></div>
             <p>{template.description || "Sin descripcion"}</p>
             <div className="checklist-card-meta"><span>{template.checklist_template_items?.length || 0} items</span><span>{friendlyChecklistLabel(CHECKLIST_CONTEXTS, template.shift_context)}</span><span>{template.assigned_role || "Rol libre"}</span><span>{profileDisplayName(profiles, template.assigned_profile_id) || "Sin responsable"}</span></div>
             <div className="checklist-actions">
@@ -1057,7 +1173,7 @@ function ChecklistAssignPanel({ template, profiles, onClose, onAssign }) {
       <div className="tasks-panel-title"><div><h2>Asignar checklist</h2><p className="tasks-muted">{template.title}</p></div><button type="button" onClick={onClose}>Cerrar</button></div>
       <div className="tasks-form-grid">
         <Field label="Fecha"><input type="date" value={form.run_date} onChange={(event) => update("run_date", event.target.value)} /></Field>
-        <Field label="Area"><select value={form.area} onChange={(event) => update("area", event.target.value)}>{CHECKLIST_AREAS.map((area) => <option key={area}>{area}</option>)}</select></Field>
+        <Field label="Area"><select value={form.area} onChange={(event) => update("area", event.target.value)}>{CHECKLIST_AREAS.map((area) => <option key={area} value={area}>{checklistAreaLabel(area)}</option>)}</select></Field>
         <Field label="Rol/Puesto"><select value={form.assigned_role} onChange={(event) => update("assigned_role", event.target.value)}><option value="">Rol libre</option>{CHECKLIST_ROLES.map((role) => <option key={role}>{role}</option>)}</select></Field>
         <Field label="Colaborador"><select value={form.assigned_profile_id} onChange={(event) => update("assigned_profile_id", event.target.value)}><option value="">Sin colaborador especifico</option>{profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.full_name || profile.username}</option>)}</select></Field>
       </div>
@@ -1086,7 +1202,7 @@ function ChecklistSuggestionPanel({ template, currentUser, onClose, onSubmit }) 
   }
   return (
     <article className="tasks-panel checklist-assign-panel">
-      <div className="tasks-panel-title"><div><h2>Sugerir cambios</h2><p className="tasks-muted">{template.title} · {template.area || "Sin area"}</p></div><button type="button" onClick={onClose}>Cerrar</button></div>
+      <div className="tasks-panel-title"><div><h2>Sugerir cambios</h2><p className="tasks-muted">{template.title} · {checklistAreaLabel(template.area)}</p></div><button type="button" onClick={onClose}>Cerrar</button></div>
       <div className="tasks-form-grid">
         <Field label="Tipo de cambio"><select value={form.change_type} onChange={(event) => update("change_type", event.target.value)}>{CHECKLIST_SUGGESTION_TYPES.map(([id, label]) => <option value={id} key={id}>{label}</option>)}</select></Field>
         <Field label="Prioridad"><select value={form.priority} onChange={(event) => update("priority", event.target.value)}><option value="low">Baja</option><option value="medium">Media</option><option value="high">Alta</option></select></Field>
@@ -1101,30 +1217,40 @@ function ChecklistSuggestionPanel({ template, currentUser, onClose, onSubmit }) 
 
 function ChecklistTemplateWizard({ editingTemplate, profiles, onCancel, onSave, approvalMode = false }) {
   const [step, setStep] = useState(1)
-  const [form, setForm] = useState(() => ({
-    title: editingTemplate?.title || "",
-    description: editingTemplate?.description || "",
-    area: editingTemplate?.area || CHECKLIST_AREAS[0],
-    assigned_role: editingTemplate?.assigned_role || "",
-    assigned_profile_id: editingTemplate?.assigned_profile_id || "",
-    supervisor_profile_id: editingTemplate?.supervisor_profile_id || "",
-    backup_profile_id: editingTemplate?.backup_profile_id || "",
-    frequency: editingTemplate?.frequency || "manual",
-    shift_context: editingTemplate?.shift_context || "general",
-    status: editingTemplate?.status || "active",
-    reminder_time: editingTemplate?.reminder_time || "",
-    due_time: editingTemplate?.due_time || "",
-    recurrence_days: editingTemplate?.recurrence_days || [],
-    recurrence_month_day: editingTemplate?.recurrence_month_day || "",
-    recurrence_rule: editingTemplate?.recurrence_rule || "",
-    skip_non_work_days: editingTemplate?.skip_non_work_days !== false,
-    auto_generate: Boolean(editingTemplate?.auto_generate),
-    requires_approval: editingTemplate?.requires_approval !== false
-  }))
+  const [form, setForm] = useState(() => buildChecklistWizardForm(editingTemplate))
   const [items, setItems] = useState(() => editingTemplate?.checklist_template_items?.length ? editingTemplate.checklist_template_items : [emptyChecklistItem()])
   const steps = ["Informacion", "Items", "Asignacion", "Vista previa"]
   function update(field, value) {
     setForm((current) => ({ ...current, [field]: value }))
+  }
+  function setRecurrenceDays(nextDays) {
+    const recurrence_days = normalizeChecklistWeekdays(nextDays)
+    setForm((current) => ({
+      ...current,
+      frequency: recurrence_days.length ? "semanal" : current.frequency,
+      recurrence_days,
+      recurrence_rule: buildChecklistWeeklyRRule(recurrence_days)
+    }))
+  }
+  function toggleRecurrenceDay(day, checked) {
+    setForm((current) => {
+      const days = normalizeChecklistWeekdays(current.recurrence_days)
+      const recurrence_days = normalizeChecklistWeekdays(checked ? [...days, day] : days.filter((item) => item !== day))
+      return {
+        ...current,
+        frequency: checked ? "semanal" : current.frequency,
+        recurrence_days,
+        recurrence_rule: buildChecklistWeeklyRRule(recurrence_days)
+      }
+    })
+  }
+  function updateRecurrenceRule(value) {
+    const recurrence_rule = String(value || "").toUpperCase().replace(/\s+/g, "")
+    setForm((current) => ({
+      ...current,
+      recurrence_rule,
+      recurrence_days: recurrence_rule ? parseChecklistWeekdaysFromRRule(recurrence_rule) : []
+    }))
   }
   function updateItem(index, field, value) {
     setItems((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, [field]: value } : item))
@@ -1141,13 +1267,145 @@ function ChecklistTemplateWizard({ editingTemplate, profiles, onCancel, onSave, 
   function duplicateItem(index) {
     setItems((current) => current.flatMap((item, itemIndex) => itemIndex === index ? [item, { ...item, id: `item-${Date.now()}-${index}`, title: `${item.title} copia` }] : [item]))
   }
+  const normalizedDays = normalizeChecklistWeekdays(form.recurrence_days)
+  const isWeekly = form.frequency === "semanal"
+  const isMonthly = form.frequency === "mensual"
+  const isDaily = form.frequency === "diaria"
+  const weeklyDaysMissing = isWeekly && !normalizedDays.length
+  const recurrenceSummary = humanChecklistRecurrenceSummary({ ...form, recurrence_days: normalizedDays })
+  const selectedDaysSummary = summarizeChecklistWeekdays(form.recurrence_days)
+  const debugRRule = form.recurrence_rule || buildChecklistWeeklyRRule(form.recurrence_days)
+  const finalActionDisabled = weeklyDaysMissing
   return (
     <article className="tasks-panel checklist-wizard">
       <div className="tasks-panel-title"><div><h2>{editingTemplate ? "Editar plantilla" : "Crear plantilla"}</h2><p className="tasks-muted">Paso {step} de 4 · {steps[step - 1]}</p></div><button type="button" onClick={onCancel}>Cancelar</button></div>
       <div className="checklist-stepper">{steps.map((label, index) => <button key={label} type="button" className={step === index + 1 ? "active" : ""} onClick={() => setStep(index + 1)}><span>{index + 1}</span>{label}</button>)}</div>
-      {step === 1 && <div className="checklist-step-card"><div className="tasks-form-grid"><Field label="Nombre"><input required value={form.title} onChange={(event) => update("title", event.target.value)} placeholder="Apertura FOH" /></Field><Field label="Area"><select value={form.area} onChange={(event) => update("area", event.target.value)}>{CHECKLIST_AREAS.map((area) => <option key={area}>{area}</option>)}</select></Field><Field label="Frecuencia"><select value={form.frequency} onChange={(event) => update("frequency", event.target.value)}>{CHECKLIST_FREQUENCIES.map(([id, label]) => <option value={id} key={id}>{label}</option>)}</select></Field><Field label="Contexto"><select value={form.shift_context} onChange={(event) => update("shift_context", event.target.value)}>{CHECKLIST_CONTEXTS.map(([id, label]) => <option value={id} key={id}>{label}</option>)}</select></Field></div><Field label="Descripcion"><textarea value={form.description} onChange={(event) => update("description", event.target.value)} /></Field></div>}
+      {step === 1 && <div className="checklist-step-card"><div className="tasks-form-grid"><Field label="Nombre"><input required value={form.title} onChange={(event) => update("title", event.target.value)} placeholder="Apertura FOH" /></Field><Field label="Area"><select value={form.area} onChange={(event) => update("area", event.target.value)}>{CHECKLIST_AREAS.map((area) => <option key={area} value={area}>{checklistAreaLabel(area)}</option>)}</select></Field><Field label="Frecuencia"><select value={form.frequency} onChange={(event) => update("frequency", event.target.value)}>{CHECKLIST_FREQUENCIES.map(([id, label]) => <option value={id} key={id}>{label}</option>)}</select></Field><Field label="Contexto"><select value={form.shift_context} onChange={(event) => update("shift_context", event.target.value)}>{CHECKLIST_CONTEXTS.map(([id, label]) => <option value={id} key={id}>{label}</option>)}</select></Field></div><Field label="Descripcion"><textarea value={form.description} onChange={(event) => update("description", event.target.value)} /></Field></div>}
       {step === 2 && <div className="checklist-builder">{items.map((item, index) => <ChecklistBuilderItem key={item.id || index} item={item} index={index} onUpdate={updateItem} onMove={move} onDuplicate={duplicateItem} onDelete={() => setItems((current) => current.filter((_, itemIndex) => itemIndex !== index))} />)}<button type="button" className="checklist-add-item" onClick={() => setItems((current) => [...current, emptyChecklistItem()])}>Agregar item</button></div>}
-      {step === 3 && <div className="checklist-step-card"><div className="tasks-form-grid"><Field label="Area sugerida"><select value={form.area} onChange={(event) => update("area", event.target.value)}>{CHECKLIST_AREAS.map((area) => <option key={area}>{area}</option>)}</select></Field><Field label="Rol/Puesto sugerido"><select value={form.assigned_role} onChange={(event) => update("assigned_role", event.target.value)}><option value="">Cualquier rol</option>{CHECKLIST_ROLES.map((role) => <option key={role}>{role}</option>)}</select></Field><Field label="Responsable permanente"><select value={form.assigned_profile_id} onChange={(event) => update("assigned_profile_id", event.target.value)}><option value="">Sin colaborador fijo</option>{profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.full_name || profile.username}</option>)}</select></Field><Field label="Suplente"><select value={form.backup_profile_id} onChange={(event) => update("backup_profile_id", event.target.value)}><option value="">Sin suplente</option>{profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.full_name || profile.username}</option>)}</select></Field><Field label="Supervisor aprobador"><select value={form.supervisor_profile_id} onChange={(event) => update("supervisor_profile_id", event.target.value)}><option value="">Gerencia / supervisor</option>{profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.full_name || profile.username}</option>)}</select></Field><Field label="Recordatorio"><input type="time" value={form.reminder_time} onChange={(event) => update("reminder_time", event.target.value)} /></Field><Field label="Hora limite"><input type="time" value={form.due_time} onChange={(event) => update("due_time", event.target.value)} /></Field><Field label="Dia mensual"><input type="number" min="1" max="31" value={form.recurrence_month_day} onChange={(event) => update("recurrence_month_day", event.target.value)} /></Field></div><div className="checklist-flags"><label className="tasks-checkbox"><input type="checkbox" checked={form.auto_generate} onChange={(event) => update("auto_generate", event.target.checked)} />Generar automaticamente</label><label className="tasks-checkbox"><input type="checkbox" checked={form.skip_non_work_days} onChange={(event) => update("skip_non_work_days", event.target.checked)} />Excluir dias de descanso</label><label className="tasks-checkbox"><input type="checkbox" checked={form.requires_approval} onChange={(event) => update("requires_approval", event.target.checked)} />Requiere aprobacion</label></div><div className="checklist-weekdays">{CHECKLIST_WEEKDAYS.map(([day, label]) => <label key={day} className="tasks-checkbox"><input type="checkbox" checked={(form.recurrence_days || []).includes(day)} onChange={() => toggleRecurrenceDay(day)} />{label}</label>)}</div><Field label="RRULE personalizada"><input value={form.recurrence_rule} onChange={(event) => update("recurrence_rule", event.target.value)} placeholder="FREQ=WEEKLY;BYDAY=MO,WE,FR" /></Field></div>}
+      {step === 3 && (
+        <div className="checklist-step-card">
+          <div className="tasks-form-grid">
+            <Field label="Area sugerida">
+              <select value={form.area} onChange={(event) => update("area", event.target.value)}>
+                {CHECKLIST_AREAS.map((area) => <option key={area} value={area}>{checklistAreaLabel(area)}</option>)}
+              </select>
+            </Field>
+            <Field label="Rol/Puesto sugerido">
+              <select value={form.assigned_role} onChange={(event) => update("assigned_role", event.target.value)}>
+                <option value="">Cualquier rol</option>
+                {CHECKLIST_ROLES.map((role) => <option key={role}>{role}</option>)}
+              </select>
+            </Field>
+            <Field label="Responsable permanente">
+              <select value={form.assigned_profile_id} onChange={(event) => update("assigned_profile_id", event.target.value)}>
+                <option value="">Sin colaborador fijo</option>
+                {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.full_name || profile.username}</option>)}
+              </select>
+            </Field>
+            <Field label="Suplente">
+              <select value={form.backup_profile_id} onChange={(event) => update("backup_profile_id", event.target.value)}>
+                <option value="">Sin suplente</option>
+                {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.full_name || profile.username}</option>)}
+              </select>
+            </Field>
+            <Field label="Supervisor aprobador">
+              <select value={form.supervisor_profile_id} onChange={(event) => update("supervisor_profile_id", event.target.value)}>
+                <option value="">Gerencia / supervisor</option>
+                {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.full_name || profile.username}</option>)}
+              </select>
+            </Field>
+            <Field label="Recordatorio">
+              <input type="time" value={form.reminder_time} onChange={(event) => update("reminder_time", event.target.value)} />
+            </Field>
+            <Field label="Hora limite">
+              <input type="time" value={form.due_time} onChange={(event) => update("due_time", event.target.value)} />
+            </Field>
+            {isMonthly && (
+              <Field label="Dia mensual" hint="Se generara una vez al mes en la fecha indicada.">
+                <input type="number" min="1" max="31" value={form.recurrence_month_day} onChange={(event) => update("recurrence_month_day", event.target.value)} />
+              </Field>
+            )}
+          </div>
+
+          <div className="checklist-flags compact">
+            <label className="tasks-checkbox checklist-flag-chip">
+              <input type="checkbox" checked={form.auto_generate} onChange={(event) => update("auto_generate", event.target.checked)} />
+              <span>Generar automaticamente</span>
+              <InfoTooltip text="El sistema creara checklists automaticamente segun la programacion configurada." />
+            </label>
+            <label className="tasks-checkbox checklist-flag-chip">
+              <input type="checkbox" checked={form.skip_non_work_days} onChange={(event) => update("skip_non_work_days", event.target.checked)} />
+              <span>Excluir dias de descanso</span>
+              <InfoTooltip text="No se generaran checklists en los dias de descanso asignados al colaborador." />
+            </label>
+            <label className="tasks-checkbox checklist-flag-chip">
+              <input type="checkbox" checked={form.requires_approval} onChange={(event) => update("requires_approval", event.target.checked)} />
+              <span>Requiere aprobacion</span>
+              <InfoTooltip text="La checklist debera ser aprobada por un supervisor antes de considerarse completada." />
+            </label>
+          </div>
+
+          <div className="checklist-recurrence-card compact">
+              <div className="checklist-recurrence-header">
+                <strong>Programacion</strong>
+                <span className="tasks-muted">Configura solo los datos necesarios para esta frecuencia.</span>
+              </div>
+
+              {!isWeekly && <div className="checklist-frequency-hint">
+                <span>Si marcas uno o mas dias, la frecuencia cambiara automaticamente a <strong>Semanal</strong>.</span>
+                <button type="button" className="tasks-secondary" onClick={() => setStep(1)}>Ir a Informacion</button>
+              </div>}
+
+              <div className="checklist-recurrence-toolbar">
+                <div className="checklist-quick-actions">
+                  <button type="button" className="checklist-quick-action" onClick={() => setRecurrenceDays(CHECKLIST_ALL_WEEKDAYS)}>Todos</button>
+                  <button type="button" className="checklist-quick-action" onClick={() => setRecurrenceDays(CHECKLIST_WORKDAYS)}>Laborales</button>
+                  <button type="button" className="checklist-quick-action" onClick={() => setRecurrenceDays(CHECKLIST_WEEKEND_DAYS)}>Fin de semana</button>
+                  <button type="button" className="checklist-quick-action" onClick={() => setRecurrenceDays([])}>Ninguno</button>
+                </div>
+                <span className={weeklyDaysMissing ? "checklist-inline-warning visible" : "checklist-inline-warning"}>Debe seleccionar al menos un dia de ejecucion.</span>
+              </div>
+
+              <div className="checklist-weekdays boxes" role="group" aria-label="Dias de ejecucion">
+                {CHECKLIST_WEEKDAYS.map(([day, label]) => {
+                  const selected = normalizedDays.includes(day)
+                  return (
+                    <label
+                      key={day}
+                      className={selected ? "tasks-checkbox checklist-day-box selected" : "tasks-checkbox checklist-day-box"}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={(event) => toggleRecurrenceDay(day, event.target.checked)}
+                      />
+                      <span className="checklist-day-box-copy">
+                        <span className="checklist-day-box-short">{CHECKLIST_WEEKDAY_SHORT[day].toUpperCase()}</span>
+                        <span className="checklist-day-box-full">{label}</span>
+                      </span>
+                    </label>
+                  )
+                })}
+              </div>
+
+              <div className="checklist-recurrence-summary human">
+                <strong>Resumen:</strong>
+                <span>{recurrenceSummary}</span>
+              </div>
+
+              <details className="checklist-technical-details">
+                <summary>Mostrar detalles tecnicos</summary>
+                <div className="checklist-technical-body">
+                  <Field label="RRULE personalizada" hint="Puedes pegar o ajustar una regla semanal para depuracion avanzada.">
+                    <input value={form.recurrence_rule} onChange={(event) => updateRecurrenceRule(event.target.value)} placeholder="FREQ=WEEKLY;BYDAY=MO,WE,FR" />
+                  </Field>
+                  {debugRRule && <div className="checklist-recurrence-debug"><strong>RRULE:</strong><code>{debugRRule}</code></div>}
+                  <div className="checklist-recurrence-summary"><strong>Dias seleccionados:</strong><span>{selectedDaysSummary}</span></div>
+                </div>
+              </details>
+            </div>
+        </div>
+      )}
       {step === 4 && <ChecklistTemplatePreview form={form} items={items} profiles={profiles} />}
       <div className="checklist-wizard-actions">
         <button type="button" className="tasks-secondary" disabled={step === 1} onClick={() => setStep((current) => Math.max(1, current - 1))}>Anterior</button>
@@ -1155,11 +1413,11 @@ function ChecklistTemplateWizard({ editingTemplate, profiles, onCancel, onSave, 
           <button type="button" className="tasks-primary" onClick={() => setStep((current) => Math.min(4, current + 1))}>Siguiente</button>
         ) : approvalMode ? (
           <>
-            <button type="button" className="tasks-secondary" onClick={() => onSave(form, items, { submitForReview: false })}>Guardar borrador</button>
-            <button type="button" className="tasks-primary" onClick={() => onSave(form, items, { submitForReview: true })}>Mandar a verificación</button>
+            <button type="button" className="tasks-secondary" disabled={finalActionDisabled} title={finalActionDisabled ? "Selecciona al menos un dia de ejecucion." : ""} onClick={() => onSave(form, items, { submitForReview: false })}>Guardar borrador</button>
+            <button type="button" className="tasks-primary" disabled={finalActionDisabled} title={finalActionDisabled ? "Selecciona al menos un dia de ejecucion." : ""} onClick={() => onSave(form, items, { submitForReview: true })}>Mandar a verificación</button>
           </>
         ) : (
-          <button type="button" className="tasks-primary" onClick={() => onSave(form, items)}>Guardar plantilla</button>
+          <button type="button" className="tasks-primary" disabled={finalActionDisabled} title={finalActionDisabled ? "Selecciona al menos un dia de ejecucion." : ""} onClick={() => onSave(form, items)}>Guardar plantilla</button>
         )}
       </div>
     </article>
@@ -1225,7 +1483,7 @@ function ChecklistTemplatePreview({ form, items, profiles }) {
   const assignee = profiles.find((profile) => profile.id === form.assigned_profile_id)
   return (
     <div className="checklist-preview">
-      <article className="checklist-template-card"><div className="checklist-card-top"><div><h3>{form.title || "Nueva checklist"}</h3><p>{form.area} · {friendlyChecklistLabel(CHECKLIST_FREQUENCIES, form.frequency)}</p></div><span className="tasks-badge">{friendlyChecklistLabel(CHECKLIST_CONTEXTS, form.shift_context)}</span></div><p>{form.description || "Sin descripcion"}</p><div className="checklist-card-meta"><span>{items.filter((item) => item.title.trim()).length} items</span><span>{form.assigned_role || "Cualquier rol"}</span><span>{assignee?.full_name || assignee?.username || "Sin colaborador fijo"}</span></div></article>
+      <article className="checklist-template-card"><div className="checklist-card-top"><div><h3>{form.title || "Nueva checklist"}</h3><p>{checklistAreaLabel(form.area)} · {friendlyChecklistLabel(CHECKLIST_FREQUENCIES, form.frequency)}</p></div><span className="tasks-badge">{friendlyChecklistLabel(CHECKLIST_CONTEXTS, form.shift_context)}</span></div><p>{form.description || "Sin descripcion"}</p><div className="checklist-card-meta"><span>{items.filter((item) => item.title.trim()).length} items</span><span>{form.assigned_role || "Cualquier rol"}</span><span>{assignee?.full_name || assignee?.username || "Sin colaborador fijo"}</span></div></article>
       <div className="checklist-preview-items">{items.filter((item) => item.title.trim()).map((item, index) => <div key={item.id || index}><strong>{index + 1}. {item.title}</strong><span>{friendlyResponseType(item.response_type)}{item.requires_photo ? " · foto" : ""}{item.requires_comment ? " · comentario" : ""}</span></div>)}</div>
     </div>
   )
@@ -1542,7 +1800,7 @@ function ChecklistVersionSummary({ title, template }) {
       {template ? (
         <>
           <span>{template.title}</span>
-          <small>{template.area || "Sin area"} · {friendlyChecklistLabel(CHECKLIST_FREQUENCIES, template.frequency)} · {template.checklist_template_items?.length || 0} items</small>
+          <small>{checklistAreaLabel(template.area)} · {friendlyChecklistLabel(CHECKLIST_FREQUENCIES, template.frequency)} · {template.checklist_template_items?.length || 0} items</small>
         </>
       ) : <small>Checklist nueva</small>}
     </div>
@@ -1554,7 +1812,7 @@ function ChecklistRequestSummary({ title, request }) {
     <div className="checklist-version-box proposed">
       <strong>{title}</strong>
       <span>{request.title}</span>
-      <small>{request.area || "Sin area"} · {friendlyChecklistLabel(CHECKLIST_FREQUENCIES, request.frequency)} · {(request.items_snapshot || []).length} items</small>
+      <small>{checklistAreaLabel(request.area)} · {friendlyChecklistLabel(CHECKLIST_FREQUENCIES, request.frequency)} · {(request.items_snapshot || []).length} items</small>
     </div>
   )
 }
@@ -1578,7 +1836,7 @@ function ChecklistReports({ runs, templates, profiles }) {
       <article className="tasks-panel">
         <div className="tasks-panel-title"><div><h2>Filtros</h2><p className="tasks-muted">{filteredRuns.length} checklists encontradas</p></div></div>
         <div className="tasks-filters">
-          <select value={filters.area} onChange={(event) => updateFilter("area", event.target.value)}><option value="">Todas las areas</option>{CHECKLIST_AREAS.map((area) => <option key={area}>{area}</option>)}</select>
+          <select value={filters.area} onChange={(event) => updateFilter("area", event.target.value)}><option value="">Todas las areas</option>{CHECKLIST_AREAS.map((area) => <option key={area} value={area}>{checklistAreaLabel(area)}</option>)}</select>
           <select value={filters.profile} onChange={(event) => updateFilter("profile", event.target.value)}><option value="">Todos los responsables</option>{profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.full_name || profile.username}</option>)}</select>
           <select value={filters.template} onChange={(event) => updateFilter("template", event.target.value)}><option value="">Todas las checklists</option>{templates.map((template) => <option key={template.id} value={template.id}>{template.title}</option>)}</select>
           <select value={filters.status} onChange={(event) => updateFilter("status", event.target.value)}><option value="">Todos los estados</option><option value="pending">Pendientes</option><option value="in_progress">En progreso</option><option value="pending_review">En revision</option><option value="completed">Completadas</option><option value="overdue">Atrasadas</option></select>
@@ -1795,8 +2053,17 @@ function Badge({ type, value }) {
   return <span className={`tasks-badge ${type}-${value}`}>{labels[value] || value}</span>
 }
 
-function Field({ label, children }) {
-  return <label className="tasks-field"><span>{label}</span>{children}</label>
+function Field({ label, tooltip, hint, children }) {
+  return (
+    <label className="tasks-field">
+      <span className="tasks-field-label">
+        <span>{label}</span>
+        {tooltip && <InfoTooltip text={tooltip} />}
+      </span>
+      {children}
+      {hint && <small className="tasks-field-hint">{hint}</small>}
+    </label>
+  )
 }
 
 function OptionSelect({ options, value, onChange }) {

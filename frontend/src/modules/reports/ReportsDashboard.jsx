@@ -1,4 +1,5 @@
 import { Component, useEffect, useMemo, useState } from "react"
+import { useNavigate } from "react-router-dom"
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
 import * as XLSX from "xlsx"
@@ -14,11 +15,14 @@ import {
   getSalesByWaiter,
   saveFixedCost
 } from "../../services/reportsService"
+import { getMonthlyGoalReport, getWaiterSalesRanking } from "../../services/salesGoalsService"
 import "./ReportsDashboard.css"
 
 const EXECUTIVE_ROLES = ["admin", "ceo", "gerente_general"]
+const GOAL_ROLES = ["admin", "gerente_general", "supervisor"]
 const TABS = [
   ["executive", "Dashboard ejecutivo"],
+  ["goals", "Metas"],
   ["sales", "Ventas"],
   ["waiters", "Ventas por colaborador"],
   ["comparison", "Comparativo meseros"],
@@ -44,9 +48,13 @@ const EMPTY_FIXED_COST = { name: "", category: "alquiler", monthly_amount: "", s
 
 function ReportsDashboard() {
   const { user } = useAuth()
-  const canView = EXECUTIVE_ROLES.includes(user?.role)
+  const navigate = useNavigate()
+  const canViewExecutive = EXECUTIVE_ROLES.includes(user?.role)
+  const canViewGoals = GOAL_ROLES.includes(user?.role)
+  const availableTabs = useMemo(() => TABS.filter(([key]) => key === "goals" ? canViewGoals : canViewExecutive), [canViewExecutive, canViewGoals])
+  const canView = availableTabs.length > 0
   const [tab, setTab] = useState("executive")
-  const [filters, setFilters] = useState({ preset: "today", start: "", end: "", collaborator: "", shift: "", category: "" })
+  const [filters, setFilters] = useState({ preset: "today", start: "", end: "", collaborator: "", shift: "", category: "", month: new Date().toISOString().slice(0, 7) })
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
@@ -55,6 +63,10 @@ function ReportsDashboard() {
 
   useEffect(() => {
     if (!canView) return
+    if (!availableTabs.some(([key]) => key === tab)) {
+      setTab(availableTabs[0]?.[0] || "goals")
+      return
+    }
     let mounted = true
     const timer = window.setTimeout(async () => {
       setLoading(true)
@@ -79,7 +91,7 @@ function ReportsDashboard() {
       mounted = false
       window.clearTimeout(timer)
     }
-  }, [canView, tab, filters, tabReloadKey])
+  }, [availableTabs, canView, tab, filters, tabReloadKey])
 
   const rowsToExport = useMemo(() => {
     try {
@@ -131,16 +143,17 @@ function ReportsDashboard() {
           <p className="reports-muted">Indicadores de ventas, compras, costos, planilla, inventario y rentabilidad.</p>
         </div>
         <div className="reports-actions">
+          {["admin", "gerente_general"].includes(user?.role) && <button type="button" onClick={() => navigate("/reports/goals/settings")}>Configurar metas</button>}
           <button type="button" disabled={!rowsToExport.length} onClick={() => exportPDF(rowsToExport, currentTabLabel(tab))}>Exportar PDF</button>
           <button type="button" className="primary" disabled={!rowsToExport.length} onClick={() => exportExcel(rowsToExport, tab)}>Exportar Excel</button>
         </div>
       </header>
 
       <nav className="reports-tabs executive-tabs">
-        {TABS.map(([key, label]) => <button key={key} className={tab === key ? "active" : ""} type="button" onClick={() => changeTab(key)}>{label}</button>)}
+        {availableTabs.map(([key, label]) => <button key={key} className={tab === key ? "active" : ""} type="button" onClick={() => changeTab(key)}>{label}</button>)}
       </nav>
 
-      {!["executive", "fixedCosts"].includes(tab) && <GlobalFilters filters={filters} onChange={(field, value) => setFilters((current) => ({ ...current, [field]: value }))} showCategory={tab === "menu"} showCollaborator={["waiters", "comparison"].includes(tab)} />}
+      {!["executive", "fixedCosts"].includes(tab) && <GlobalFilters filters={filters} onChange={(field, value) => setFilters((current) => ({ ...current, [field]: value }))} showMonth={tab === "goals"} showDateRange={tab !== "goals"} showCategory={tab === "menu"} showCollaborator={["waiters", "comparison"].includes(tab)} />}
       <ReportTabBoundary key={`${tab}-${tabReloadKey}`} tab={tab} onRetry={retryTab}>
         {loading
           ? <div className="reports-loading">Cargando {currentTabLabel(tab).toLowerCase()}...</div>
@@ -148,7 +161,7 @@ function ReportsDashboard() {
             ? <ReportTabError tab={tab} error={error} onRetry={retryTab} />
             : tab === "inventory"
               ? <CriticalInventory data={data} />
-              : <ExecutiveContent tab={tab} data={data} filters={filters} fixedForm={fixedForm} setFixedForm={setFixedForm} submitFixedCost={submitFixedCost} />}
+              : <ExecutiveContent tab={tab} data={data} filters={filters} fixedForm={fixedForm} setFixedForm={setFixedForm} submitFixedCost={submitFixedCost} onConfigureGoals={() => navigate("/reports/goals/settings")} canManageGoals={["admin", "gerente_general"].includes(user?.role)} />}
       </ReportTabBoundary>
     </section>
   )
@@ -156,6 +169,13 @@ function ReportsDashboard() {
 
 async function loadExecutiveReport(tab, filters) {
   if (tab === "executive") return getExecutiveDashboardReport()
+  if (tab === "goals") {
+    const [report, ranking] = await Promise.all([
+      getMonthlyGoalReport(filters.month),
+      getWaiterSalesRanking(filters.month, false)
+    ])
+    return { data: { report: report.data, ranking: ranking.data || [] }, error: report.error || ranking.error }
+  }
   if (tab === "sales") return getSalesAnalyticsReport(filters)
   if (tab === "waiters" || tab === "comparison") return getSalesByWaiter(filters)
   if (tab === "purchases") return getPurchasesReport(filters)
@@ -166,16 +186,17 @@ async function loadExecutiveReport(tab, filters) {
   return { data: null, error: "" }
 }
 
-function GlobalFilters({ filters, onChange, showCategory, showCollaborator }) {
+function GlobalFilters({ filters, onChange, showCategory, showCollaborator, showMonth = false, showDateRange = true }) {
   return <div className="reports-filters">
-    <label>Periodo<select value={filters.preset} onChange={(event) => onChange("preset", event.target.value)}>
+    {showMonth && <label>Mes<input type="month" value={filters.month} onChange={(event) => onChange("month", event.target.value)} /></label>}
+    {showDateRange && <label>Periodo<select value={filters.preset} onChange={(event) => onChange("preset", event.target.value)}>
       <option value="today">Hoy</option>
       <option value="week">Esta semana</option>
       <option value="month">Este mes</option>
       <option value="year">Este año</option>
       <option value="custom">Rango personalizado</option>
-    </select></label>
-    {filters.preset === "custom" && <>
+    </select></label>}
+    {showDateRange && filters.preset === "custom" && <>
       <label>Desde<input type="date" value={filters.start} onChange={(event) => onChange("start", event.target.value)} /></label>
       <label>Hasta<input type="date" value={filters.end} onChange={(event) => onChange("end", event.target.value)} /></label>
     </>}
@@ -188,6 +209,7 @@ function GlobalFilters({ filters, onChange, showCategory, showCollaborator }) {
 function ExecutiveContent(props) {
   if (!props.data) return <Empty />
   if (props.tab === "executive") return <ExecutiveDashboard data={props.data} />
+  if (props.tab === "goals") return <GoalsReport data={props.data} onConfigure={props.onConfigureGoals} canManage={props.canManageGoals} />
   if (props.tab === "sales") return <SalesReport data={props.data} />
   if (props.tab === "waiters") return <WaiterSales rows={filterWaiters(props.data, props.filters)} />
   if (props.tab === "comparison") return <WaiterComparison rows={filterWaiters(props.data, props.filters)} />
@@ -242,6 +264,47 @@ function SalesReport({ data }) {
       <Panel title="Ventas por semana"><BarChart rows={data.byWeek || []} labelKey="week" valueKey="sales" /></Panel>
       <Panel title="Ventas por mes"><BarChart rows={data.byMonth || []} labelKey="month" valueKey="sales" /></Panel>
       <Panel title="Detalle por dia"><DataTable headers={["Periodo", "Ordenes", "Ventas", "Ticket promedio"]} rows={(data.byDay || []).map((row) => [row.date, row.orders, money(row.sales), money(row.averageTicket)])} /></Panel>
+    </div>
+  </div>
+}
+
+function GoalsReport({ data, onConfigure, canManage }) {
+  const report = data.report || {}
+  const ranking = safeRows(data.ranking)
+  const progress = finiteNumber(report.progress_percent)
+  const remaining = finiteNumber(report.remaining_amount)
+  const target = finiteNumber(report.target_amount)
+  return <div className="reports-stack">
+    <div className="reports-kpis">
+      <KPI title="Meta mensual" value={money(target)} tone={target > 0 ? "good" : "warning"} />
+      <KPI title="Ventas acumuladas" value={money(report.actual_sales)} />
+      <KPI title="Avance" value={`${progress.toFixed(1)}%`} tone={progress >= 100 ? "good" : progress >= 70 ? "" : "warning"} />
+      <KPI title="Faltante" value={money(remaining)} tone={remaining <= 0 ? "good" : ""} />
+      <KPI title="Ordenes pagadas" value={report.order_count || 0} />
+      <KPI title="Ticket promedio" value={money(report.average_ticket)} />
+    </div>
+    <div className="reports-grid">
+      <Panel title="Progreso mensual">
+        <div className="goal-report-progress">
+          <div><i style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} /></div>
+          <strong>{report.status_label || "Meta mensual"}</strong>
+          <span>{Number(report.days_remaining || 0)} dias restantes</span>
+        </div>
+        {canManage && <button type="button" className="report-inline-action" onClick={onConfigure}>Configurar meta</button>}
+      </Panel>
+      <Panel title="Ranking de colaboradores">
+        <DataTable
+          headers={["#", "Colaborador", "Ventas", "Ordenes", "Ticket promedio", "Peso"]}
+          rows={ranking.map((row) => [
+            row.rank_position,
+            row.display_name || row.full_name || "Colaborador",
+            money(row.total_sales),
+            row.order_count,
+            money(row.average_ticket),
+            `${finiteNumber(row.relative_percent).toFixed(1)}%`
+          ])}
+        />
+      </Panel>
     </div>
   </div>
 }
@@ -408,6 +471,24 @@ function exportRows(tab, data) {
     ]
   }
   if (tab === "sales") return safeRows(data.byDay).map((row) => ({ Periodo: row.date, Ordenes: row.orders, Ventas: row.sales, TicketPromedio: row.averageTicket }))
+  if (tab === "goals") {
+    const report = data.report || {}
+    const ranking = safeRows(data.ranking)
+    return [
+      { Tipo: "Resumen", Indicador: "Meta mensual", Valor: report.target_amount || 0 },
+      { Tipo: "Resumen", Indicador: "Ventas acumuladas", Valor: report.actual_sales || 0 },
+      { Tipo: "Resumen", Indicador: "Avance", Valor: report.progress_percent || 0 },
+      { Tipo: "Resumen", Indicador: "Faltante", Valor: report.remaining_amount || 0 },
+      ...ranking.map((row) => ({
+        Tipo: "Ranking",
+        Ranking: row.rank_position,
+        Colaborador: row.display_name || row.full_name,
+        Ventas: row.total_sales,
+        Ordenes: row.order_count,
+        TicketPromedio: row.average_ticket
+      }))
+    ]
+  }
   if (tab === "waiters" || tab === "comparison") return safeRows(data).map((row, index) => ({ Ranking: index + 1, Colaborador: row.waiter, Ventas: row.sales, Ordenes: row.orders, TicketPromedio: row.averageTicket }))
   if (tab === "purchases") return safeRows(data.rows).map((row) => ({ Orden: row.orderNumber, Proveedor: row.supplier, Estado: row.status, Total: row.total, Fecha: row.created_at }))
   if (tab === "fixedCosts") return safeRows(data).map((row) => ({ Nombre: row.name, Categoria: fixedCategoryLabel(row.category), MontoMensual: row.monthly_amount, Activo: row.active }))

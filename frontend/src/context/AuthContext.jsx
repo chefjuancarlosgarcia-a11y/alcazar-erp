@@ -24,7 +24,7 @@ const ROLE_PERMISSIONS = {
   encargado_almacen: ["inventory"],
   rrhh: ["inventory", "hr", "tasks"],
   recursos_humanos: ["inventory", "hr", "tasks"],
-  supervisor: ["pos", "cash", "production", "hr", "tasks", "inventory"],
+  supervisor: ["dashboard", "pos", "cash", "production", "hr", "tasks", "inventory", "reports"],
   cajero: ["pos", "cash", "hr"],
   caja: ["pos", "cash", "hr"],
   mesero: ["pos", "hr"],

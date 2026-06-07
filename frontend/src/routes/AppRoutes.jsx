@@ -13,6 +13,7 @@ import Cashier from "../pages/Cashier"
 import CashManagement from "../pages/CashManagement"
 import Production from "../pages/Production"
 import Reports from "../pages/Reports"
+import SalesGoalsSettings from "../pages/SalesGoalsSettings"
 import Settings from "../pages/Settings"
 import TicketTemplateSettings from "../pages/TicketTemplateSettings"
 import Account from "../pages/Account"
@@ -50,6 +51,7 @@ function AppRoutes() {
           <Route path="/hr" element={<ProtectedRoute module="hr"><HR /></ProtectedRoute>} />
           <Route path="/tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
           <Route path="/reports" element={<ProtectedRoute module="reports"><Reports /></ProtectedRoute>} />
+          <Route path="/reports/goals/settings" element={<ProtectedRoute module="reports"><SalesGoalsSettings /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute module="settings"><Settings /></ProtectedRoute>} />
           <Route path="/settings/tickets" element={<ProtectedRoute module="settings"><TicketTemplateSettings /></ProtectedRoute>} />
           <Route path="/account" element={<ProtectedRoute><Account /></ProtectedRoute>} />

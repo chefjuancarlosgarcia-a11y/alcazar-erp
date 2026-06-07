@@ -42,6 +42,12 @@
 .report-panel { min-width: 0; display: grid; gap: 12px; padding: 15px; border: 1px solid #24344a; border-radius: 14px; background: #0f172a; }
 .report-panel.wide { grid-column: 1 / -1; }
 .report-panel h2 { margin: 0; color: #f1f5f9; font-size: 18px; }
+.goal-report-progress { display: grid; gap: 10px; }
+.goal-report-progress div { height: 14px; overflow: hidden; border-radius: 999px; background: #172033; }
+.goal-report-progress div i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #14b8a6, #facc15); }
+.goal-report-progress strong { color: #f8fafc; font-size: 20px; }
+.goal-report-progress span { color: #94a3b8; }
+.report-inline-action { justify-self: start; min-height: 40px; border: 1px solid #0f766e; border-radius: 8px; background: #0f766e; color: #f0fdfa; padding: 9px 13px; font-weight: 800; cursor: pointer; }
 .reports-table-scroll { width: 100%; overflow: auto; }
 .reports-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .reports-table th { padding: 9px 8px; color: #94a3b8; text-align: left; text-transform: uppercase; font-size: 11px; letter-spacing: .05em; border-bottom: 1px solid #25364d; white-space: nowrap; }

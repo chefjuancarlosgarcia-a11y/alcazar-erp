@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { BRANDING } from "../branding"
+import GoalEnergyWidget from "../components/GoalEnergyWidget"
 import SupabaseConnectionTest from "../components/SupabaseConnectionTest"
+import WaiterRankingWidget from "../components/WaiterRankingWidget"
 import { useAuth } from "../context/AuthContext"
 import { getCurrentUserTaskId, loadAssignedTasks, loadTaskNotifications, taskMatchesUser, withComputedTaskStatus } from "../utils/tasks"
 
@@ -44,6 +46,10 @@ function Dashboard() {
           <button type="button" style={buttonStyle} onClick={() => navigate("/cash")}>Abrir Caja</button>
         </article>
       )}
+      <div className="dashboard-goal-grid">
+        <GoalEnergyWidget />
+        <WaiterRankingWidget />
+      </div>
       <SupabaseConnectionTest />
       <article style={tasksCardStyle}>
         <div style={taskHeaderStyle}>

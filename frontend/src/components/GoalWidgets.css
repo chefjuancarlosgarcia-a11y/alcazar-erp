@@ -1,0 +1,98 @@
+.dashboard-goal-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+  max-width: 920px;
+}
+
+.goal-widget {
+  display: grid;
+  gap: 12px;
+  min-height: 158px;
+  padding: 17px;
+  border: 1px solid #1f6f68;
+  border-radius: 12px;
+  background: #08252c;
+  color: #e6fffb;
+}
+
+.goal-widget.muted {
+  border-color: #334155;
+  background: #0f172a;
+  color: #cbd5e1;
+}
+
+.goal-widget-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.goal-widget-header span,
+.goal-widget small {
+  color: #99f6e4;
+  font-size: 13px;
+}
+
+.goal-widget-header strong {
+  color: #ffffff;
+  font-size: 24px;
+}
+
+.goal-widget p {
+  margin: 0;
+  color: #f8fafc;
+  font-weight: 700;
+}
+
+.goal-progress {
+  height: 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #12384a;
+}
+
+.goal-progress i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #14b8a6, #facc15);
+}
+
+.goal-ranking-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.goal-ranking-list li {
+  display: grid;
+  grid-template-columns: 42px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 10px;
+  border-radius: 9px;
+  background: #0f172a;
+}
+
+.goal-ranking-list li span {
+  color: #facc15;
+  font-weight: 800;
+}
+
+.goal-ranking-list li strong {
+  color: #f8fafc;
+}
+
+@media (max-width: 640px) {
+  .goal-ranking-list li {
+    grid-template-columns: 36px 1fr;
+  }
+
+  .goal-ranking-list li small {
+    grid-column: 2;
+  }
+}
