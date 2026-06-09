@@ -7,6 +7,7 @@ import {
   approveChecklistChangeRequest,
   approveChecklistRun,
   completeChecklistRun,
+  checkTemplateHasRuns,
   createChecklistRunFromTemplate,
   createChecklistChangeRequest,
   createChecklistTemplate,
@@ -1291,7 +1292,13 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       setEditingTemplate(null)
       setSection("templates")
       await refresh()
-      const successMessage = templateId ? "Checklist actualizado correctamente." : "Checklist creado correctamente."
+      let successMessage = templateId ? "Checklist actualizado correctamente." : "Checklist creado correctamente."
+      if (templateId) {
+        const { hasRuns } = await checkTemplateHasRuns(templateId)
+        if (hasRuns) {
+          successMessage = "Checklist actualizado correctamente. El historial anterior se conserva."
+        }
+      }
       setMessage(successMessage)
       return { ok: true, message: successMessage, data: result.data }
     } finally {
@@ -1715,7 +1722,22 @@ function ChecklistTemplateWizard({ templateId = "", editingTemplate, profiles, o
   const [items, setItems] = useState(() => editingTemplate?.checklist_template_items?.length ? editingTemplate.checklist_template_items : [emptyChecklistItem()])
   const [saveFeedback, setSaveFeedback] = useState(null)
   const [saving, setSaving] = useState(false)
+  const [hasRunHistory, setHasRunHistory] = useState(false)
   const steps = ["Informacion", "Items", "Asignacion", "Vista previa"]
+
+  useEffect(() => {
+    if (!templateId) {
+      setHasRunHistory(false)
+      return
+    }
+    let cancelled = false
+    checkTemplateHasRuns(templateId).then(({ hasRuns }) => {
+      if (!cancelled) setHasRunHistory(hasRuns)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [templateId])
   function update(field, value) {
     setForm((current) => ({ ...current, [field]: value }))
   }
@@ -1805,6 +1827,11 @@ function ChecklistTemplateWizard({ templateId = "", editingTemplate, profiles, o
   return (
     <article className="tasks-panel checklist-wizard">
       <div className="tasks-panel-title"><div><h2>{editingTemplate ? "Editar plantilla" : "Crear plantilla"}</h2><p className="tasks-muted">Paso {step} de 4 · {steps[step - 1]}</p></div><button type="button" onClick={onCancel}>Cancelar</button></div>
+      {hasRunHistory && (
+        <p className="checklist-template-history-note">
+          Esta plantilla tiene ejecuciones previas. Los cambios se aplicarán hacia adelante sin afectar el historial.
+        </p>
+      )}
       <div className="checklist-stepper">{steps.map((label, index) => <button key={label} type="button" className={step === index + 1 ? "active" : ""} onClick={() => setStep(index + 1)}><span>{index + 1}</span>{label}</button>)}</div>
       {step === 1 && <div className="checklist-step-card"><div className="tasks-form-grid"><Field label="Nombre"><input required value={form.title} onChange={(event) => update("title", event.target.value)} placeholder="Apertura FOH" /></Field><Field label="Area"><select value={form.area} onChange={(event) => update("area", event.target.value)}>{CHECKLIST_AREAS.map((area) => <option key={area} value={area}>{checklistAreaLabel(area)}</option>)}</select></Field><Field label="Frecuencia"><select value={form.frequency} onChange={(event) => update("frequency", event.target.value)}>{CHECKLIST_FREQUENCIES.map(([id, label]) => <option value={id} key={id}>{label}</option>)}</select></Field><Field label="Contexto"><select value={form.shift_context} onChange={(event) => update("shift_context", event.target.value)}>{CHECKLIST_CONTEXTS.map(([id, label]) => <option value={id} key={id}>{label}</option>)}</select></Field></div><Field label="Descripcion"><textarea value={form.description} onChange={(event) => update("description", event.target.value)} /></Field></div>}
       {step === 2 && <div className="checklist-builder">{items.map((item, index) => <ChecklistBuilderItem key={item.id || index} item={item} index={index} onUpdate={updateItem} onMove={move} onDuplicate={duplicateItem} onDelete={() => setItems((current) => current.filter((_, itemIndex) => itemIndex !== index))} />)}<button type="button" className="checklist-add-item" onClick={() => setItems((current) => [...current, emptyChecklistItem()])}>Agregar item</button></div>}

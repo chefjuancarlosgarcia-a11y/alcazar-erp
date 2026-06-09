@@ -1,6 +1,15 @@
 import { supabase } from "../lib/supabase"
 
 const TEMPLATE_SELECT = "*, checklist_template_items(*)"
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+function isPersistentItemId(id) {
+  return UUID_RE.test(String(id || ""))
+}
+
+function activeTemplateItems(items) {
+  return (items || []).filter((item) => item.is_active !== false)
+}
 const RUN_SELECT = "*, checklist_templates(title, description, frequency, shift_context), checklist_run_items(*)"
 const INCIDENT_SELECT = "*, checklist_runs(run_date, area, checklist_templates(title)), checklist_run_items(title, response_type, checked, response_text, response_number, photo_url, comment), profiles!checklist_incidents_reported_by_fkey(full_name, username)"
 const RRULE_DAY_TO_ISO = { MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6, SU: 7 }
@@ -37,7 +46,8 @@ function orderTemplate(template) {
   return template ? {
     ...template,
     ...recurrence,
-    checklist_template_items: [...(template.checklist_template_items || [])].sort((a, b) => Number(a.item_order || 0) - Number(b.item_order || 0))
+    checklist_template_items: activeTemplateItems(template.checklist_template_items)
+      .sort((a, b) => Number(a.item_order || 0) - Number(b.item_order || 0))
   } : template
 }
 
@@ -93,7 +103,8 @@ function itemPayload(item, index, templateId) {
     create_task_on_fail: Boolean(item.create_task_on_fail),
     options: parseOptions(item.options),
     rule_config: { ...(item.rule_config || {}), section: item.section || item.rule_config?.section || "" },
-    score_points: Math.max(0, Number(item.score_points || 0))
+    score_points: Math.max(0, Number(item.score_points || 0)),
+    is_active: true
   }
 }
 
@@ -281,6 +292,15 @@ export async function createChecklistTemplate(payload, items) {
   return getChecklistTemplateById(template.id)
 }
 
+export async function checkTemplateHasRuns(templateId) {
+  if (!templateId) return { hasRuns: false, error: null }
+  const { count, error } = await supabase
+    .from("checklist_runs")
+    .select("id", { count: "exact", head: true })
+    .eq("template_id", templateId)
+  return { hasRuns: Number(count || 0) > 0, error }
+}
+
 export async function updateChecklistTemplate(id, payload, items) {
   const { error } = await supabase
     .from("checklist_templates")
@@ -288,15 +308,46 @@ export async function updateChecklistTemplate(id, payload, items) {
     .eq("id", id)
   if (error) return { data: null, error }
 
-  const { error: deleteError } = await supabase
+  const { data: existingItems, error: fetchError } = await supabase
     .from("checklist_template_items")
-    .delete()
+    .select("id")
     .eq("template_id", id)
-  if (deleteError) return { data: null, error: deleteError }
+    .eq("is_active", true)
+  if (fetchError) return { data: null, error: fetchError }
 
-  const itemRows = items.map((item, index) => itemPayload(item, index, id))
-  const { error: itemsError } = await supabase.from("checklist_template_items").insert(itemRows)
-  if (itemsError) return { data: null, error: itemsError }
+  const submittedIds = new Set(
+    items.map((item) => item.id).filter((itemId) => isPersistentItemId(itemId))
+  )
+  const toDeactivate = (existingItems || [])
+    .filter((row) => !submittedIds.has(row.id))
+    .map((row) => row.id)
+
+  if (toDeactivate.length) {
+    const { error: deactivateError } = await supabase
+      .from("checklist_template_items")
+      .update({ is_active: false })
+      .in("id", toDeactivate)
+    if (deactivateError) return { data: null, error: deactivateError }
+  }
+
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index]
+    const row = itemPayload(item, index, id)
+
+    if (isPersistentItemId(item.id)) {
+      const { error: updateError } = await supabase
+        .from("checklist_template_items")
+        .update(row)
+        .eq("id", item.id)
+        .eq("template_id", id)
+      if (updateError) return { data: null, error: updateError }
+    } else {
+      const { error: insertError } = await supabase
+        .from("checklist_template_items")
+        .insert(row)
+      if (insertError) return { data: null, error: insertError }
+    }
+  }
 
   return getChecklistTemplateById(id)
 }

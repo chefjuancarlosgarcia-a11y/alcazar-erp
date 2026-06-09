@@ -1068,6 +1068,16 @@
   gap: 16px;
 }
 
+.checklist-template-history-note {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--erp-primary, #2563eb) 8%, transparent);
+  color: var(--erp-text-muted, #64748b);
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
 .checklist-wizard-actions {
   display: flex;
   justify-content: flex-end;
