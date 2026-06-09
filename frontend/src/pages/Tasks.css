@@ -1074,6 +1074,14 @@
   gap: 10px;
 }
 
+.checklist-wizard-feedback {
+  margin: 0;
+}
+
+.checklist-preview-meta {
+  margin: 0 0 8px;
+}
+
 .checklist-touch-toggle {
   align-self: end;
   min-height: 43px;

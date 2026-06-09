@@ -1156,6 +1156,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   const canAssignChecklists = ["admin", "gerente_general", "gerente", "recursos_humanos", "rrhh"].includes(userRole)
   const canApproveTemplateChanges = ["admin", "gerente_general"].includes(userRole)
   const isSupervisorOnly = userRole === "supervisor"
+  const canProposeChecklistEdits = isSupervisorOnly
   const canDeleteTemplates = ["admin", "gerente_general"].includes(userRole)
   const [section, setSection] = useState(initialChecklistView === "incidents" ? "incidents" : "today")
   const [templates, setTemplates] = useState([])
@@ -1225,49 +1226,77 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   }, [initialChecklistView, initialRunId])
 
   async function saveTemplate(form, items, options = {}) {
-    if (!form.title.trim()) return setMessage("No se puede guardar una checklist sin titulo.")
-    if (!items.some((item) => item.title.trim())) return setMessage("Agrega al menos 1 item.")
-    if (form.frequency === "semanal" && !normalizeChecklistWeekdays(form.recurrence_days).length) {
-      return setMessage("Debe seleccionar al menos un dia de ejecucion para una checklist semanal.")
+    const templateId = options.templateId || editingTemplate?.id || null
+    if (!form.title.trim()) {
+      return { ok: false, error: "Falta el campo obligatorio: Nombre." }
     }
-    setLoading(true)
-    const cleanedItems = items.filter((item) => item.title.trim())
-    if (isSupervisorOnly) {
-      const payload = {
-        ...form,
-        template_id: editingTemplate?.id || null,
-        request_type: editingTemplate?.id ? "update" : "create",
-        status_after_approval: form.status || "active"
-      }
-      const draftResult = await createChecklistChangeRequest(payload, cleanedItems)
-      if (draftResult.error) {
-        setLoading(false)
-        return setMessage(draftResult.error.message || "No se pudo guardar el borrador.")
-      }
-      if (options.submitForReview) {
-        const submitResult = await submitChecklistChangeRequest(draftResult.data.id)
-        setLoading(false)
-        if (submitResult.error) return setMessage(submitResult.error.message || "No se pudo mandar a verificación.")
-        setMessage("Solicitud enviada a verificación.")
-      } else {
-        setLoading(false)
-        setMessage("Borrador guardado.")
-      }
-      setEditingTemplate(null)
-      setSection("templates")
-      refresh()
-      return
+    if (!items.some((item) => item.title.trim())) {
+      return { ok: false, error: "Agrega al menos 1 item con titulo antes de guardar." }
+    }
+    if (form.frequency === "semanal" && !normalizeChecklistWeekdays(form.recurrence_days).length) {
+      return { ok: false, error: "Debe seleccionar al menos un dia de ejecucion para una checklist semanal." }
     }
 
-    const result = editingTemplate
-      ? await updateChecklistTemplate(editingTemplate.id, form, cleanedItems)
-      : await createChecklistTemplate(form, cleanedItems)
-    setLoading(false)
-    if (result.error) return setMessage(result.error.message || "No se pudo guardar la plantilla.")
-    setMessage(editingTemplate ? "Checklist actualizada." : "Checklist creada.")
-    setEditingTemplate(null)
-    setSection("templates")
-    refresh()
+    setLoading(true)
+    const cleanedItems = items.filter((item) => item.title.trim())
+
+    try {
+      if (isSupervisorOnly) {
+        const payload = {
+          ...form,
+          template_id: templateId,
+          request_type: templateId ? "update" : "create",
+          status_after_approval: form.status || "active"
+        }
+        const existingDraft = templateId
+          ? changeRequests.find((request) => request.template_id === templateId && request.status === "draft")
+          : null
+        const draftResult = existingDraft
+          ? await updateChecklistChangeRequest(existingDraft.id, payload, cleanedItems)
+          : await createChecklistChangeRequest(payload, cleanedItems)
+
+        if (draftResult.error) {
+          return { ok: false, error: draftResult.error.message || "No se pudo guardar el borrador." }
+        }
+
+        if (options.submitForReview) {
+          const submitResult = await submitChecklistChangeRequest(draftResult.data.id)
+          if (submitResult.error) {
+            return { ok: false, error: submitResult.error.message || "No se pudo mandar a verificacion." }
+          }
+          setEditingTemplate(null)
+          setSection("approvals")
+          await refresh()
+          const successMessage = templateId ? "Cambios enviados a verificacion." : "Solicitud de checklist enviada a verificacion."
+          setMessage(successMessage)
+          return { ok: true, message: successMessage }
+        }
+
+        setEditingTemplate(null)
+        setSection("approvals")
+        await refresh()
+        const successMessage = templateId ? "Borrador de cambios actualizado." : "Borrador de checklist guardado."
+        setMessage(successMessage)
+        return { ok: true, message: successMessage }
+      }
+
+      const result = templateId
+        ? await updateChecklistTemplate(templateId, form, cleanedItems)
+        : await createChecklistTemplate(form, cleanedItems)
+
+      if (result.error) {
+        return { ok: false, error: result.error.message || "No se pudo guardar la plantilla." }
+      }
+
+      setEditingTemplate(null)
+      setSection("templates")
+      await refresh()
+      const successMessage = templateId ? "Checklist actualizado correctamente." : "Checklist creado correctamente."
+      setMessage(successMessage)
+      return { ok: true, message: successMessage, data: result.data }
+    } finally {
+      setLoading(false)
+    }
   }
 
   async function assignTemplate(payload) {
@@ -1410,7 +1439,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
         {loading && <span className="tasks-access-chip">Cargando</span>}
       </article>
 
-      {message && <p className={message.includes("No ") || message.includes("Completa") ? "tasks-warning" : "tasks-success"}>{message}</p>}
+      {message && <p className={message.includes("correctamente") || message.includes("guardad") || message.includes("enviad") || message.includes("actualizad") ? "tasks-success" : "tasks-warning"} role="status">{message}</p>}
 
       <nav className="checklists-main-tabs" aria-label="Checklists">
         {sections.map(([id, label]) => (
@@ -1446,6 +1475,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
           onDelete={removeTemplateWithArchiveUX}
           canDelete={canDeleteTemplates}
           canEdit={canEditChecklistsDirectly}
+          canProposeEdits={canProposeChecklistEdits}
           canAssign={canAssignChecklists}
           canSuggest={isSupervisorOnly}
           onSuggest={async (payload) => {
@@ -1459,6 +1489,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       {section === "create" && (canCreateChecklists || editingTemplate) && (
         <ChecklistTemplateWizard
           key={editingTemplate?.id || "new-checklist-template"}
+          templateId={editingTemplate?.id || ""}
           editingTemplate={editingTemplate}
           profiles={profiles}
           onCancel={() => { setEditingTemplate(null); setSection("templates") }}
@@ -1580,7 +1611,7 @@ function ChecklistTodayCard({ run, profiles, onOpen }) {
   )
 }
 
-function ChecklistTemplatesView({ templates, profiles, currentUser, userRole, onEdit, onAssign, onAssignToday, onDuplicate, onDeactivate, onDelete, canDelete, canEdit, canAssign, canSuggest, onSuggest }) {
+function ChecklistTemplatesView({ templates, profiles, currentUser, userRole, onEdit, onAssign, onAssignToday, onDuplicate, onDeactivate, onDelete, canDelete, canEdit, canProposeEdits, canAssign, canSuggest, onSuggest }) {
   const [filters, setFilters] = useState({ area: "", frequency: "", status: "active" })
   const [assigning, setAssigning] = useState(null)
   const [suggesting, setSuggesting] = useState(null)
@@ -1608,6 +1639,7 @@ function ChecklistTemplatesView({ templates, profiles, currentUser, userRole, on
             <div className="checklist-card-meta"><span>{template.checklist_template_items?.length || 0} items</span><span>{friendlyChecklistLabel(CHECKLIST_CONTEXTS, template.shift_context)}</span><span>{template.assigned_role || "Rol libre"}</span><span>{profileDisplayName(profiles, template.assigned_profile_id) || "Sin responsable"}</span></div>
             <div className="checklist-actions">
               {canEdit && <button type="button" className="tasks-secondary" onClick={() => onEdit(template)}>Editar</button>}
+              {canProposeEdits && !canEdit && <button type="button" className="tasks-secondary" onClick={() => onEdit(template)}>Editar checklist</button>}
               {canSuggest && <button type="button" className="tasks-secondary" onClick={() => setSuggesting(template)}>Sugerir cambios</button>}
               {canAssign && <button type="button" className="tasks-secondary" onClick={() => setAssigning(template)}>Asignar</button>}
               {canEdit && <button type="button" className="tasks-secondary" onClick={() => onDuplicate(template)}>Duplicar</button>}
@@ -1677,10 +1709,12 @@ function ChecklistSuggestionPanel({ template, currentUser, onClose, onSubmit }) 
   )
 }
 
-function ChecklistTemplateWizard({ editingTemplate, profiles, onCancel, onSave, approvalMode = false }) {
+function ChecklistTemplateWizard({ templateId = "", editingTemplate, profiles, onCancel, onSave, approvalMode = false }) {
   const [step, setStep] = useState(1)
   const [form, setForm] = useState(() => buildChecklistWizardForm(editingTemplate))
   const [items, setItems] = useState(() => editingTemplate?.checklist_template_items?.length ? editingTemplate.checklist_template_items : [emptyChecklistItem()])
+  const [saveFeedback, setSaveFeedback] = useState(null)
+  const [saving, setSaving] = useState(false)
   const steps = ["Informacion", "Items", "Asignacion", "Vista previa"]
   function update(field, value) {
     setForm((current) => ({ ...current, [field]: value }))
@@ -1737,7 +1771,37 @@ function ChecklistTemplateWizard({ editingTemplate, profiles, onCancel, onSave, 
   const recurrenceSummary = humanChecklistRecurrenceSummary({ ...form, recurrence_days: normalizedDays })
   const selectedDaysSummary = summarizeChecklistWeekdays(form.recurrence_days)
   const debugRRule = form.recurrence_rule || buildChecklistWeeklyRRule(form.recurrence_days)
-  const finalActionDisabled = weeklyDaysMissing
+  const saveBlockReason = weeklyDaysMissing
+    ? "Selecciona al menos un dia de ejecucion en la pestana Asignacion antes de guardar."
+    : !form.title.trim()
+      ? "Completa el nombre de la checklist en la pestana Informacion."
+      : !items.some((item) => item.title.trim())
+        ? "Agrega al menos 1 item con titulo en la pestana Items."
+        : ""
+  const finalActionDisabled = Boolean(saveBlockReason) || saving
+
+  async function handleSave(options = {}) {
+    setSaveFeedback(null)
+    if (saveBlockReason) {
+      setSaveFeedback({ type: "error", message: saveBlockReason })
+      return
+    }
+    setSaving(true)
+    try {
+      const result = await onSave(form, items, { ...options, templateId: templateId || editingTemplate?.id || "" })
+      if (result?.ok) {
+        setSaveFeedback({ type: "success", message: result.message || "Checklist guardado correctamente." })
+        return
+      }
+      setSaveFeedback({ type: "error", message: result?.error || "No se pudo guardar la checklist." })
+    } catch (error) {
+      console.error("Checklist save error:", error)
+      setSaveFeedback({ type: "error", message: error?.message || "Error inesperado al guardar la checklist." })
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <article className="tasks-panel checklist-wizard">
       <div className="tasks-panel-title"><div><h2>{editingTemplate ? "Editar plantilla" : "Crear plantilla"}</h2><p className="tasks-muted">Paso {step} de 4 · {steps[step - 1]}</p></div><button type="button" onClick={onCancel}>Cancelar</button></div>
@@ -1868,18 +1932,26 @@ function ChecklistTemplateWizard({ editingTemplate, profiles, onCancel, onSave, 
             </div>
         </div>
       )}
-      {step === 4 && <ChecklistTemplatePreview form={form} items={items} profiles={profiles} />}
+      {step === 4 && <ChecklistTemplatePreview form={form} items={items} profiles={profiles} templateId={templateId || editingTemplate?.id} />}
+      {saveFeedback && (
+        <p className={saveFeedback.type === "success" ? "tasks-success checklist-wizard-feedback" : "tasks-warning checklist-wizard-feedback"} role={saveFeedback.type === "success" ? "status" : "alert"}>
+          {saveFeedback.message}
+        </p>
+      )}
+      {saveBlockReason && step === 4 && (
+        <p className="tasks-warning checklist-wizard-feedback" role="alert">{saveBlockReason}</p>
+      )}
       <div className="checklist-wizard-actions">
-        <button type="button" className="tasks-secondary" disabled={step === 1} onClick={() => setStep((current) => Math.max(1, current - 1))}>Anterior</button>
+        <button type="button" className="tasks-secondary" disabled={step === 1 || saving} onClick={() => setStep((current) => Math.max(1, current - 1))}>Anterior</button>
         {step < 4 ? (
           <button type="button" className="tasks-primary" onClick={() => setStep((current) => Math.min(4, current + 1))}>Siguiente</button>
         ) : approvalMode ? (
           <>
-            <button type="button" className="tasks-secondary" disabled={finalActionDisabled} title={finalActionDisabled ? "Selecciona al menos un dia de ejecucion." : ""} onClick={() => onSave(form, items, { submitForReview: false })}>Guardar borrador</button>
-            <button type="button" className="tasks-primary" disabled={finalActionDisabled} title={finalActionDisabled ? "Selecciona al menos un dia de ejecucion." : ""} onClick={() => onSave(form, items, { submitForReview: true })}>Mandar a verificación</button>
+            <button type="button" className="tasks-secondary" disabled={finalActionDisabled} title={saveBlockReason || ""} onClick={() => handleSave({ submitForReview: false })}>{saving ? "Guardando..." : "Guardar borrador"}</button>
+            <button type="button" className="tasks-primary" disabled={finalActionDisabled} title={saveBlockReason || ""} onClick={() => handleSave({ submitForReview: true })}>{saving ? "Enviando..." : "Mandar a verificacion"}</button>
           </>
         ) : (
-          <button type="button" className="tasks-primary" disabled={finalActionDisabled} title={finalActionDisabled ? "Selecciona al menos un dia de ejecucion." : ""} onClick={() => onSave(form, items)}>Guardar plantilla</button>
+          <button type="button" className="tasks-primary" disabled={finalActionDisabled} title={saveBlockReason || ""} onClick={() => handleSave()}>{saving ? "Guardando..." : templateId ? "Guardar cambios" : "Guardar plantilla"}</button>
         )}
       </div>
     </article>
@@ -1941,11 +2013,13 @@ function ChecklistBuilderItem({ item, index, onUpdate, onMove, onDuplicate, onDe
   )
 }
 
-function ChecklistTemplatePreview({ form, items, profiles }) {
+function ChecklistTemplatePreview({ form, items, profiles, templateId = "" }) {
   const assignee = profiles.find((profile) => profile.id === form.assigned_profile_id)
+  const recurrenceDays = summarizeChecklistWeekdays(form.recurrence_days)
   return (
     <div className="checklist-preview">
-      <article className="checklist-template-card"><div className="checklist-card-top"><div><h3>{form.title || "Nueva checklist"}</h3><p>{checklistAreaLabel(form.area)} · {friendlyChecklistLabel(CHECKLIST_FREQUENCIES, form.frequency)}</p></div><span className="tasks-badge">{friendlyChecklistLabel(CHECKLIST_CONTEXTS, form.shift_context)}</span></div><p>{form.description || "Sin descripcion"}</p><div className="checklist-card-meta"><span>{items.filter((item) => item.title.trim()).length} items</span><span>{form.assigned_role || "Cualquier rol"}</span><span>{assignee?.full_name || assignee?.username || "Sin colaborador fijo"}</span></div></article>
+      {templateId && <p className="tasks-muted checklist-preview-meta">Editando checklist existente · ID {templateId.slice(0, 8)}...</p>}
+      <article className="checklist-template-card"><div className="checklist-card-top"><div><h3>{form.title || "Nueva checklist"}</h3><p>{checklistAreaLabel(form.area)} · {friendlyChecklistLabel(CHECKLIST_FREQUENCIES, form.frequency)}</p></div><span className="tasks-badge">{friendlyChecklistLabel(CHECKLIST_CONTEXTS, form.shift_context)}</span></div><p>{form.description || "Sin descripcion"}</p><div className="checklist-card-meta"><span>{items.filter((item) => item.title.trim()).length} items</span><span>{form.assigned_role || "Cualquier rol"}</span><span>{assignee?.full_name || assignee?.username || "Sin colaborador fijo"}</span>{recurrenceDays !== "Ninguno" && <span>Dias: {recurrenceDays}</span>}</div></article>
       <div className="checklist-preview-items">{items.filter((item) => item.title.trim()).map((item, index) => <div key={item.id || index}><strong>{index + 1}. {item.title}</strong><span>{friendlyResponseType(item.response_type)}{item.requires_photo ? " · foto" : ""}{item.requires_comment ? " · comentario" : ""}</span></div>)}</div>
     </div>
   )
