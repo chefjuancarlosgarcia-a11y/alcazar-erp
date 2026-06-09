@@ -1,0 +1,66 @@
+.brand-logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.brand-logo-mark {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 42px;
+  height: 42px;
+  border: 1px solid color-mix(in srgb, var(--erp-primary, #14b8a6) 40%, transparent);
+  border-radius: var(--erp-border-radius-sm, 8px);
+  background: color-mix(in srgb, var(--erp-primary, #14b8a6) 12%, transparent);
+  color: var(--erp-primary, #14b8a6);
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  overflow: hidden;
+}
+
+.brand-logo-mark img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.brand-logo-copy {
+  min-width: 0;
+}
+
+.brand-logo-copy strong {
+  display: block;
+  color: var(--erp-text-primary, #f8fafc);
+  font-size: 0.95rem;
+  line-height: 1.2;
+}
+
+.brand-logo-copy small {
+  display: block;
+  margin-top: 2px;
+  color: var(--erp-text-secondary, #94a3b8);
+  font-size: 0.78rem;
+}
+
+.brand-logo-header .brand-logo-mark {
+  width: 36px;
+  height: 36px;
+}
+
+.brand-logo-header .brand-logo-copy strong {
+  font-size: 0.9rem;
+}
+
+.brand-logo-compact .brand-logo-mark {
+  width: 34px;
+  height: 34px;
+}
+
+.brand-logo-sidebar {
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--erp-primary, #14b8a6) 18%, #1f3046);
+  border-radius: var(--erp-border-radius, 12px);
+  background: color-mix(in srgb, var(--erp-surface, #0f172a) 88%, transparent);
+}

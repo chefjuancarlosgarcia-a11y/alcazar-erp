@@ -1,16 +1,19 @@
 import { useState } from "react"
 import { Outlet, useLocation } from "react-router-dom"
 import Sidebar from "../components/Sidebar"
+import BrandLogo from "../components/branding/BrandLogo"
 import NotificationsBell from "../components/NotificationsBell"
 import UserProfileDropdown from "../components/UserProfileDropdown"
 import MyProfilePanel from "../components/MyProfilePanel"
 import { useAuth } from "../context/AuthContext"
+import { useBrandingContext } from "../context/BrandingProvider"
 import { useDevice } from "../context/DeviceContext"
 import "./MainLayout.css"
 
 function MainLayout() {
   const location = useLocation()
   const { user } = useAuth()
+  const branding = useBrandingContext()
   const device = useDevice()
   const [profilePanelView, setProfilePanelView] = useState("")
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
@@ -18,7 +21,7 @@ function MainLayout() {
   const deviceClass = device.isMobile ? "device-mobile" : device.isTablet ? "device-tablet" : "device-desktop"
 
   return (
-    <div className={`app-layout ${deviceClass} ${device.isTouchDevice ? "device-touch" : ""}`} style={layoutStyle}>
+    <div className={`app-layout ${deviceClass} ${device.isTouchDevice ? "device-touch" : ""}`}>
       {!device.isMobile && <Sidebar compact={device.isTablet} />}
       {device.isMobile && mobileMenuOpen && (
         <>
@@ -26,9 +29,12 @@ function MainLayout() {
           <Sidebar mobile onNavigate={() => setMobileMenuOpen(false)} />
         </>
       )}
-      <div className="app-content" style={contentStyle}>
+      <div className="app-content">
         {user && (
-          <header className="app-account-header" style={accountHeaderStyle}>
+          <header className="app-account-header">
+            <div className="app-account-header-brand">
+              <BrandLogo branding={branding} variant="header" showText={!device.isMobile} />
+            </div>
             {device.isMobile && (
               <button
                 type="button"
@@ -45,7 +51,7 @@ function MainLayout() {
             <UserProfileDropdown currentUser={user} onOpenProfile={setProfilePanelView} />
           </header>
         )}
-        <main className={`app-main ${isLegacyModule ? "app-main-legacy" : ""}`} style={isLegacyModule ? legacyMainStyle : mainStyle}>
+        <main className={`app-main ${isLegacyModule ? "app-main-legacy" : ""}`}>
           <Outlet />
         </main>
       </div>
@@ -71,54 +77,6 @@ function DeviceIndicator({ device }) {
       {size} / {system} / {orientation}
     </aside>
   )
-}
-
-const layoutStyle = {
-  display: "flex",
-  width: "100%",
-  minHeight: "100vh",
-  background: "#071023",
-  color: "#e6eef8"
-}
-
-const contentStyle = {
-  display: "flex",
-  flexDirection: "column",
-  minWidth: 0,
-  flex: 1,
-  minHeight: "100vh"
-}
-
-const accountHeaderStyle = {
-  position: "sticky",
-  top: 0,
-  zIndex: 50,
-  display: "flex",
-  justifyContent: "flex-end",
-  alignItems: "center",
-  minHeight: "64px",
-  padding: "10px 22px",
-  borderBottom: "1px solid #18283d",
-  background: "rgba(7, 16, 35, 0.92)",
-  backdropFilter: "blur(15px)",
-  boxSizing: "border-box"
-}
-
-const mainStyle = {
-  position: "relative",
-  flex: 1,
-  minWidth: 0,
-  padding: "28px",
-  overflow: "auto"
-}
-
-const legacyMainStyle = {
-  ...mainStyle,
-  flex: "1 1 100%",
-  padding: 0,
-  width: "100%",
-  minHeight: "100vh",
-  overflow: "auto"
 }
 
 export default MainLayout

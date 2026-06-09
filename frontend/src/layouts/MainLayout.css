@@ -63,14 +63,43 @@
   -webkit-overflow-scrolling: touch;
 }
 
+.app-account-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  min-height: 64px;
+  padding: 10px 22px;
+  box-sizing: border-box;
+}
+
+.app-main {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  padding: 28px;
+  overflow: auto;
+}
+
+.app-main-legacy {
+  flex: 1 1 100%;
+  padding: 0;
+  width: 100%;
+  min-height: 100vh;
+  overflow: auto;
+}
+
 @media (max-width: 767px) {
   .app-account-header {
-    justify-content: space-between !important;
-    padding: 9px 12px !important;
+    justify-content: space-between;
+    padding: 9px 12px;
   }
 
   .app-main:not(.app-main-legacy) {
-    padding: 14px !important;
+    padding: 14px;
   }
 
   .device-indicator {

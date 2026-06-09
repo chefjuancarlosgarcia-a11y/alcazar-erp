@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react"
 import { applyBrandingTheme } from "../../utils/brandingTheme"
+import BrandLogo from "./BrandLogo"
 
 export default function ErpLivePreview({ branding }) {
   const rootRef = useRef(null)
@@ -8,22 +9,11 @@ export default function ErpLivePreview({ branding }) {
     if (rootRef.current) applyBrandingTheme(branding, rootRef.current)
   }, [branding])
 
-  const logo = branding.logoUrl
-  const compactLogo = branding.compactLogoUrl || branding.logoUrl
-
   return (
     <div className="erp-live-preview" ref={rootRef}>
       <div className="erp-live-preview-shell">
         <aside className="erp-live-sidebar">
-          <div className="erp-live-brand">
-            <span className="erp-live-logo">
-              {logo ? <img src={logo} alt="" /> : branding.monogram}
-            </span>
-            <div>
-              <strong>{branding.commercialName || "Mi restaurante"}</strong>
-              <small>{branding.subtitle || "Sistema operativo"}</small>
-            </div>
-          </div>
+          <BrandLogo branding={branding} variant="sidebar" showText />
           <nav>
             <button type="button" className="active">Dashboard</button>
             <button type="button">Punto de Venta</button>
@@ -32,17 +22,14 @@ export default function ErpLivePreview({ branding }) {
             <button type="button">Reportes</button>
           </nav>
           <div className="erp-live-compact-logo">
-            {compactLogo ? <img src={compactLogo} alt="" /> : <span>{branding.monogram}</span>}
+            <BrandLogo branding={branding} variant="compact" showText={false} />
             <em>Vista compacta</em>
           </div>
         </aside>
 
         <main className="erp-live-main">
           <header>
-            <div>
-              <p>Panel principal</p>
-              <h3>Resumen del dia</h3>
-            </div>
+            <BrandLogo branding={branding} variant="header" />
             <div className="erp-live-header-actions">
               <button type="button" className="ghost">Exportar</button>
               <button type="button" className="primary">Nueva orden</button>

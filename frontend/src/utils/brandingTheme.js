@@ -179,12 +179,44 @@ function paletteFromPrimary(primaryHex, variant) {
   }
 }
 
+export function buildFullThemeTokens(palette, themeMode = "dark") {
+  const mode = themeMode === "light" ? "light" : "dark"
+  const text = mode === "light"
+    ? { textPrimary: "#0f172a", textSecondary: "#64748b" }
+    : { textPrimary: "#f8fafc", textSecondary: "#94a3b8" }
+  return {
+    ...palette,
+    successColor: DEFAULT_THEME_TOKENS.successColor,
+    warningColor: DEFAULT_THEME_TOKENS.warningColor,
+    dangerColor: DEFAULT_THEME_TOKENS.dangerColor,
+    ...text
+  }
+}
+
+export function themeFromPaletteVariant(primaryHex, variantKey, themeMode = "dark") {
+  const palette = paletteFromPrimary(primaryHex, variantKey)
+  return buildFullThemeTokens(palette, themeMode)
+}
+
+export const PALETTE_VARIANT_LABELS = {
+  corporate: "Corporativo",
+  modern: "Moderno",
+  dark: "Oscuro"
+}
+
 export function generatePaletteVariants(primaryHex) {
   return {
     corporate: { id: "corporate", label: "Corporativo", ...paletteFromPrimary(primaryHex, "corporate") },
     modern: { id: "modern", label: "Moderno", ...paletteFromPrimary(primaryHex, "modern") },
     dark: { id: "dark", label: "Oscuro", ...paletteFromPrimary(primaryHex, "dark") }
   }
+}
+
+export function resolveLogoUrl(branding = {}, { compact = false } = {}) {
+  const main = String(branding.logoUrl || "").trim()
+  const small = String(branding.compactLogoUrl || "").trim()
+  if (compact) return small || main
+  return main || small
 }
 
 export function resolveBrandingTokens(branding = {}) {
@@ -238,10 +270,24 @@ const CSS_VAR_MAP = {
   densityScale: "--erp-density-scale"
 }
 
+const CSS_VAR_ALIASES = {
+  primaryColor: "--erp-primary",
+  secondaryColor: "--erp-secondary",
+  accentColor: "--erp-accent",
+  backgroundColor: "--erp-background",
+  surfaceColor: "--erp-surface",
+  successColor: "--erp-success",
+  warningColor: "--erp-warning",
+  dangerColor: "--erp-danger"
+}
+
 export function applyBrandingTheme(branding, target = document.documentElement) {
   if (!target) return
   const tokens = resolveBrandingTokens(branding)
   Object.entries(CSS_VAR_MAP).forEach(([key, cssVar]) => {
+    if (tokens[key] != null) target.style.setProperty(cssVar, tokens[key])
+  })
+  Object.entries(CSS_VAR_ALIASES).forEach(([key, cssVar]) => {
     if (tokens[key] != null) target.style.setProperty(cssVar, tokens[key])
   })
   target.style.setProperty("--sidebar-accent", tokens.primaryColor)
@@ -343,8 +389,10 @@ function loadImage(url) {
 export function applyPresetTheme(presetId) {
   const preset = PRESET_THEMES[presetId]
   if (!preset) return null
+  const tokens = buildFullThemeTokens(preset, preset.themeMode || "dark")
   return {
-    ...normalizeBrandingDraft(preset),
+    ...tokens,
+    themeMode: preset.themeMode || "dark",
     presetTheme: presetId,
     paletteVariant: presetId === "dark" ? "dark" : presetId === "modern" ? "modern" : "corporate"
   }

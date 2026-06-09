@@ -1,0 +1,195 @@
+/* Global ERP shell tokens — consumed by layout, sidebar, cards, buttons, tabs */
+
+.app-layout {
+  background: var(--erp-background, #071023);
+  color: var(--erp-text-primary, #f8fafc);
+}
+
+.app-content {
+  background: var(--erp-background, #071023);
+}
+
+.app-account-header {
+  background: color-mix(in srgb, var(--erp-background, #071023) 92%, transparent) !important;
+  border-bottom: 1px solid color-mix(in srgb, var(--erp-primary, #14b8a6) 16%, #18283d) !important;
+  color: var(--erp-text-primary, #f8fafc);
+}
+
+.app-account-header-brand {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  margin-right: auto;
+}
+
+.app-main {
+  color: var(--erp-text-primary, #f8fafc);
+}
+
+.mobile-menu-button {
+  border-color: color-mix(in srgb, var(--erp-primary, #14b8a6) 28%, #334155) !important;
+  background: var(--erp-surface, #101b2d) !important;
+  color: var(--erp-text-primary, #e6eef8) !important;
+}
+
+.mobile-menu-button span {
+  color: var(--erp-accent, #5eead4) !important;
+}
+
+.erp-sidebar {
+  background: linear-gradient(180deg, var(--erp-surface, #0f172a) 0%, var(--erp-background, #0b1220) 100%) !important;
+  border-right: 1px solid color-mix(in srgb, var(--erp-primary, #14b8a6) 14%, #1f2d40) !important;
+  color: var(--erp-text-primary, #e6eef8) !important;
+}
+
+.erp-sidebar .erp-sidebar-link.active,
+.erp-sidebar .erp-sidebar-link[aria-current="page"] {
+  background: color-mix(in srgb, var(--erp-primary, #14b8a6) 14%, transparent) !important;
+  border-color: color-mix(in srgb, var(--erp-primary, #14b8a6) 62%, transparent) !important;
+  box-shadow: inset 3px 0 0 var(--sidebar-accent, var(--erp-primary, #14b8a6)) !important;
+  color: var(--erp-text-primary, #f0fdfa) !important;
+}
+
+.erp-sidebar .erp-sidebar-subitem.active,
+.erp-sidebar .erp-sidebar-subitem[aria-current="page"] {
+  border-color: color-mix(in srgb, var(--erp-primary, #14b8a6) 32%, transparent) !important;
+}
+
+.erp-card {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid color-mix(in srgb, var(--erp-primary, #14b8a6) 16%, #24344a);
+  border-radius: var(--erp-border-radius, 14px);
+  background: var(--erp-surface, #0f172a);
+  color: var(--erp-text-primary, #f8fafc);
+}
+
+.erp-card-accent {
+  border-color: color-mix(in srgb, var(--erp-primary, #14b8a6) 45%, #24344a);
+  background: color-mix(in srgb, var(--erp-primary, #14b8a6) 8%, var(--erp-surface, #0f172a));
+}
+
+.erp-btn-primary {
+  min-height: 42px;
+  padding: 10px 14px;
+  border: 1px solid var(--erp-primary, #0f766e);
+  border-radius: var(--erp-border-radius-sm, 10px);
+  background: var(--erp-primary, #0f766e);
+  color: #ecfeff;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.erp-btn-primary:hover {
+  background: color-mix(in srgb, var(--erp-primary, #0f766e) 88%, white);
+}
+
+.erp-muted {
+  color: var(--erp-text-secondary, #94a3b8);
+}
+
+.settings-tab.active {
+  color: var(--erp-accent, #2dd4bf) !important;
+  border-bottom-color: var(--erp-accent, #2dd4bf) !important;
+}
+
+.settings-card {
+  border-color: color-mix(in srgb, var(--erp-primary, #14b8a6) 12%, #1f3046);
+}
+
+.settings-card button.primary,
+.branding-actions button.primary,
+.branding-upload-button {
+  border-color: var(--erp-primary, #0f766e) !important;
+  background: var(--erp-primary, #0f766e) !important;
+}
+
+.settings-eyebrow {
+  color: var(--erp-accent, #2dd4bf) !important;
+}
+
+.branding-palette-active-badge {
+  display: inline-flex;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--erp-primary, #14b8a6) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--erp-primary, #14b8a6) 35%, transparent);
+  color: var(--erp-text-primary, #f8fafc);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.branding-logo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.branding-logo-actions button {
+  min-height: 36px;
+  padding: 7px 11px;
+  border: 1px solid #475569;
+  border-radius: 9px;
+  background: transparent;
+  color: #cbd5e1;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.branding-logo-actions button.danger {
+  border-color: color-mix(in srgb, var(--erp-danger, #ef4444) 45%, #475569);
+  color: #fecaca;
+}
+
+.branding-logo-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.dashboard-page {
+  display: grid;
+  gap: 18px;
+}
+
+.dashboard-page-header {
+  max-width: 720px;
+}
+
+.dashboard-action-card,
+.dashboard-tasks-card {
+  display: grid;
+  gap: 12px;
+  max-width: 720px;
+}
+
+.dashboard-action-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.dashboard-tasks-head,
+.dashboard-task-row {
+  display: grid;
+  gap: 4px;
+}
+
+.dashboard-tasks-head {
+  grid-template-columns: 1fr auto;
+  align-items: start;
+  gap: 12px;
+}
+
+.dashboard-task-row + .dashboard-task-row {
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--erp-primary, #14b8a6) 12%, #24344a);
+}
+
+.dashboard-page h2 {
+  margin: 0;
+  color: var(--erp-text-primary, #f8fafc);
+}

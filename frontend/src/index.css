@@ -12,6 +12,14 @@
   --erp-border-radius: 12px;
   --erp-border-radius-sm: 8px;
   --erp-density-scale: 1;
+  --erp-primary: var(--erp-primary-color);
+  --erp-secondary: var(--erp-secondary-color);
+  --erp-accent: var(--erp-accent-color);
+  --erp-background: var(--erp-background-color);
+  --erp-surface: var(--erp-surface-color);
+  --erp-success: var(--erp-success-color);
+  --erp-warning: var(--erp-warning-color);
+  --erp-danger: var(--erp-danger-color);
   --sidebar-accent: var(--erp-primary-color);
 
   --text: var(--erp-text-secondary);

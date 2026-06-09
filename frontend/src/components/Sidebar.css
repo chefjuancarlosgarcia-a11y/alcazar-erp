@@ -27,16 +27,16 @@
 
 .erp-sidebar .erp-sidebar-link.active,
 .erp-sidebar .erp-sidebar-link[aria-current="page"] {
-  background: rgba(20, 184, 166, 0.14) !important;
-  border-color: rgba(20, 184, 166, 0.62) !important;
-  box-shadow: inset 3px 0 0 var(--sidebar-accent, #14b8a6) !important;
-  color: #f0fdfa !important;
+  background: color-mix(in srgb, var(--erp-primary, #14b8a6) 14%, transparent) !important;
+  border-color: color-mix(in srgb, var(--erp-primary, #14b8a6) 62%, transparent) !important;
+  box-shadow: inset 3px 0 0 var(--sidebar-accent, var(--erp-primary, #14b8a6)) !important;
+  color: var(--erp-text-primary, #f0fdfa) !important;
 }
 
 .erp-sidebar .erp-sidebar-subitem.active,
 .erp-sidebar .erp-sidebar-subitem[aria-current="page"] {
-  background: rgba(30, 41, 59, 0.72) !important;
-  border-color: rgba(20, 184, 166, 0.32) !important;
+  background: color-mix(in srgb, var(--erp-surface, #1e293b) 72%, transparent) !important;
+  border-color: color-mix(in srgb, var(--erp-primary, #14b8a6) 32%, transparent) !important;
   box-shadow: none !important;
-  color: #e6eef8 !important;
+  color: var(--erp-text-primary, #e6eef8) !important;
 }

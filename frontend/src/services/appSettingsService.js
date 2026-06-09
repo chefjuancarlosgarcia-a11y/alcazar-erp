@@ -36,8 +36,8 @@ function normalizeBranding(value = {}) {
     ...value,
     commercialName: value.commercialName || value.appName || DEFAULT_BRANDING_SETTINGS.commercialName,
     subtitle: value.subtitle || value.tagline || DEFAULT_BRANDING_SETTINGS.subtitle,
-    logoUrl: value.logoUrl || value.logo_url || "",
-    compactLogoUrl: value.compactLogoUrl || value.compact_logo_url || "",
+    logoUrl: String(value.logoUrl || value.logo_url || "").trim(),
+    compactLogoUrl: String(value.compactLogoUrl || value.compact_logo_url || "").trim(),
     primaryColor: value.primaryColor || value.primary_color || value.accentColor || value.accent_color,
     accentColor: value.accentColor || value.accent_color || value.primaryColor || value.primary_color
   })

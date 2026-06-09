@@ -3,6 +3,7 @@ import { NavLink, useLocation } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
 import { normalizeRole } from "../utils/profilePermissions"
 import useAppBranding from "../hooks/useAppBranding"
+import BrandLogo from "./branding/BrandLogo"
 import "./Sidebar.css"
 
 function submenuAllowsRole(allowedRoles, userRole) {
@@ -118,17 +119,7 @@ function Sidebar({ compact = false, mobile = false, onNavigate }) {
 
   return (
     <aside className="erp-sidebar" style={{ ...sidebarStyle, "--sidebar-accent": accent, ...(compact ? compactSidebarStyle : {}), ...(mobile ? mobileSidebarStyle : {}) }}>
-      <div style={{ ...brandStyle, ...(compact ? compactBrandStyle : {}) }}>
-        <span style={{ ...brandIconStyle, borderColor: `${accent}66`, color: accent }}>
-          {(compact ? branding.compactLogoUrl : branding.logoUrl) || branding.logoUrl
-            ? <img src={(compact ? branding.compactLogoUrl : branding.logoUrl) || branding.logoUrl} alt="" style={brandLogoImageStyle} />
-            : branding.monogram}
-        </span>
-        <div style={brandTextStyle}>
-          <strong>{branding.commercialName}</strong>
-          {!compact && <span style={brandSubtitleStyle}>{branding.subtitle}</span>}
-        </div>
-      </div>
+      <BrandLogo branding={branding} variant="sidebar" showText={!compact} className="brand-logo-sidebar" />
 
       <nav style={navStyle}>
         {allowedItems.map((item) => (
@@ -168,9 +159,6 @@ const sidebarStyle = {
   minHeight: "100vh",
   flex: "0 0 280px",
   padding: "20px",
-  background: "linear-gradient(180deg, #0f172a 0%, #0b1220 100%)",
-  borderRight: "1px solid #1f2d40",
-  color: "#e6eef8",
   boxSizing: "border-box",
   overflowY: "auto",
   pointerEvents: "auto"
@@ -228,7 +216,7 @@ const linkStyle = {
   gap: "8px",
   padding: "11px 12px 11px 14px",
   borderRadius: "12px",
-  color: "#cbd5e1",
+  color: "var(--erp-text-secondary, #cbd5e1)",
   textDecoration: "none",
   border: "1px solid transparent",
   outline: "none",
@@ -240,8 +228,7 @@ const linkStyle = {
 const navLabelStyle = { display: "inline-flex", alignItems: "center", gap: "9px", fontWeight: 750 }
 
 const activeLinkStyle = {
-  background: "rgba(20, 184, 166, .14)",
-  color: "#f0fdfa"
+  color: "var(--erp-text-primary, #f0fdfa)"
 }
 
 const chevronStyle = { color: "#64748b", fontSize: "0.9rem", lineHeight: 1 }
@@ -271,9 +258,9 @@ const logoutButtonStyle = {
   marginTop: "24px",
   padding: "10px 12px",
   borderRadius: "10px",
-  border: "1px solid #24344a",
-  background: "#111827",
-  color: "#e6eef8",
+  border: "1px solid color-mix(in srgb, var(--erp-primary, #14b8a6) 20%, #24344a)",
+  background: "var(--erp-surface, #111827)",
+  color: "var(--erp-text-primary, #e6eef8)",
   cursor: "pointer"
 }
 

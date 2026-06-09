@@ -11,7 +11,9 @@ import {
   extractColorsFromImageFile,
   generatePaletteVariants,
   normalizeBrandingDraft,
-  PRESET_THEMES
+  PALETTE_VARIANT_LABELS,
+  PRESET_THEMES,
+  themeFromPaletteVariant
 } from "../../utils/brandingTheme"
 import ErpLivePreview from "./ErpLivePreview"
 import "./BrandingAppearance.css"
@@ -28,9 +30,11 @@ export default function BrandingAppearanceSettings() {
   const [busy, setBusy] = useState(false)
   const [logoExtract, setLogoExtract] = useState(null)
   const previewRef = useRef(null)
+  const savedRef = useRef(saved)
 
   const hasChanges = useMemo(() => brandingSnapshot(saved) !== brandingSnapshot(draft), [saved, draft])
   const paletteVariants = useMemo(() => generatePaletteVariants(draft.primaryColor), [draft.primaryColor])
+  const activePaletteLabel = PALETTE_VARIANT_LABELS[draft.paletteVariant] || draft.paletteVariant
 
   useEffect(() => {
     getBrandingSettings().then(({ data }) => {
@@ -41,11 +45,23 @@ export default function BrandingAppearanceSettings() {
   }, [])
 
   useEffect(() => {
+    savedRef.current = saved
+  }, [saved])
+
+  useEffect(() => {
     if (previewRef.current) applyBrandingTheme(draft, previewRef.current)
   }, [draft])
 
+  useEffect(() => {
+    applyBrandingTheme(draft, document.documentElement)
+  }, [draft])
+
+  useEffect(() => {
+    return () => applyBrandingTheme(savedRef.current, document.documentElement)
+  }, [])
+
   function patchDraft(next) {
-    setDraft((current) => normalizeBrandingDraft({ ...current, ...next, presetTheme: next.presetTheme || "custom" }))
+    setDraft((current) => normalizeBrandingDraft({ ...current, ...next, presetTheme: next.presetTheme ?? current.presetTheme ?? "custom" }))
   }
 
   async function handleLogoUpload(event, variant) {
@@ -81,49 +97,76 @@ export default function BrandingAppearanceSettings() {
     setBusy(false)
   }
 
+  function removeLogo(variant) {
+    if (variant === "compact") {
+      patchDraft({ compactLogoUrl: "" })
+      setMessage("Logo compacto removido.")
+    } else {
+      patchDraft({ logoUrl: "" })
+      setLogoExtract(null)
+      setMessage("Logo principal removido.")
+    }
+  }
+
   function applyPaletteVariant(variantKey) {
-    const palette = paletteVariants[variantKey]
-    if (!palette) return
+    const tokens = themeFromPaletteVariant(draft.primaryColor, variantKey, draft.themeMode)
     patchDraft({
+      ...tokens,
       paletteVariant: variantKey,
-      primaryColor: palette.primaryColor,
-      secondaryColor: palette.secondaryColor,
-      accentColor: palette.accentColor,
-      backgroundColor: palette.backgroundColor,
-      surfaceColor: palette.surfaceColor
+      presetTheme: "custom"
     })
+    setMessage(`Paleta ${PALETTE_VARIANT_LABELS[variantKey] || variantKey} aplicada en vista previa.`)
   }
 
   function applyQuickTheme(themeId) {
     const preset = applyPresetTheme(themeId)
     if (!preset) return
-    patchDraft(preset)
-    setMessage(`Tema ${PRESET_THEMES[themeId].label} aplicado en vista previa.`)
+    patchDraft({ ...preset, presetTheme: themeId })
+    setMessage(`${PRESET_THEMES[themeId].label} aplicado en vista previa.`)
   }
 
   async function handleSave() {
     setBusy(true)
     setError("")
-    const result = await saveBrandingSettings(draft)
+    const payload = normalizeBrandingDraft({
+      ...draft,
+      logoUrl: draft.logoUrl || "",
+      compactLogoUrl: draft.compactLogoUrl || ""
+    })
+    const result = await saveBrandingSettings(payload)
     if (result.error) {
       setError("Cambios guardados localmente. Verifica la migracion app_settings / branding-assets en Supabase.")
     } else {
-      setMessage("Cambios guardados correctamente.")
+      setMessage("Apariencia guardada correctamente.")
     }
-    setSaved(normalizeBrandingDraft(result.data))
-    setDraft(normalizeBrandingDraft(result.data))
+    const normalized = normalizeBrandingDraft(result.data)
+    setSaved(normalized)
+    setDraft(normalized)
     setBusy(false)
   }
 
   function handleRestore() {
     patchDraft(saved)
-    setMessage("Se restauro la ultima version guardada.")
+    setMessage("Se descartaron los cambios no guardados.")
     setError("")
   }
 
-  function handleRestoreDefaults() {
-    patchDraft(DEFAULT_BRANDING_SETTINGS)
-    setMessage("Valores predeterminados cargados en vista previa.")
+  function handleRestoreColors() {
+    patchDraft({
+      ...DEFAULT_BRANDING_SETTINGS,
+      commercialName: draft.commercialName,
+      subtitle: draft.subtitle,
+      monogram: draft.monogram,
+      logoUrl: draft.logoUrl,
+      compactLogoUrl: draft.compactLogoUrl
+    })
+    setMessage("Colores restaurados al predeterminado.")
+  }
+
+  function handleRemoveAllLogos() {
+    patchDraft({ logoUrl: "", compactLogoUrl: "" })
+    setLogoExtract(null)
+    setMessage("Logos removidos. Guarda para persistir.")
   }
 
   return (
@@ -162,18 +205,24 @@ export default function BrandingAppearanceSettings() {
               <div>
                 <strong>Logo principal</strong>
                 <div className="branding-logo-preview">{draft.logoUrl ? <img src={draft.logoUrl} alt="" /> : <span>{draft.monogram}</span>}</div>
-                <label className="branding-upload-button">
-                  Subir imagen
-                  <input type="file" accept=".png,.jpg,.jpeg,.svg,image/png,image/jpeg,image/svg+xml" disabled={busy} onChange={(event) => handleLogoUpload(event, "main")} />
-                </label>
+                <div className="branding-logo-actions">
+                  <label className="branding-upload-button">
+                    Subir imagen
+                    <input type="file" accept=".png,.jpg,.jpeg,.svg,image/png,image/jpeg,image/svg+xml" disabled={busy} onChange={(event) => handleLogoUpload(event, "main")} />
+                  </label>
+                  <button type="button" className="danger" disabled={busy || !draft.logoUrl} onClick={() => removeLogo("main")}>Quitar logo</button>
+                </div>
               </div>
               <div>
                 <strong>Logo compacto</strong>
                 <div className="branding-logo-preview compact">{draft.compactLogoUrl ? <img src={draft.compactLogoUrl} alt="" /> : <span>{draft.monogram}</span>}</div>
-                <label className="branding-upload-button">
-                  Subir imagen
-                  <input type="file" accept=".png,.jpg,.jpeg,.svg,image/png,image/jpeg,image/svg+xml" disabled={busy} onChange={(event) => handleLogoUpload(event, "compact")} />
-                </label>
+                <div className="branding-logo-actions">
+                  <label className="branding-upload-button">
+                    Subir imagen
+                    <input type="file" accept=".png,.jpg,.jpeg,.svg,image/png,image/jpeg,image/svg+xml" disabled={busy} onChange={(event) => handleLogoUpload(event, "compact")} />
+                  </label>
+                  <button type="button" className="danger" disabled={busy || !draft.compactLogoUrl} onClick={() => removeLogo("compact")}>Quitar logo</button>
+                </div>
               </div>
             </div>
             <p className="branding-help">Formatos: PNG, JPG, SVG. Se guardan en Supabase Storage.</p>
@@ -182,7 +231,7 @@ export default function BrandingAppearanceSettings() {
           <article className="settings-card">
             <h3>Color principal</h3>
             <label className="branding-color-picker">Elige un color base
-              <input type="color" value={draft.primaryColor} onChange={(event) => patchDraft({ primaryColor: event.target.value, accentColor: event.target.value })} />
+              <input type="color" value={draft.primaryColor} onChange={(event) => patchDraft({ primaryColor: event.target.value, accentColor: event.target.value, presetTheme: "custom" })} />
               <code>{draft.primaryColor}</code>
             </label>
           </article>
@@ -211,12 +260,16 @@ export default function BrandingAppearanceSettings() {
           <div className="branding-actions">
             <button type="button" className="primary" disabled={busy || !hasChanges} onClick={handleSave}>Guardar cambios</button>
             <button type="button" disabled={busy || !hasChanges} onClick={handleRestore}>Descartar cambios</button>
-            <button type="button" disabled={busy} onClick={handleRestoreDefaults}>Restaurar predeterminado</button>
+            <button type="button" disabled={busy} onClick={handleRestoreColors}>Restaurar colores</button>
+            <button type="button" disabled={busy || (!draft.logoUrl && !draft.compactLogoUrl)} onClick={handleRemoveAllLogos}>Quitar logos</button>
           </div>
         </section>
 
         <section className="branding-column branding-column-preview" ref={previewRef}>
-          <div className="branding-preview-label">Vista previa en vivo</div>
+          <div className="branding-preview-label">
+            Vista previa en vivo
+            <span className="branding-palette-active-badge">Paleta activa: {activePaletteLabel}</span>
+          </div>
           <ErpLivePreview branding={draft} />
         </section>
 
@@ -266,7 +319,7 @@ export default function BrandingAppearanceSettings() {
                     key={label}
                     type="button"
                     className="branding-logo-color"
-                    onClick={() => patchDraft({ primaryColor: color, accentColor: color })}
+                    onClick={() => patchDraft({ primaryColor: color, accentColor: color, presetTheme: "custom" })}
                   >
                     <span style={{ background: color }} />
                     <div><strong>{label}</strong><code>{color}</code></div>
