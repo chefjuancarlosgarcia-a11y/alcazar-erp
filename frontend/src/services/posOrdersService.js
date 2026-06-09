@@ -24,6 +24,9 @@ function mapOrderItem(row) {
     is_test_item: row.is_test_item === true,
     inventoryConsumed: row.inventory_consumed === true,
     ticketId: row.production_ticket_id || "",
+    productVariantId: row.product_variant_id || "",
+    productVariantName: row.product_variant_name || "",
+    selectedSize: row.selected_size || "",
     modificaciones: row.notes || "",
     modifiers: row.modifiers || []
   }
@@ -165,22 +168,29 @@ export async function updateOrderSalesChannel(orderId, payload = {}) {
   )
 }
 
-export async function addItemToOrder(orderId, product, quantity = 1, notes = "") {
-  const unitPrice = Number(product.price ?? product.precio ?? 0)
+export async function addItemToOrder(orderId, product, quantity = 1, notesOrOptions = "") {
+  const options = typeof notesOrOptions === "string"
+    ? { notes: notesOrOptions }
+    : (notesOrOptions || {})
+  const unitPrice = Number(options.unitPrice ?? product.price ?? product.precio ?? 0)
+  const modifiers = Array.isArray(options.modifiers) ? options.modifiers.filter(Boolean) : []
   const { data, error } = await withTimeout(
     supabase.from("pos_order_items").insert({
       order_id: orderId,
       product_id: product.productId || product.id,
-      product_name: product.productName || product.nombre || product.name,
+      product_name: options.productName || product.productName || product.nombre || product.name,
       quantity: Number(quantity),
       unit_price: unitPrice,
       total_price: unitPrice * Number(quantity),
-      recipe_id: product.recipeId || product.recipe_id,
-      production_area_id: product.productionAreaId || product.production_area_id || product.areaProduccion,
+      recipe_id: options.recipeId || product.recipeId || product.recipe_id,
+      production_area_id: options.productionAreaId || product.productionAreaId || product.production_area_id || product.areaProduccion,
       production_ready: product.productionReady === true,
       is_test_item: product.isTestItem === true || product.is_test_item === true,
-      notes: notes || null,
-      modifiers: notes ? [notes] : []
+      notes: options.notes || null,
+      modifiers,
+      product_variant_id: options.productVariantId || null,
+      product_variant_name: options.productVariantName || null,
+      selected_size: options.selectedSize || null
     }).select().single(),
     10000,
     "agregar producto a orden POS"
@@ -238,8 +248,7 @@ export async function clearDraftItems(orderId) {
 export async function updateOrderItemNotes(itemId, notes) {
   const { data, error } = await withTimeout(
     supabase.from("pos_order_items").update({
-      notes: notes || null,
-      modifiers: notes ? [notes] : []
+      notes: notes || null
     }).eq("id", itemId).eq("status", "draft").select().single(),
     10000,
     "actualizar modificaciones POS"

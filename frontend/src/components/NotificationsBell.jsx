@@ -5,6 +5,11 @@ import "./NotificationsBell.css"
 
 const APPROVAL_ROLES = ["admin", "gerente_general"]
 
+function isInternalActionUrl(url) {
+  const value = String(url || "").trim()
+  return value.startsWith("/") && !value.startsWith("//")
+}
+
 function NotificationsBell({ currentUser }) {
   const navigate = useNavigate()
   const rootRef = useRef(null)
@@ -48,7 +53,7 @@ function NotificationsBell({ currentUser }) {
   async function viewEntity(notification) {
     await markRead(notification)
     setOpen(false)
-    if (notification.action_url) {
+    if (notification.action_url && isInternalActionUrl(notification.action_url)) {
       navigate(notification.action_url)
       return
     }
@@ -58,6 +63,8 @@ function NotificationsBell({ currentUser }) {
       navigate("/hr?section=horarios")
     } else if (notification.entity_type === "checklist_run") {
       navigate(`/tasks?tab=checklists&view=run&id=${encodeURIComponent(notification.entity_id || "")}`)
+    } else if (notification.entity_type === "task") {
+      navigate("/tasks?view=mine")
     }
   }
 
@@ -100,8 +107,9 @@ function NotificationsBell({ currentUser }) {
                   {notification.entity_type === "purchase_order" && <button type="button" onClick={() => viewEntity(notification)}>Ver orden</button>}
                   {["employee_schedule", "schedule_week"].includes(notification.entity_type) && <button type="button" onClick={() => viewEntity(notification)}>Ver horario</button>}
                   {notification.entity_type === "checklist_run" && <button type="button" onClick={() => viewEntity(notification)}>Abrir checklist</button>}
+                  {notification.entity_type === "task" && <button type="button" onClick={() => viewEntity(notification)}>Ir a tarea</button>}
                   {notification.entity_type === "checklist_template_change_request" && <button type="button" onClick={() => viewEntity(notification)}>Revisar solicitud</button>}
-                  {notification.action_url && !["purchase_order", "employee_schedule", "schedule_week", "checklist_run", "checklist_template_change_request"].includes(notification.entity_type) && <button type="button" onClick={() => viewEntity(notification)}>Abrir</button>}
+                  {notification.action_url && !["purchase_order", "employee_schedule", "schedule_week", "checklist_run", "checklist_template_change_request", "task"].includes(notification.entity_type) && <button type="button" onClick={() => viewEntity(notification)}>Abrir</button>}
                   {notification.entity_type === "purchase_order" && notification.type === "purchase_order_pending" && APPROVAL_ROLES.includes(currentUser?.role) && (
                     <>
                       <button type="button" className="approve" onClick={() => processOrder(notification, "approve")}>Aprobar</button>

@@ -337,6 +337,164 @@
   }
 }
 
+.pos-catalog-section {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid #26364a;
+  border-radius: 18px;
+  background: #111c2b;
+}
+
+.pos-catalog-section-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.pos-catalog-section-head strong {
+  color: #edf5fd;
+}
+
+.pos-catalog-section-head small,
+.pos-catalog-note {
+  color: #9fb0c4;
+}
+
+.pos-catalog-note {
+  padding: 12px 14px;
+  border: 1px dashed #38506a;
+  border-radius: 14px;
+  background: #142131;
+}
+
+.pos-inline-toggle {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-height: 52px;
+  padding: 12px 14px;
+  border: 1px solid #31465c;
+  border-radius: 14px;
+  background: #142131;
+  color: #dce6f1;
+}
+
+.pos-inline-toggle input {
+  width: 20px;
+  min-height: 20px;
+}
+
+.pos-inline-toggle span {
+  display: grid;
+  gap: 3px;
+}
+
+.pos-inline-toggle small {
+  color: #9fb0c4;
+}
+
+.pos-product-type-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.pos-product-type-card {
+  display: grid;
+  gap: 6px;
+  min-height: 96px;
+  padding: 14px;
+  border: 1px solid #31465c;
+  border-radius: 16px;
+  background: #142131;
+  color: #dce6f1;
+  text-align: left;
+}
+
+.pos-product-type-card.active {
+  border-color: #0ea5a4;
+  background: #12373d;
+  box-shadow: inset 0 0 0 1px rgba(14, 165, 164, .28);
+}
+
+.pos-product-type-card small {
+  color: #9fb0c4;
+}
+
+.pos-variant-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+}
+
+.pos-variant-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #31465c;
+  border-radius: 16px;
+  background: #142131;
+}
+
+.pos-variant-card.active {
+  border-color: #0ea5a4;
+}
+
+.pos-modifier-list {
+  display: grid;
+  gap: 10px;
+}
+
+.pos-modifier-row {
+  display: grid;
+  grid-template-columns: minmax(170px, 220px) minmax(180px, 1.2fr) 150px 170px auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.pos-modal-section {
+  display: grid;
+  gap: 10px;
+}
+
+.pos-size-chip-row,
+.pos-modal-modifier-grid {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.pos-size-chip,
+.pos-modal-modifier {
+  padding: 10px 12px;
+  border: 1px solid #31465c;
+  border-radius: 14px;
+  background: #142131;
+  color: #dce6f1;
+}
+
+.pos-size-chip {
+  display: grid;
+  gap: 4px;
+  min-width: 120px;
+  text-align: left;
+}
+
+.pos-size-chip.active,
+.pos-modal-modifier.active {
+  border-color: #0ea5a4;
+  background: #12373d;
+  color: #ecfeff;
+}
+
+@media (max-width: 860px) {
+  .pos-modifier-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Touch-first restaurant terminal */
 .pos-operation-header {
   padding: 14px 18px;

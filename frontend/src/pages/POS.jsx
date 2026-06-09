@@ -16,7 +16,7 @@ import {
   deactivatePOSProduct,
   getPOSProductById,
   getPOSProducts,
-  updatePOSProduct
+  savePOSCatalogProduct
 } from "../services/posProductsService"
 import { getProductionTickets } from "../services/productionTicketsService"
 import {
@@ -85,6 +85,32 @@ const CATEGORY_QUICK_OPTIONS = [
   { name: "Sándwiches", icon: "🍔", description: "Sándwiches preparados al momento", color: "#f97316", productionAreaId: "cocina" }
 ]
 
+const PRODUCT_TYPE_OPTIONS = [
+  { id: "pizza", label: "Pizza", hint: "Producto padre con tamanos y extras para POS." },
+  { id: "simple", label: "Platillo simple", hint: "Un solo precio y una sola receta." },
+  { id: "beverage", label: "Bebida", hint: "Refrescos, cafe y bebidas de barra." },
+  { id: "dessert", label: "Postre", hint: "Postres listos o de preparacion simple." },
+  { id: "manual_test", label: "Producto manual / prueba", hint: "Se envia a KDS sin receta ni consumo." }
+]
+const PIZZA_VARIANT_OPTIONS = [
+  { size: "personal", label: "Personal" },
+  { size: "mediana", label: "Mediana" },
+  { size: "grande", label: "Grande" }
+]
+const MODIFIER_TYPE_OPTIONS = [
+  { id: "remove", label: "Quitar" },
+  { id: "extra", label: "Extra" },
+  { id: "note", label: "Nota" }
+]
+const DEFAULT_REMOVE_MODIFIERS = ["Cebolla", "Pesto", "Aceitunas", "Champinones", "Jalapenos", "Chile pimiento", "Espinaca", "Tomate", "Queso feta"]
+const DEFAULT_EXTRA_MODIFIERS = [
+  { name: "Extra queso", priceDelta: "" },
+  { name: "Extra pepperoni", priceDelta: "" },
+  { name: "Extra tocino", priceDelta: "" },
+  { name: "Extra salsa", priceDelta: "" },
+  { name: "Extra jalapenos", priceDelta: "" }
+]
+
 function normalizeId(value) {
   return String(value || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
 }
@@ -100,6 +126,94 @@ function isSalesChannelName(value) {
 
 function productInitials(name) {
   return String(name || "Producto").trim().split(/\s+/).slice(0, 2).map((part) => part.charAt(0).toUpperCase()).join("")
+}
+
+function createEmptyPizzaVariant(size, label, fallbackArea = "pizzeria", fallbackName = "") {
+  return {
+    id: "",
+    size,
+    label,
+    name: fallbackName,
+    price: "",
+    recipeId: "",
+    productionAreaId: fallbackArea,
+    prepTimeMinutes: "",
+    isActive: size !== "grande",
+    sortOrder: PIZZA_VARIANT_OPTIONS.findIndex((option) => option.size === size)
+  }
+}
+
+function createModifierDraft(name = "", modifierType = "remove", priceDelta = "", isActive = true) {
+  return {
+    id: "",
+    name,
+    modifierType,
+    priceDelta,
+    isActive,
+    sortOrder: 0
+  }
+}
+
+function normalizeModifierDraft(modifier, index = 0) {
+  return {
+    id: modifier.id || "",
+    name: modifier.name || "",
+    modifierType: modifier.modifierType || modifier.modifier_type || "remove",
+    priceDelta: modifier.priceDelta != null ? String(modifier.priceDelta) : modifier.price_delta != null ? String(modifier.price_delta) : "",
+    isActive: modifier.isActive !== false && modifier.is_active !== false,
+    sortOrder: Number(modifier.sortOrder ?? modifier.sort_order ?? index)
+  }
+}
+
+function createDefaultModifiers() {
+  return [
+    ...DEFAULT_REMOVE_MODIFIERS.map((name, index) => ({ ...createModifierDraft(name, "remove"), sortOrder: index })),
+    ...DEFAULT_EXTRA_MODIFIERS.map((modifier, index) => ({
+      ...createModifierDraft(modifier.name, "extra", modifier.priceDelta),
+      sortOrder: DEFAULT_REMOVE_MODIFIERS.length + index
+    }))
+  ]
+}
+
+function formatProductTypeLabel(productType) {
+  return PRODUCT_TYPE_OPTIONS.find((option) => option.id === productType)?.label || "Platillo"
+}
+
+function formatPizzaSizeLabel(size) {
+  return PIZZA_VARIANT_OPTIONS.find((option) => option.size === size)?.label || size || ""
+}
+
+function getActiveProductVariants(product) {
+  return (product?.variants || []).filter((variant) => variant.isActive === true || variant.is_active === true)
+}
+
+function getActiveProductModifiers(product) {
+  return (product?.modifierOptions || product?.modifiers || []).filter((modifier) => modifier.isActive !== false && modifier.is_active !== false)
+}
+
+function getProductBasePrice(product) {
+  const variants = getActiveProductVariants(product)
+  if ((product?.productType || product?.product_type) === "pizza" && variants.length > 0) {
+    return Math.min(...variants.map((variant) => Number(variant.price || 0)))
+  }
+  return Number(product?.precio ?? product?.price ?? 0)
+}
+
+function formatModifierDisplay(modifier) {
+  const type = modifier.modifierType || modifier.modifier_type || "remove"
+  const name = modifier.name || ""
+  const price = Number(modifier.priceDelta ?? modifier.price_delta ?? 0)
+  const label = type === "remove" ? `Sin ${name}` : name
+  return price > 0 ? `${label} (+Q${price.toFixed(2)})` : label
+}
+
+function getSelectedModifiersTotal(modifiers) {
+  return (modifiers || []).reduce((total, modifier) => {
+    const type = modifier.modifierType || modifier.modifier_type || "remove"
+    if (type !== "extra") return total
+    const delta = Number(modifier.priceDelta ?? modifier.price_delta ?? 0)
+    return total + (Number.isFinite(delta) ? delta : 0)
+  }, 0)
 }
 
 function tableStatusLabel(status) {
@@ -162,6 +276,17 @@ function getOrderItemInstructions(notes) {
   return String(notes || "").replace(/^\[Para: [^\]]+\]\s*/, "").trim()
 }
 
+function getOrderItemDisplayName(item) {
+  const baseName = item?.nombre || item?.productName || "Producto"
+  const variantName = item?.productVariantName || item?.selectedSize || ""
+  if (!variantName) return baseName
+  return baseName.toLowerCase().includes(String(variantName).toLowerCase()) ? baseName : `${baseName} - ${variantName}`
+}
+
+function getOrderItemModifierLines(item) {
+  return Array.isArray(item?.modifiers) ? item.modifiers.filter(Boolean) : []
+}
+
 const POS_DEBUG = import.meta.env.DEV
 
 function posDebug(label, payload) {
@@ -188,19 +313,24 @@ function getProductProductionState(product, recipes, areas, categories) {
   const recipeId = productRecipeId(product)
   const areaId = productProductionAreaId(product)
   const categoryId = productCategoryId(product)
+  const productType = product.productType || product.product_type || "simple"
   const recipe = recipes.find((entry) => String(entry.id) === String(recipeId) && entry.active !== false)
   const link = recipe?.links?.find((entry) => String(entry.pos_product_id) === String(product?.id))
   const area = areas.find((entry) => entry.id === areaId)
   const category = categories.find((entry) => entry.id === categoryId && entry.active !== false)
   const active = product?.estado === "activo" || product?.active === true
   const testItem = isTestProduct(product)
+  const activeVariants = getActiveProductVariants(product)
   const issues = []
-  if (!testItem && !recipe) issues.push("Sin receta válida")
+  if (!testItem && productType !== "pizza" && !recipe) issues.push("Sin receta válida")
+  if (productType === "pizza" && activeVariants.length === 0) issues.push("Sin tamaños activos")
+  if (productType === "pizza" && activeVariants.some((variant) => !variant.recipeId || Number(variant.price || 0) <= 0)) issues.push("Variantes incompletas")
   if (!area) issues.push("Sin área válida")
   if (!category) issues.push("Sin categoría activa")
   if (active && product?.productionReady !== true) issues.push("No validado para producción")
   return {
     active,
+    productType,
     recipeId,
     areaId,
     categoryId,
@@ -209,6 +339,7 @@ function getProductProductionState(product, recipes, areas, categories) {
     area,
     category,
     testItem,
+    variants: activeVariants,
     issues,
     productionReady: active && product?.productionReady === true && issues.length === 0
   }
@@ -250,17 +381,19 @@ const emptyItemForm = {
   nombre: "",
   categoria: "Entradas",
   categoriaId: "entradas",
+  productType: "simple",
   precio: "",
   descripcion: "",
   imagen: "",
   estado: "activo",
-  sku: "",
   areaProduccion: "cocina",
   tiempoPreparacion: "",
-  costoEstimado: "",
-  ingredientesRelacionados: "",
   recipeId: "",
-  isTestItem: false
+  isTestItem: false,
+  allowKitchenNotes: false,
+  modifierNotesPlaceholder: "Ej. sin cebolla, bien tostada, cortar en 8.",
+  modifiers: [],
+  variants: PIZZA_VARIANT_OPTIONS.map((option) => createEmptyPizzaVariant(option.size, option.label))
 }
 
 const emptyCategoryForm = {
@@ -556,7 +689,7 @@ function POS() {
   const [mesaDestinoId, setMesaDestinoId] = useState("")
   const [tick, setTick] = useState(() => Date.now())
   const [itemPendiente, setItemPendiente] = useState(null)
-  const [modificacionesPendientes, setModificacionesPendientes] = useState("")
+  const [configuracionPendiente, setConfiguracionPendiente] = useState({ variantId: "", modifierKeys: [], customNote: "" })
   const [editandoModificacionLineId, setEditandoModificacionLineId] = useState(null)
   const [modificacionActualTexto, setModificacionActualTexto] = useState("")
   const [edicionEnviada, setEdicionEnviada] = useState(null)
@@ -618,9 +751,25 @@ function POS() {
     const state = getProductProductionState(item, finalRecipes, productionAreas, activeCategories)
     return state.active && !state.productionReady
   })
+  const formProductType = form.productType || "simple"
   const selectedRecipe = finalRecipes.find((recipe) => String(recipe.id) === String(productRecipeId(form)))
   const selectedProductionArea = productionAreas.find((area) => area.id === productProductionAreaId(form))
-  const formReadyForValidation = Boolean((form.isTestItem || selectedRecipe) && selectedProductionArea && form.estado === "activo")
+  const activeFormVariants = (form.variants || []).filter((variant) => variant.isActive === true)
+  const formReadyForValidation = Boolean(
+    form.estado !== "activo"
+      || (
+        selectedProductionArea
+        && (
+          form.isTestItem
+          || formProductType === "manual_test"
+          || (
+            formProductType === "pizza"
+              ? activeFormVariants.length > 0 && activeFormVariants.every((variant) => Number(variant.price || 0) > 0 && variant.recipeId)
+              : selectedRecipe
+          )
+        )
+      )
+  )
   const storedLocalPOSProducts = readLegacyPOSProducts()
   const localPOSProducts = storedLocalPOSProducts.filter((product) => !product.supabaseProductId)
   const mesasDestinoDisponibles = activeFloorAreas.flatMap((area) =>
@@ -1553,13 +1702,84 @@ function POS() {
     })
   }
 
+  function actualizarTipoProducto(productType) {
+    const selectedCategory = posCategories.find((category) => category.id === form.categoriaId)
+    const fallbackArea = selectedCategory?.productionAreaId || form.areaProduccion || "cocina"
+    setForm((actual) => ({
+      ...actual,
+      productType,
+      isTestItem: productType === "manual_test",
+      recipeId: productType === "pizza" || productType === "manual_test" ? "" : actual.recipeId,
+      precio: productType === "pizza" ? "" : actual.precio,
+      modifiers: productType === "pizza" ? (actual.modifiers?.length ? actual.modifiers : createDefaultModifiers()) : (actual.modifiers || []),
+      variants: productType === "pizza"
+        ? (actual.variants?.length
+            ? actual.variants
+            : PIZZA_VARIANT_OPTIONS.map((option) => createEmptyPizzaVariant(option.size, option.label, fallbackArea, actual.nombre)))
+        : PIZZA_VARIANT_OPTIONS.map((option) => createEmptyPizzaVariant(option.size, option.label, fallbackArea, actual.nombre)),
+      allowKitchenNotes: productType === "pizza" ? true : actual.allowKitchenNotes
+    }))
+  }
+
+  function actualizarVariantePizza(size, campo, valor) {
+    setForm((actual) => ({
+      ...actual,
+      variants: (actual.variants || []).map((variant) =>
+        variant.size === size
+          ? {
+              ...variant,
+              [campo]: valor,
+              productionAreaId: campo === "recipeId"
+                ? finalRecipes.find((recipe) => String(recipe.id) === String(valor))?.production_area_id || variant.productionAreaId
+                : variant.productionAreaId
+            }
+          : variant
+      )
+    }))
+  }
+
+  function actualizarModificador(index, campo, valor) {
+    setForm((actual) => ({
+      ...actual,
+      modifiers: (actual.modifiers || []).map((modifier, modifierIndex) =>
+        modifierIndex === index ? { ...modifier, [campo]: valor } : modifier
+      )
+    }))
+  }
+
+  function agregarModificador() {
+    setForm((actual) => ({
+      ...actual,
+      modifiers: [...(actual.modifiers || []), { ...createModifierDraft(), sortOrder: (actual.modifiers || []).length }]
+    }))
+  }
+
+  function agregarPresetModificadores() {
+    setForm((actual) => ({
+      ...actual,
+      modifiers: actual.modifiers?.length ? actual.modifiers : createDefaultModifiers()
+    }))
+  }
+
+  function eliminarModificador(index) {
+    setForm((actual) => ({
+      ...actual,
+      modifiers: (actual.modifiers || []).filter((_, modifierIndex) => modifierIndex !== index).map((modifier, modifierIndex) => ({
+        ...modifier,
+        sortOrder: modifierIndex
+      }))
+    }))
+  }
+
   function emptyActiveItemForm() {
     const category = activeCategories[0]
     return {
       ...emptyItemForm,
       categoriaId: category?.id || "",
       categoria: category?.name || "",
-      areaProduccion: category?.productionAreaId || "cocina"
+      areaProduccion: category?.productionAreaId || "cocina",
+      variants: PIZZA_VARIANT_OPTIONS.map((option) => createEmptyPizzaVariant(option.size, option.label, category?.productionAreaId || "cocina")),
+      modifiers: []
     }
   }
 
@@ -1575,17 +1795,35 @@ function POS() {
     const faltantes = {}
     const recipeId = productRecipeId(form)
     const productionAreaId = productProductionAreaId(form)
+    const productType = form.productType || "simple"
+    const activeVariants = (form.variants || []).filter((variant) => variant.isActive === true)
     if (!form.nombre.trim()) faltantes.nombre = "Nombre del platillo"
     if (!form.categoriaId) faltantes.categoria = "Categoría POS"
     if (form.estado === "activo" && !activeCategories.some((category) => category.id === form.categoriaId)) faltantes.categoria = "Categoría POS activa"
-    if (!form.precio || Number(form.precio) <= 0) faltantes.precio = "Precio de venta"
+    if (productType !== "pizza" && (!form.precio || Number(form.precio) <= 0)) faltantes.precio = "Precio de venta"
     if (!form.descripcion.trim()) faltantes.descripcion = "Descripción"
     if (!form.estado) faltantes.estado = "Estado"
     if (!productionAreaId || (form.estado === "activo" && !productionAreas.some((area) => area.id === productionAreaId))) faltantes.areaProduccion = "Área de producción válida"
     if (!form.tiempoPreparacion.trim()) faltantes.tiempoPreparacion = "Tiempo estimado de preparación"
-    if (!form.isTestItem && form.estado === "activo" && !finalRecipes.some((recipe) => String(recipe.id) === String(recipeId))) faltantes.recipeId = "Receta final activa válida"
+    if (!form.isTestItem && productType !== "manual_test" && productType !== "pizza" && form.estado === "activo" && !finalRecipes.some((recipe) => String(recipe.id) === String(recipeId))) {
+      faltantes.recipeId = "Receta final activa válida"
+    }
     const recipe = finalRecipes.find((entry) => String(entry.id) === String(recipeId))
-    if (!form.isTestItem && form.estado === "activo" && recipe && recipe.production_area_id !== productionAreaId) faltantes.areaProduccion = "Área que coincida con la receta"
+    if (!form.isTestItem && productType !== "manual_test" && productType !== "pizza" && form.estado === "activo" && recipe && recipe.production_area_id !== productionAreaId) {
+      faltantes.areaProduccion = "Área que coincida con la receta"
+    }
+    if (productType === "pizza" && form.estado === "activo") {
+      if (activeVariants.length === 0) {
+        faltantes.variants = "Activa al menos un tamaño"
+      } else if (activeVariants.some((variant) => !variant.recipeId || Number(variant.price || 0) <= 0 || !variant.prepTimeMinutes)) {
+        faltantes.variants = "Completa precio, receta y tiempo en cada tamaño activo"
+      } else if (activeVariants.some((variant) => {
+        const variantRecipe = finalRecipes.find((entry) => String(entry.id) === String(variant.recipeId))
+        return variantRecipe && variantRecipe.production_area_id !== productionAreaId
+      })) {
+        faltantes.variants = "Las recetas por tamaño deben coincidir con el área"
+      }
+    }
     return faltantes
   }
 
@@ -1598,48 +1836,64 @@ function POS() {
     const recipeId = productRecipeId(form)
     const productionAreaId = productProductionAreaId(form)
     const categoryId = productCategoryId(form)
+    const productType = form.productType || "simple"
+    const selectedCategoryName = posCategories.find((category) => category.id === categoryId)?.name || form.categoria
     const item = {
       ...form,
       categoriaId: categoryId,
       categoryId,
       category_id: categoryId,
-      categoria: posCategories.find((category) => category.id === categoryId)?.name || form.categoria,
+      categoria: selectedCategoryName,
       id: editandoId || null,
-      precio: Number(form.precio),
-      price: Number(form.precio),
+      precio: Number(form.precio || 0),
+      price: Number(form.precio || 0),
       recipeId,
       recipe_id: recipeId,
       productionAreaId,
       production_area_id: productionAreaId,
       areaProduccion: productionAreaId,
-      isTestItem: form.isTestItem === true,
-      is_test_item: form.isTestItem === true,
+      productType,
+      product_type: productType,
+      isTestItem: form.isTestItem === true || productType === "manual_test",
+      is_test_item: form.isTestItem === true || productType === "manual_test",
+      allowKitchenNotes: form.allowKitchenNotes === true,
+      allow_kitchen_notes: form.allowKitchenNotes === true,
+      prepTimeMinutes: Number(form.tiempoPreparacion || 0),
+      prep_time_minutes: Number(form.tiempoPreparacion || 0),
       active: form.estado === "activo",
       productionReady: false,
-      costoEstimado: form.costoEstimado ? Number(form.costoEstimado) : "",
       actualizadoEn: new Date().toLocaleString()
     }
+    const variants = productType === "pizza"
+      ? (form.variants || []).map((variant, index) => ({
+          ...variant,
+          name: form.nombre,
+          recipeId: variant.recipeId || "",
+          prepTimeMinutes: Number(variant.prepTimeMinutes || 0),
+          price: Number(variant.price || 0),
+          productionAreaId,
+          isActive: variant.isActive === true,
+          sortOrder: index
+        }))
+      : []
+    const modifiers = (form.modifiers || [])
+      .filter((modifier) => String(modifier.name || "").trim())
+      .map((modifier, index) => ({
+        ...modifier,
+        priceDelta: Number(modifier.priceDelta || 0),
+        modifierType: modifier.modifierType || "remove",
+        isActive: modifier.isActive !== false,
+        sortOrder: index
+      }))
     posDebug("producto a guardar", {
       item,
+      variants,
+      modifiers,
       recipeId: productRecipeId(item),
       productionAreaId: productProductionAreaId(item)
     })
 
-    const selectedFinalRecipe = finalRecipes.find((recipe) => String(recipe.id) === String(recipeId))
-    const savedResult = item.active && !item.isTestItem
-      ? await createOrUpdatePOSProductFromRecipe({
-          ...selectedFinalRecipe,
-          id: recipeId,
-          name: item.nombre,
-          description: item.descripcion,
-          salePrice: item.precio,
-          imageUrl: item.imagen,
-          posCategoryId: categoryId,
-          categoryName: item.categoria
-        }, editandoId)
-      : editandoId
-        ? await updatePOSProduct(editandoId, item)
-        : await createPOSProduct(item)
+    const savedResult = await savePOSCatalogProduct(item, variants, modifiers)
     if (savedResult.error) {
       console.error("Supabase POS product save error:", savedResult.error)
       setOrdenError(`Producto no guardado: ${savedResult.error.message}`)
@@ -1666,18 +1920,41 @@ function POS() {
   function editarItem(item) {
     const recipeId = productRecipeId(item)
     const productionAreaId = productProductionAreaId(item)
+    const productType = item.productType || item.product_type || "simple"
     setForm({
       ...emptyItemForm,
       ...item,
       categoriaId: productCategoryId(item),
       precio: String(item.precio ?? item.price ?? ""),
-      costoEstimado: item.costoEstimado ? String(item.costoEstimado) : "",
       recipeId,
       recipe_id: recipeId,
       areaProduccion: productionAreaId,
       productionAreaId,
       production_area_id: productionAreaId,
-      isTestItem: isTestProduct(item)
+      isTestItem: isTestProduct(item),
+      productType,
+      allowKitchenNotes: item.allowKitchenNotes === true || item.allow_kitchen_notes === true,
+      modifierNotesPlaceholder: item.modifierNotesPlaceholder || emptyItemForm.modifierNotesPlaceholder,
+      modifiers: (item.modifierOptions || item.modifiers || []).length
+        ? (item.modifierOptions || item.modifiers || []).map(normalizeModifierDraft)
+        : productType === "pizza"
+          ? createDefaultModifiers()
+          : [],
+      variants: PIZZA_VARIANT_OPTIONS.map((option, index) => {
+        const variant = (item.variants || []).find((entry) => entry.size === option.size)
+        return variant
+          ? {
+              ...createEmptyPizzaVariant(option.size, option.label, productionAreaId, item.nombre),
+              ...variant,
+              label: option.label,
+              price: variant.price != null ? String(variant.price) : "",
+              recipeId: variant.recipeId || variant.recipe_id || "",
+              prepTimeMinutes: variant.prepTimeMinutes != null ? String(variant.prepTimeMinutes) : variant.prep_time_minutes != null ? String(variant.prep_time_minutes) : "",
+              isActive: variant.isActive === true || variant.is_active === true,
+              sortOrder: Number(variant.sortOrder ?? variant.sort_order ?? index)
+            }
+          : createEmptyPizzaVariant(option.size, option.label, productionAreaId, item.nombre)
+      })
     })
     setEditandoId(item.id)
     setMostrarFormulario(true)
@@ -1693,6 +1970,16 @@ function POS() {
     }
     setItems((current) => current.map((entry) => entry.id === item.id ? result.data : entry))
     setOrdenError("Producto POS desactivado.")
+  }
+
+  function abrirConfiguracionProducto(item) {
+    const variants = getActiveProductVariants(item)
+    setItemPendiente(item)
+    setConfiguracionPendiente({
+      variantId: variants[0]?.id || "",
+      modifierKeys: [],
+      customNote: ""
+    })
   }
 
   function agregarAOrden(item) {
@@ -1713,19 +2000,36 @@ function POS() {
       mesa: ordenMesa,
       ordenActual: orden
     })
-    confirmarAgregarItem("", item)
+    abrirConfiguracionProducto(item)
   }
 
-  async function confirmarAgregarItem(modificaciones = "", productOverride = itemPendiente) {
+  async function confirmarAgregarItem(productOverride = itemPendiente) {
     const productToAdd = productOverride || itemPendiente
     if (!productToAdd) return
     if (!ordenMesa) {
       setOrdenError("Selecciona una mesa antes de agregar productos.")
       return
     }
+    const selectedVariant = (productToAdd.variants || []).find((variant) => String(variant.id) === String(configuracionPendiente.variantId))
+    if ((productToAdd.productType || productToAdd.product_type) === "pizza" && !selectedVariant) {
+      setOrdenError("Selecciona un tamaño de pizza antes de agregarla.")
+      return
+    }
     const assignment = selectedAssignment || "Mesa completa"
-    const instructions = modificaciones.trim()
-    const notas = `${assignment === "Mesa completa" ? "" : `[Para: ${assignment}] `}${instructions}`.trim()
+    const selectedModifiers = getActiveProductModifiers(productToAdd).filter((modifier) => configuracionPendiente.modifierKeys.includes(String(modifier.id || `${modifier.modifierType}-${modifier.name}`)))
+    const modifierLabels = selectedModifiers.map(formatModifierDisplay)
+    const instructions = configuracionPendiente.customNote.trim()
+    const notesParts = []
+    if (assignment !== "Mesa completa") notesParts.push(`[Para: ${assignment}]`)
+    if (instructions) notesParts.push(instructions)
+    const notas = notesParts.join(" ").trim()
+    const variantPrice = selectedVariant ? Number(selectedVariant.price || 0) : Number(productToAdd.price ?? productToAdd.precio ?? 0)
+    const modifiersTotal = getSelectedModifiersTotal(selectedModifiers)
+    const finalUnitPrice = variantPrice + modifiersTotal
+    const effectiveRecipeId = selectedVariant?.recipeId || selectedVariant?.recipe_id || productRecipeId(productToAdd)
+    const effectiveAreaId = selectedVariant?.productionAreaId || selectedVariant?.production_area_id || productProductionAreaId(productToAdd)
+    const selectedSize = selectedVariant?.size || ""
+    const productName = selectedVariant ? `${productToAdd.nombre} - ${formatPizzaSizeLabel(selectedVariant.size)}` : productToAdd.nombre
     let itemSaved = false
     try {
       let orderId = activeOrderId
@@ -1759,12 +2063,29 @@ function POS() {
         if (channelResult.error) throw new Error(channelResult.message || channelResult.error.message)
         setCurrentOrder(channelResult.data)
       }
-      const existe = orden.find((ordenItem) => ordenItem.id === productToAdd.id && (ordenItem.modificaciones || "") === notas && ordenItem.status === "draft")
+      const modifierKey = JSON.stringify(modifierLabels)
+      const existe = orden.find((ordenItem) =>
+        ordenItem.id === productToAdd.id
+        && (ordenItem.modificaciones || "") === notas
+        && String(ordenItem.productVariantId || "") === String(selectedVariant?.id || "")
+        && JSON.stringify((ordenItem.modifiers || []).filter((entry) => !String(entry || "").startsWith("[Para: "))) === modifierKey
+        && ordenItem.status === "draft"
+      )
       if (existe) {
         const result = await updateOrderItemQuantity(existe.lineId, existe.cantidad + 1, existe.precio)
         if (result.error) throw new Error(result.message || result.error.message)
       } else {
-        const result = await addItemToOrder(orderId, productToAdd, 1, notas)
+        const result = await addItemToOrder(orderId, productToAdd, 1, {
+          notes: notas,
+          modifiers: modifierLabels,
+          unitPrice: finalUnitPrice,
+          recipeId: effectiveRecipeId,
+          productionAreaId: effectiveAreaId,
+          productVariantId: selectedVariant?.id || null,
+          productVariantName: selectedVariant ? formatPizzaSizeLabel(selectedVariant.size) : null,
+          selectedSize,
+          productName
+        })
         if (result.error) throw new Error(result.message || result.error.message)
       }
       await cargarMesaDesdeSupabase(ordenMesa, orderId)
@@ -1774,7 +2095,7 @@ function POS() {
       setOrdenError(`No se pudo agregar el producto: ${error.message}`)
     } finally {
       setItemPendiente(null)
-      setModificacionesPendientes("")
+      setConfiguracionPendiente({ variantId: "", modifierKeys: [], customNote: "" })
     }
     if (!itemSaved) return
     setOrdenMessage("Producto agregado.")
@@ -2454,59 +2775,188 @@ function POS() {
           {mostrarFormulario && (
             <form className="pos-dish-form" onSubmit={guardarItem} style={formCardStyle}>
               <div className="pos-dish-form-heading">
-                <div><span>{editandoId ? "Editando platillo" : "Nuevo platillo"}</span><h2>{form.nombre || "Configura el platillo"}</h2></div>
-                <label className="pos-test-toggle">
-                  <input type="checkbox" checked={form.isTestItem === true} onChange={(event) => setForm((current) => ({ ...current, isTestItem: event.target.checked, recipeId: event.target.checked ? "" : current.recipeId }))} />
-                  <span><strong>🧪 Platillo manual / prueba</strong><small>Va a KDS, aparece en órdenes y no consume inventario.</small></span>
-                </label>
+                <div>
+                  <span>{editandoId ? "Editando producto POS" : "Nuevo producto POS"}</span>
+                  <h2>{form.nombre || "Configura un producto pensado para pizzería"}</h2>
+                </div>
+                <div style={buttonRowStyle}>
+                  <span className="pos-test-badge">{formatProductTypeLabel(formProductType)}</span>
+                  {formProductType === "manual_test" && <span className="pos-test-badge">🧪 Sin receta ni consumo</span>}
+                </div>
               </div>
               {Object.keys(errores).length > 0 && (
                 <div style={errorBoxStyle}>Faltan campos requeridos: {Object.values(errores).join(", ")}.</div>
               )}
-              <div style={formGridStyle}>
-                <input placeholder="Nombre del platillo" value={form.nombre} onChange={(e) => actualizarCampo("nombre", e.target.value)} style={errores.nombre ? inputErrorStyle : inputStyle} />
-                <select value={form.categoriaId} onChange={(e) => seleccionarCategoriaProducto(e.target.value)} style={errores.categoria ? inputErrorStyle : inputStyle}>
-                  <option value="">Categoría POS</option>
-                  {posCategories.filter((category) => category.active !== false || category.id === form.categoriaId).sort((a, b) => a.sortOrder - b.sortOrder).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
-                </select>
-                <input type="number" min="0" step="0.01" placeholder="Precio de venta" value={form.precio} onChange={(e) => actualizarCampo("precio", e.target.value)} style={errores.precio ? inputErrorStyle : inputStyle} />
-                <select value={form.estado} onChange={(e) => actualizarCampo("estado", e.target.value)} style={errores.estado ? inputErrorStyle : inputStyle}><option value="activo">Activo</option><option value="inactivo">Inactivo</option></select>
-                <input placeholder="Código/SKU opcional" value={form.sku} onChange={(e) => actualizarCampo("sku", e.target.value)} style={inputStyle} />
-                <select value={form.areaProduccion} onChange={(e) => actualizarCampo("areaProduccion", e.target.value)} style={errores.areaProduccion ? inputErrorStyle : inputStyle}>
-                  <option value="">{form.isTestItem ? "Destino KDS" : "Área de producción"}</option>
-                  {productionAreas.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}
-                </select>
-                <select
-                  value={form.recipeId}
-                  disabled={form.isTestItem === true}
-                  onChange={(e) => {
-                    const recipe = finalRecipes.find((entry) => String(entry.id) === e.target.value)
-                    setForm((actual) => ({ ...actual, recipeId: e.target.value, areaProduccion: recipe?.production_area_id || actual.areaProduccion }))
-                    setErrores((actual) => {
-                      const next = { ...actual }
-                      delete next.recipeId
-                      delete next.areaProduccion
-                      return next
-                    })
-                  }}
-                  style={errores.recipeId ? inputErrorStyle : inputStyle}
-                >
-                  <option value="">{form.isTestItem ? "No requiere receta estandarizada" : "Receta estandarizada conectada"}</option>
-                  {finalRecipes.map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.name}</option>)}
-                </select>
-                <input placeholder="Tiempo estimado de preparación" value={form.tiempoPreparacion} onChange={(e) => actualizarCampo("tiempoPreparacion", e.target.value)} style={errores.tiempoPreparacion ? inputErrorStyle : inputStyle} />
-                <input type="number" min="0" step="0.01" placeholder="Costo estimado si existe" value={form.costoEstimado} onChange={(e) => actualizarCampo("costoEstimado", e.target.value)} style={inputStyle} />
-              </div>
-              <textarea placeholder="Descripción" value={form.descripcion} onChange={(e) => actualizarCampo("descripcion", e.target.value)} style={errores.descripcion ? textAreaErrorStyle : textAreaStyle} />
-              <textarea placeholder="Ingredientes relacionados si aplica" value={form.ingredientesRelacionados} onChange={(e) => actualizarCampo("ingredientesRelacionados", e.target.value)} style={textAreaStyle} />
-              <input type="file" accept="image/*" onChange={cargarImagen} style={inputStyle} />
-              {form.imagen ? <img src={form.imagen} alt={form.nombre || "Platillo"} style={previewStyle} /> : <div className="pos-dish-image-empty">{productInitials(form.nombre)}</div>}
-              <div style={readinessPanelStyle}>
-                <strong>Estado producción</strong>
-                {form.isTestItem ? <span className="pos-test-badge">🧪 PRUEBA · sin receta ni consumo</span> : <span style={selectedRecipe ? availableStyle : unavailableStyle}>{selectedRecipe ? `✓ Receta conectada: ${selectedRecipe.name}` : "✗ Sin receta válida"}</span>}
-                <span style={selectedProductionArea ? availableStyle : unavailableStyle}>{selectedProductionArea ? `✓ ${form.isTestItem ? "Destino KDS" : "Área producción"}: ${selectedProductionArea.name}` : "✗ Sin área válida"}</span>
-                <span style={formReadyForValidation ? availableStyle : unavailableStyle}>{formReadyForValidation ? "✓ Se validará vínculo Supabase al guardar" : "✗ Configuración incompleta"}</span>
-              </div>
+
+              <section className="pos-catalog-section">
+                <div className="pos-catalog-section-head">
+                  <strong>1. Información general</strong>
+                  <small>Lo básico que verá el mesero y lo que usará KDS.</small>
+                </div>
+                <div style={formGridStyle}>
+                  <input placeholder="Nombre del platillo" value={form.nombre} onChange={(e) => actualizarCampo("nombre", e.target.value)} style={errores.nombre ? inputErrorStyle : inputStyle} />
+                  <select value={form.categoriaId} onChange={(e) => seleccionarCategoriaProducto(e.target.value)} style={errores.categoria ? inputErrorStyle : inputStyle}>
+                    <option value="">Categoría POS</option>
+                    {posCategories.filter((category) => category.active !== false || category.id === form.categoriaId).sort((a, b) => a.sortOrder - b.sortOrder).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+                  </select>
+                  <select value={form.areaProduccion} onChange={(e) => actualizarCampo("areaProduccion", e.target.value)} style={errores.areaProduccion ? inputErrorStyle : inputStyle}>
+                    <option value="">{formProductType === "manual_test" ? "Destino KDS" : "Área de preparación"}</option>
+                    {productionAreas.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}
+                  </select>
+                  <select value={form.estado} onChange={(e) => actualizarCampo("estado", e.target.value)} style={errores.estado ? inputErrorStyle : inputStyle}>
+                    <option value="activo">Activo</option>
+                    <option value="inactivo">Inactivo</option>
+                  </select>
+                  <input placeholder="Tiempo base de preparación (minutos)" value={form.tiempoPreparacion} onChange={(e) => actualizarCampo("tiempoPreparacion", e.target.value)} style={errores.tiempoPreparacion ? inputErrorStyle : inputStyle} />
+                  {formProductType !== "pizza" && (
+                    <input type="number" min="0" step="0.01" placeholder="Precio de venta" value={form.precio} onChange={(e) => actualizarCampo("precio", e.target.value)} style={errores.precio ? inputErrorStyle : inputStyle} />
+                  )}
+                </div>
+                <textarea placeholder="Descripción para POS / KDS" value={form.descripcion} onChange={(e) => actualizarCampo("descripcion", e.target.value)} style={errores.descripcion ? textAreaErrorStyle : textAreaStyle} />
+                <div style={formGridStyle}>
+                  <select
+                    value={form.recipeId}
+                    disabled={formProductType === "pizza" || formProductType === "manual_test"}
+                    onChange={(e) => {
+                      const recipe = finalRecipes.find((entry) => String(entry.id) === e.target.value)
+                      setForm((actual) => ({ ...actual, recipeId: e.target.value, areaProduccion: recipe?.production_area_id || actual.areaProduccion }))
+                      setErrores((actual) => {
+                        const next = { ...actual }
+                        delete next.recipeId
+                        delete next.areaProduccion
+                        return next
+                      })
+                    }}
+                    style={errores.recipeId ? inputErrorStyle : inputStyle}
+                  >
+                    <option value="">{formProductType === "pizza" ? "La pizza usa recetas por tamaño" : formProductType === "manual_test" ? "No requiere receta estandarizada" : "Receta estandarizada conectada"}</option>
+                    {finalRecipes.map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.name}</option>)}
+                  </select>
+                  <label className="pos-inline-toggle">
+                    <input type="checkbox" checked={form.allowKitchenNotes === true} onChange={(event) => actualizarCampo("allowKitchenNotes", event.target.checked)} />
+                    <span>
+                      <strong>Permitir observaciones de cocina</strong>
+                      <small>Ej. bien tostada, cortar en 8, salsa aparte.</small>
+                    </span>
+                  </label>
+                </div>
+                {selectedRecipe && formProductType !== "pizza" && (
+                  <div className="pos-catalog-note">
+                    Receta conectada: <strong>{selectedRecipe.name}</strong>. El costo operativo debe venir desde la receta estandarizada, no desde este formulario.
+                  </div>
+                )}
+              </section>
+
+              <section className="pos-catalog-section">
+                <div className="pos-catalog-section-head">
+                  <strong>2. Tipo de producto</strong>
+                  <small>Elige la estructura correcta para el POS.</small>
+                </div>
+                <div className="pos-product-type-grid">
+                  {PRODUCT_TYPE_OPTIONS.map((option) => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      className={`pos-product-type-card ${formProductType === option.id ? "active" : ""}`}
+                      onClick={() => actualizarTipoProducto(option.id)}
+                    >
+                      <strong>{option.label}</strong>
+                      <small>{option.hint}</small>
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              {formProductType === "pizza" && (
+                <>
+                  <section className="pos-catalog-section">
+                    <div className="pos-catalog-section-head">
+                      <strong>3. Configuración de pizza</strong>
+                      <small>Un producto padre con tamaños, precios y recetas por tamaño.</small>
+                    </div>
+                    {errores.variants && <div style={errorBoxStyle}>{errores.variants}</div>}
+                    <div className="pos-variant-grid">
+                      {(form.variants || []).map((variant) => (
+                        <article key={variant.size} className={`pos-variant-card ${variant.isActive ? "active" : ""}`}>
+                          <label className="pos-inline-toggle">
+                            <input type="checkbox" checked={variant.isActive === true} onChange={(event) => actualizarVariantePizza(variant.size, "isActive", event.target.checked)} />
+                            <span>
+                              <strong>{variant.label}</strong>
+                              <small>{variant.isActive ? "Visible para meseros" : "Oculto en POS"}</small>
+                            </span>
+                          </label>
+                          <div style={formGridStyle}>
+                            <input type="number" min="0" step="0.01" placeholder="Precio de venta" value={variant.price} onChange={(event) => actualizarVariantePizza(variant.size, "price", event.target.value)} style={inputStyle} disabled={!variant.isActive} />
+                            <input type="number" min="0" step="1" placeholder="Tiempo preparación (min)" value={variant.prepTimeMinutes} onChange={(event) => actualizarVariantePizza(variant.size, "prepTimeMinutes", event.target.value)} style={inputStyle} disabled={!variant.isActive} />
+                          </div>
+                          <select
+                            value={variant.recipeId}
+                            onChange={(event) => actualizarVariantePizza(variant.size, "recipeId", event.target.value)}
+                            style={inputStyle}
+                            disabled={!variant.isActive}
+                          >
+                            <option value="">Receta conectada para {variant.label.toLowerCase()}</option>
+                            {finalRecipes.map((recipe) => <option key={`${variant.size}-${recipe.id}`} value={recipe.id}>{recipe.name}</option>)}
+                          </select>
+                        </article>
+                      ))}
+                    </div>
+                    <div className="pos-catalog-note">
+                      En POS el mesero verá un solo producto, por ejemplo <strong>{form.nombre || "Pizza Carbonara"}</strong>, y luego elegirá tamaño.
+                    </div>
+                  </section>
+
+                  <section className="pos-catalog-section">
+                    <div className="pos-catalog-section-head">
+                      <strong>4. Modificadores para POS</strong>
+                      <small>Define lo que el mesero puede quitar, agregar o anotar.</small>
+                    </div>
+                    <div style={buttonRowStyle}>
+                      <button type="button" onClick={agregarPresetModificadores} style={secondaryButtonStyle}>Cargar sugeridos de pizza</button>
+                      <button type="button" onClick={agregarModificador} style={secondaryButtonStyle}>+ Nuevo modificador</button>
+                    </div>
+                    <div className="pos-modifier-list">
+                      {(form.modifiers || []).map((modifier, index) => (
+                        <div key={`${modifier.name}-${index}`} className="pos-modifier-row">
+                          <label className="pos-inline-toggle">
+                            <input type="checkbox" checked={modifier.isActive !== false} onChange={(event) => actualizarModificador(index, "isActive", event.target.checked)} />
+                            <span>
+                              <strong>Activo</strong>
+                              <small>{modifier.isActive !== false ? "Disponible en POS" : "Oculto en POS"}</small>
+                            </span>
+                          </label>
+                          <input placeholder="Nombre del modificador" value={modifier.name} onChange={(event) => actualizarModificador(index, "name", event.target.value)} style={inputStyle} />
+                          <select value={modifier.modifierType || "remove"} onChange={(event) => actualizarModificador(index, "modifierType", event.target.value)} style={inputStyle}>
+                            {MODIFIER_TYPE_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+                          </select>
+                          <input type="number" min="0" step="0.01" placeholder="Precio extra opcional" value={modifier.priceDelta} onChange={(event) => actualizarModificador(index, "priceDelta", event.target.value)} style={inputStyle} disabled={(modifier.modifierType || "remove") === "remove"} />
+                          <button type="button" onClick={() => eliminarModificador(index)} style={dangerMiniButtonStyle}>Quitar</button>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                </>
+              )}
+
+              <section className="pos-catalog-section">
+                <div className="pos-catalog-section-head">
+                  <strong>{formProductType === "pizza" ? "5. Imagen y validación" : "3. Imagen y validación"}</strong>
+                  <small>Último repaso antes de guardar.</small>
+                </div>
+                <input type="file" accept="image/*" onChange={cargarImagen} style={inputStyle} />
+                {form.imagen ? <img src={form.imagen} alt={form.nombre || "Platillo"} style={previewStyle} /> : <div className="pos-dish-image-empty">{productInitials(form.nombre)}</div>}
+                <div style={readinessPanelStyle}>
+                  <strong>Estado producción</strong>
+                  {formProductType === "pizza"
+                    ? <span style={activeFormVariants.length > 0 ? availableStyle : unavailableStyle}>{activeFormVariants.length > 0 ? `✓ ${activeFormVariants.length} tamaños activos configurados` : "✗ Sin tamaños activos"}</span>
+                    : form.isTestItem
+                      ? <span className="pos-test-badge">🧪 PRUEBA · sin receta ni consumo</span>
+                      : <span style={selectedRecipe ? availableStyle : unavailableStyle}>{selectedRecipe ? `✓ Receta conectada: ${selectedRecipe.name}` : "✗ Sin receta válida"}</span>}
+                  <span style={selectedProductionArea ? availableStyle : unavailableStyle}>{selectedProductionArea ? `✓ ${form.isTestItem ? "Destino KDS" : "Área producción"}: ${selectedProductionArea.name}` : "✗ Sin área válida"}</span>
+                  <span style={formReadyForValidation ? availableStyle : unavailableStyle}>{formReadyForValidation ? "✓ Se validará vínculo Supabase al guardar" : "✗ Configuración incompleta"}</span>
+                </div>
+              </section>
+
               <div style={buttonRowStyle}>
                 <button type="submit" style={primaryButtonStyle}>{editandoId ? "Guardar cambios" : "Agregar platillo"}</button>
                 <button type="button" onClick={() => { setMostrarFormulario(false); setEditandoId(null); setForm(emptyActiveItemForm()); setErrores({}) }} style={secondaryButtonStyle}>Cancelar</button>
@@ -2524,7 +2974,20 @@ function POS() {
                   <span className="pos-product-category">{item.categoria}</span>
                   <h3 style={{ margin: "0 0 4px" }}>{item.nombre}</h3>
                   {isTestProduct(item) && <span className="pos-test-badge">🧪 PRUEBA</span>}
-                  <p style={mutedStyle}>{productionAreas.find((area) => area.id === productProductionAreaId(item))?.name || productProductionAreaId(item)} · Q{item.precio.toFixed(2)} · {item.estado}</p>
+                  <p style={mutedStyle}>
+                    {productionAreas.find((area) => area.id === productProductionAreaId(item))?.name || productProductionAreaId(item)}
+                    {" · "}
+                    {(item.productType || item.product_type) === "pizza"
+                      ? `Desde Q${getProductBasePrice(item).toFixed(2)}`
+                      : `Q${Number(item.precio || 0).toFixed(2)}`}
+                    {" · "}
+                    {formatProductTypeLabel(item.productType || item.product_type || "simple")}
+                  </p>
+                  {(item.productType || item.product_type) === "pizza" && (
+                    <small style={mutedStyle}>
+                      {getActiveProductVariants(item).map((variant) => formatPizzaSizeLabel(variant.size)).join(", ") || "Sin tamaños activos"} · {getActiveProductModifiers(item).length} modificador(es)
+                    </small>
+                  )}
                   <ProductionBadges state={state} />
                 </div>
                 <div className="pos-dish-card-actions">
@@ -2943,7 +3406,11 @@ function POS() {
                         <span className="pos-product-category">{posCategories.find((category) => category.id === productCategoryId(item))?.name || item.categoria || "Producto"}</span>
                         {isTestProduct(item) && <span className="pos-test-badge">🧪 PRUEBA</span>}
                         <h3>{item.nombre}</h3>
-                        <strong className="pos-product-price">Q{item.precio.toFixed(2)}</strong>
+                        <strong className="pos-product-price">
+                          {(item.productType || item.product_type) === "pizza"
+                            ? `Desde Q${getProductBasePrice(item).toFixed(2)}`
+                            : `Q${Number(item.precio || 0).toFixed(2)}`}
+                        </strong>
                       </div>
                       <p className="pos-product-production" style={mutedStyle}>Producción: {productionAreas.find((area) => area.id === productProductionAreaId(item))?.name || productProductionAreaId(item)}</p>
                       <p className="pos-product-availability" style={item.estado === "activo" ? availableStyle : unavailableStyle}>{item.estado === "activo" ? "Disponible" : "No disponible"}</p>
@@ -3099,7 +3566,7 @@ function POS() {
                           <div>
                             {ordenEnviada.items.map((item) => (
                               <div key={`${ordenEnviada.id}-${item.lineId || item.id}`} style={sentItemRowStyle}>
-                                <span>{item.cantidad} x {item.nombre} · Q{(item.precio * item.cantidad).toFixed(2)}</span>
+                                <span>{item.cantidad} x {getOrderItemDisplayName(item)} · Q{(item.precio * item.cantidad).toFixed(2)}</span>
                                 <span style={{ ...orderItemBadgeStyle, ...getOrderItemStatusStyle(item.status) }}>{getOrderItemStatusLabel(item.status)}</span>
                                 {allowHistoricalOrderActions && puedeEditarOrdenes && (item.status || "draft") === "draft" && !item.inventoryConsumed && (
                                   <span style={qtyRowStyle}>
@@ -3111,6 +3578,7 @@ function POS() {
                                 {allowHistoricalOrderActions && item.status !== "cancelled" && (
                                   <button type="button" onClick={() => cancelarItemEnviado(ordenEnviada.id, item)} style={dangerMiniButtonStyle}>Cancelar producto</button>
                                 )}
+                                {getOrderItemModifierLines(item).length > 0 && <small style={modifierTextStyle}>Modificadores: {getOrderItemModifierLines(item).join(", ")}</small>}
                                 {item.modificaciones && <small style={modifierTextStyle}>Modificaciones: {item.modificaciones}</small>}
                                 {item.historialCambios?.length > 0 && (
                                   <div style={auditBoxStyle}>
@@ -3299,7 +3767,7 @@ function POS() {
                       return (
                         <div className="pos-current-order-item" key={item.lineId} style={orderItemStyle}>
                           <div style={historyHeaderStyle}>
-                            <strong>{item.nombre}</strong>
+                            <strong>{getOrderItemDisplayName(item)}</strong>
                             <span style={{ ...orderItemBadgeStyle, ...getOrderItemStatusStyle(item.status) }}>{getOrderItemStatusLabel(item.status)}</span>
                           </div>
                           {isTestProduct(item) && <span className="pos-test-badge">🧪 PRUEBA · sin consumo</span>}
@@ -3307,6 +3775,7 @@ function POS() {
                           <span>{item.cantidad} x Q{item.precio.toFixed(2)} = Q{(item.precio * item.cantidad).toFixed(2)}</span>
                           <small style={mutedStyle}>Area: {area?.name || item.productionAreaId || "Sin area"} | Receta: {recipe?.name || "Sin receta"}</small>
                           {inProduction && <small style={timerStyle}>Enviado hace {minutosTranscurridos(item.updated_at || item.created_at)} min</small>}
+                          {getOrderItemModifierLines(item).length > 0 && <small style={modifierTextStyle}>Modificadores: {getOrderItemModifierLines(item).join(", ")}</small>}
                           {getOrderItemInstructions(item.modificaciones) && <small style={modifierTextStyle}>Modificaciones: {getOrderItemInstructions(item.modificaciones)}</small>}
                           {editable && editandoModificacionLineId === item.lineId ? (
                             <div style={editSentModifierStyle}>
@@ -3421,12 +3890,16 @@ function POS() {
           {itemPendiente && (
             <div style={modalOverlayStyle}>
               <div style={modifierModalStyle}>
-                <h2 style={{ marginTop: 0 }}>¿Hay modificaciones o extras para este platillo?</h2>
+                <h2 style={{ marginTop: 0 }}>Configurar producto para la orden</h2>
                 <div style={modifierDishHeaderStyle}>
                   {itemPendiente.imagen && <img src={itemPendiente.imagen} alt={itemPendiente.nombre} style={modifierDishImageStyle} />}
                   <div>
                     <strong>{itemPendiente.nombre}</strong>
-                    <p style={mutedStyle}>Q{Number(itemPendiente.precio || 0).toFixed(2)}</p>
+                    <p style={mutedStyle}>
+                      {(itemPendiente.productType || itemPendiente.product_type) === "pizza"
+                        ? `Desde Q${getProductBasePrice(itemPendiente).toFixed(2)}`
+                        : `Q${Number(itemPendiente.precio || 0).toFixed(2)}`}
+                    </p>
                   </div>
                 </div>
                 <label className="pos-assignment-select">
@@ -3436,16 +3909,61 @@ function POS() {
                     {seatNames.map((name, index) => <option key={`assignment-${index}`} value={name || `Persona ${index + 1}`}>{name || `Persona ${index + 1}`}</option>)}
                   </select>
                 </label>
-                <textarea
-                  value={modificacionesPendientes}
-                  onChange={(e) => setModificacionesPendientes(e.target.value)}
-                  placeholder="Ej: sin cebolla, extra queso, salsa aparte, bien tostada..."
-                  style={textAreaStyle}
-                />
+                {(itemPendiente.productType || itemPendiente.product_type) === "pizza" && (
+                  <div className="pos-modal-section">
+                    <strong>Tamaño</strong>
+                    <div className="pos-size-chip-row">
+                      {getActiveProductVariants(itemPendiente).map((variant) => (
+                        <button
+                          key={variant.id}
+                          type="button"
+                          className={`pos-size-chip ${String(configuracionPendiente.variantId) === String(variant.id) ? "active" : ""}`}
+                          onClick={() => setConfiguracionPendiente((current) => ({ ...current, variantId: variant.id }))}
+                        >
+                          <span>{PIZZA_VARIANT_OPTIONS.find((option) => option.size === variant.size)?.label || variant.size}</span>
+                          <strong>Q{Number(variant.price || 0).toFixed(2)}</strong>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {getActiveProductModifiers(itemPendiente).length > 0 && (
+                  <div className="pos-modal-section">
+                    <strong>Modificadores</strong>
+                    <div className="pos-modal-modifier-grid">
+                      {getActiveProductModifiers(itemPendiente).map((modifier) => {
+                        const modifierKey = String(modifier.id || `${modifier.modifierType}-${modifier.name}`)
+                        const selected = configuracionPendiente.modifierKeys.includes(modifierKey)
+                        return (
+                          <button
+                            key={modifierKey}
+                            type="button"
+                            className={`pos-modal-modifier ${selected ? "active" : ""}`}
+                            onClick={() => setConfiguracionPendiente((current) => ({
+                              ...current,
+                              modifierKeys: selected
+                                ? current.modifierKeys.filter((entry) => entry !== modifierKey)
+                                : [...current.modifierKeys, modifierKey]
+                            }))}
+                          >
+                            {formatModifierDisplay(modifier)}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+                {itemPendiente.allowKitchenNotes === true || itemPendiente.allow_kitchen_notes === true || (itemPendiente.productType || itemPendiente.product_type) === "pizza" ? (
+                  <textarea
+                    value={configuracionPendiente.customNote}
+                    onChange={(e) => setConfiguracionPendiente((current) => ({ ...current, customNote: e.target.value }))}
+                    placeholder={itemPendiente.modifierNotesPlaceholder || "Ej: bien tostada, cortar en 8, salsa aparte..."}
+                    style={textAreaStyle}
+                  />
+                ) : null}
                 <div style={buttonRowStyle}>
-                  <button type="button" onClick={() => confirmarAgregarItem("")} style={secondaryButtonStyle}>Agregar sin modificaciones</button>
-                  <button type="button" onClick={() => confirmarAgregarItem(modificacionesPendientes)} style={primaryButtonStyle}>Agregar con modificaciones</button>
-                  <button type="button" onClick={() => { setItemPendiente(null); setModificacionesPendientes("") }} style={dangerButtonStyle}>Cancelar</button>
+                  <button type="button" onClick={() => confirmarAgregarItem()} style={primaryButtonStyle}>Agregar a la orden</button>
+                  <button type="button" onClick={() => { setItemPendiente(null); setConfiguracionPendiente({ variantId: "", modifierKeys: [], customNote: "" }) }} style={dangerButtonStyle}>Cancelar</button>
                 </div>
               </div>
             </div>
@@ -3559,7 +4077,9 @@ function ProductionBadges({ state }) {
   }
   return (
     <div style={readinessBadgesStyle}>
-      <span style={state.recipe ? readyBadgeStyle : invalidBadgeStyle}>{state.recipe ? "✓ Receta conectada" : "✗ Sin receta"}</span>
+      <span style={state.productType === "pizza" ? (state.variants?.length ? readyBadgeStyle : invalidBadgeStyle) : (state.recipe ? readyBadgeStyle : invalidBadgeStyle)}>
+        {state.productType === "pizza" ? (state.variants?.length ? `✓ ${state.variants.length} tamaños activos` : "✗ Sin tamaños activos") : (state.recipe ? "✓ Receta conectada" : "✗ Sin receta")}
+      </span>
       <span style={state.area ? readyBadgeStyle : invalidBadgeStyle}>{state.area ? "✓ Área producción configurada" : "✗ Sin área"}</span>
       <span style={state.productionReady ? readyBadgeStyle : invalidBadgeStyle}>{state.productionReady ? "✓ Listo para producción" : "✗ No enviará a KDS"}</span>
     </div>

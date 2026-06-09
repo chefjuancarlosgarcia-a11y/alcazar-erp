@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
 import { getActiveAreas } from "../services/areasService"
+import { createNotification } from "../services/notificationsService"
 import {
   approveChecklistChangeRequest,
   approveChecklistRun,
@@ -124,6 +125,185 @@ const EMPTY_TEMPLATE = {
   active: true
 }
 
+const TASK_ROLE_LABELS = {
+  admin: "Admin",
+  gerente_general: "Gerente general",
+  gerente: "Gerente",
+  recursos_humanos: "RRHH",
+  supervisor: "Supervisor",
+  cocina: "Cocina",
+  cocinero: "Cocina",
+  servicio: "Servicio",
+  mesero: "Servicio",
+  caja: "Caja",
+  cajero: "Caja",
+  barra: "Barra",
+  bartender: "Barra",
+  barista: "Cafeteria",
+  cafeteria: "Cafeteria",
+  limpieza: "Limpieza",
+  almacen: "Almacen",
+  encargado_almacen: "Almacen",
+  pizzeria: "Pizzeria",
+  panadero: "Panaderia",
+  repostero: "Reposteria",
+  mantenimiento: "Mantenimiento",
+  colaborador: "Colaborador"
+}
+const TASK_PROTECTED_ROLES = new Set(["admin", "gerente_general"])
+const TASK_SUPERVISOR_RESTRICTED_ROLES = new Set(["admin", "gerente_general", "gerente", "recursos_humanos", "supervisor"])
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+function isValidUuid(value) {
+  return UUID_PATTERN.test(String(value || "").trim())
+}
+
+function resolveEmployeeProfileId(employeeOrId, employees = []) {
+  if (typeof employeeOrId === "object" && employeeOrId) {
+    if (isValidUuid(employeeOrId.profileId)) return String(employeeOrId.profileId).trim()
+    if (isValidUuid(employeeOrId.id)) return String(employeeOrId.id).trim()
+    return null
+  }
+  const assigneeKey = String(employeeOrId || "").trim()
+  if (!assigneeKey) return null
+  if (isValidUuid(assigneeKey)) return assigneeKey
+  const employee = employees.find((item) => item.taskId === assigneeKey || item.profileId === assigneeKey)
+  return resolveEmployeeProfileId(employee, employees)
+}
+
+function normalizeTaskArea(value) {
+  return String(value || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+}
+
+function getTaskOptionLabel(options, value, fallback = "No definido") {
+  return options.find((option) => option.id === value)?.label || fallback
+}
+
+function getEmployeeRoleKey(employee) {
+  return normalizeRole(employee?.role || employee?.rol || employee?.puesto)
+}
+
+function getEmployeeAreaKey(employee) {
+  return normalizeTaskArea(employee?.areaId || employee?.departamento || employee?.areaName)
+}
+
+function getTaskActorArea(user, employees) {
+  const actorId = getCurrentUserTaskId(user)
+  const employee = employees.find((item) => item.taskId === actorId)
+  return normalizeTaskArea(user?.areaId || user?.areaName || employee?.areaId || employee?.departamento || employee?.areaName)
+}
+
+function taskRoleLabel(role) {
+  const normalized = normalizeRole(role)
+  return TASK_ROLE_LABELS[normalized] || String(role || "Colaborador")
+}
+
+function formatTaskDate(date) {
+  if (!date) return "Sin fecha"
+  return new Date(`${date}T12:00:00`).toLocaleDateString("es-GT", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric"
+  })
+}
+
+function timeToMinutes(value) {
+  const [hours, minutes] = String(value || "00:00").split(":").map(Number)
+  return (hours * 60) + minutes
+}
+
+function addMinutesToTime(time, minutesToAdd) {
+  const total = timeToMinutes(time) + Number(minutesToAdd || 0)
+  const hours = ((Math.floor(total / 60) % 24) + 24) % 24
+  const minutes = ((total % 60) + 60) % 60
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`
+}
+
+function toDateTime(date, time) {
+  return new Date(`${date}T${time || "00:00"}:00`)
+}
+
+function isPastTaskSchedule(date, time, actorRole) {
+  if (["admin", "gerente_general"].includes(actorRole)) return false
+  return toDateTime(date, time).getTime() < Date.now()
+}
+
+function resolveTaskShiftId(startTime) {
+  const minutes = timeToMinutes(startTime)
+  const match = OPERATIONAL_SHIFTS.find((shift, index) => {
+    const start = timeToMinutes(shift.start)
+    const next = OPERATIONAL_SHIFTS[index + 1]
+    const end = next ? timeToMinutes(next.start) : 24 * 60
+    return minutes >= start && minutes < end
+  })
+  return match?.id || OPERATIONAL_SHIFTS[0]?.id || "opening"
+}
+
+function validateManualTaskAssignment({ assigneeId, date, startTime, dueTime }, actorRole) {
+  if (!assigneeId) return "Selecciona un colaborador para continuar."
+  if (!date) return "Selecciona la fecha de ejecucion."
+  if (!startTime) return "Selecciona la hora de inicio."
+  if (!dueTime) return "Selecciona la hora limite."
+  if (toDateTime(date, dueTime).getTime() < toDateTime(date, startTime).getTime()) return "La hora limite no puede ser anterior a la hora de inicio."
+  if (isPastTaskSchedule(date, startTime, actorRole)) return "No puedes asignar tareas en el pasado con tu rol actual."
+  return ""
+}
+
+function buildManualTaskRecord(template, assigneeId, assignment, assignedBy) {
+  const shiftId = resolveTaskShiftId(assignment.startTime)
+  return {
+    id: `task-${Date.now()}-${Math.floor(Math.random() * 100000)}`,
+    templateId: template.id,
+    title: template.title,
+    description: template.description || "",
+    areaId: template.areaId,
+    areaName: template.areaName,
+    category: template.category,
+    assignedTo: assigneeId ? [assigneeId] : [],
+    assignedBy,
+    date: assignment.date,
+    shiftId,
+    scheduledStart: assignment.startTime,
+    scheduledEnd: assignment.dueTime,
+    estimatedMinutes: Number(template.estimatedMinutes) || 0,
+    recommendedTimeBlock: template.recommendedTimeBlock || "",
+    priority: template.priority,
+    difficulty: template.difficulty,
+    requiredPeople: 1,
+    status: assigneeId ? "pending" : "review_required",
+    checklistItems: (template.checklistItems || []).map((item) => ({ ...item, completed: false })),
+    evidenceRequired: Boolean(template.evidenceRequired),
+    evidenceFiles: [],
+    completedAt: "",
+    completionNotes: "",
+    createdAt: new Date().toISOString()
+  }
+}
+
+function getAssignableEmployeesForTemplate(user, employees, template) {
+  const actorRole = normalizeRole(user?.role)
+  const actorArea = getTaskActorArea(user, employees)
+  const scopedArea = normalizeTaskArea(template?.areaId) || actorArea
+
+  return employees
+    .filter((employee) => {
+      if (!employee?.taskId) return false
+      const state = normalizeTaskArea(employee.estado || (employee.activo === false ? "Inactivo" : "Activo"))
+      if (employee.activo === false || ["inactivo", "suspendido"].includes(state)) return false
+
+      const targetRole = getEmployeeRoleKey(employee)
+      const targetArea = getEmployeeAreaKey(employee)
+      const supportAreas = Array.isArray(employee.supportAreas) ? employee.supportAreas.map(normalizeTaskArea) : []
+      const areaMatches = !scopedArea || !targetArea || targetArea === scopedArea || supportAreas.includes(scopedArea)
+
+      if (actorRole === "admin" || actorRole === "gerente_general") return true
+      if (actorRole === "recursos_humanos") return !TASK_PROTECTED_ROLES.has(targetRole)
+      if (actorRole === "supervisor") return areaMatches && !TASK_SUPERVISOR_RESTRICTED_ROLES.has(targetRole)
+      return false
+    })
+    .sort((left, right) => left.name.localeCompare(right.name, "es", { sensitivity: "base" }))
+}
+
 function normalizeChecklistWeekdays(days) {
   return [...new Set((Array.isArray(days) ? days : []).map((day) => Number(day)).filter((day) => CHECKLIST_WEEKDAY_TO_RRULE[day]))].sort((a, b) => a - b)
 }
@@ -217,14 +397,18 @@ function buildChecklistWizardForm(editingTemplate) {
 function Tasks() {
   const { user } = useAuth()
   const [params, setParams] = useSearchParams()
-  const isManager = MANAGEMENT_ROLES.includes(normalizeRole(user?.role))
+  const currentUserRole = normalizeRole(user?.role)
+  const isManager = MANAGEMENT_ROLES.includes(currentUserRole)
   const [templates, setTemplates] = useState(loadTaskTemplates)
   const [editingTemplate, setEditingTemplate] = useState(null)
   const [assignedTasks, setAssignedTasks] = useState(loadAssignedTasks)
   const [areas, setAreas] = useState([])
   const [employees] = useState(() => loadOperationalEmployees(user))
+  const [assignmentTemplate, setAssignmentTemplate] = useState(null)
+  const [assignmentFeedback, setAssignmentFeedback] = useState(null)
   const requestedTab = params.get("tab") === "checklists" ? "checklists" : params.get("view") || (isManager ? "dashboard" : "mine")
   const tab = requestedTab === "checklists" ? "checklists" : isManager && ADMIN_TABS.some(([id]) => id === requestedTab) ? requestedTab : "mine"
+  const taskFromQuery = params.get("task") || ""
   const visibleTemplates = templates.filter((template) => mayUseTemplate(template, user, employees))
   const computedTasks = assignedTasks.map(withComputedTaskStatus)
   const permittedAreas = getPermittedAreas(areas, user, employees, visibleTemplates)
@@ -275,6 +459,59 @@ function Tasks() {
     updateTaskPerformance(nextTasks)
   }
 
+  async function notifyAssignedTasks(newTasks) {
+    createTaskNotifications(newTasks)
+    // TODO: migrar assigned tasks a Supabase para deep links y sincronizacion entre dispositivos.
+    const supabaseRequests = []
+    let skippedMissingProfile = false
+    for (const task of newTasks) {
+      for (const assigneeId of task.assignedTo || []) {
+        const profileId = resolveEmployeeProfileId(assigneeId, employees)
+        if (!profileId) {
+          skippedMissingProfile = true
+          console.warn("[Tasks] Notificacion Supabase omitida: el colaborador no tiene profile UUID valido.", {
+            assigneeId,
+            taskId: task.id,
+            taskTitle: task.title
+          })
+          continue
+        }
+        supabaseRequests.push(createNotification({
+          userId: profileId,
+          type: "task_assigned",
+          title: `Nueva tarea asignada: ${task.title}`,
+          message: `${user?.name || "Sistema"} te asigno la tarea ${task.title} para el ${formatTaskDate(task.date)} a las ${formatOperationalTime(task.scheduledStart || "08:00")}.`,
+          entityType: "task",
+          entityId: task.id,
+          actionUrl: "/tasks?view=mine"
+        }))
+      }
+    }
+    if (!supabaseRequests.length) {
+      return skippedMissingProfile
+        ? "La tarea se asigno localmente. No se envio notificacion en campana porque el colaborador no tiene UUID de perfil valido."
+        : ""
+    }
+    const responses = await Promise.all(supabaseRequests)
+    const failed = responses.find((result) => result?.error)
+    if (failed) return "La tarea se asigno, pero no se pudo reflejar la notificacion en la campana."
+    if (skippedMissingProfile) {
+      return "La tarea se asigno. Algunas notificaciones en campana se omitieron por falta de UUID de perfil valido."
+    }
+    return ""
+  }
+
+  async function handleManualAssignment(template, assignment) {
+    const task = buildManualTaskRecord(template, assignment.assigneeId, assignment, user?.name || "Sistema")
+    persistTasks([task, ...assignedTasks])
+    const notificationWarning = await notifyAssignedTasks([task])
+    setAssignmentFeedback({
+      tone: notificationWarning ? "warning" : "success",
+      text: notificationWarning || `Tarea asignada a ${assignment.assigneeName} para el ${formatTaskDate(assignment.date)}.`
+    })
+    setAssignmentTemplate(null)
+  }
+
   return (
     <section className="tasks-page">
       <header className="tasks-page-header">
@@ -293,7 +530,18 @@ function Tasks() {
       </nav>
 
       {tab === "dashboard" && <TasksDashboard tasks={computedTasks} areas={areas} employees={employees} onOpenTab={openTab} />}
-      {tab === "bank" && <TaskBank templates={visibleTemplates} allTemplates={templates} areas={permittedAreas} setTemplates={setTemplates} canDeactivate={user.role !== "rrhh"} onEdit={(template) => { setEditingTemplate(template); openTab("create") }} />}
+      {tab === "bank" && (
+        <TaskBank
+          templates={visibleTemplates}
+          allTemplates={templates}
+          areas={permittedAreas}
+          setTemplates={setTemplates}
+          canDeactivate={currentUserRole !== "recursos_humanos"}
+          onAssign={(template) => { setAssignmentFeedback(null); setAssignmentTemplate(template) }}
+          onEdit={(template) => { setEditingTemplate(template); openTab("create") }}
+          feedback={assignmentFeedback}
+        />
+      )}
       {tab === "create" && <TaskTemplateForm key={editingTemplate?.id || "new"} templates={templates} setTemplates={setTemplates} areas={permittedAreas} currentUser={user} editingTemplate={editingTemplate} onFinished={() => { setEditingTemplate(null); openTab("bank") }} />}
       {tab === "assign" && (
         <TaskAssignment
@@ -303,27 +551,40 @@ function Tasks() {
           areas={permittedAreas}
           user={user}
           onAssigned={(newTasks) => persistTasks([...newTasks, ...assignedTasks])}
+          onNotifyAssignedTasks={notifyAssignedTasks}
         />
       )}
       {tab === "calendar" && <OperationalCalendar tasks={computedTasks} employees={employees} areas={areas} />}
       {tab === "checklists" && <ChecklistsModule user={user} initialRunId={params.get("id") || ""} initialChecklistView={params.get("view") || ""} />}
-      {tab === "mine" && <MyTasks tasks={computedTasks.filter((task) => taskMatchesUser(task, user))} user={user} persistAllTasks={persistTasks} allTasks={assignedTasks} />}
+      {tab === "mine" && <MyTasks initialTaskId={taskFromQuery} tasks={computedTasks.filter((task) => taskMatchesUser(task, user))} user={user} persistAllTasks={persistTasks} allTasks={assignedTasks} />}
       {tab === "reports" && <TaskReports tasks={computedTasks} employees={employees} areas={areas} />}
+      {assignmentTemplate && (
+        <TaskAssignWizard
+          template={assignmentTemplate}
+          user={user}
+          employees={employees}
+          areas={areas}
+          onClose={() => setAssignmentTemplate(null)}
+          onSubmit={handleManualAssignment}
+        />
+      )}
     </section>
   )
 }
 
 function mayUseTemplate(template, user, employees) {
+  const role = normalizeRole(user?.role)
   if (!template.active) return false
-  if (user?.role === "rrhh") return template.areaId === "administracion" || ["Recursos Humanos", "Capacitación"].includes(template.category)
-  if (user?.role !== "supervisor") return true
+  if (role === "recursos_humanos") return template.areaId === "administracion" || ["Recursos Humanos", "Capacitación"].includes(template.category)
+  if (role !== "supervisor") return true
   const employee = employees.find((item) => item.taskId === getCurrentUserTaskId(user))
   return !employee?.areaId || template.areaId === employee.areaId
 }
 
 function getPermittedAreas(areas, user, employees, templates) {
-  if (user?.role === "rrhh") return areas.filter((area) => area.id === "administracion")
-  if (user?.role !== "supervisor") return areas
+  const role = normalizeRole(user?.role)
+  if (role === "recursos_humanos") return areas.filter((area) => area.id === "administracion")
+  if (role !== "supervisor") return areas
   const employee = employees.find((item) => item.taskId === getCurrentUserTaskId(user))
   if (employee?.areaId) return areas.filter((area) => area.id === employee.areaId)
   const taskAreaIds = new Set(templates.map((template) => template.areaId))
@@ -375,7 +636,7 @@ function TasksDashboard({ tasks, areas, employees, onOpenTab }) {
   )
 }
 
-function TaskBank({ templates, allTemplates, areas, setTemplates, canDeactivate, onEdit }) {
+function TaskBank({ templates, allTemplates, areas, setTemplates, canDeactivate, onAssign, onEdit, feedback }) {
   const [search, setSearch] = useState("")
   const [areaFilter, setAreaFilter] = useState("")
   const [category, setCategory] = useState("")
@@ -392,6 +653,7 @@ function TaskBank({ templates, allTemplates, areas, setTemplates, canDeactivate,
   return (
     <article className="tasks-panel">
       <div className="tasks-panel-title"><div><h2>Banco de tareas</h2><p className="tasks-muted">{filtered.length} procedimientos estandarizados activos</p></div></div>
+      {feedback?.text && <p className={feedback.tone === "warning" ? "tasks-warning" : "tasks-success"}>{feedback.text}</p>}
       <div className="tasks-filters">
         <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar tarea..." />
         <select value={areaFilter} onChange={(event) => setAreaFilter(event.target.value)}><option value="">Todas las áreas</option>{areas.map((area) => <option value={area.id} key={area.id}>{area.name}</option>)}</select>
@@ -406,6 +668,7 @@ function TaskBank({ templates, allTemplates, areas, setTemplates, canDeactivate,
             <div className="tasks-template-meta"><span>{template.areaName}</span><span>{template.category}</span><span>{template.estimatedMinutes} min</span><span>{template.requiredPeople} pers.</span></div>
             {template.evidenceRequired && <small className="tasks-evidence-tag">Requiere evidencia</small>}
             <div className="tasks-card-actions">
+              <button type="button" className="tasks-card-action-primary" onClick={() => onAssign(template)}>Asignar</button>
               <button type="button" className="tasks-link" onClick={() => onEdit(template)}>Editar</button>
               {canDeactivate && <button type="button" className="tasks-link danger" onClick={() => toggle(template.id)}>Desactivar</button>}
             </div>
@@ -413,6 +676,196 @@ function TaskBank({ templates, allTemplates, areas, setTemplates, canDeactivate,
         ))}
       </div>
     </article>
+  )
+}
+
+function TaskAssignWizard({ template, user, employees, areas, onClose, onSubmit }) {
+  const actorRole = normalizeRole(user?.role)
+  const candidates = getAssignableEmployeesForTemplate(user, employees, template)
+  const [step, setStep] = useState(1)
+  const [assigneeId, setAssigneeId] = useState(candidates[0]?.taskId || "")
+  const [date, setDate] = useState(TODAY)
+  const [startTime, setStartTime] = useState(template?.recommendedTimeBlock || "08:00")
+  const [dueTime, setDueTime] = useState(addMinutesToTime(template?.recommendedTimeBlock || "08:00", Number(template?.estimatedMinutes) || 30))
+  const [error, setError] = useState("")
+  const [saving, setSaving] = useState(false)
+  const selectedEmployee = candidates.find((employee) => employee.taskId === assigneeId) || null
+  const validationError = validateManualTaskAssignment({ assigneeId, date, startTime, dueTime }, actorRole)
+  const areaName = areas.find((area) => area.id === template.areaId)?.name || template.areaName || "Sin area"
+
+  useEffect(() => {
+    if (!assigneeId && candidates[0]?.taskId) setAssigneeId(candidates[0].taskId)
+  }, [assigneeId, candidates])
+
+  useEffect(() => {
+    function closeOnEscape(event) {
+      if (event.key === "Escape" && !saving) onClose()
+    }
+    document.addEventListener("keydown", closeOnEscape)
+    return () => document.removeEventListener("keydown", closeOnEscape)
+  }, [onClose, saving])
+
+  async function submitAssignment() {
+    if (validationError || !selectedEmployee) {
+      setError(validationError || "Selecciona un colaborador para continuar.")
+      return
+    }
+    setSaving(true)
+    setError("")
+    try {
+      await onSubmit(template, {
+        assigneeId: selectedEmployee.taskId,
+        assigneeName: selectedEmployee.name,
+        date,
+        startTime,
+        dueTime
+      })
+    } catch (submitError) {
+      setError(submitError?.message || "No se pudo asignar la tarea.")
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="tasks-modal-backdrop" role="presentation" onClick={(event) => { if (event.target === event.currentTarget && !saving) onClose() }}>
+      <section className="tasks-modal" aria-modal="true" role="dialog" aria-labelledby="task-assign-title">
+        <div className="tasks-panel-title">
+          <div>
+            <p className="tasks-eyebrow">Asignacion guiada</p>
+            <h2 id="task-assign-title">Asignar tarea</h2>
+            <p className="tasks-muted">Banco de tareas &gt; {template.title}</p>
+          </div>
+          <button type="button" className="tasks-link" onClick={onClose} disabled={saving}>Cerrar</button>
+        </div>
+
+        <div className="tasks-wizard-steps" aria-label="Pasos de asignacion">
+          {[
+            [1, "Tarea"],
+            [2, "Colaborador"],
+            [3, "Fecha y hora"],
+            [4, "Confirmar"]
+          ].map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              className={step === id ? "active" : ""}
+              onClick={() => {
+                if (id < step) setStep(id)
+              }}
+            >
+              <span>{id}</span>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {step === 1 && (
+          <div className="tasks-wizard-body">
+            <p className="tasks-wizard-intro">Vas a asignar esta tarea a un colaborador.</p>
+            <div className="tasks-summary-grid">
+              <div><span>Tarea</span><strong>{template.title}</strong></div>
+              <div><span>Categoria</span><strong>{template.category}</strong></div>
+              <div><span>Area sugerida</span><strong>{areaName}</strong></div>
+              <div><span>Prioridad</span><strong>{getTaskOptionLabel(TASK_PRIORITIES, template.priority, template.priority)}</strong></div>
+              <div><span>Duracion estimada</span><strong>{template.estimatedMinutes} min</strong></div>
+              <div><span>Estado</span><strong>{template.active ? "Activa" : "Inactiva"}</strong></div>
+            </div>
+          </div>
+        )}
+
+        {step === 2 && (
+          <div className="tasks-wizard-body">
+            <Field label="Colaborador disponible" hint="El listado respeta tu rol y el alcance operativo permitido para asignar tareas.">
+              <select value={assigneeId} onChange={(event) => setAssigneeId(event.target.value)} disabled={!candidates.length}>
+                <option value="">{candidates.length ? "Selecciona un colaborador" : "Sin colaboradores disponibles"}</option>
+                {candidates.map((employee) => (
+                  <option value={employee.taskId} key={employee.taskId}>
+                    {employee.name} · {taskRoleLabel(employee.role || employee.rol || employee.puesto)} · {employee.departamento || employee.areaName || employee.areaId || "Sin area"}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {!candidates.length && <p className="tasks-warning">No tienes colaboradores disponibles para asignar esta tarea.</p>}
+            {selectedEmployee && (
+              <div className="tasks-assignee-card">
+                <strong>{selectedEmployee.name}</strong>
+                <span>{taskRoleLabel(selectedEmployee.role || selectedEmployee.rol || selectedEmployee.puesto)}</span>
+                <small>{selectedEmployee.departamento || selectedEmployee.areaName || selectedEmployee.areaId || "Sin area asignada"}</small>
+              </div>
+            )}
+          </div>
+        )}
+
+        {step === 3 && (
+          <div className="tasks-wizard-body">
+            <div className="tasks-form-grid">
+              <Field label={<><span aria-hidden="true">📅</span> Fecha de ejecucion</>} hint={["admin", "gerente_general"].includes(actorRole) ? "Puedes asignar fechas pasadas si hace falta corregir una carga operativa." : "No se permiten fechas pasadas con tu rol actual."}>
+                <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+              </Field>
+              <Field label={<><span aria-hidden="true">🕒</span> Hora de inicio sugerida</>}>
+                <input type="time" value={startTime} onChange={(event) => setStartTime(event.target.value)} />
+              </Field>
+              <Field label={<><span aria-hidden="true">🕒</span> Hora limite</>}>
+                <input type="time" value={dueTime} onChange={(event) => setDueTime(event.target.value)} />
+              </Field>
+            </div>
+            <div className="tasks-inline-summary">
+              <span>Turno sugerido</span>
+              <strong>{OPERATIONAL_SHIFTS.find((shift) => shift.id === resolveTaskShiftId(startTime))?.name || "Manual"}</strong>
+            </div>
+            {validationError && <p className="tasks-warning">{validationError}</p>}
+          </div>
+        )}
+
+        {step === 4 && (
+          <div className="tasks-wizard-body">
+            <p className="tasks-wizard-intro">Revisa el resumen antes de guardar.</p>
+            <div className="tasks-confirm-list">
+              <div><span>Tarea</span><strong>{template.title}</strong></div>
+              <div><span>Asignado a</span><strong>{selectedEmployee?.name || "Sin seleccionar"}</strong></div>
+              <div><span>Fecha</span><strong>{formatTaskDate(date)}</strong></div>
+              <div><span>Hora de inicio</span><strong>{formatOperationalTime(startTime)}</strong></div>
+              <div><span>Hora limite</span><strong>{formatOperationalTime(dueTime)}</strong></div>
+              <div><span>Prioridad</span><strong>{getTaskOptionLabel(TASK_PRIORITIES, template.priority, template.priority)}</strong></div>
+            </div>
+            {validationError && <p className="tasks-warning">{validationError}</p>}
+          </div>
+        )}
+
+        {error && <p className="tasks-warning">{error}</p>}
+
+        <div className="tasks-wizard-actions">
+          <button type="button" className="tasks-secondary" onClick={() => { if (step === 1) onClose(); else setStep((current) => current - 1) }} disabled={saving}>
+            {step === 1 ? "Cancelar" : "Anterior"}
+          </button>
+          {step < 4 ? (
+            <button
+              type="button"
+              className="tasks-primary"
+              onClick={() => {
+                if (step === 2 && !assigneeId) {
+                  setError("Selecciona un colaborador para continuar.")
+                  return
+                }
+                if (step === 3 && validationError) {
+                  setError(validationError)
+                  return
+                }
+                setError("")
+                setStep((current) => current + 1)
+              }}
+              disabled={(step === 2 && !candidates.length) || (step === 3 && Boolean(validationError))}
+            >
+              Siguiente
+            </button>
+          ) : (
+            <button type="button" className="tasks-primary" onClick={submitAssignment} disabled={saving || Boolean(validationError)}>
+              {saving ? "Asignando..." : "Asignar tarea"}
+            </button>
+          )}
+        </div>
+      </section>
+    </div>
   )
 }
 
@@ -487,7 +940,7 @@ function TaskTemplateForm({ templates, setTemplates, areas, currentUser, editing
   )
 }
 
-function TaskAssignment({ templates, tasks, employees, areas, user, onAssigned }) {
+function TaskAssignment({ templates, tasks, employees, areas, user, onAssigned, onNotifyAssignedTasks }) {
   const [date, setDate] = useState(TODAY)
   const [areaId, setAreaId] = useState(templates[0]?.areaId || "cocina")
   const [shiftId, setShiftId] = useState(OPERATIONAL_SHIFTS[0].id)
@@ -513,23 +966,23 @@ function TaskAssignment({ templates, tasks, employees, areas, user, onAssigned }
   function toggle(templateId) {
     setSelected((current) => current.includes(templateId) ? current.filter((id) => id !== templateId) : [...current, templateId])
   }
-  function automated() {
+  async function automated() {
     if (!selection.length) return
     const result = assignTasksAutomatically(selection, employees, date, shift, areaId, tasks, user.name)
-    createTaskNotifications(result.assignedTasks)
     onAssigned(result.assignedTasks)
-    setWarnings(result.warnings)
+    const notificationWarning = onNotifyAssignedTasks ? await onNotifyAssignedTasks(result.assignedTasks) : ""
+    setWarnings(notificationWarning ? [...result.warnings, notificationWarning] : result.warnings)
     setSelected([])
   }
-  function manual() {
+  async function manual() {
     if (!selection.length || !selectedEmployees.length) {
       setWarnings(["Selecciona al menos una tarea y un colaborador para asignar manualmente."])
       return
     }
     const created = assignTasksManually(selection, selectedEmployees, date, shift, user.name)
-    createTaskNotifications(created)
     onAssigned(created)
-    setWarnings([])
+    const notificationWarning = onNotifyAssignedTasks ? await onNotifyAssignedTasks(created) : ""
+    setWarnings(notificationWarning ? [notificationWarning] : [])
     setSelected([])
   }
   return (
@@ -602,12 +1055,21 @@ function OperationalCalendar({ tasks, employees, areas }) {
   )
 }
 
-function MyTasks({ tasks, user, allTasks, persistAllTasks }) {
+function MyTasks({ initialTaskId = "", tasks, user, allTasks, persistAllTasks }) {
   const [selectedTaskId, setSelectedTaskId] = useState("")
   const [notes, setNotes] = useState("")
   const taskNotifications = loadTaskNotifications().filter((notification) => notification.userId === getCurrentUserTaskId(user))
   const notifications = taskNotifications.filter((notification) => !notification.read)
   const selectedTask = tasks.find((task) => task.id === selectedTaskId)
+
+  useEffect(() => {
+    if (initialTaskId && tasks.some((task) => task.id === initialTaskId)) {
+      const task = tasks.find((item) => item.id === initialTaskId)
+      setSelectedTaskId(initialTaskId)
+      setNotes(task?.completionNotes || "")
+    }
+  }, [initialTaskId, tasks])
+
   function updateOwn(taskId, updater) {
     const updated = allTasks.map((task) => task.id === taskId ? updater(task) : task)
     persistAllTasks(updated)

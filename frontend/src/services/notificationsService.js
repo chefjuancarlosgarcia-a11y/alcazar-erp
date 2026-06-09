@@ -22,7 +22,8 @@ export async function createNotification(notification) {
     p_title: notification.title,
     p_message: notification.message,
     p_entity_type: notification.entityType || null,
-    p_entity_id: notification.entityId == null ? null : String(notification.entityId)
+    p_entity_id: notification.entityId == null ? null : String(notification.entityId),
+    p_action_url: notification.actionUrl || null
   })
   window.dispatchEvent(new CustomEvent("notifications-updated"))
   return result

@@ -140,11 +140,22 @@ export function saveTaskNotifications(notifications) {
   window.dispatchEvent(new Event("task-notifications-updated"))
 }
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+function isValidProfileUuid(value) {
+  return UUID_PATTERN.test(String(value || "").trim())
+}
+
 export function loadOperationalEmployees(currentUser) {
   const managed = parseArray("users")
   const users = managed.map((employee) => ({
     ...employee,
     taskId: employee.id || employee.username,
+    profileId: isValidProfileUuid(employee.profileId)
+      ? String(employee.profileId).trim()
+      : isValidProfileUuid(employee.id)
+        ? String(employee.id).trim()
+        : null,
     name: employee.nombre || employee.name || employee.username,
     areaId: normalize(employee.departamento),
     level: employee.skillLevel || inferSkillLevel(employee),
@@ -155,6 +166,7 @@ export function loadOperationalEmployees(currentUser) {
     users.push({
       id: currentId,
       taskId: currentId,
+      profileId: isValidProfileUuid(currentUser.id) ? String(currentUser.id).trim() : null,
       username: currentUser.username,
       nombre: currentUser.name,
       name: currentUser.name,

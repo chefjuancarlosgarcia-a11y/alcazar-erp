@@ -263,8 +263,21 @@
 
 .tasks-card-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 14px;
   margin-top: 4px;
+}
+
+.tasks-card-action-primary {
+  padding: 9px 12px;
+  border: 1px solid #14b8a6;
+  border-radius: 9px;
+  background: #0f766e;
+  color: #ecfeff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
 }
 
 .tasks-card-actions .danger {
@@ -354,6 +367,132 @@
 .tasks-assignment-summary {
   position: sticky;
   top: 84px;
+}
+
+.tasks-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(2, 8, 23, 0.76);
+  backdrop-filter: blur(4px);
+}
+
+.tasks-modal {
+  display: grid;
+  gap: 18px;
+  width: min(760px, 100%);
+  max-height: min(88vh, 920px);
+  overflow: auto;
+  padding: 22px;
+  border: 1px solid #24405c;
+  border-radius: 18px;
+  background: #0f172a;
+  box-shadow: 0 24px 80px rgba(2, 6, 23, 0.45);
+}
+
+.tasks-wizard-steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.tasks-wizard-steps button {
+  display: grid;
+  gap: 6px;
+  min-height: 62px;
+  padding: 10px 12px;
+  border: 1px solid #26384e;
+  border-radius: 12px;
+  background: #101c30;
+  color: #cbd5e1;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.tasks-wizard-steps button span {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin: 0 auto;
+  border-radius: 999px;
+  background: #23344b;
+}
+
+.tasks-wizard-steps button.active {
+  border-color: #14b8a6;
+  background: #102a31;
+  color: #99f6e4;
+}
+
+.tasks-wizard-steps button.active span {
+  background: #0f766e;
+  color: #ecfeff;
+}
+
+.tasks-wizard-body {
+  display: grid;
+  gap: 16px;
+}
+
+.tasks-wizard-intro {
+  margin: 0;
+  color: #dbeafe;
+}
+
+.tasks-summary-grid,
+.tasks-confirm-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.tasks-summary-grid div,
+.tasks-confirm-list div,
+.tasks-inline-summary,
+.tasks-assignee-card {
+  display: grid;
+  gap: 4px;
+  padding: 13px;
+  border: 1px solid #24354a;
+  border-radius: 12px;
+  background: #101c30;
+}
+
+.tasks-summary-grid span,
+.tasks-confirm-list span,
+.tasks-inline-summary span,
+.tasks-assignee-card span,
+.tasks-assignee-card small {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.tasks-summary-grid strong,
+.tasks-confirm-list strong,
+.tasks-inline-summary strong,
+.tasks-assignee-card strong {
+  color: #f8fafc;
+}
+
+.tasks-inline-summary {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+}
+
+.tasks-assignee-card {
+  max-width: 340px;
+}
+
+.tasks-wizard-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .tasks-total {
@@ -1462,6 +1601,16 @@
 
   .checklist-recurrence-toolbar {
     align-items: stretch;
+  }
+
+  .tasks-wizard-steps,
+  .tasks-summary-grid,
+  .tasks-confirm-list {
+    grid-template-columns: 1fr;
+  }
+
+  .tasks-modal {
+    padding: 18px;
   }
 
   .checklist-weekdays.boxes {
