@@ -343,27 +343,6 @@ function isInRange(value, range) {
   return time >= new Date(range.start).getTime() && time <= new Date(range.end).getTime()
 }
 
-export async function getFixedCosts() {
-  const { data, error } = await supabase.from("fixed_costs").select("*").order("category", { ascending: true }).order("name", { ascending: true })
-  return empty(Array.isArray(data) ? data.filter((row) => row && typeof row === "object") : [], error)
-}
-
-export async function saveFixedCost(cost) {
-  const payload = {
-    name: cost.name?.trim(),
-    category: cost.category,
-    monthly_amount: Number(cost.monthly_amount || cost.monthlyAmount || 0),
-    start_date: cost.start_date || cost.startDate || null,
-    active: cost.active !== false
-  }
-  if (cost.id) {
-    const { data, error } = await supabase.from("fixed_costs").update(payload).eq("id", cost.id).select("*").single()
-    return { data, error }
-  }
-  const { data, error } = await supabase.from("fixed_costs").insert(payload).select("*").single()
-  return { data, error }
-}
-
 export async function getPayrollCostReport(filters = {}) {
   const [payroll, profiles] = await Promise.all([
     withDates(supabase.from("payroll_summaries").select("*"), filters, "week_start"),

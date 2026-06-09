@@ -1,24 +1,39 @@
 import { Component, useEffect, useMemo, useState } from "react"
-import { useNavigate } from "react-router-dom"
+import { useNavigate, useSearchParams } from "react-router-dom"
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
 import * as XLSX from "xlsx"
 import { useAuth } from "../../context/AuthContext"
 import {
+  copyFixedCostsFromPreviousMonth,
+  deactivateFixedCost,
+  emptyFixedCostForm,
+  FIXED_COST_CATEGORIES,
+  FIXED_COST_FREQUENCIES,
+  FIXED_COST_PAYMENT_STATUSES,
+  fixedCostCategoryLabel,
+  fixedCostFrequencyLabel,
+  fixedCostPaymentStatusLabel,
+  generateMonthlyFixedCostReviewNotifications,
+  getFixedCostsByMonth,
+  markFixedCostPaid,
+  upsertFixedCost
+} from "../../services/fixedCostsService"
+import {
   getExecutiveDashboardReport,
-  getFixedCosts,
   getInventoryReport,
   getMenuEngineeringReport,
   getPayrollCostReport,
   getPurchasesReport,
   getSalesAnalyticsReport,
-  getSalesByWaiter,
-  saveFixedCost
+  getSalesByWaiter
 } from "../../services/reportsService"
 import { getMonthlyGoalReport, getWaiterSalesRanking } from "../../services/salesGoalsService"
 import "./ReportsDashboard.css"
 
 const EXECUTIVE_ROLES = ["admin", "ceo", "gerente_general"]
+const FIXED_COSTS_VIEW_ROLES = ["admin", "ceo", "gerente_general", "supervisor"]
+const FIXED_COSTS_MANAGE_ROLES = ["admin", "ceo", "gerente_general"]
 const GOAL_ROLES = ["admin", "gerente_general", "supervisor"]
 const TABS = [
   ["executive", "Dashboard ejecutivo"],
@@ -32,34 +47,36 @@ const TABS = [
   ["menu", "Analisis de menu"],
   ["inventory", "Inventario critico"]
 ]
-const FIXED_CATEGORIES = [
-  ["alquiler", "Alquiler"],
-  ["energia_electrica", "Energia electrica"],
-  ["agua", "Agua"],
-  ["internet", "Internet"],
-  ["telefonia", "Telefonia"],
-  ["seguridad", "Seguridad"],
-  ["software", "Software"],
-  ["mantenimiento", "Mantenimiento"],
-  ["otros", "Otros"]
-]
-
-const EMPTY_FIXED_COST = { name: "", category: "alquiler", monthly_amount: "", start_date: "", active: true }
+function canAccessReportTab(key, role) {
+  if (key === "goals") return GOAL_ROLES.includes(role)
+  if (key === "fixedCosts") return FIXED_COSTS_VIEW_ROLES.includes(role)
+  return EXECUTIVE_ROLES.includes(role)
+}
 
 function ReportsDashboard() {
   const { user } = useAuth()
   const navigate = useNavigate()
-  const canViewExecutive = EXECUTIVE_ROLES.includes(user?.role)
-  const canViewGoals = GOAL_ROLES.includes(user?.role)
-  const availableTabs = useMemo(() => TABS.filter(([key]) => key === "goals" ? canViewGoals : canViewExecutive), [canViewExecutive, canViewGoals])
+  const [searchParams] = useSearchParams()
+  const canManageFixedCosts = FIXED_COSTS_MANAGE_ROLES.includes(user?.role)
+  const availableTabs = useMemo(
+    () => TABS.filter(([key]) => canAccessReportTab(key, user?.role)),
+    [user?.role]
+  )
   const canView = availableTabs.length > 0
   const [tab, setTab] = useState("executive")
   const [filters, setFilters] = useState({ preset: "today", start: "", end: "", collaborator: "", shift: "", category: "", month: new Date().toISOString().slice(0, 7) })
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
-  const [fixedForm, setFixedForm] = useState(EMPTY_FIXED_COST)
   const [tabReloadKey, setTabReloadKey] = useState(0)
+  const [fixedCostsFeedback, setFixedCostsFeedback] = useState("")
+
+  useEffect(() => {
+    const requestedTab = searchParams.get("tab")
+    if (requestedTab && availableTabs.some(([key]) => key === requestedTab)) {
+      setTab(requestedTab)
+    }
+  }, [searchParams, availableTabs])
 
   useEffect(() => {
     if (!canView) return
@@ -106,17 +123,15 @@ function ReportsDashboard() {
     return <section className="reports-page executive"><Empty text="No tienes permiso para ver esta seccion." /></section>
   }
 
-  async function submitFixedCost(event) {
-    event.preventDefault()
-    if (!fixedForm.name.trim() || Number(fixedForm.monthly_amount) < 0) return
-    const result = await saveFixedCost(fixedForm)
+  async function reloadFixedCosts(month = filters.month) {
+    const result = await getFixedCostsByMonth(month)
     if (result.error) {
-      setError(result.error.message)
-      return
+      setError(result.error.message || "No se pudieron cargar los costos fijos.")
+      return null
     }
-    setFixedForm(EMPTY_FIXED_COST)
-    const refreshed = await getFixedCosts()
-    setData(refreshed.data)
+    setData(result.data)
+    setError("")
+    return result.data
   }
 
   function changeTab(nextTab) {
@@ -153,7 +168,13 @@ function ReportsDashboard() {
         {availableTabs.map(([key, label]) => <button key={key} className={tab === key ? "active" : ""} type="button" onClick={() => changeTab(key)}>{label}</button>)}
       </nav>
 
-      {!["executive", "fixedCosts"].includes(tab) && <GlobalFilters filters={filters} onChange={(field, value) => setFilters((current) => ({ ...current, [field]: value }))} showMonth={tab === "goals"} showDateRange={tab !== "goals"} showCategory={tab === "menu"} showCollaborator={["waiters", "comparison"].includes(tab)} />}
+      {(tab === "goals" || tab === "fixedCosts") && (
+        <div className="reports-filters">
+          <label>Mes<input type="month" value={filters.month} onChange={(event) => setFilters((current) => ({ ...current, month: event.target.value }))} /></label>
+        </div>
+      )}
+      {!["executive", "fixedCosts", "goals"].includes(tab) && <GlobalFilters filters={filters} onChange={(field, value) => setFilters((current) => ({ ...current, [field]: value }))} showMonth={false} showDateRange={tab !== "goals"} showCategory={tab === "menu"} showCollaborator={["waiters", "comparison"].includes(tab)} />}
+      {fixedCostsFeedback && tab === "fixedCosts" && <p className="reports-success-banner" role="status">{fixedCostsFeedback}</p>}
       <ReportTabBoundary key={`${tab}-${tabReloadKey}`} tab={tab} onRetry={retryTab}>
         {loading
           ? <div className="reports-loading">Cargando {currentTabLabel(tab).toLowerCase()}...</div>
@@ -161,7 +182,18 @@ function ReportsDashboard() {
             ? <ReportTabError tab={tab} error={error} onRetry={retryTab} />
             : tab === "inventory"
               ? <CriticalInventory data={data} />
-              : <ExecutiveContent tab={tab} data={data} filters={filters} fixedForm={fixedForm} setFixedForm={setFixedForm} submitFixedCost={submitFixedCost} onConfigureGoals={() => navigate("/reports/goals/settings")} canManageGoals={["admin", "gerente_general"].includes(user?.role)} />}
+              : <ExecutiveContent
+                  tab={tab}
+                  data={data}
+                  filters={filters}
+                  canManageFixedCosts={canManageFixedCosts}
+                  onFixedCostsChange={async (message) => {
+                    if (message) setFixedCostsFeedback(message)
+                    await reloadFixedCosts(filters.month)
+                  }}
+                  onConfigureGoals={() => navigate("/reports/goals/settings")}
+                  canManageGoals={["admin", "gerente_general"].includes(user?.role)}
+                />}
       </ReportTabBoundary>
     </section>
   )
@@ -179,7 +211,7 @@ async function loadExecutiveReport(tab, filters) {
   if (tab === "sales") return getSalesAnalyticsReport(filters)
   if (tab === "waiters" || tab === "comparison") return getSalesByWaiter(filters)
   if (tab === "purchases") return getPurchasesReport(filters)
-  if (tab === "fixedCosts") return getFixedCosts()
+  if (tab === "fixedCosts") return getFixedCostsByMonth(filters.month)
   if (tab === "payroll") return getPayrollCostReport(filters)
   if (tab === "menu") return getMenuEngineeringReport(filters)
   if (tab === "inventory") return getInventoryReport(filters)
@@ -207,14 +239,17 @@ function GlobalFilters({ filters, onChange, showCategory, showCollaborator, show
 }
 
 function ExecutiveContent(props) {
+  if (props.tab === "fixedCosts") {
+    return (
+      <FixedCostsPanel
+        report={props.data || { costs: [], summary: {} }}
+        month={props.filters.month}
+        canManage={props.canManageFixedCosts}
+        onChange={props.onFixedCostsChange}
+      />
+    )
+  }
   if (!props.data) return <Empty />
-  if (props.tab === "executive") return <ExecutiveDashboard data={props.data} />
-  if (props.tab === "goals") return <GoalsReport data={props.data} onConfigure={props.onConfigureGoals} canManage={props.canManageGoals} />
-  if (props.tab === "sales") return <SalesReport data={props.data} />
-  if (props.tab === "waiters") return <WaiterSales rows={filterWaiters(props.data, props.filters)} />
-  if (props.tab === "comparison") return <WaiterComparison rows={filterWaiters(props.data, props.filters)} />
-  if (props.tab === "purchases") return <PurchasesReport data={props.data} />
-  if (props.tab === "fixedCosts") return <FixedCosts rows={props.data} form={props.fixedForm} setForm={props.setFixedForm} onSubmit={props.submitFixedCost} />
   if (props.tab === "payroll") return <PayrollReport data={props.data} />
   if (props.tab === "menu") return <MenuReport rows={filterMenuRows(props.data, props.filters)} />
   return <Empty />
@@ -338,22 +373,184 @@ function PurchasesReport({ data }) {
   </div>
 }
 
-function FixedCosts({ rows, form, setForm, onSubmit }) {
-  const safe = safeRows(rows)
-  const activeRows = safe.filter((row) => row.active)
-  const total = activeRows.reduce((sum, row) => sum + Number(row.monthly_amount || 0), 0)
-  return <div className="reports-stack">
-    <div className="reports-kpis"><KPI title="Costo fijo mensual total" value={money(total)} /><KPI title="Costo fijo anual proyectado" value={money(total * 12)} /></div>
-    <form className="fixed-cost-form" onSubmit={onSubmit}>
-      <input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Nombre del costo" />
-      <select value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })}>{FIXED_CATEGORIES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
-      <input type="number" min="0" step="0.01" value={form.monthly_amount} onChange={(event) => setForm({ ...form, monthly_amount: event.target.value })} placeholder="Monto mensual" />
-      <input type="date" value={form.start_date} onChange={(event) => setForm({ ...form, start_date: event.target.value })} />
-      <label><input type="checkbox" checked={form.active} onChange={(event) => setForm({ ...form, active: event.target.checked })} /> Activo</label>
-      <button className="primary" type="submit">Guardar costo</button>
-    </form>
-    <Panel title="Costos fijos registrados"><DataTable headers={["Nombre", "Categoria", "Monto mensual", "Inicio", "Estado"]} rows={safe.map((row) => [row.name, fixedCategoryLabel(row.category), money(row.monthly_amount), row.start_date || "-", row.active ? "Activo" : "Inactivo"])} /></Panel>
-  </div>
+function FixedCostsPanel({ report, month, canManage, onChange }) {
+  const costs = safeRows(report?.costs)
+  const summary = report?.summary || {}
+  const [formOpen, setFormOpen] = useState(false)
+  const [form, setForm] = useState(() => emptyFixedCostForm(month))
+  const [formError, setFormError] = useState("")
+  const [busy, setBusy] = useState(false)
+
+  function openCreateForm() {
+    setForm(emptyFixedCostForm(month))
+    setFormError("")
+    setFormOpen(true)
+  }
+
+  function openEditForm(row) {
+    setForm({
+      id: row.id,
+      name: row.name || "",
+      category: row.category || "renta",
+      amount: row.amount ?? "",
+      frequency: row.frequency || "monthly",
+      cost_month: row.cost_month || emptyFixedCostForm(month).cost_month,
+      due_day: row.due_day ?? "",
+      payment_status: row.payment_status || "pending",
+      notes: row.notes || "",
+      is_active: row.is_active !== false
+    })
+    setFormError("")
+    setFormOpen(true)
+  }
+
+  async function runAction(action, successMessage) {
+    setBusy(true)
+    setFormError("")
+    try {
+      const result = await action()
+      if (result.error) {
+        setFormError(result.error.message || "No se pudo completar la accion.")
+        return
+      }
+      setFormOpen(false)
+      await onChange?.(successMessage)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function submitForm(event) {
+    event.preventDefault()
+    if (!form.name.trim()) {
+      setFormError("Falta el campo obligatorio: Nombre del costo.")
+      return
+    }
+    if (Number(form.amount) < 0 || form.amount === "") {
+      setFormError("Indica un monto valido mayor o igual a 0.")
+      return
+    }
+    await runAction(
+      () => upsertFixedCost(form),
+      form.id ? "Costo fijo actualizado correctamente." : "Costo fijo registrado correctamente."
+    )
+  }
+
+  const comparison = finiteNumber(summary.comparison_percent)
+  const comparisonTone = comparison > 0 ? "warning" : comparison < 0 ? "good" : ""
+
+  return (
+    <div className="reports-stack fixed-costs-panel">
+      <div className="reports-kpis">
+        <KPI title="Total costos fijos" value={money(summary.total)} />
+        <KPI title="Pendientes de pago" value={money(summary.pending_total)} tone="warning" />
+        <KPI title="Pagados" value={money(summary.paid_total)} tone="good" />
+        <KPI title="Vencidos" value={money(summary.overdue_total)} tone={summary.overdue_total > 0 ? "danger" : ""} />
+        <KPI title="Mes anterior" value={money(summary.previous_month_total)} />
+        <KPI title="Variacion vs mes anterior" value={`${comparison >= 0 ? "+" : ""}${comparison.toFixed(1)}%`} tone={comparisonTone} />
+      </div>
+
+      {canManage && (
+        <div className="fixed-cost-toolbar">
+          <button type="button" className="primary" onClick={openCreateForm}>Agregar costo fijo</button>
+          <button type="button" disabled={busy} onClick={() => runAction(() => copyFixedCostsFromPreviousMonth(month), "Costos copiados del mes anterior.")}>Copiar costos del mes anterior</button>
+          <button type="button" disabled={busy} onClick={() => runAction(() => generateMonthlyFixedCostReviewNotifications(month), "Notificaciones de revision generadas.")}>Generar recordatorio mensual</button>
+        </div>
+      )}
+
+      {!canManage && <p className="reports-muted fixed-cost-readonly-note">Vista de solo lectura. Solo Admin y Gerente General pueden modificar costos fijos.</p>}
+
+      {formError && !formOpen && <p className="reports-warning" role="alert">{formError}</p>}
+
+      {!costs.length ? (
+        <div className="reports-empty fixed-cost-empty">
+          <span>No hay costos fijos registrados para este mes.</span>
+          {canManage && (
+            <div className="fixed-cost-empty-actions">
+              <button type="button" className="primary" onClick={openCreateForm}>Agregar costo fijo</button>
+              <button type="button" disabled={busy} onClick={() => runAction(() => copyFixedCostsFromPreviousMonth(month), "Costos copiados del mes anterior.")}>Copiar costos del mes anterior</button>
+            </div>
+          )}
+        </div>
+      ) : (
+        <>
+          <div className="reports-grid">
+            <Panel title="Costos por categoria">
+              <DataTable
+                headers={["Categoria", "Monto", "% del total"]}
+                rows={safeRows(summary.by_category).map((row) => [
+                  fixedCostCategoryLabel(row.category),
+                  money(row.amount),
+                  `${finiteNumber(row.percent).toFixed(1)}%`
+                ])}
+              />
+            </Panel>
+            <Panel title="Base para estado de resultados">
+              <div className="fixed-cost-pnl-hint">
+                <p>Estos totales quedan listos para calcular utilidad estimada:</p>
+                <strong>Ventas netas - Costo de ventas - Planilla - Costos fijos</strong>
+                <span>Total costos fijos del mes: {money(summary.total)}</span>
+              </div>
+            </Panel>
+          </div>
+          <Panel title="Detalle de costos fijos">
+            <DataTable
+              headers={["Nombre", "Categoria", "Monto", "Frecuencia", "Dia pago", "Estado", "Notas", ...(canManage ? ["Acciones"] : [])]}
+              rows={costs.map((row) => [
+                row.name,
+                fixedCostCategoryLabel(row.category),
+                money(row.amount),
+                fixedCostFrequencyLabel(row.frequency),
+                row.due_day || "-",
+                <PaymentStatusBadge key={`${row.id}-status`} status={row.payment_status} />,
+                row.notes || "-",
+                ...(canManage ? [
+                  <div className="fixed-cost-row-actions" key={`${row.id}-actions`}>
+                    <button type="button" onClick={() => openEditForm(row)}>Editar</button>
+                    {row.payment_status !== "paid" && (
+                      <button type="button" disabled={busy} onClick={() => runAction(() => markFixedCostPaid(row), "Costo marcado como pagado.")}>Marcar pagado</button>
+                    )}
+                    <button type="button" disabled={busy} onClick={() => runAction(() => deactivateFixedCost(row.id), "Costo fijo desactivado.")}>Desactivar</button>
+                  </div>
+                ] : [])
+              ])}
+            />
+          </Panel>
+        </>
+      )}
+
+      {formOpen && (
+        <div className="fixed-cost-modal-backdrop" role="presentation" onClick={() => !busy && setFormOpen(false)}>
+          <form className="fixed-cost-modal" onSubmit={submitForm} onClick={(event) => event.stopPropagation()}>
+            <div className="fixed-cost-modal-header">
+              <h2>{form.id ? "Editar costo fijo" : "Agregar costo fijo"}</h2>
+              <button type="button" onClick={() => setFormOpen(false)} disabled={busy}>Cerrar</button>
+            </div>
+            {formError && <p className="reports-warning" role="alert">{formError}</p>}
+            <div className="fixed-cost-form-grid">
+              <label>Nombre del costo<input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Renta local principal" /></label>
+              <label>Categoria<select value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })}>{FIXED_COST_CATEGORIES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+              <label>Monto<input type="number" min="0" step="0.01" required value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
+              <label>Frecuencia<select value={form.frequency} onChange={(event) => setForm({ ...form, frequency: event.target.value })}>{FIXED_COST_FREQUENCIES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+              <label>Mes<input type="month" value={form.cost_month.slice(0, 7)} onChange={(event) => setForm({ ...form, cost_month: `${event.target.value}-01` })} /></label>
+              <label>Dia de pago<input type="number" min="1" max="31" value={form.due_day} onChange={(event) => setForm({ ...form, due_day: event.target.value })} placeholder="Opcional" /></label>
+              <label>Estado<select value={form.payment_status} onChange={(event) => setForm({ ...form, payment_status: event.target.value })}>{FIXED_COST_PAYMENT_STATUSES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+              <label className="wide">Notas<textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} rows={3} /></label>
+            </div>
+            <div className="fixed-cost-modal-actions">
+              <button type="button" className="ghost" onClick={() => setFormOpen(false)} disabled={busy}>Cancelar</button>
+              <button type="submit" className="primary" disabled={busy}>{busy ? "Guardando..." : form.id ? "Guardar cambios" : "Guardar costo"}</button>
+            </div>
+          </form>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function PaymentStatusBadge({ status }) {
+  const tone = status === "paid" ? "completed" : status === "overdue" ? "critical" : status === "cancelled" ? "rejected" : "pending"
+  return <span className={`reports-badge ${tone}`}>{fixedCostPaymentStatusLabel(status)}</span>
 }
 
 function PayrollReport({ data }) {
@@ -491,7 +688,18 @@ function exportRows(tab, data) {
   }
   if (tab === "waiters" || tab === "comparison") return safeRows(data).map((row, index) => ({ Ranking: index + 1, Colaborador: row.waiter, Ventas: row.sales, Ordenes: row.orders, TicketPromedio: row.averageTicket }))
   if (tab === "purchases") return safeRows(data.rows).map((row) => ({ Orden: row.orderNumber, Proveedor: row.supplier, Estado: row.status, Total: row.total, Fecha: row.created_at }))
-  if (tab === "fixedCosts") return safeRows(data).map((row) => ({ Nombre: row.name, Categoria: fixedCategoryLabel(row.category), MontoMensual: row.monthly_amount, Activo: row.active }))
+  if (tab === "fixedCosts") {
+    const costs = safeRows(data?.costs)
+    return costs.map((row) => ({
+      Nombre: row.name,
+      Categoria: fixedCostCategoryLabel(row.category),
+      Monto: row.amount,
+      Frecuencia: fixedCostFrequencyLabel(row.frequency),
+      DiaPago: row.due_day || "",
+      Estado: fixedCostPaymentStatusLabel(row.payment_status),
+      Notas: row.notes || ""
+    }))
+  }
   if (tab === "payroll") return safeRows(data.rows).map((row) => ({ Colaborador: row.employee, Departamento: row.department, Monto: row.amount }))
   if (tab === "menu") return safeRows(data).map((row) => ({ Producto: row.product, Categoria: row.category, Unidades: row.quantity, Ventas: row.revenue ?? row.sales, Utilidad: row.profit ?? row.estimatedProfit, Clasificacion: row.classification }))
   if (tab === "inventory") return [...safeRows(data.out), ...safeRows(data.low)].map((row) => ({ Producto: row.item?.name, Area: row.area?.name || row.area_id, StockActual: row.quantity, StockMinimo: row.minimum_quantity }))
@@ -555,10 +763,6 @@ function pieGradient(rows) {
     return `${colors[index % colors.length]} ${start}% ${cursor}%`
   })
   return `conic-gradient(${stops.join(", ")})`
-}
-
-function fixedCategoryLabel(value) {
-  return FIXED_CATEGORIES.find(([key]) => key === value)?.[1] || value
 }
 
 function money(value) { return `Q${Number(value || 0).toFixed(2)}` }
