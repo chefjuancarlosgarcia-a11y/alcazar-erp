@@ -50,7 +50,7 @@ const posSubmenu = [
 ]
 
 const settingsSubmenu = [
-  { roles: ["admin", "gerente_general"], to: "/settings", label: "Branding y roles" },
+  { roles: ["admin", "gerente_general"], to: "/settings", label: "Branding y permisos" },
   { roles: ["admin", "gerente_general", "supervisor"], to: "/settings/tickets", label: "Diseno de Tickets" }
 ]
 

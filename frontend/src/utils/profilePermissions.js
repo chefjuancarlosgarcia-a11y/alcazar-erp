@@ -103,17 +103,25 @@ export async function loadDynamicRoles() {
       const { supabase } = await import("../lib/supabase.js")
       const { data, error } = await supabase
         .from("user_roles")
-        .select("role_key, role_name")
+        .select("role_key, role_name, hr_assignable, is_deprecated, is_active, is_system")
         .eq("is_active", true)
         .order("role_key", { ascending: true })
 
       if (error) throw error
 
-      // Create a mapping of role_key to role_name for display
+      const rows = data || []
       cachedRoles = {
-        keys: (data || []).map((r) => r.role_key),
-        names: (data || []).reduce((acc, r) => {
+        keys: rows.map((r) => r.role_key),
+        names: rows.reduce((acc, r) => {
           acc[r.role_key] = r.role_name
+          return acc
+        }, {}),
+        meta: rows.reduce((acc, r) => {
+          acc[r.role_key] = {
+            hr_assignable: r.hr_assignable === true,
+            is_deprecated: r.is_deprecated === true,
+            is_system: r.is_system === true
+          }
           return acc
         }, {})
       }
@@ -201,12 +209,20 @@ export function canChangeRole(currentUser, targetProfile, newRole) {
   const actorRole = normalizeRole(currentUser.role)
   const targetRole = normalizeRole(targetProfile.role)
   const nextRole = normalizeRole(newRole)
-  if (actorRole === "admin") return true
-  if (actorRole === "gerente_general") return targetRole !== "admin" && nextRole !== "admin"
+  const roleMeta = cachedRoles?.meta || {}
+  if (actorRole === "admin") return !roleMeta[nextRole]?.is_deprecated
+  if (actorRole === "gerente_general") {
+    return targetRole !== "admin" && nextRole !== "admin" && !roleMeta[nextRole]?.is_deprecated
+  }
   if (actorRole === "recursos_humanos") {
     if (PROTECTED_PROFILE_ROLES.includes(targetRole)) return false
     if (PROTECTED_PROFILE_ROLES.includes(nextRole)) return false
+    if (roleMeta[nextRole]?.is_deprecated) return false
     if (String(currentUser.id) === String(targetProfile.id) && PROTECTED_PROFILE_ROLES.includes(nextRole)) return false
+    const meta = roleMeta[nextRole]
+    if (meta && Object.prototype.hasOwnProperty.call(meta, "hr_assignable")) {
+      return meta.hr_assignable === true
+    }
     return HR_ASSIGNABLE_ROLES.has(nextRole)
   }
   return false
@@ -214,13 +230,33 @@ export function canChangeRole(currentUser, targetProfile, newRole) {
 
 export function getAllowedAssignableRoles(currentUser) {
   const actorRole = normalizeRole(currentUser?.role)
-  
-  // Use cached roles if available, otherwise fallback to defaults
   const availableRoles = cachedRoles?.keys || PROFILE_ROLES
-  
-  if (actorRole === "admin") return availableRoles
-  if (actorRole === "gerente_general") return availableRoles.filter((role) => normalizeRole(role) !== "admin")
-  if (actorRole === "recursos_humanos") return availableRoles.filter((role) => HR_ASSIGNABLE_ROLES.has(normalizeRole(role)))
+  const roleMeta = cachedRoles?.meta || {}
+
+  function isHrAssignable(roleKey) {
+    const key = normalizeRole(roleKey)
+    if (PROTECTED_PROFILE_ROLES.includes(key)) return false
+    if (key === "recursos_humanos" || key === "rrhh" || key === "gerente") return false
+    const meta = roleMeta[key]
+    if (meta?.is_deprecated) return false
+    if (meta && Object.prototype.hasOwnProperty.call(meta, "hr_assignable")) {
+      return meta.hr_assignable === true
+    }
+    return HR_ASSIGNABLE_ROLES.has(key)
+  }
+
+  if (actorRole === "admin") {
+    return availableRoles.filter((role) => !roleMeta[normalizeRole(role)]?.is_deprecated)
+  }
+  if (actorRole === "gerente_general") {
+    return availableRoles.filter((role) => {
+      const key = normalizeRole(role)
+      return key !== "admin" && !roleMeta[key]?.is_deprecated
+    })
+  }
+  if (actorRole === "recursos_humanos") {
+    return availableRoles.filter((role) => isHrAssignable(role))
+  }
   return []
 }
 
@@ -257,9 +293,18 @@ export function canAssignUserRole(currentUser, targetUser, nextRole) {
 export function canCreateUserRole(currentUser, nextRole) {
   const actorRole = normalizeRole(currentUser?.role)
   const role = normalizeRole(nextRole)
-  if (actorRole === "admin") return true
-  if (actorRole === "gerente_general") return role !== "admin"
-  if (actorRole === "recursos_humanos") return HR_ASSIGNABLE_ROLES.has(role) && !PROTECTED_PROFILE_ROLES.includes(role)
+  const roleMeta = cachedRoles?.meta || {}
+  if (actorRole === "admin") return !roleMeta[role]?.is_deprecated
+  if (actorRole === "gerente_general") return role !== "admin" && !roleMeta[role]?.is_deprecated
+  if (actorRole === "recursos_humanos") {
+    if (PROTECTED_PROFILE_ROLES.includes(role)) return false
+    if (roleMeta[role]?.is_deprecated) return false
+    const meta = roleMeta[role]
+    if (meta && Object.prototype.hasOwnProperty.call(meta, "hr_assignable")) {
+      return meta.hr_assignable === true
+    }
+    return HR_ASSIGNABLE_ROLES.has(role)
+  }
   return false
 }
 

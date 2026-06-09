@@ -1,10 +1,14 @@
 import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
+import { useAuth } from "../context/AuthContext"
 import { DEFAULT_BRANDING_SETTINGS, getBrandingSettings, saveBrandingSettings } from "../services/appSettingsService"
+import { canManageRoleCatalog } from "../utils/profilePermissions"
 import RolesManagement from "./RolesManagement"
 import "./Settings.css"
 
 function Settings() {
+  const { user } = useAuth()
+  const canManageRoles = canManageRoleCatalog(user)
   const [activeTab, setActiveTab] = useState("branding")
   const [branding, setBranding] = useState(DEFAULT_BRANDING_SETTINGS)
   const [message, setMessage] = useState("")
@@ -25,9 +29,11 @@ function Settings() {
         <button className={`settings-tab ${activeTab === "branding" ? "active" : ""}`} onClick={() => setActiveTab("branding")}>
           Branding del sistema
         </button>
-        <button className={`settings-tab ${activeTab === "roles" ? "active" : ""}`} onClick={() => setActiveTab("roles")}>
-          Roles de Usuario
-        </button>
+        {canManageRoles && (
+          <button className={`settings-tab ${activeTab === "roles" ? "active" : ""}`} onClick={() => setActiveTab("roles")}>
+            Roles y permisos
+          </button>
+        )}
         <Link className="settings-tab" to="/settings/tickets">
           Diseno de Tickets
         </Link>
@@ -79,7 +85,7 @@ function Settings() {
             </article>
           </form>
         )}
-        {activeTab === "roles" && <RolesManagement />}
+        {canManageRoles && activeTab === "roles" && <RolesManagement />}
       </div>
     </section>
   )

@@ -1,10 +1,34 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useAuth } from "../context/AuthContext"
 import * as userRolesService from "../services/userRolesService"
 import { canManageRoleCatalog } from "../utils/profilePermissions"
 import "./RolesManagement.css"
 
-const ROLE_CATALOG_DENIED_MESSAGE = "Solo Administración puede crear roles personalizados."
+const ROLE_CATALOG_DENIED_MESSAGE = "Solo Administración puede administrar el catálogo de roles."
+
+const FUTURE_MODULES = [
+  "Dashboard",
+  "Inventario",
+  "Punto de venta",
+  "Caja",
+  "Producción",
+  "Recursos humanos",
+  "Tareas",
+  "Reportes",
+  "Configuración"
+]
+
+const EMPTY_FORM = {
+  role_name: "",
+  description: "",
+  is_active: true,
+  hr_assignable: false
+}
+
+function formatDate(value) {
+  if (!value) return "—"
+  return new Date(value).toLocaleString("es-GT", { dateStyle: "short", timeStyle: "short" })
+}
 
 function RolesManagement() {
   const { user } = useAuth()
@@ -13,18 +37,21 @@ function RolesManagement() {
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
   const [editingRole, setEditingRole] = useState(null)
-  const [showCreate, setShowCreate] = useState(false)
+  const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [formData, setFormData] = useState({
-    role_name: "",
-    category: "Personalizado",
-    description: ""
-  })
+  const [formData, setFormData] = useState(EMPTY_FORM)
   const [filter, setFilter] = useState("all")
+  const [search, setSearch] = useState("")
+
+  const canManageCatalog = canManageRoleCatalog(user)
+  const previewRoleKey = useMemo(
+    () => userRolesService.normalizeRoleName(formData.role_name),
+    [formData.role_name]
+  )
 
   useEffect(() => {
-    loadRoles()
-  }, [])
+    if (canManageCatalog) loadRoles()
+  }, [canManageCatalog])
 
   async function loadRoles() {
     try {
@@ -34,50 +61,123 @@ function RolesManagement() {
       setRoles(data || [])
     } catch (err) {
       console.error("Error loading roles:", err)
-      setError("Error al cargar los roles")
+      setError(err.message || "Error al cargar los roles")
     } finally {
       setLoading(false)
     }
   }
 
-  async function handleSave() {
-    if (!canManageRoleCatalog(user)) {
+  const filteredRoles = useMemo(() => {
+    const query = search.trim().toLowerCase()
+    return roles.filter((role) => {
+      if (filter === "active" && !role.is_active) return false
+      if (filter === "inactive" && role.is_active) return false
+      if (filter === "system" && !role.is_system) return false
+      if (filter === "deprecated" && !userRolesService.isDeprecatedRole(role)) return false
+      if (filter === "hr_assignable" && !role.hr_assignable) return false
+      if (!query) return true
+      return (
+        String(role.role_name || "").toLowerCase().includes(query)
+        || String(role.role_key || "").toLowerCase().includes(query)
+      )
+    })
+  }, [roles, filter, search])
+
+  const filterCounts = useMemo(() => ({
+    all: roles.length,
+    active: roles.filter((role) => role.is_active).length,
+    inactive: roles.filter((role) => !role.is_active).length,
+    system: roles.filter((role) => role.is_system).length,
+    deprecated: roles.filter((role) => userRolesService.isDeprecatedRole(role)).length,
+    hr_assignable: roles.filter((role) => role.hr_assignable).length
+  }), [roles])
+
+  function openCreate() {
+    if (!canManageCatalog) {
       setError(ROLE_CATALOG_DENIED_MESSAGE)
       return
     }
+    setEditingRole(null)
+    setFormData(EMPTY_FORM)
+    setShowForm(true)
+    setError("")
+  }
+
+  function openEdit(role) {
+    if (!canManageCatalog) {
+      setError(ROLE_CATALOG_DENIED_MESSAGE)
+      return
+    }
+    if (userRolesService.isProtectedRoleKey(role.role_key)) {
+      setError("Los roles admin y gerente_general no se pueden editar.")
+      return
+    }
+    setEditingRole(role)
+    setFormData({
+      role_name: role.role_name,
+      description: role.description || "",
+      is_active: role.is_active !== false,
+      hr_assignable: role.hr_assignable === true
+    })
+    setShowForm(true)
+    setError("")
+  }
+
+  function closeForm() {
+    setShowForm(false)
+    setEditingRole(null)
+    setFormData(EMPTY_FORM)
+    setError("")
+  }
+
+  async function handleSave() {
+    if (!canManageCatalog) {
+      setError(ROLE_CATALOG_DENIED_MESSAGE)
+      return
+    }
+
     try {
       setSaving(true)
       setError("")
 
-      if (!formData.role_name.trim()) {
-        setError("El nombre del rol es obligatorio")
-        setSaving(false)
+      const roleName = formData.role_name.trim()
+      if (!roleName) {
+        setError("El nombre visible del rol es obligatorio")
         return
       }
 
-      if (editingRole) {
-        // Update existing role
-        const updated = await userRolesService.updateUserRole(editingRole.id, {
-          role_name: formData.role_name.trim(),
-          category: formData.category || "Personalizado",
-          description: formData.description || ""
+      if (!editingRole) {
+        const roleKey = userRolesService.normalizeRoleName(roleName)
+        if (!roleKey) {
+          setError("No se pudo generar una clave válida para el rol")
+          return
+        }
+        if (userRolesService.RESERVED_CREATE_ROLE_KEYS.has(roleKey)) {
+          setError("No se pueden crear roles reservados como admin o gerente_general")
+          return
+        }
+        if (roles.some((role) => role.role_key === roleKey)) {
+          setError(`El rol con clave "${roleKey}" ya existe`)
+          return
+        }
+
+        const created = await userRolesService.createUserRole({
+          role_name: roleName,
+          description: formData.description,
+          is_active: formData.is_active,
+          hr_assignable: formData.hr_assignable
         })
-
-        setRoles(
-          roles.map((r) => (r.id === editingRole.id ? updated : r))
-        )
-
-        setMessage("Rol actualizado exitosamente")
+        setRoles((current) => [...current, created].sort((a, b) => a.role_name.localeCompare(b.role_name)))
+        setMessage(`Rol "${created.role_name}" creado correctamente`)
       } else {
-        // Create new role
-        const newRole = await userRolesService.createUserRole({
-          role_name: formData.role_name.trim(),
-          category: formData.category || "Personalizado",
-          description: formData.description || ""
+        const updated = await userRolesService.updateUserRole(editingRole.id, {
+          role_name: roleName,
+          description: formData.description,
+          is_active: formData.is_active,
+          hr_assignable: formData.hr_assignable
         })
-
-        setRoles([...roles, newRole])
-        setMessage("Rol creado exitosamente")
+        setRoles((current) => current.map((role) => (role.id === updated.id ? updated : role)))
+        setMessage(`Rol "${updated.role_name}" actualizado correctamente`)
       }
 
       closeForm()
@@ -90,22 +190,25 @@ function RolesManagement() {
   }
 
   async function handleToggleActive(role) {
-    if (!canManageRoleCatalog(user)) {
+    if (!canManageCatalog) {
       setError(ROLE_CATALOG_DENIED_MESSAGE)
       return
     }
+    if (userRolesService.isProtectedRoleKey(role.role_key)) {
+      setError("Los roles admin y gerente_general no se pueden desactivar.")
+      return
+    }
+
     try {
       setSaving(true)
       setError("")
 
-      const updated = await userRolesService.updateUserRole(role.id, {
-        is_active: !role.is_active
-      })
+      const updated = role.is_active
+        ? await userRolesService.deactivateUserRole(role.id, role.role_key)
+        : await userRolesService.activateUserRole(role.id)
 
-      setRoles(roles.map((r) => (r.id === role.id ? updated : r)))
-      setMessage(
-        `Rol ${updated.is_active ? "activado" : "desactivado"} exitosamente`
-      )
+      setRoles((current) => current.map((item) => (item.id === updated.id ? updated : item)))
+      setMessage(`Rol ${updated.is_active ? "activado" : "desactivado"} correctamente`)
     } catch (err) {
       console.error("Error toggling role:", err)
       setError(err.message || "Error al cambiar el estado del rol")
@@ -114,57 +217,10 @@ function RolesManagement() {
     }
   }
 
-  function openEdit(role) {
-    if (!canManageRoleCatalog(user)) {
-      setError(ROLE_CATALOG_DENIED_MESSAGE)
-      return
-    }
-    setEditingRole(role)
-    setFormData({
-      role_name: role.role_name,
-      category: role.category || "Personalizado",
-      description: role.description || ""
-    })
-    setShowCreate(true)
-  }
-
-  function openCreate() {
-    if (!canManageRoleCatalog(user)) {
-      setError(ROLE_CATALOG_DENIED_MESSAGE)
-      return
-    }
-    setEditingRole(null)
-    setFormData({
-      role_name: "",
-      category: "Personalizado",
-      description: ""
-    })
-    setShowCreate(true)
-  }
-
-  function closeForm() {
-    setShowCreate(false)
-    setEditingRole(null)
-    setFormData({
-      role_name: "",
-      category: "Personalizado",
-      description: ""
-    })
-    setError("")
-  }
-
-  const canManageCatalog = canManageRoleCatalog(user)
-  const filteredRoles = roles.filter((role) => {
-    if (filter === "active") return role.is_active
-    if (filter === "inactive") return !role.is_active
-    if (filter === "system") return role.is_system
-    return true
-  })
-
   if (!canManageCatalog) {
     return (
       <section className="roles-management">
-        <h1>Gestión de Roles</h1>
+        <h1>Roles y permisos</h1>
         <div className="roles-error">
           No tienes permiso para administrar el catálogo de roles.
         </div>
@@ -176,46 +232,50 @@ function RolesManagement() {
     <section className="roles-management">
       <header className="roles-header">
         <div>
-          <h1>Gestión de Roles de Usuario</h1>
-          <p>Crear, editar y administrar roles personalizados para tu organización.</p>
+          <p className="roles-eyebrow">Configuración</p>
+          <h1>Roles y permisos</h1>
+          <p>Administra el catálogo de roles de la empresa. Solo Administración puede crear o modificar roles.</p>
         </div>
-        <button 
+        <button
           className="roles-primary-btn"
           onClick={openCreate}
           disabled={loading || saving}
         >
-          + Crear Rol
+          + Crear rol
         </button>
       </header>
 
       {message && <div className="roles-success" role="status">{message}</div>}
-      {error && <div className="roles-error" role="alert">{error}</div>}
+      {error && !showForm && <div className="roles-error" role="alert">{error}</div>}
+
+      <div className="roles-toolbar">
+        <input
+          type="search"
+          className="roles-search"
+          placeholder="Buscar por nombre o role_key..."
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+        />
+      </div>
 
       <div className="roles-filters">
-        <button 
-          className={`roles-filter-btn ${filter === "all" ? "active" : ""}`}
-          onClick={() => setFilter("all")}
-        >
-          Todos ({roles.length})
-        </button>
-        <button 
-          className={`roles-filter-btn ${filter === "active" ? "active" : ""}`}
-          onClick={() => setFilter("active")}
-        >
-          Activos ({roles.filter((r) => r.is_active).length})
-        </button>
-        <button 
-          className={`roles-filter-btn ${filter === "inactive" ? "active" : ""}`}
-          onClick={() => setFilter("inactive")}
-        >
-          Inactivos ({roles.filter((r) => !r.is_active).length})
-        </button>
-        <button 
-          className={`roles-filter-btn ${filter === "system" ? "active" : ""}`}
-          onClick={() => setFilter("system")}
-        >
-          Sistema ({roles.filter((r) => r.is_system).length})
-        </button>
+        {[
+          ["all", "Todos"],
+          ["active", "Activos"],
+          ["inactive", "Inactivos"],
+          ["system", "Sistema"],
+          ["deprecated", "Deprecated"],
+          ["hr_assignable", "Asignables por RRHH"]
+        ].map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            className={`roles-filter-btn ${filter === key ? "active" : ""}`}
+            onClick={() => setFilter(key)}
+          >
+            {label} ({filterCounts[key]})
+          </button>
+        ))}
       </div>
 
       {loading ? (
@@ -225,63 +285,79 @@ function RolesManagement() {
       ) : (
         <div className="roles-table">
           <div className="roles-table-header">
-            <div>Nombre del Rol</div>
-            <div>Categoría</div>
-            <div>Clave</div>
+            <div>Nombre visible</div>
+            <div>Role key</div>
             <div>Estado</div>
-            <div>Tipo</div>
+            <div>Etiquetas</div>
+            <div>RRHH</div>
+            <div>Actualización</div>
             <div>Acciones</div>
           </div>
-          {filteredRoles.map((role) => (
-            <div key={role.id} className={`roles-table-row ${!role.is_active ? "inactive" : ""}`}>
-              <div className="roles-name">
-                <strong>{role.role_name}</strong>
-                {role.description && <small>{role.description}</small>}
+          {filteredRoles.map((role) => {
+            const protectedRole = userRolesService.isProtectedRoleKey(role.role_key)
+            const deprecatedRole = userRolesService.isDeprecatedRole(role)
+            const editable = !protectedRole
+
+            return (
+              <div key={role.id} className={`roles-table-row ${!role.is_active ? "inactive" : ""}`}>
+                <div className="roles-name">
+                  <strong>{role.role_name}</strong>
+                  {role.description && <small>{role.description}</small>}
+                </div>
+                <div className="roles-key">
+                  <code>{role.role_key}</code>
+                </div>
+                <div>
+                  <span className={`roles-status-badge ${role.is_active ? "active" : "inactive"}`}>
+                    {role.is_active ? "Activo" : "Inactivo"}
+                  </span>
+                </div>
+                <div className="roles-badge-group">
+                  {protectedRole && <span className="roles-type-badge protected">Protegido</span>}
+                  {role.is_system && <span className="roles-type-badge system">Sistema</span>}
+                  {!role.is_system && <span className="roles-type-badge custom">Personalizado</span>}
+                  {deprecatedRole && <span className="roles-type-badge deprecated">Deprecated</span>}
+                </div>
+                <div>
+                  <span className={`roles-status-badge ${role.hr_assignable ? "active" : "inactive"}`}>
+                    {role.hr_assignable ? "Sí" : "No"}
+                  </span>
+                </div>
+                <div className="roles-dates">
+                  <small>Creado: {formatDate(role.created_at)}</small>
+                  <small>Actualizado: {formatDate(role.updated_at)}</small>
+                </div>
+                <div className="roles-actions">
+                  {editable ? (
+                    <>
+                      <button
+                        type="button"
+                        className="roles-action-btn edit"
+                        onClick={() => openEdit(role)}
+                        disabled={saving}
+                      >
+                        Editar
+                      </button>
+                      <button
+                        type="button"
+                        className={`roles-action-btn ${role.is_active ? "deactivate" : "activate"}`}
+                        onClick={() => handleToggleActive(role)}
+                        disabled={saving}
+                      >
+                        {role.is_active ? "Desactivar" : "Activar"}
+                      </button>
+                    </>
+                  ) : (
+                    <span className="roles-system-note">Rol protegido del sistema</span>
+                  )}
+                </div>
               </div>
-              <div>{role.category || "-"}</div>
-              <div className="roles-key">
-                <code>{role.role_key}</code>
-              </div>
-              <div>
-                <span className={`roles-status-badge ${role.is_active ? "active" : "inactive"}`}>
-                  {role.is_active ? "Activo" : "Inactivo"}
-                </span>
-              </div>
-              <div>
-                <span className={`roles-type-badge ${role.is_system ? "system" : "custom"}`}>
-                  {role.is_system ? "Sistema" : "Personalizado"}
-                </span>
-              </div>
-              <div className="roles-actions">
-                {!role.is_system && (
-                  <>
-                    <button 
-                      className="roles-action-btn edit"
-                      onClick={() => openEdit(role)}
-                      title="Editar rol"
-                    >
-                      Editar
-                    </button>
-                    <button 
-                      className={`roles-action-btn ${role.is_active ? "deactivate" : "activate"}`}
-                      onClick={() => handleToggleActive(role)}
-                      disabled={saving}
-                      title={role.is_active ? "Desactivar rol" : "Activar rol"}
-                    >
-                      {role.is_active ? "Desactivar" : "Activar"}
-                    </button>
-                  </>
-                )}
-                {role.is_system && (
-                  <span className="roles-system-note">Rol del sistema (No editable)</span>
-                )}
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
-      {showCreate && (
+      {showForm && (
         <div className="roles-modal-overlay">
           <div className="roles-modal">
             <header className="roles-modal-header">
@@ -289,7 +365,7 @@ function RolesManagement() {
                 <p className="roles-eyebrow">{editingRole ? "Editar rol" : "Nuevo rol"}</p>
                 <h2>{editingRole ? editingRole.role_name : "Crear rol personalizado"}</h2>
               </div>
-              <button 
+              <button
                 type="button"
                 className="roles-close-btn"
                 onClick={closeForm}
@@ -301,44 +377,89 @@ function RolesManagement() {
 
             <div className="roles-modal-body">
               <div className="roles-form-field">
-                <label>Nombre del rol *</label>
-                <input 
+                <label>Nombre visible *</label>
+                <input
                   type="text"
                   value={formData.role_name}
-                  onChange={(e) => setFormData({ ...formData, role_name: e.target.value })}
-                  placeholder="Ej: Closing Concierge"
+                  onChange={(event) => setFormData((current) => ({ ...current, role_name: event.target.value }))}
+                  placeholder='Ej: Jefe de Barra'
                   disabled={saving}
                   required
                 />
               </div>
 
-              <div className="roles-form-field">
-                <label>Categoría</label>
-                <input 
-                  type="text"
-                  value={formData.category}
-                  onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                  placeholder="Ej: Servicio"
-                  disabled={saving}
-                />
-              </div>
+              {!editingRole && (
+                <div className="roles-form-field">
+                  <label>Role key (generado automáticamente)</label>
+                  <input type="text" value={previewRoleKey || "—"} readOnly disabled />
+                  <small className="roles-field-help">
+                    Ejemplo: &quot;Jefe de Barra&quot; → <code>jefe_de_barra</code>
+                  </small>
+                </div>
+              )}
+
+              {editingRole && (
+                <div className="roles-form-field">
+                  <label>Role key</label>
+                  <input type="text" value={editingRole.role_key} readOnly disabled />
+                  {editingRole.is_system && (
+                    <small className="roles-field-help">Los roles de sistema no permiten cambiar la clave.</small>
+                  )}
+                </div>
+              )}
 
               <div className="roles-form-field">
                 <label>Descripción</label>
-                <textarea 
+                <textarea
                   value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  onChange={(event) => setFormData((current) => ({ ...current, description: event.target.value }))}
                   placeholder="Descripción opcional del rol"
                   disabled={saving}
                   rows="4"
                 />
               </div>
 
+              <div className="roles-form-checks">
+                <label className="roles-check">
+                  <input
+                    type="checkbox"
+                    checked={formData.is_active}
+                    onChange={(event) => setFormData((current) => ({ ...current, is_active: event.target.checked }))}
+                    disabled={saving || (editingRole && userRolesService.isProtectedRoleKey(editingRole.role_key))}
+                  />
+                  Rol activo
+                </label>
+                <label className="roles-check">
+                  <input
+                    type="checkbox"
+                    checked={formData.hr_assignable}
+                    onChange={(event) => setFormData((current) => ({ ...current, hr_assignable: event.target.checked }))}
+                    disabled={saving}
+                  />
+                  Permitir asignación por RRHH
+                </label>
+              </div>
+
+              <div className="roles-future-modules">
+                <div>
+                  <strong>Módulos permitidos</strong>
+                  <p>Disponible en una fase futura. Por ahora los permisos siguen la configuración estática del sistema.</p>
+                </div>
+                <div className="roles-future-modules-grid">
+                  {FUTURE_MODULES.map((moduleName) => (
+                    <label key={moduleName} className="roles-check disabled">
+                      <input type="checkbox" disabled />
+                      {moduleName}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
               {error && <div className="roles-error compact">{error}</div>}
             </div>
 
             <footer className="roles-modal-footer">
-              <button 
+              <button
                 type="button"
                 className="roles-secondary-btn"
                 onClick={closeForm}
@@ -346,13 +467,13 @@ function RolesManagement() {
               >
                 Cancelar
               </button>
-              <button 
+              <button
                 type="button"
                 className="roles-primary-btn"
                 onClick={handleSave}
                 disabled={saving || !formData.role_name.trim()}
               >
-                {saving ? "Guardando..." : editingRole ? "Actualizar" : "Crear Rol"}
+                {saving ? "Guardando..." : editingRole ? "Guardar cambios" : "Crear rol"}
               </button>
             </footer>
           </div>

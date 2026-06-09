@@ -103,6 +103,28 @@
   font-size: 13px;
 }
 
+.roles-toolbar {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.roles-search {
+  width: min(420px, 100%);
+  padding: 10px 12px;
+  border: 1px solid #264653;
+  border-radius: 8px;
+  background: #0b1424;
+  color: #e2e8f0;
+  font-size: 14px;
+}
+
+.roles-search:focus {
+  outline: none;
+  border-color: #2dd4bf;
+  box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.1);
+}
+
 .roles-filters {
   display: flex;
   gap: 8px;
@@ -143,7 +165,7 @@
 
 .roles-table-header {
   display: grid;
-  grid-template-columns: 2fr 1.5fr 1.5fr 1fr 1fr 1.5fr;
+  grid-template-columns: 2fr 1.2fr 0.9fr 1.4fr 0.8fr 1.3fr 1.3fr;
   gap: 0;
   padding: 12px 16px;
   background: #0b1424;
@@ -155,7 +177,7 @@
 
 .roles-table-row {
   display: grid;
-  grid-template-columns: 2fr 1.5fr 1.5fr 1fr 1fr 1.5fr;
+  grid-template-columns: 2fr 1.2fr 0.9fr 1.4fr 0.8fr 1.3fr 1.3fr;
   gap: 0;
   padding: 14px 16px;
   background: #0f172a;
@@ -231,6 +253,80 @@
 .roles-type-badge.custom {
   background: #3f2f3f;
   color: #d8b4fe;
+}
+
+.roles-type-badge.protected {
+  background: #4a1d1d;
+  color: #fecaca;
+}
+
+.roles-type-badge.deprecated {
+  background: #3f3f1f;
+  color: #fde68a;
+}
+
+.roles-badge-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.roles-dates {
+  display: grid;
+  gap: 4px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.roles-field-help {
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.roles-field-help code {
+  color: #5eead4;
+}
+
+.roles-form-checks,
+.roles-future-modules-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.roles-form-checks {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.roles-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #cbd5e1;
+  font-size: 13px;
+}
+
+.roles-check.disabled {
+  opacity: 0.55;
+}
+
+.roles-future-modules {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px dashed #334155;
+  border-radius: 8px;
+  background: #0b1424;
+}
+
+.roles-future-modules p {
+  margin: 4px 0 0;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.roles-future-modules-grid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
 .roles-actions {
