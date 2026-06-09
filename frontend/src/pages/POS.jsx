@@ -1029,7 +1029,7 @@ function POS() {
     setPosCategories(ordered.map((category, position) => ({ ...category, sortOrder: position + 1 })))
   }
 
-  function guardarAreas(nextAreas, message = "Plano sincronizado con POS.") {
+  function guardarAreas(nextAreas, message = "Cambios guardados en este equipo.") {
     const syncedAreas = syncPosLayoutStorage(nextAreas, layoutSettings)
     setAreasRestaurante(syncedAreas)
     setLayoutError("")
@@ -1044,15 +1044,15 @@ function POS() {
     event.preventDefault()
     const faltantes = {}
     const areaName = areaForm.name.trim()
-    if (!areaName) faltantes.name = "Nombre del area"
-    if (isSalesChannelName(areaName)) faltantes.name = "Delivery y Para llevar son canales de venta, no areas fisicas"
+    if (!areaName) faltantes.name = "Nombre de la zona física"
+    if (isSalesChannelName(areaName)) faltantes.name = "Delivery y Para llevar son canales de venta, no zonas físicas"
     if (Number(areaForm.width) < 400) faltantes.width = "Ancho minimo 400 px"
     if (Number(areaForm.height) < 300) faltantes.height = "Alto minimo 300 px"
     if (areasRestaurante.some((area) => area.id !== editandoAreaId && normalizeText(area.nombre) === normalizeText(areaName))) {
-      faltantes.name = "Ya existe un area con ese nombre"
+      faltantes.name = "Ya existe una zona física con ese nombre"
     }
     setAreaErrors(faltantes)
-    setLayoutError(Object.keys(faltantes).length > 0 ? "No se pudo guardar el area. Revisa los campos marcados." : "")
+    setLayoutError(Object.keys(faltantes).length > 0 ? "No se pudo guardar la zona física. Revisa los campos marcados." : "")
     if (Object.keys(faltantes).length > 0) return
 
     if (editandoAreaId) {
@@ -1060,7 +1060,7 @@ function POS() {
         area.id === editandoAreaId
           ? { ...area, name: areaName, nombre: areaName, description: areaForm.description.trim(), width: Number(areaForm.width), height: Number(areaForm.height), active: areaForm.active }
           : area
-      ), "Area guardada y sincronizada con POS.")
+      ), "Zona física guardada en este equipo.")
     } else {
       const nuevaArea = {
         id: `${normalizeId(areaName) || "area"}-${Date.now()}`,
@@ -1075,7 +1075,7 @@ function POS() {
         mesas: []
       }
 
-      guardarAreas([...areasRestaurante, nuevaArea], "Area creada y sincronizada con POS.")
+      guardarAreas([...areasRestaurante, nuevaArea], "Zona física creada en este equipo.")
       setAreaActivaId(nuevaArea.id)
     }
     setAreaForm(emptyAreaForm)
@@ -1103,18 +1103,18 @@ function POS() {
     if (!area) return
     if ((area.mesas || []).some((mesa) => mesaTieneOrdenesActivas(area.id, mesa.id))) {
       setLayoutMessage("")
-      setLayoutError("No se puede eliminar el area porque tiene ordenes activas.")
+      setLayoutError("No se puede eliminar la zona física porque tiene ordenes activas.")
       return
     }
     if ((area.mesas || []).length > 0) {
       setLayoutMessage("")
-      setLayoutError("No se puede eliminar el area porque todavia tiene mesas. Elimina o mueve las mesas primero.")
+      setLayoutError("No se puede eliminar la zona física porque todavia tiene mesas. Elimina o mueve las mesas primero.")
       return
     }
     const nextAreas = areasRestaurante
       .filter((item) => item.id !== areaId)
       .map((item, index) => ({ ...item, sortOrder: index + 1 }))
-    guardarAreas(nextAreas, "Area eliminada y POS sincronizado.")
+    guardarAreas(nextAreas, "Zona física eliminada en este equipo.")
     if (ordenMesa?.areaId === areaId) setOrdenMesa(null)
     setMesaSeleccionada(null)
   }
@@ -1136,7 +1136,7 @@ function POS() {
     const selectedArea = areasRestaurante.find((area) => area.id === areaActiva?.id && area.active !== false)
     if (!selectedArea) {
       setLayoutMessage("")
-      setLayoutError("Crea o selecciona un area antes de agregar mesas.")
+      setLayoutError("Crea o selecciona una zona física antes de agregar mesas.")
       setMostrarAreaForm(true)
       return
     }
@@ -1191,7 +1191,7 @@ function POS() {
     const destinationId = mesaForm.areaId || areaActiva.id
     const duplicate = areasRestaurante.find((area) => area.id === destinationId)?.mesas.some((mesa) => mesa.id !== mesaSeleccionada && String(mesa.name || `M${mesa.numero}`).toLowerCase() === name.toLowerCase())
     if (duplicate) {
-      setMesaError("Ya existe una mesa con ese nombre en el area seleccionada.")
+      setMesaError("Ya existe una mesa con ese nombre en la zona física seleccionada.")
       return
     }
     const sourceTable = areaActiva.mesas.find((mesa) => mesa.id === mesaSeleccionada)
@@ -1281,14 +1281,14 @@ function POS() {
     if (!draggingTableId) return
     setDraggingTableId(null)
     setLayoutError("")
-    setLayoutMessage("Posicion guardada y sincronizada.")
+    setLayoutMessage("Posición guardada en este equipo.")
   }
 
   function guardarLayoutManual() {
     const syncedAreas = syncPosLayoutStorage(areasRestaurante, layoutSettings)
     setAreasRestaurante(syncedAreas)
     setLayoutError("")
-    setLayoutMessage("Plano guardado y sincronizado con POS.")
+    setLayoutMessage("Plano guardado en este equipo.")
   }
 
   function estadoMesaPorOrden(order) {
@@ -3126,13 +3126,17 @@ function POS() {
         puedeAdministrarCroquis ? (
           <>
             <header style={headerStyle}>
-              <h1>Croquis del Restaurante</h1>
+              <h1>Plano del restaurante</h1>
             </header>
+
+            <div style={warningBoxStyle} role="status">
+              El plano del restaurante se guarda actualmente en este equipo. Otros dispositivos pueden no ver estos cambios hasta la próxima fase de sincronización.
+            </div>
 
             <section style={floorPlanSectionStyle}>
               <div style={layoutToolbarStyle}>
                 <div style={buttonRowStyle}>
-                  <button type="button" onClick={() => { setMostrarAreaForm((actual) => !actual); setEditandoAreaId(null); setAreaForm(emptyAreaForm); setAreaErrors({}); setLayoutError("") }} style={primaryButtonStyle}>Crear Área</button>
+                  <button type="button" onClick={() => { setMostrarAreaForm((actual) => !actual); setEditandoAreaId(null); setAreaForm(emptyAreaForm); setAreaErrors({}); setLayoutError("") }} style={primaryButtonStyle}>Crear zona física</button>
                   <button type="button" onClick={agregarMesa} style={areaActiva && editandoCroquis ? secondaryButtonStyle : disabledButtonStyle} disabled={!areaActiva || !editandoCroquis}>Agregar Mesa</button>
                   <button type="button" onClick={() => setEditandoCroquis((actual) => !actual)} style={editandoCroquis ? activeTabStyle : secondaryButtonStyle}>
                     {editandoCroquis ? "Modo edicion" : "Modo operacion"}
@@ -3147,7 +3151,7 @@ function POS() {
                   <span style={zoomValueStyle}>{Math.round(layoutSettings.zoom * 100)}%</span>
                   <button type="button" title="Acercar" onClick={() => setLayoutSettings((actual) => ({ ...actual, zoom: Math.min(1.4, Number((actual.zoom + 0.1).toFixed(1))) }))} style={smallButtonStyle}>+</button>
                   <button type="button" onClick={() => setLayoutSettings((actual) => ({ ...actual, zoom: 1 }))} style={secondaryButtonStyle}>Reset</button>
-                  <button type="button" onClick={guardarLayoutManual} style={secondaryButtonStyle}>Guardar Plano</button>
+                  <button type="button" onClick={guardarLayoutManual} style={secondaryButtonStyle}>Guardar plano en este equipo</button>
                 </div>
               </div>
               {layoutMessage && <div style={successInlineStyle}>{layoutMessage}</div>}
@@ -3155,18 +3159,18 @@ function POS() {
               {mostrarAreaForm && (
                 <form onSubmit={guardarArea} style={areaFormStyle}>
                   {Object.keys(areaErrors).length > 0 && <div style={errorBoxStyle}>Faltan campos requeridos: {Object.values(areaErrors).join(", ")}.</div>}
-                  <label style={fieldStackStyle}><span style={fieldTitleStyle}>Nombre del area / nivel</span><input placeholder="Ej. Primer nivel, Terraza" value={areaForm.name} onChange={(e) => setAreaForm((actual) => ({ ...actual, name: e.target.value }))} style={areaErrors.name ? inputErrorStyle : inputStyle} /></label>
+                  <label style={fieldStackStyle}><span style={fieldTitleStyle}>Nombre de la zona física / nivel</span><input placeholder="Ej. Primer nivel, Terraza" value={areaForm.name} onChange={(e) => setAreaForm((actual) => ({ ...actual, name: e.target.value }))} style={areaErrors.name ? inputErrorStyle : inputStyle} /></label>
                   <label style={fieldStackStyle}><span style={fieldTitleStyle}>Descripcion</span><input placeholder="Ej. Salon principal" value={areaForm.description} onChange={(e) => setAreaForm((actual) => ({ ...actual, description: e.target.value }))} style={inputStyle} /></label>
                   <label style={fieldStackStyle}><span style={fieldTitleStyle}>Ancho del plano</span><input type="number" min="400" value={areaForm.width} onChange={(e) => setAreaForm((actual) => ({ ...actual, width: e.target.value }))} style={areaErrors.width ? inputErrorStyle : inputStyle} /></label>
                   <label style={fieldStackStyle}><span style={fieldTitleStyle}>Alto del plano</span><input type="number" min="300" value={areaForm.height} onChange={(e) => setAreaForm((actual) => ({ ...actual, height: e.target.value }))} style={areaErrors.height ? inputErrorStyle : inputStyle} /></label>
-                  {editandoAreaId && <label style={snapToggleStyle}><input type="checkbox" checked={areaForm.active} onChange={(e) => setAreaForm((actual) => ({ ...actual, active: e.target.checked }))} />Area activa</label>}
-                  <button type="submit" style={primaryButtonStyle}>{editandoAreaId ? "Guardar Área" : "Crear Área"}</button>
+                  {editandoAreaId && <label style={snapToggleStyle}><input type="checkbox" checked={areaForm.active} onChange={(e) => setAreaForm((actual) => ({ ...actual, active: e.target.checked }))} />Zona física activa</label>}
+                  <button type="submit" style={primaryButtonStyle}>{editandoAreaId ? "Guardar zona física" : "Crear zona física"}</button>
                 </form>
               )}
 
               <div style={croquisGuideStyle}>
-                <span><strong>1.</strong> Crea un area completa.</span>
-                <span><strong>2.</strong> Selecciona el area.</span>
+                <span><strong>1.</strong> Crea una zona física completa.</span>
+                <span><strong>2.</strong> Selecciona la zona física.</span>
                 <span><strong>3.</strong> Agrega y acomoda sus mesas.</span>
               </div>
 
@@ -3188,10 +3192,10 @@ function POS() {
                   <div style={selectedAreaActionsStyle}>
                     <strong>{areaActiva.nombre}</strong>
                     <span>{areaActiva.mesas?.length || 0} mesa(s)</span>
-                    <button type="button" onClick={() => moverArea(areaActiva.id, -1)} style={smallButtonStyle} title="Mover area a la izquierda">↑</button>
-                    <button type="button" onClick={() => moverArea(areaActiva.id, 1)} style={smallButtonStyle} title="Mover area a la derecha">↓</button>
-                    <button type="button" onClick={() => editarArea(areaActiva)} style={smallButtonStyle}>Editar Área</button>
-                    <button type="button" onClick={() => eliminarArea(areaActiva.id)} style={dangerMiniButtonStyle}>Eliminar Área</button>
+                    <button type="button" onClick={() => moverArea(areaActiva.id, -1)} style={smallButtonStyle} title="Mover zona física a la izquierda">↑</button>
+                    <button type="button" onClick={() => moverArea(areaActiva.id, 1)} style={smallButtonStyle} title="Mover zona física a la derecha">↓</button>
+                    <button type="button" onClick={() => editarArea(areaActiva)} style={smallButtonStyle}>Editar zona física</button>
+                    <button type="button" onClick={() => eliminarArea(areaActiva.id)} style={dangerMiniButtonStyle}>Eliminar zona física</button>
                   </div>
                 )}
               </div>
@@ -3240,7 +3244,7 @@ function POS() {
                         <option value="round">Redonda</option>
                         <option value="rectangular">Rectangular</option>
                       </select></label>
-                      <label style={fieldStackStyle}><span style={fieldTitleStyle}>Area / nivel</span><select value={mesaForm.areaId} onChange={(e) => setMesaForm((actual) => ({ ...actual, areaId: e.target.value }))} style={inputStyle}>
+                      <label style={fieldStackStyle}><span style={fieldTitleStyle}>Zona física / nivel</span><select value={mesaForm.areaId} onChange={(e) => setMesaForm((actual) => ({ ...actual, areaId: e.target.value }))} style={inputStyle}>
                         {activeFloorAreas.map((area) => <option key={area.id} value={area.id}>{area.nombre}</option>)}
                       </select></label>
                       <div style={buttonRowStyle}>
@@ -3257,12 +3261,12 @@ function POS() {
                   )}
                 </div>
               ) : (
-                <div style={emptyPlanStyle}>Agrega un área para crear el croquis del restaurante.</div>
+                <div style={emptyPlanStyle}>Agrega una zona física para crear el plano del restaurante.</div>
               )}
             </section>
           </>
         ) : (
-          <section style={pageStyle}><h1>Croquis del Restaurante</h1><div style={errorBoxStyle}>No tienes permiso para administrar el croquis del restaurante.</div></section>
+          <section style={pageStyle}><h1>Plano del restaurante</h1><div style={errorBoxStyle}>No tienes permiso para administrar el plano del restaurante.</div></section>
         )
       ) : (
         <>
@@ -3324,7 +3328,7 @@ function POS() {
                   <div style={headerStyle}>
                     <div>
                       <h2 style={{ margin: 0 }}>Canal de venta</h2>
-                      <p style={mutedStyle}>{salesChannel === "dine_in" ? "Selecciona una mesa para asociarla a la orden actual." : "Este pedido no usa area fisica del croquis."}</p>
+                      <p style={mutedStyle}>{salesChannel === "dine_in" ? "Selecciona una mesa para asociarla a la orden actual." : "Este pedido no usa una zona física del plano del restaurante."}</p>
                     </div>
                   </div>
 
@@ -3364,7 +3368,7 @@ function POS() {
                       </div>
                     </div>
                   ) : (
-                    <div style={emptyPlanStyle}>Agrega un área para crear el croquis del restaurante.</div>
+                    <div style={emptyPlanStyle}>Agrega una zona física para crear el plano del restaurante.</div>
                   )}
                 </section>
                 <section className="pos-people-panel">

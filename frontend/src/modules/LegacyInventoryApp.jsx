@@ -3262,7 +3262,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
     { key: "requisicion", label: "Requisiciones", icon: "📝", roles: ["Administrador", "Gerente General", "Supervisor", "Encargado de Cocina", "FOH", "Recursos Humanos"] },
     { key: "movimientosInventario", label: "Movimientos", icon: "↔", roles: ["Administrador", "Gerente General", "Supervisor", "Encargado de Cocina", "Recursos Humanos"] },
     { key: "inventarioAreas", label: "Inventario por áreas", icon: "▦", roles: ["Administrador", "Gerente General", "Supervisor", "Encargado de Cocina", "FOH", "Recursos Humanos"] },
-    { key: "areas", label: "Administrar áreas", icon: "⚙", roles: ["Administrador", "Gerente General"] },
+    { key: "areas", label: "Áreas operativas", icon: "⚙", roles: ["Administrador", "Gerente General"] },
     { key: "ordenes", label: "Órdenes de compra", icon: "📋", roles: ["Administrador", "Gerente General", "Gerente", "Encargado de Almacén"] },
     { key: "puntoVenta", label: "Punto de Venta", icon: "💳", roles: ["Administrador", "Gerente General", "Supervisor", "FOH"] },
     { key: "asistencia", label: "Marcaje de asistencia", icon: "📷", roles: ["Administrador", "Gerente General", "Supervisor", "Encargado de Cocina", "FOH", "BOH", "Cocina", "Servicio", "Recursos Humanos"] },
@@ -3279,7 +3279,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
     requisicion: ["Requisiciones", "Traslados internos de Almacén hacia áreas operativas"],
     movimientosInventario: ["Movimientos", "Kardex y auditoría de transferencias internas"],
     inventarioAreas: ["Inventario por áreas", "Existencias operativas por ubicación"],
-    areas: ["Áreas", "Administración de ubicaciones operativas y responsables"],
+    areas: ["Áreas operativas", "Administración de ubicaciones operativas y responsables"],
     ordenes: ["Órdenes de compra", "Compras, recepción y seguimiento de proveedores"],
     puntoVenta: ["Punto de Venta", "Operación de mesas, comandas y cobros"],
     asistencia: ["Asistencia", "Marcaje, entradas, salidas y control de turno"],
@@ -8446,7 +8446,10 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
           {seccionActiva === "areas" && puedeAdministrarAreas && (
             <>
               <div style={cardStyle}>
-                <h2>Administrar áreas</h2>
+                <h2>Áreas operativas</h2>
+                <p style={{ margin: "0 0 16px", color: "#94a3b8", lineHeight: 1.5 }}>
+                  Estas áreas se usan para inventario, producción, requisiciones y colaboradores. No son zonas físicas del restaurante.
+                </p>
                 {areasError && <p style={attendanceWarningStyle}>{areasError}</p>}
                 <div style={hrFilterGridStyle}>
                   <input value={areaForm.name} onChange={(e) => setAreaForm((actual) => ({ ...actual, name: e.target.value }))} placeholder="Nombre del área" style={inputStyle} />
@@ -8476,7 +8479,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
                 </div>
               </div>
               <div style={cardStyle}>
-                <h2>Áreas registradas</h2>
+                <h2>Áreas operativas registradas</h2>
                 {areasLoading && <p>Cargando áreas desde Supabase...</p>}
                 <div style={registeredAreasGridStyle}>
                   {areas.map((area) => (

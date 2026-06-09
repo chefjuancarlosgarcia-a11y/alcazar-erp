@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react"
 import { useAuth } from "../context/AuthContext"
 import * as userRolesService from "../services/userRolesService"
-import { canManageUsers } from "../utils/profilePermissions"
+import { canManageRoleCatalog } from "../utils/profilePermissions"
 import "./RolesManagement.css"
+
+const ROLE_CATALOG_DENIED_MESSAGE = "Solo Administración puede crear roles personalizados."
 
 function RolesManagement() {
   const { user } = useAuth()
@@ -39,6 +41,10 @@ function RolesManagement() {
   }
 
   async function handleSave() {
+    if (!canManageRoleCatalog(user)) {
+      setError(ROLE_CATALOG_DENIED_MESSAGE)
+      return
+    }
     try {
       setSaving(true)
       setError("")
@@ -84,6 +90,10 @@ function RolesManagement() {
   }
 
   async function handleToggleActive(role) {
+    if (!canManageRoleCatalog(user)) {
+      setError(ROLE_CATALOG_DENIED_MESSAGE)
+      return
+    }
     try {
       setSaving(true)
       setError("")
@@ -105,6 +115,10 @@ function RolesManagement() {
   }
 
   function openEdit(role) {
+    if (!canManageRoleCatalog(user)) {
+      setError(ROLE_CATALOG_DENIED_MESSAGE)
+      return
+    }
     setEditingRole(role)
     setFormData({
       role_name: role.role_name,
@@ -115,6 +129,10 @@ function RolesManagement() {
   }
 
   function openCreate() {
+    if (!canManageRoleCatalog(user)) {
+      setError(ROLE_CATALOG_DENIED_MESSAGE)
+      return
+    }
     setEditingRole(null)
     setFormData({
       role_name: "",
@@ -135,7 +153,7 @@ function RolesManagement() {
     setError("")
   }
 
-  const canManage = canManageUsers(user)
+  const canManageCatalog = canManageRoleCatalog(user)
   const filteredRoles = roles.filter((role) => {
     if (filter === "active") return role.is_active
     if (filter === "inactive") return !role.is_active
@@ -143,12 +161,12 @@ function RolesManagement() {
     return true
   })
 
-  if (!canManage) {
+  if (!canManageCatalog) {
     return (
       <section className="roles-management">
         <h1>Gestión de Roles</h1>
         <div className="roles-error">
-          No tienes permiso para acceder a esta sección.
+          No tienes permiso para administrar el catálogo de roles.
         </div>
       </section>
     )

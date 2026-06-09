@@ -24,12 +24,15 @@ import {
   canEditUserRole,
   canManageAttendancePinForUser,
   canManageUsers,
+  canManageRoleCatalog,
   getAllowedAssignableRoles,
   loadDynamicRoles,
   getRoleDisplayName
 } from "../utils/profilePermissions"
 import * as userRolesService from "../services/userRolesService"
 import "./ProfileManagement.css"
+
+const ROLE_CATALOG_DENIED_MESSAGE = "Solo Administración puede crear roles personalizados."
 
 const EMPTY_FORM = {
   full_name: "",
@@ -242,6 +245,10 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
   }
 
   async function createNewRole() {
+    if (!canManageRoleCatalog(user)) {
+      setNewRoleError(ROLE_CATALOG_DENIED_MESSAGE)
+      return
+    }
     try {
       setNewRoleError("")
       if (!newRoleForm.role_name.trim()) {
@@ -280,6 +287,10 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
   }
 
   function openNewRoleModal() {
+    if (!canManageRoleCatalog(user)) {
+      setNewRoleError(ROLE_CATALOG_DENIED_MESSAGE)
+      return
+    }
     setNewRoleForm({ role_name: "", category: "Personalizado", description: "" })
     setNewRoleError("")
     setShowNewRoleModal(true)
@@ -879,7 +890,7 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
                           </option>
                         ))}
                       </select>
-                      {canManageUsers(user) && (
+                      {canManageRoleCatalog(user) && (
                         <button 
                           type="button" 
                           className="profiles-add-role-btn"
@@ -1124,7 +1135,7 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
                             </option>
                           ))}
                       </select>
-                      {canManageUsers(user) && (
+                      {canManageRoleCatalog(user) && (
                         <button 
                           type="button" 
                           className="profiles-add-role-btn"

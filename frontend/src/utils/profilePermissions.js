@@ -58,25 +58,25 @@ const ROLE_ALIASES = {
 }
 
 const HR_ASSIGNABLE_ROLES = new Set([
-  "recursos_humanos",
-  "encargado_almacen",
   "supervisor",
-  "bartender",
-  "barista",
-  "cocina",
-  "servicio",
-  "pizzeria",
-  "cafeteria",
-  "limpieza",
+  "encargado_almacen",
   "caja",
-  "operativo",
   "mesero",
+  "servicio",
+  "cocina",
+  "pizzeria",
+  "barista",
+  "bartender",
+  "panadero",
+  "repostero",
+  "limpieza",
   "repartidor",
   "mantenimiento",
-  "colaborador",
-  "repostero",
-  "panadero"
+  "operativo",
+  "colaborador"
 ])
+
+const ROLE_CATALOG_MANAGERS = new Set(["admin", "gerente_general"])
 
 function stripAccents(value) {
   return String(value || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
@@ -226,6 +226,10 @@ export function getAllowedAssignableRoles(currentUser) {
 
 export function canManageUsers(currentUser) {
   return canAccessUserManagement(currentUser)
+}
+
+export function canManageRoleCatalog(currentUser) {
+  return ROLE_CATALOG_MANAGERS.has(normalizeRole(currentUser?.role))
 }
 
 export function canManageAttendancePin(currentUser) {

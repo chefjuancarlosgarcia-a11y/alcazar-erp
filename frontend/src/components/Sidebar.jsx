@@ -1,8 +1,14 @@
 import { useState } from "react"
 import { NavLink, useLocation } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
+import { normalizeRole } from "../utils/profilePermissions"
 import useAppBranding from "../hooks/useAppBranding"
 import "./Sidebar.css"
+
+function submenuAllowsRole(allowedRoles, userRole) {
+  const normalizedUserRole = normalizeRole(userRole)
+  return allowedRoles.some((role) => normalizeRole(role) === normalizedUserRole)
+}
 
 const navigationItems = [
   { module: "dashboard", to: "/dashboard", label: "Dashboard" },
@@ -21,7 +27,7 @@ const inventorySubmenu = [
   { roles: ["admin", "gerente", "gerente_general", "supervisor", "encargado_area", "cocina"], to: "/inventory?section=requisicion", label: "Requisiciones" },
   { roles: ["admin", "gerente", "gerente_general", "encargado_almacen", "cocina"], to: "/inventory?section=movimientosInventario", label: "Movimientos" },
   { roles: ["admin", "gerente", "gerente_general", "encargado_almacen", "cocina"], to: "/inventory?section=inventarioAreas", label: "Inventario por áreas" },
-  { roles: ["admin", "gerente", "gerente_general"], to: "/inventory?section=areas", label: "Administrar áreas" },
+  { roles: ["admin", "gerente", "gerente_general"], to: "/inventory?section=areas", label: "Áreas operativas" },
   { roles: ["admin", "gerente", "gerente_general", "encargado_almacen"], to: "/inventory?section=ordenes", label: "Órdenes de compra" },
   { roles: ["admin", "gerente", "gerente_general", "encargado_almacen", "recursos_humanos", "rrhh"], to: "/inventory?section=proveedores", label: "Proveedores" },
   { roles: ["admin", "gerente", "gerente_general", "supervisor"], to: "/inventory?section=recetas", label: "Recetas estandarizadas" },
@@ -40,7 +46,7 @@ const posSubmenu = [
   { roles: ["admin", "gerente", "gerente_general", "mesero", "supervisor", "caja"], to: "/pos?section=pos", label: "Punto de Venta" },
   { roles: ["admin", "gerente", "gerente_general", "supervisor"], to: "/pos?section=agregar-item", label: "Agregar platillo" },
   { roles: ["admin", "gerente", "gerente_general", "gerente_operaciones"], to: "/pos?section=categorias", label: "Secciones del menú" },
-  { roles: ["admin", "gerente", "gerente_general", "gerente_operaciones"], to: "/pos?section=croquis", label: "Croquis del restaurante" }
+  { roles: ["admin", "gerente", "gerente_general", "gerente_operaciones"], to: "/pos?section=croquis", label: "Plano del restaurante" }
 ]
 
 const settingsSubmenu = [
@@ -55,10 +61,10 @@ function Sidebar({ compact = false, mobile = false, onNavigate }) {
   const [openSubmenu, setOpenSubmenu] = useState(location.pathname === "/inventory" ? "inventory" : location.pathname === "/hr" ? "hr" : location.pathname === "/pos" ? "pos" : location.pathname.startsWith("/settings") ? "settings" : null)
   const visibleSubmenu = ["/inventory", "/hr", "/pos"].includes(location.pathname) || location.pathname.startsWith("/settings") ? openSubmenu : null
   const allowedItems = navigationItems.filter((item) => canAccess(item.module))
-  const allowedInventorySubmenu = inventorySubmenu.filter((item) => item.roles.includes(user?.role))
-  const allowedPosSubmenu = posSubmenu.filter((item) => item.roles.includes(user?.role))
-  const allowedHrSubmenu = hrSubmenu.filter((item) => item.roles.includes(user?.role))
-  const allowedSettingsSubmenu = settingsSubmenu.filter((item) => item.roles.includes(user?.role))
+  const allowedInventorySubmenu = inventorySubmenu.filter((item) => submenuAllowsRole(item.roles, user?.role))
+  const allowedPosSubmenu = posSubmenu.filter((item) => submenuAllowsRole(item.roles, user?.role))
+  const allowedHrSubmenu = hrSubmenu.filter((item) => submenuAllowsRole(item.roles, user?.role))
+  const allowedSettingsSubmenu = settingsSubmenu.filter((item) => submenuAllowsRole(item.roles, user?.role))
 
   function isMainActive(item) {
     if (item.to === "/dashboard") return location.pathname === "/dashboard" || location.pathname === "/"

@@ -34,8 +34,15 @@ const ROLE_PERMISSIONS = {
   barista: ["production", "hr"],
   bartender: ["production", "hr"],
   pizzero: ["production", "hr"],
+  pizzeria: ["production", "hr"],
   repostero: ["production", "hr"],
   panadero: ["production", "hr"],
+  servicio: ["pos", "hr"],
+  cafeteria: ["production", "hr"],
+  limpieza: ["hr", "tasks"],
+  operativo: ["hr"],
+  mantenimiento: ["hr", "tasks"],
+  repartidor: ["hr"],
   colaborador: ["hr"]
 }
 
@@ -57,8 +64,15 @@ const LEGACY_ROLE_NAMES = {
   barista: "Barista",
   bartender: "Bartender",
   pizzero: "Pizzero",
+  pizzeria: "Pizzero",
   repostero: "Repostero",
   panadero: "Panadero",
+  servicio: "Servicio",
+  cafeteria: "Cafetería",
+  limpieza: "Limpieza",
+  operativo: "Operativo",
+  mantenimiento: "Mantenimiento",
+  repartidor: "Repartidor",
   colaborador: "Colaborador"
 }
 
@@ -89,7 +103,16 @@ function normalizeRole(role) {
     "rr.hh.": "recursos_humanos",
     "rr._hh.": "recursos_humanos",
     rrhh: "recursos_humanos",
-    recursos_humanos: "recursos_humanos"
+    recursos_humanos: "recursos_humanos",
+    "gerente_general": "gerente_general",
+    encargado_almacen: "encargado_almacen",
+    encargado_de_almacen: "encargado_almacen",
+    cajero: "caja",
+    caja: "caja",
+    cocinero: "cocina",
+    cocina: "cocina",
+    pizzero: "pizzeria",
+    pizzeria: "pizzeria"
   }
   const roleKey = aliases[normalized] || normalized
   return ROLE_PERMISSIONS[roleKey] ? roleKey : "colaborador"
