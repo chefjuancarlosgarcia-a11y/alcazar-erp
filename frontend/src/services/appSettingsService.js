@@ -1,27 +1,47 @@
 import { BRANDING } from "../branding"
 import { supabase } from "../lib/supabase"
+import { DEFAULT_THEME_TOKENS, normalizeBrandingDraft, PRESET_THEMES } from "../utils/brandingTheme"
 
 export const BRANDING_SETTINGS_KEY = "system_branding"
 const LOCAL_KEY = "app-setting:system_branding"
+const BRANDING_BUCKET = "branding-assets"
+const ALLOWED_LOGO_TYPES = ["image/png", "image/jpeg", "image/jpg", "image/svg+xml"]
 
-export const DEFAULT_BRANDING_SETTINGS = {
+export const DEFAULT_BRANDING_SETTINGS = normalizeBrandingDraft({
   commercialName: BRANDING.appName,
   subtitle: BRANDING.tagline,
   logoUrl: BRANDING.logoUrl,
+  compactLogoUrl: "",
+  monogram: BRANDING.monogram,
+  primaryColor: BRANDING.accentColor,
   accentColor: BRANDING.accentColor,
-  monogram: BRANDING.monogram
-}
+  secondaryColor: DEFAULT_THEME_TOKENS.secondaryColor,
+  backgroundColor: DEFAULT_THEME_TOKENS.backgroundColor,
+  surfaceColor: DEFAULT_THEME_TOKENS.surfaceColor,
+  successColor: DEFAULT_THEME_TOKENS.successColor,
+  warningColor: DEFAULT_THEME_TOKENS.warningColor,
+  dangerColor: DEFAULT_THEME_TOKENS.dangerColor,
+  textPrimary: DEFAULT_THEME_TOKENS.textPrimary,
+  textSecondary: DEFAULT_THEME_TOKENS.textSecondary,
+  presetTheme: "alcazar",
+  paletteVariant: "corporate",
+  themeMode: "dark",
+  density: "normal",
+  borderStyle: "soft"
+})
 
 function normalizeBranding(value = {}) {
-  return {
+  const draft = normalizeBrandingDraft({
     ...DEFAULT_BRANDING_SETTINGS,
     ...value,
-    commercialName: String(value.commercialName || value.appName || DEFAULT_BRANDING_SETTINGS.commercialName).trim() || DEFAULT_BRANDING_SETTINGS.commercialName,
-    subtitle: String(value.subtitle || value.tagline || DEFAULT_BRANDING_SETTINGS.subtitle).trim() || DEFAULT_BRANDING_SETTINGS.subtitle,
-    logoUrl: String(value.logoUrl || value.logo_url || "").trim(),
-    accentColor: String(value.accentColor || value.accent_color || DEFAULT_BRANDING_SETTINGS.accentColor).trim() || DEFAULT_BRANDING_SETTINGS.accentColor,
-    monogram: String(value.monogram || DEFAULT_BRANDING_SETTINGS.monogram).trim().slice(0, 3).toUpperCase() || DEFAULT_BRANDING_SETTINGS.monogram
-  }
+    commercialName: value.commercialName || value.appName || DEFAULT_BRANDING_SETTINGS.commercialName,
+    subtitle: value.subtitle || value.tagline || DEFAULT_BRANDING_SETTINGS.subtitle,
+    logoUrl: value.logoUrl || value.logo_url || "",
+    compactLogoUrl: value.compactLogoUrl || value.compact_logo_url || "",
+    primaryColor: value.primaryColor || value.primary_color || value.accentColor || value.accent_color,
+    accentColor: value.accentColor || value.accent_color || value.primaryColor || value.primary_color
+  })
+  return draft
 }
 
 function readLocalBranding() {
@@ -63,3 +83,23 @@ export async function saveBrandingSettings(settings) {
   }
   return { data: normalized, error: null, source: "supabase" }
 }
+
+export async function uploadBrandingLogo(file, variant = "main") {
+  if (!file) return { data: "", error: null }
+  if (!supabase) return { data: "", error: { message: "Supabase Storage no esta configurado." } }
+  if (!ALLOWED_LOGO_TYPES.includes(file.type)) {
+    return { data: "", error: { message: "Formato no permitido. Usa PNG, JPG o SVG." } }
+  }
+  const extension = file.name.split(".").pop()?.toLowerCase() || "png"
+  const folder = variant === "compact" ? "compact" : "main"
+  const path = `${folder}/${Date.now()}-${Math.random().toString(36).slice(2)}.${extension}`
+  const { error } = await supabase.storage.from(BRANDING_BUCKET).upload(path, file, {
+    upsert: true,
+    contentType: file.type
+  })
+  if (error) return { data: "", error }
+  const { data } = supabase.storage.from(BRANDING_BUCKET).getPublicUrl(path)
+  return { data: data?.publicUrl || "", error: null }
+}
+
+export { PRESET_THEMES }

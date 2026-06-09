@@ -44,6 +44,10 @@
   padding: 24px 28px;
 }
 
+.settings-content-wide {
+  max-width: none;
+}
+
 .branding-settings {
   display: grid;
   grid-template-columns: minmax(320px, 560px) minmax(280px, 420px);

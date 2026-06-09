@@ -50,7 +50,7 @@ const posSubmenu = [
 ]
 
 const settingsSubmenu = [
-  { roles: ["admin", "gerente_general"], to: "/settings", label: "Branding y permisos" },
+  { roles: ["admin", "gerente_general"], to: "/settings", label: "Apariencia y Marca" },
   { roles: ["admin", "gerente_general", "supervisor"], to: "/settings/tickets", label: "Diseno de Tickets" }
 ]
 
@@ -58,6 +58,7 @@ function Sidebar({ compact = false, mobile = false, onNavigate }) {
   const { user, canAccess, logout } = useAuth()
   const branding = useAppBranding()
   const location = useLocation()
+  const accent = branding.primaryColor || branding.accentColor
   const [openSubmenu, setOpenSubmenu] = useState(location.pathname === "/inventory" ? "inventory" : location.pathname === "/hr" ? "hr" : location.pathname === "/pos" ? "pos" : location.pathname.startsWith("/settings") ? "settings" : null)
   const visibleSubmenu = ["/inventory", "/hr", "/pos"].includes(location.pathname) || location.pathname.startsWith("/settings") ? openSubmenu : null
   const allowedItems = navigationItems.filter((item) => canAccess(item.module))
@@ -116,10 +117,12 @@ function Sidebar({ compact = false, mobile = false, onNavigate }) {
   }
 
   return (
-    <aside className="erp-sidebar" style={{ ...sidebarStyle, "--sidebar-accent": branding.accentColor, ...(compact ? compactSidebarStyle : {}), ...(mobile ? mobileSidebarStyle : {}) }}>
+    <aside className="erp-sidebar" style={{ ...sidebarStyle, "--sidebar-accent": accent, ...(compact ? compactSidebarStyle : {}), ...(mobile ? mobileSidebarStyle : {}) }}>
       <div style={{ ...brandStyle, ...(compact ? compactBrandStyle : {}) }}>
-        <span style={{ ...brandIconStyle, borderColor: `${branding.accentColor}66`, color: branding.accentColor }}>
-          {branding.logoUrl ? <img src={branding.logoUrl} alt="" style={brandLogoImageStyle} /> : branding.monogram}
+        <span style={{ ...brandIconStyle, borderColor: `${accent}66`, color: accent }}>
+          {(compact ? branding.compactLogoUrl : branding.logoUrl) || branding.logoUrl
+            ? <img src={(compact ? branding.compactLogoUrl : branding.logoUrl) || branding.logoUrl} alt="" style={brandLogoImageStyle} />
+            : branding.monogram}
         </span>
         <div style={brandTextStyle}>
           <strong>{branding.commercialName}</strong>

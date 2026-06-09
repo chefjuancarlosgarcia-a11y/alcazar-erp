@@ -1,13 +1,28 @@
 :root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
-  --social-bg: rgba(244, 243, 236, 0.5);
+  --erp-primary-color: #14b8a6;
+  --erp-secondary-color: #0f766e;
+  --erp-accent-color: #2dd4bf;
+  --erp-background-color: #071023;
+  --erp-surface-color: #0f172a;
+  --erp-success-color: #22c55e;
+  --erp-warning-color: #f59e0b;
+  --erp-danger-color: #ef4444;
+  --erp-text-primary: #f8fafc;
+  --erp-text-secondary: #94a3b8;
+  --erp-border-radius: 12px;
+  --erp-border-radius-sm: 8px;
+  --erp-density-scale: 1;
+  --sidebar-accent: var(--erp-primary-color);
+
+  --text: var(--erp-text-secondary);
+  --text-h: var(--erp-text-primary);
+  --bg: var(--erp-background-color);
+  --border: #24344a;
+  --code-bg: #111827;
+  --accent: var(--erp-primary-color);
+  --accent-bg: color-mix(in srgb, var(--erp-primary-color) 12%, transparent);
+  --accent-border: color-mix(in srgb, var(--erp-primary-color) 45%, transparent);
+  --social-bg: rgba(15, 23, 42, 0.5);
   --shadow:
     rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
 
@@ -31,15 +46,15 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
+  :root:not([data-erp-theme-mode="light"]) {
+    --text: var(--erp-text-secondary);
+    --text-h: var(--erp-text-primary);
+    --bg: var(--erp-background-color);
     --border: #2e303a;
     --code-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
+    --accent: var(--erp-primary-color);
+    --accent-bg: color-mix(in srgb, var(--erp-primary-color) 15%, transparent);
+    --accent-border: color-mix(in srgb, var(--erp-primary-color) 45%, transparent);
     --social-bg: rgba(47, 48, 58, 0.5);
     --shadow:
       rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
