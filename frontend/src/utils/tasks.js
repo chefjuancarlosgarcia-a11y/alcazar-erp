@@ -146,6 +146,41 @@ function isValidProfileUuid(value) {
   return UUID_PATTERN.test(String(value || "").trim())
 }
 
+export function mapProfileToOperationalEmployee(profile) {
+  const role = profile?.role || "colaborador"
+  const status = profile?.status || "active"
+  return {
+    id: profile.id,
+    taskId: profile.id,
+    profileId: profile.id,
+    username: profile.username,
+    nombre: profile.full_name,
+    name: profile.full_name || profile.username || "Colaborador",
+    rol: role,
+    role,
+    departamento: profile.area_name || profile.area_id || "",
+    areaId: normalize(profile.area_id || profile.area_name),
+    areaName: profile.area_name || "",
+    activo: status === "active",
+    status,
+    estado: status === "suspended" ? "Suspendido" : status === "inactive" ? "Inactivo" : "Activo",
+    supervisorProfileId: profile.supervisor_profile_id || null,
+    level: inferSkillLevel({ rol: role, role }),
+    score: 80,
+    schedules: []
+  }
+}
+
+export function mergeOperationalEmployees(primary = [], fallback = []) {
+  const merged = new Map()
+  ;[...fallback, ...primary].forEach((employee) => {
+    const key = employee.profileId || employee.taskId || employee.id
+    if (!key) return
+    merged.set(String(key), { ...merged.get(String(key)), ...employee })
+  })
+  return [...merged.values()]
+}
+
 export function loadOperationalEmployees(currentUser) {
   const managed = parseArray("users")
   const users = managed.map((employee) => ({
@@ -159,7 +194,8 @@ export function loadOperationalEmployees(currentUser) {
     name: employee.nombre || employee.name || employee.username,
     areaId: normalize(employee.departamento),
     level: employee.skillLevel || inferSkillLevel(employee),
-    score: calculateScore(employee)
+    score: calculateScore(employee),
+    supervisorProfileId: employee.supervisorProfileId || employee.supervisor_profile_id || null
   }))
   const currentId = currentUser?.id || currentUser?.username
   if (currentUser && !users.some((employee) => employee.taskId === currentId)) {

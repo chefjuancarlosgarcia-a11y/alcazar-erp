@@ -47,7 +47,8 @@ const EMPTY_FORM = {
   attendance_pin: "",
   authorized_attendance_device: "",
   phone: "",
-  status: "active"
+  status: "active",
+  supervisor_profile_id: ""
 }
 
 const CREATE_FORM = {
@@ -160,6 +161,22 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
   const getRoleName = (roleKey) => {
     const role = dynamicRoles.find((r) => r.role_key === roleKey)
     return role?.role_name || ROLE_NAMES[roleKey] || roleKey
+  }
+
+  const canManageSupervisorAssignment = ["admin", "gerente_general", "recursos_humanos", "rrhh"].includes(user?.role)
+
+  const supervisorOptions = useMemo(() => {
+    const managerRoles = new Set(["admin", "gerente_general", "gerente", "supervisor"])
+    return profiles
+      .filter((profile) => profile.status === "active" && managerRoles.has(profile.role))
+      .filter((profile) => !editingProfile || profile.id !== editingProfile.id)
+      .sort((left, right) => String(left.full_name || left.username).localeCompare(String(right.full_name || right.username), "es"))
+  }, [profiles, editingProfile])
+
+  const getSupervisorName = (supervisorId) => {
+    if (!supervisorId) return "Sin supervisor"
+    const supervisor = profiles.find((profile) => profile.id === supervisorId)
+    return supervisor?.full_name || supervisor?.username || "Supervisor"
   }
 
   useEffect(() => {
@@ -328,7 +345,8 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
       avatar_url: profile.avatar_url || "",
       hourly_rate: profile.hourly_rate ?? "",
       attendance_pin: "",
-      authorized_attendance_device: profile.authorized_attendance_device || ""
+      authorized_attendance_device: profile.authorized_attendance_device || "",
+      supervisor_profile_id: profile.supervisor_profile_id || ""
     })
     setError("")
     setMessage("")
@@ -482,6 +500,9 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
     }
     if (canEditUserRole(user, editingProfile)) changes.role = form.role
     if (canDeactivateUser(user, editingProfile)) changes.status = form.status
+    if (canManageSupervisorAssignment) {
+      changes.supervisor_profile_id = form.supervisor_profile_id || null
+    }
 
     const { data, error: updateError } = await updateProfileWithFallback(editingProfile.id, changes)
     if (updateError) {
@@ -830,6 +851,7 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
                 <div>
                   <Badge type="role" value={profile.role} />
                   <small>{profile.area_name || "Sin area"}</small>
+                  <small>{getSupervisorName(profile.supervisor_profile_id)}</small>
                 </div>
                 <div><span>{profile.email || "Sin correo"}</span><small>{profile.phone || "Sin telefono"}</small></div>
                 <div><Badge type="status" value={profile.status} /></div>
@@ -920,6 +942,16 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
                   </Field>
                   <Field label="Employee ID"><input value={form.employee_id} onChange={(event) => updateField("employee_id", event.target.value)} disabled={currentIsReadOnly || saving} /></Field>
                   <Field label="Salario por hora (Q)"><input type="number" min="0" step="0.01" value={form.hourly_rate} onChange={(event) => updateField("hourly_rate", event.target.value)} placeholder="Opcional" disabled={currentIsReadOnly || saving} /></Field>
+                  <Field label="Supervisor a cargo" hint="Define quien puede asignar tareas y checklists a este colaborador.">
+                    <select value={form.supervisor_profile_id} onChange={(event) => updateField("supervisor_profile_id", event.target.value)} disabled={currentIsReadOnly || saving || !canManageSupervisorAssignment}>
+                      <option value="">Sin supervisor asignado</option>
+                      {supervisorOptions.map((profile) => (
+                        <option key={profile.id} value={profile.id}>
+                          {profile.full_name || profile.username} · {getRoleName(profile.role)}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
                   <Field label="Dispositivo autorizado">
                     <input value={form.authorized_attendance_device} onChange={(event) => updateField("authorized_attendance_device", event.target.value)} placeholder="Ej. terminal-recepcion-01" disabled={!canManageCurrentPin || saving} />
                   </Field>

@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
 import { getActiveAreas } from "../services/areasService"
+import { getProfilesTaskUnavailability, getTaskAssignableProfiles } from "../services/tasksService"
 import { createNotification } from "../services/notificationsService"
 import {
   approveChecklistChangeRequest,
@@ -49,6 +50,8 @@ import {
   getCurrentUserTaskId,
   loadAssignedTasks,
   loadOperationalEmployees,
+  mapProfileToOperationalEmployee,
+  mergeOperationalEmployees,
   loadTaskNotifications,
   loadTaskTemplates,
   saveAssignedTasks,
@@ -286,26 +289,37 @@ function buildManualTaskRecord(template, assigneeId, assignment, assignedBy) {
   }
 }
 
-function getAssignableEmployeesForTemplate(user, employees, template) {
+function getAssignableEmployeesForTemplate(user, employees, template, options = {}) {
   const actorRole = normalizeRole(user?.role)
-  const actorArea = getTaskActorArea(user, employees)
-  const scopedArea = normalizeTaskArea(template?.areaId) || actorArea
+  const actorId = String(user?.id || "")
+  const availability = options.availability || {}
 
   return employees
     .filter((employee) => {
       if (!employee?.taskId) return false
+      if (!employee?.profileId) return false
+
       const state = normalizeTaskArea(employee.estado || (employee.activo === false ? "Inactivo" : "Activo"))
+      const profileStatus = String(employee.status || "").toLowerCase()
       if (employee.activo === false || ["inactivo", "suspendido"].includes(state)) return false
+      if (profileStatus === "suspended" || profileStatus === "inactive") return false
 
       const targetRole = getEmployeeRoleKey(employee)
-      const targetArea = getEmployeeAreaKey(employee)
-      const supportAreas = Array.isArray(employee.supportAreas) ? employee.supportAreas.map(normalizeTaskArea) : []
-      const areaMatches = !scopedArea || !targetArea || targetArea === scopedArea || supportAreas.includes(scopedArea)
 
-      if (actorRole === "admin" || actorRole === "gerente_general") return true
-      if (actorRole === "recursos_humanos") return !TASK_PROTECTED_ROLES.has(targetRole)
-      if (actorRole === "supervisor") return areaMatches && !TASK_SUPERVISOR_RESTRICTED_ROLES.has(targetRole)
-      return false
+      if (actorRole === "admin" || actorRole === "gerente_general" || actorRole === "gerente") {
+        // Sin restriccion por area: admin y gerencia pueden delegar a cualquier colaborador activo.
+      } else if (actorRole === "recursos_humanos") {
+        if (TASK_PROTECTED_ROLES.has(targetRole)) return false
+      } else if (actorRole === "supervisor") {
+        if (String(employee.supervisorProfileId || "") !== actorId) return false
+        if (TASK_SUPERVISOR_RESTRICTED_ROLES.has(targetRole)) return false
+      } else {
+        return false
+      }
+
+      if (options.date && availability[employee.profileId]) return false
+
+      return true
     })
     .sort((left, right) => left.name.localeCompare(right.name, "es", { sensitivity: "base" }))
 }
@@ -418,7 +432,8 @@ function Tasks() {
   const [editingTemplate, setEditingTemplate] = useState(null)
   const [assignedTasks, setAssignedTasks] = useState(loadAssignedTasks)
   const [areas, setAreas] = useState([])
-  const [employees] = useState(() => loadOperationalEmployees(user))
+  const [employees, setEmployees] = useState(() => loadOperationalEmployees(user))
+  const [employeesLoading, setEmployeesLoading] = useState(false)
   const [assignmentTemplate, setAssignmentTemplate] = useState(null)
   const [assignmentFeedback, setAssignmentFeedback] = useState(null)
   const requestedTab = params.get("tab") === "checklists" ? "checklists" : params.get("view") || (isManager ? "dashboard" : "mine")
@@ -437,6 +452,32 @@ function Tasks() {
       mounted = false
     }
   }, [])
+
+  useEffect(() => {
+    if (!isManager) return undefined
+    let mounted = true
+
+    async function loadEmployees() {
+      setEmployeesLoading(true)
+      const fallback = loadOperationalEmployees(user)
+      const { data, error } = await getTaskAssignableProfiles()
+      if (!mounted) return
+
+      if (error) {
+        console.warn("[Tasks] No se pudieron cargar colaboradores desde Supabase.", error)
+        setEmployees(fallback)
+      } else {
+        const mapped = (data || []).map(mapProfileToOperationalEmployee)
+        setEmployees(mergeOperationalEmployees(mapped, fallback))
+      }
+      setEmployeesLoading(false)
+    }
+
+    loadEmployees()
+    return () => {
+      mounted = false
+    }
+  }, [isManager, user?.id, user?.role])
 
   useEffect(() => {
     const currentTasks = assignedTasks.map(withComputedTaskStatus)
@@ -696,21 +737,61 @@ function TaskBank({ templates, allTemplates, areas, setTemplates, canDeactivate,
 
 function TaskAssignWizard({ template, user, employees, areas, onClose, onSubmit }) {
   const actorRole = normalizeRole(user?.role)
-  const candidates = getAssignableEmployeesForTemplate(user, employees, template)
   const [step, setStep] = useState(1)
-  const [assigneeId, setAssigneeId] = useState(candidates[0]?.taskId || "")
   const [date, setDate] = useState(TODAY)
   const [startTime, setStartTime] = useState(template?.recommendedTimeBlock || "08:00")
   const [dueTime, setDueTime] = useState(addMinutesToTime(template?.recommendedTimeBlock || "08:00", Number(template?.estimatedMinutes) || 30))
   const [error, setError] = useState("")
   const [saving, setSaving] = useState(false)
+  const [availability, setAvailability] = useState({})
+  const [availabilityLoading, setAvailabilityLoading] = useState(false)
+  const baseCandidates = useMemo(
+    () => getAssignableEmployeesForTemplate(user, employees, template, { date }),
+    [user, employees, template, date]
+  )
+  const candidates = useMemo(
+    () => getAssignableEmployeesForTemplate(user, employees, template, { date, availability }),
+    [user, employees, template, date, availability]
+  )
+  const [assigneeId, setAssigneeId] = useState("")
   const selectedEmployee = candidates.find((employee) => employee.taskId === assigneeId) || null
   const validationError = validateManualTaskAssignment({ assigneeId, date, startTime, dueTime }, actorRole)
   const areaName = areas.find((area) => area.id === template.areaId)?.name || template.areaName || "Sin area"
 
   useEffect(() => {
-    if (!assigneeId && candidates[0]?.taskId) setAssigneeId(candidates[0].taskId)
-  }, [assigneeId, candidates])
+    if (!baseCandidates.length) {
+      setAssigneeId("")
+      return
+    }
+    if (!assigneeId || !candidates.some((employee) => employee.taskId === assigneeId)) {
+      setAssigneeId(candidates[0]?.taskId || "")
+    }
+  }, [assigneeId, candidates, baseCandidates.length])
+
+  useEffect(() => {
+    let mounted = true
+    const profileIds = baseCandidates.map((employee) => employee.profileId).filter(Boolean)
+    if (!date || !profileIds.length) {
+      setAvailability({})
+      return undefined
+    }
+
+    setAvailabilityLoading(true)
+    getProfilesTaskUnavailability(profileIds, date).then(({ data, error: availabilityError }) => {
+      if (!mounted) return
+      if (availabilityError) {
+        console.warn("[Tasks] No se pudo validar disponibilidad de colaboradores.", availabilityError)
+        setAvailability({})
+      } else {
+        setAvailability(data || {})
+      }
+      setAvailabilityLoading(false)
+    })
+
+    return () => {
+      mounted = false
+    }
+  }, [baseCandidates, date])
 
   useEffect(() => {
     function closeOnEscape(event) {
@@ -790,9 +871,9 @@ function TaskAssignWizard({ template, user, employees, areas, onClose, onSubmit 
 
         {step === 2 && (
           <div className="tasks-wizard-body">
-            <Field label="Colaborador disponible" hint="El listado respeta tu rol y el alcance operativo permitido para asignar tareas.">
-              <select value={assigneeId} onChange={(event) => setAssigneeId(event.target.value)} disabled={!candidates.length}>
-                <option value="">{candidates.length ? "Selecciona un colaborador" : "Sin colaboradores disponibles"}</option>
+            <Field label="Colaborador disponible" hint="Solo se excluyen colaboradores suspendidos, inactivos, de vacaciones o con dia de descanso en la fecha seleccionada.">
+              <select value={assigneeId} onChange={(event) => setAssigneeId(event.target.value)} disabled={!candidates.length || availabilityLoading}>
+                <option value="">{availabilityLoading ? "Validando disponibilidad..." : candidates.length ? "Selecciona un colaborador" : "Sin colaboradores disponibles"}</option>
                 {candidates.map((employee) => (
                   <option value={employee.taskId} key={employee.taskId}>
                     {employee.name} · {taskRoleLabel(employee.role || employee.rol || employee.puesto)} · {employee.departamento || employee.areaName || employee.areaId || "Sin area"}
@@ -800,7 +881,13 @@ function TaskAssignWizard({ template, user, employees, areas, onClose, onSubmit 
                 ))}
               </select>
             </Field>
-            {!candidates.length && <p className="tasks-warning">No tienes colaboradores disponibles para asignar esta tarea.</p>}
+            {!candidates.length && !availabilityLoading && (
+              <p className="tasks-warning">
+                {normalizeRole(user?.role) === "supervisor"
+                  ? "No tienes colaboradores a tu cargo disponibles. RRHH debe asignarte colaboradores en Gestion de usuarios."
+                  : "No hay colaboradores disponibles para esta fecha."}
+              </p>
+            )}
             {selectedEmployee && (
               <div className="tasks-assignee-card">
                 <strong>{selectedEmployee.name}</strong>
@@ -829,6 +916,11 @@ function TaskAssignWizard({ template, user, employees, areas, onClose, onSubmit 
               <strong>{OPERATIONAL_SHIFTS.find((shift) => shift.id === resolveTaskShiftId(startTime))?.name || "Manual"}</strong>
             </div>
             {validationError && <p className="tasks-warning">{validationError}</p>}
+            {assigneeId && availability[baseCandidates.find((employee) => employee.taskId === assigneeId)?.profileId] && (
+              <p className="tasks-warning">
+                El colaborador seleccionado no esta disponible en esta fecha: {availability[baseCandidates.find((employee) => employee.taskId === assigneeId)?.profileId]}.
+              </p>
+            )}
           </div>
         )}
 
