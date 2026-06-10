@@ -3,8 +3,8 @@
   gap: 18px;
   min-height: 100%;
   padding: 26px;
-  background: #071023;
-  color: #e6eef8;
+  background: var(--erp-background);
+  color: var(--erp-text-primary);
   box-sizing: border-box;
 }
 
@@ -22,12 +22,12 @@
 .cash-panel h2,
 .cash-movement-form h3 {
   margin: 3px 0 6px;
-  color: #f8fafc;
+  color: var(--erp-text-primary);
 }
 
 .cash-eyebrow {
   margin: 0;
-  color: #2dd4bf;
+  color: var(--erp-accent);
   font-size: 12px;
   font-weight: 800;
   letter-spacing: .1em;
@@ -37,7 +37,7 @@
 .cash-muted,
 .cash-empty {
   margin: 0;
-  color: #94a3b8;
+  color: var(--erp-text-secondary);
 }
 
 .cash-state {
@@ -50,18 +50,18 @@
 }
 
 .cash-state.open {
-  border-color: #0f766e;
-  background: #052e2c;
-  color: #99f6e4;
+  border-color: var(--erp-primary);
+  background: var(--erp-primary-soft);
+  color: var(--erp-accent);
 }
 
 .cash-success,
 .cash-error {
   padding: 12px 14px;
-  border: 1px solid #0f766e;
+  border: 1px solid var(--erp-primary);
   border-radius: 10px;
-  background: #052e2c;
-  color: #99f6e4;
+  background: var(--erp-primary-soft);
+  color: var(--erp-accent);
 }
 
 .cash-error {
@@ -78,7 +78,7 @@
 .cash-page label {
   display: grid;
   gap: 6px;
-  color: #cbd5e1;
+  color: var(--erp-text-primary);
   font-size: 12px;
   font-weight: 800;
 }
@@ -89,10 +89,10 @@
   min-height: 42px;
   width: 100%;
   padding: 10px 11px;
-  border: 1px solid #334155;
+  border: 1px solid var(--erp-border);
   border-radius: 8px;
-  background: #081425;
-  color: #e6eef8;
+  background: var(--erp-surface-2);
+  color: var(--erp-text-primary);
   box-sizing: border-box;
 }
 
@@ -107,16 +107,16 @@
 .cash-actions button {
   min-height: 42px;
   padding: 10px 14px;
-  border: 1px solid #334155;
+  border: 1px solid var(--erp-border);
   border-radius: 9px;
-  background: #111c2d;
-  color: #e2e8f0;
+  background: var(--erp-surface-2);
+  color: var(--erp-text-primary);
   font-weight: 800;
   cursor: pointer;
 }
 
 .cash-primary {
-  border-color: #0f766e;
+  border-color: var(--erp-primary);
   background: #0ea5a4;
   color: #032b2c;
 }
@@ -141,9 +141,9 @@
 
 .cash-status-grid article,
 .cash-panel {
-  border: 1px solid #24344a;
+  border: 1px solid var(--erp-border);
   border-radius: 12px;
-  background: #0f172a;
+  background: var(--erp-surface);
 }
 
 .cash-status-grid article {
@@ -153,17 +153,17 @@
 }
 
 .cash-status-grid article.highlight {
-  border-color: #0f766e;
-  background: #082f2f;
+  border-color: var(--erp-primary);
+  background: var(--erp-primary-soft);
 }
 
 .cash-status-grid span {
-  color: #94a3b8;
+  color: var(--erp-text-secondary);
   font-size: 12px;
 }
 
 .cash-status-grid strong {
-  color: #f8fafc;
+  color: var(--erp-text-primary);
   font-size: 20px;
 }
 
@@ -202,12 +202,12 @@
   gap: 12px;
   margin: 0;
   padding: 9px 0;
-  border-bottom: 1px solid #24344a;
-  color: #cbd5e1;
+  border-bottom: 1px solid var(--erp-border);
+  color: var(--erp-text-primary);
 }
 
 .cash-breakdown p.strong {
-  color: #99f6e4;
+  color: var(--erp-accent);
   font-size: 17px;
 }
 
@@ -228,8 +228,8 @@
 }
 
 .cash-difference.zero {
-  background: #052e2c;
-  color: #99f6e4;
+  background: var(--erp-primary-soft);
+  color: var(--erp-accent);
 }
 
 .cash-table-wrap {
@@ -245,13 +245,13 @@
 .cash-table-wrap th,
 .cash-table-wrap td {
   padding: 10px 8px;
-  border-bottom: 1px solid #24344a;
+  border-bottom: 1px solid var(--erp-border);
   text-align: left;
   font-size: 13px;
 }
 
 .cash-table-wrap th {
-  color: #94a3b8;
+  color: var(--erp-text-secondary);
 }
 
 .cash-session-list {
@@ -264,13 +264,13 @@
   display: grid;
   gap: 5px;
   padding: 11px;
-  border: 1px solid #24344a;
+  border: 1px solid var(--erp-border);
   border-radius: 9px;
-  background: #111c2d;
+  background: var(--erp-surface-2);
 }
 
 .cash-session-list span {
-  color: #94a3b8;
+  color: var(--erp-text-secondary);
   font-size: 12px;
 }
 

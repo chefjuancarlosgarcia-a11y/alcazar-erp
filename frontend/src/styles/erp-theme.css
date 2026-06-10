@@ -24,9 +24,310 @@
 
 .app-main {
   color: var(--erp-text-primary, #f8fafc);
+  background: var(--erp-background, #071023);
 }
 
-.mobile-menu-button {
+/* Shared page shells */
+.app-main .kds-page,
+.app-main .cash-page,
+.app-main .settings-page,
+.app-main .reports-page {
+  color: var(--erp-text-primary);
+  background: var(--erp-background);
+}
+
+.app-main .kds-page {
+  background: radial-gradient(
+    circle at top,
+    color-mix(in srgb, var(--erp-primary) 10%, var(--erp-background)) 0,
+    var(--erp-background) 42%
+  );
+}
+
+/* Shared typography in main content */
+.app-main .kds-eyebrow,
+.app-main .cash-eyebrow,
+.app-main .reports-eyebrow,
+.app-main .pos-operation-eyebrow,
+.app-main .settings-eyebrow {
+  color: var(--erp-accent);
+}
+
+.app-main .kds-muted,
+.app-main .cash-muted,
+.app-main .cash-empty,
+.app-main .reports-muted,
+.app-main .pos-operation-subtitle {
+  color: var(--erp-text-secondary);
+}
+
+.app-main .kds-header h1,
+.app-main .kds-unassigned h1,
+.app-main .cash-header h1,
+.app-main .cash-panel h2,
+.app-main .reports-header h1,
+.app-main .pos-operation-header h1,
+.app-main .settings-card h2 {
+  color: var(--erp-text-primary);
+}
+
+/* Panels, cards, filters */
+.app-main .kds-header,
+.app-main .cash-panel,
+.app-main .cash-movement-form,
+.app-main .report-panel,
+.app-main .report-kpi,
+.app-main .executive-kpi,
+.app-main .reports-header.hero,
+.app-main .reports-filters,
+.app-main .fixed-cost-form,
+.app-main .fixed-cost-modal,
+.app-main .alert-card,
+.app-main .kds-column,
+.app-main .kds-metric,
+.app-main .kds-ticket,
+.app-main .pos-dish-manager-header,
+.app-main .pos-dish-form,
+.app-main .pos-floor-panel,
+.app-main .pos-current-order,
+.app-main .pos-dish-card,
+.app-main .pos-catalog-section,
+.app-main .settings-card {
+  border-color: var(--erp-border);
+}
+
+.app-main .kds-header,
+.app-main .cash-panel,
+.app-main .report-panel,
+.app-main .report-kpi,
+.app-main .executive-kpi,
+.app-main .reports-header.hero,
+.app-main .reports-filters,
+.app-main .fixed-cost-form,
+.app-main .fixed-cost-modal,
+.app-main .alert-card,
+.app-main .kds-column,
+.app-main .kds-metric,
+.app-main .settings-card {
+  background: var(--erp-surface);
+  color: var(--erp-text-primary);
+}
+
+.app-main .kds-header {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--erp-surface) 92%, var(--erp-primary) 8%),
+    color-mix(in srgb, var(--erp-surface) 82%, var(--erp-background) 18%)
+  );
+}
+
+.app-main .pos-dish-manager-header,
+.app-main .pos-dish-form {
+  border-color: var(--erp-border) !important;
+  background: var(--erp-surface) !important;
+  color: var(--erp-text-primary);
+}
+
+.app-main .pos-dish-manager-header h1,
+.app-main .pos-dish-form h2,
+.app-main .pos-dish-card h3 {
+  color: var(--erp-text-primary);
+}
+
+.app-main .pos-dish-manager-header p {
+  color: var(--erp-text-secondary);
+}
+
+.app-main .pos-category-strip {
+  background: var(--erp-background);
+}
+
+/* Forms */
+.app-main input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+.app-main select,
+.app-main textarea {
+  border: 1px solid var(--erp-border);
+  background: var(--erp-surface-2);
+  color: var(--erp-text-primary);
+}
+
+.app-main input[type="checkbox"],
+.app-main input[type="radio"] {
+  accent-color: var(--erp-primary);
+}
+
+/* Primary / secondary buttons in main content */
+.app-main .kds-actions button,
+.app-main .kds-modal button,
+.app-main .kds-alert-settings button,
+.app-main .kds-fullscreen,
+.app-main .reports-actions .primary,
+.app-main .reports-tabs button.active,
+.app-main .report-inline-action,
+.app-main .fixed-cost-form button,
+.app-main .fixed-cost-toolbar button.primary,
+.app-main .fixed-cost-empty-actions button.primary,
+.app-main .fixed-cost-modal-actions button.primary,
+.app-main .cash-page button.primary,
+.app-main .settings-card button.primary {
+  border-color: var(--erp-primary);
+  background: var(--erp-primary);
+  color: #f0fdfa;
+}
+
+.app-main .kds-fullscreen.secondary,
+.app-main .kds-alert-settings .secondary,
+.app-main .reports-actions button,
+.app-main .reports-tabs button,
+.app-main .fixed-cost-toolbar button,
+.app-main .fixed-cost-empty-actions button,
+.app-main .fixed-cost-row-actions button,
+.app-main .fixed-cost-modal-actions button {
+  border: 1px solid var(--erp-border);
+  background: var(--erp-surface-2);
+  color: var(--erp-text-primary);
+}
+
+/* Tabs */
+.app-main .settings-tabs {
+  border-bottom-color: var(--erp-border);
+  background: var(--erp-surface);
+}
+
+.app-main .settings-tab {
+  color: var(--erp-text-secondary);
+}
+
+.app-main .settings-tab:hover {
+  color: var(--erp-text-primary);
+  background: var(--erp-primary-muted);
+}
+
+.app-main .settings-tab.active {
+  color: var(--erp-accent);
+  border-bottom-color: var(--erp-accent);
+}
+
+.app-main .reports-tabs {
+  border-bottom-color: var(--erp-border);
+}
+
+/* Tables */
+.app-main .reports-table th {
+  color: var(--erp-text-secondary);
+  border-bottom-color: var(--erp-border);
+}
+
+.app-main .reports-table td {
+  color: var(--erp-text-primary);
+  border-bottom-color: var(--erp-border-subtle);
+}
+
+/* Status feedback */
+.app-main .kds-feedback,
+.app-main .cash-success,
+.app-main .reports-success-banner,
+.app-main .cash-state.open {
+  border-color: var(--erp-primary);
+  background: var(--erp-primary-soft);
+  color: var(--erp-accent);
+}
+
+.app-main .cash-error,
+.app-main .cash-state,
+.app-main .reports-inventory-error {
+  border-color: var(--erp-danger);
+  background: var(--erp-danger-soft);
+  color: color-mix(in srgb, var(--erp-danger) 35%, white 65%);
+}
+
+.app-main .reports-warning,
+.app-main .kds-feedback.live-notice {
+  border-color: var(--erp-warning);
+  background: var(--erp-warning-soft);
+  color: color-mix(in srgb, var(--erp-warning) 55%, white 45%);
+}
+
+.app-main .kds-live.connected {
+  color: var(--erp-success);
+}
+
+.app-main .kds-live.connected i {
+  background: var(--erp-success);
+  box-shadow: 0 0 9px var(--erp-success);
+}
+
+/* KDS column status accents */
+.app-main .kds-column.ready {
+  border-top-color: var(--erp-primary);
+  background: var(--erp-primary-soft);
+}
+
+.app-main .kds-column.in_production {
+  border-top-color: var(--erp-warning);
+}
+
+.app-main .kds-column.problem {
+  border-top-color: var(--erp-danger);
+}
+
+.app-main .kds-metric.ready {
+  border-color: var(--erp-primary);
+  background: var(--erp-primary-soft);
+}
+
+.app-main .kds-metric.ready strong {
+  color: var(--erp-accent);
+}
+
+.app-main .kds-metric.working {
+  border-color: var(--erp-warning);
+}
+
+.app-main .report-kpi.good {
+  border-color: var(--erp-primary);
+  background: var(--erp-primary-soft);
+}
+
+.app-main .report-kpi.danger {
+  border-color: var(--erp-danger);
+  background: var(--erp-danger-soft);
+}
+
+.app-main .report-kpi.warning,
+.app-main .alert-card.medium {
+  border-color: var(--erp-warning);
+}
+
+.app-main .executive-kpi::before {
+  background: var(--erp-primary);
+}
+
+.app-main .executive-kpi.down::before {
+  background: var(--erp-danger);
+}
+
+.app-main .goal-report-progress div i,
+.app-main .bar-row i {
+  background: linear-gradient(90deg, var(--erp-primary), var(--erp-accent));
+}
+
+.app-main .pos-product-card:hover {
+  border-color: var(--erp-primary) !important;
+}
+
+.app-main .pos-order-section.section-ready {
+  border-color: var(--erp-primary) !important;
+  background: var(--erp-primary-soft) !important;
+}
+
+.app-main .pos-next-action {
+  border-color: var(--erp-primary);
+  background: var(--erp-primary-soft);
+  color: var(--erp-accent);
+}
+
+.erp-sidebar {
   border-color: color-mix(in srgb, var(--erp-primary, #14b8a6) 28%, #334155) !important;
   background: var(--erp-surface, #101b2d) !important;
   color: var(--erp-text-primary, #e6eef8) !important;

@@ -4,12 +4,12 @@
 
 .pos-operation-header h1 {
   margin: 3px 0 4px;
-  color: #f8fafc;
+  color: var(--erp-text-primary);
 }
 
 .pos-operation-eyebrow {
   margin: 0;
-  color: #2dd4bf;
+  color: var(--erp-accent);
   font-size: 12px;
   font-weight: 800;
   letter-spacing: .14em;
@@ -18,7 +18,7 @@
 
 .pos-operation-subtitle {
   margin: 0;
-  color: #94a3b8;
+  color: var(--erp-text-secondary);
 }
 
 .pos-catalog-search input {
@@ -31,7 +31,7 @@
   top: 0;
   z-index: 3;
   padding: 8px 0;
-  background: #071023;
+  background: var(--erp-background);
 }
 
 .pos-product-card {
@@ -44,7 +44,7 @@
 
 .pos-product-card:hover {
   transform: translateY(-2px);
-  border-color: #0f766e !important;
+  border-color: var(--erp-primary) !important;
   box-shadow: 0 13px 30px rgba(2, 6, 23, .4);
 }
 
@@ -97,14 +97,14 @@
   display: grid;
   gap: 3px;
   padding: 10px;
-  border: 1px solid #0f766e;
+  border: 1px solid var(--erp-primary);
   border-radius: 9px;
-  background: #082f2e;
+  background: var(--erp-primary-soft);
   color: #ccfbf1;
 }
 
 .pos-next-action small {
-  color: #5eead4;
+  color: var(--erp-accent);
   font-weight: 800;
   letter-spacing: .06em;
   text-transform: uppercase;
@@ -116,7 +116,7 @@
 }
 
 .pos-order-section.section-ready {
-  border-color: #14b8a6 !important;
+  border-color: var(--erp-primary) !important;
   background: #042f2e !important;
   box-shadow: 0 0 14px rgba(20, 184, 166, .12);
 }
@@ -184,21 +184,21 @@
 .pos-dish-manager-header,
 .pos-dish-form {
   padding: 18px !important;
-  border: 1px solid #26364a !important;
+  border: 1px solid var(--erp-border) !important;
   border-radius: 20px !important;
-  background: #172334 !important;
-  color: #dce6f1;
+  background: var(--erp-surface-2) !important;
+  color: var(--erp-text-primary);
   box-shadow: 0 8px 22px rgba(2, 8, 23, .18);
 }
 
 .pos-dish-manager-header h1,
 .pos-dish-form h2,
 .pos-dish-card h3 {
-  color: #edf5fd;
+  color: var(--erp-text-primary);
 }
 
 .pos-dish-manager-header p {
-  color: #9fb0c4;
+  color: var(--erp-text-secondary);
 }
 
 .pos-dish-manager button,
@@ -295,7 +295,7 @@
   padding: 12px !important;
   border-color: #26364a !important;
   border-radius: 18px !important;
-  background: #172334 !important;
+  background: var(--erp-surface-2) !important;
 }
 
 .pos-dish-card > img,
@@ -341,7 +341,7 @@
   display: grid;
   gap: 14px;
   padding: 16px;
-  border: 1px solid #26364a;
+  border: 1px solid var(--erp-border);
   border-radius: 18px;
   background: #111c2b;
 }
@@ -354,19 +354,19 @@
 }
 
 .pos-catalog-section-head strong {
-  color: #edf5fd;
+  color: var(--erp-text-primary);
 }
 
 .pos-catalog-section-head small,
 .pos-catalog-note {
-  color: #9fb0c4;
+  color: var(--erp-text-secondary);
 }
 
 .pos-catalog-note {
   padding: 12px 14px;
   border: 1px dashed #38506a;
   border-radius: 14px;
-  background: #142131;
+  background: var(--erp-surface-2);
 }
 
 .pos-inline-toggle {
@@ -375,10 +375,10 @@
   align-items: center;
   min-height: 52px;
   padding: 12px 14px;
-  border: 1px solid #31465c;
+  border: 1px solid var(--erp-border);
   border-radius: 14px;
-  background: #142131;
-  color: #dce6f1;
+  background: var(--erp-surface-2);
+  color: var(--erp-text-primary);
 }
 
 .pos-inline-toggle input {
@@ -392,7 +392,7 @@
 }
 
 .pos-inline-toggle small {
-  color: #9fb0c4;
+  color: var(--erp-text-secondary);
 }
 
 .pos-product-type-grid {
@@ -406,10 +406,10 @@
   gap: 6px;
   min-height: 96px;
   padding: 14px;
-  border: 1px solid #31465c;
+  border: 1px solid var(--erp-border);
   border-radius: 16px;
-  background: #142131;
-  color: #dce6f1;
+  background: var(--erp-surface-2);
+  color: var(--erp-text-primary);
   text-align: left;
 }
 
@@ -420,7 +420,7 @@
 }
 
 .pos-product-type-card small {
-  color: #9fb0c4;
+  color: var(--erp-text-secondary);
 }
 
 .pos-variant-grid {
@@ -433,9 +433,9 @@
   display: grid;
   gap: 12px;
   padding: 14px;
-  border: 1px solid #31465c;
+  border: 1px solid var(--erp-border);
   border-radius: 16px;
-  background: #142131;
+  background: var(--erp-surface-2);
 }
 
 .pos-variant-card.active {
@@ -469,10 +469,10 @@
 .pos-size-chip,
 .pos-modal-modifier {
   padding: 10px 12px;
-  border: 1px solid #31465c;
+  border: 1px solid var(--erp-border);
   border-radius: 14px;
-  background: #142131;
-  color: #dce6f1;
+  background: var(--erp-surface-2);
+  color: var(--erp-text-primary);
 }
 
 .pos-size-chip {
@@ -576,7 +576,7 @@
 
 .pos-category-button.active {
   border-color: #0d9488 !important;
-  background: #0f766e !important;
+  background: var(--erp-primary) !important;
   color: #fff !important;
   box-shadow: 0 8px 18px rgba(13, 148, 136, .26);
 }
@@ -670,7 +670,7 @@
 }
 
 .pos-product-card:hover {
-  border-color: #5eead4 !important;
+  border-color: var(--erp-accent) !important;
   box-shadow: 0 15px 30px rgba(15, 118, 110, .15);
 }
 
@@ -753,7 +753,7 @@
 .pos-table-summary,
 .pos-current-order-item,
 .pos-current-order .pos-order-section {
-  border-color: #e2e8f0 !important;
+  border-color: var(--erp-text-primary) !important;
   background: #f8fafc !important;
   color: #0f172a;
 }
@@ -773,14 +773,14 @@
 .pos-current-order select,
 .pos-current-order textarea {
   min-height: 48px;
-  border-color: #cbd5e1 !important;
+  border-color: var(--erp-text-primary) !important;
   background: #fff !important;
   color: #0f172a !important;
 }
 
 .pos-order-footer {
   padding: 14px 0 2px !important;
-  border-color: #e2e8f0;
+  border-color: var(--erp-text-primary);
   background: #fff !important;
 }
 
@@ -891,7 +891,7 @@
 
 .pos-operation-subtitle,
 .pos-operation-header p {
-  color: #9fb0c4 !important;
+  color: var(--erp-text-secondary) !important;
 }
 
 .pos-stepper {
@@ -900,7 +900,7 @@
   gap: 8px;
   margin: 14px 0 18px;
   padding: 8px;
-  border: 1px solid #26364a;
+  border: 1px solid var(--erp-border);
   border-radius: 18px;
   background: #121c2a;
   overflow-x: auto;
@@ -915,7 +915,7 @@
   border: 1px solid transparent;
   border-radius: 13px;
   background: #1a2839;
-  color: #9fb0c4;
+  color: var(--erp-text-secondary);
   font-weight: 800;
 }
 
@@ -951,8 +951,8 @@
 .pos-current-order,
 .pos-people-panel {
   border-color: #26364a !important;
-  background: #172334 !important;
-  color: #dce6f1 !important;
+  background: var(--erp-surface-2) !important;
+  color: var(--erp-text-primary) !important;
   box-shadow: 0 8px 22px rgba(2, 8, 23, .18) !important;
 }
 
@@ -1044,7 +1044,7 @@
 
 .pos-operation-shell .pos-floor-table.traffic-free::before,
 .pos-operation-shell .pos-floor-table.traffic-free::after {
-  background: #22c55e;
+  background: var(--erp-success);
 }
 
 .pos-operation-shell .pos-floor-table.traffic-free::after {
@@ -1089,7 +1089,7 @@
 }
 
 .pos-operation-shell .pos-floor-table .pos-table-surface strong {
-  color: #f8fafc;
+  color: var(--erp-text-primary);
   font-size: 16px;
 }
 
@@ -1105,7 +1105,7 @@
 .pos-operation-shell .pos-floor-table .pos-table-status-label {
   border: 1px solid rgba(148, 163, 184, .2);
   background: rgba(15, 23, 42, .42) !important;
-  color: #cbd5e1;
+  color: var(--erp-text-primary);
 }
 
 .pos-operation-shell .pos-floor-table.traffic-free .pos-table-status-label {
@@ -1166,7 +1166,7 @@
 }
 
 .pos-operation-shell .pos-floor-table .pos-table-name {
-  color: #f8fafc;
+  color: var(--erp-text-primary);
   font-size: 22px;
   font-weight: 950;
   line-height: 1.05;
@@ -1174,7 +1174,7 @@
 }
 
 .pos-operation-shell .pos-floor-table .pos-table-time {
-  color: #dbeafe;
+  color: var(--erp-text-primary);
   font-size: 18px;
   font-weight: 900;
   line-height: 1.05;
@@ -1201,7 +1201,7 @@
 .pos-operation-shell .pos-floor-table.traffic-disabled .pos-table-status-label {
   border-color: rgba(148, 163, 184, .28);
   background: rgba(148, 163, 184, .12) !important;
-  color: #e2e8f0;
+  color: var(--erp-text-primary);
 }
 
 @media (min-width: 760px) and (max-width: 1180px) {
@@ -1267,7 +1267,7 @@
   border: 1px solid #34485f;
   border-radius: 12px;
   background: #1d2d40;
-  color: #dce6f1;
+  color: var(--erp-text-primary);
   font-weight: 850;
 }
 
@@ -1314,17 +1314,17 @@
 .pos-order-footer > div:first-child {
   border-color: #2c4056 !important;
   background: #1b2a3c !important;
-  color: #dce6f1 !important;
+  color: var(--erp-text-primary) !important;
 }
 
 .pos-order-footer {
-  background: #172334 !important;
+  background: var(--erp-surface-2) !important;
 }
 
 .pos-current-order small,
 .pos-current-order p,
 .pos-people-panel p {
-  color: #9fb0c4 !important;
+  color: var(--erp-text-secondary) !important;
 }
 
 .pos-people-panel {
@@ -1345,7 +1345,7 @@
 
 .pos-step-heading h2 {
   margin: 7px 0;
-  color: #edf5fd;
+  color: var(--erp-text-primary);
 }
 
 .pos-people-count {
@@ -1394,7 +1394,7 @@
   border: 1px solid #34485f;
   border-radius: 12px;
   background: #1d2d40;
-  color: #dce6f1;
+  color: var(--erp-text-primary);
   font-weight: 850;
 }
 
@@ -1427,7 +1427,7 @@
   padding: 13px;
   border: 1px solid #2c4056;
   border-radius: 14px;
-  background: #142131;
+  background: var(--erp-surface-2);
 }
 
 .pos-person-subtotals > div {
@@ -1458,12 +1458,12 @@
   padding: 13px;
   border: 1px solid #2c4056;
   border-radius: 14px;
-  background: #142131;
-  color: #dce6f1;
+  background: var(--erp-surface-2);
+  color: var(--erp-text-primary);
 }
 
 .pos-payment-prep span {
-  color: #9fb0c4;
+  color: var(--erp-text-secondary);
   font-size: 12px;
 }
 
@@ -1478,7 +1478,7 @@
   border: 1px solid #34485f;
   border-radius: 12px;
   background: #1d2d40;
-  color: #dce6f1;
+  color: var(--erp-text-primary);
   font-weight: 850;
 }
 

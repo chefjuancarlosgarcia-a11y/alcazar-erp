@@ -4090,17 +4090,17 @@ function ProductionBadges({ state }) {
   )
 }
 
-const pageStyle = { display: "grid", gap: "18px", color: "#e5e7eb" }
+const pageStyle = { display: "grid", gap: "18px", color: "var(--erp-text-primary)" }
 const headerStyle = { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap" }
-const formCardStyle = { padding: "18px", borderRadius: "12px", border: "1px solid #334155", background: "#0f172a", display: "grid", gap: "12px" }
+const formCardStyle = { padding: "18px", borderRadius: "12px", border: "1px solid var(--erp-border)", background: "var(--erp-surface)", display: "grid", gap: "12px" }
 const formGridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "12px" }
-const inputStyle = { width: "100%", padding: "12px", borderRadius: "8px", border: "1px solid #334155", background: "#111827", color: "#f8fafc", boxSizing: "border-box" }
-const inputErrorStyle = { ...inputStyle, borderColor: "#f87171", boxShadow: "0 0 0 3px rgba(248,113,113,.18)" }
+const inputStyle = { width: "100%", padding: "12px", borderRadius: "8px", border: "1px solid var(--erp-border)", background: "var(--erp-surface-2)", color: "var(--erp-text-primary)", boxSizing: "border-box" }
+const inputErrorStyle = { ...inputStyle, borderColor: "var(--erp-danger)", boxShadow: "0 0 0 3px color-mix(in srgb, var(--erp-danger) 18%, transparent)" }
 const textAreaStyle = { ...inputStyle, minHeight: "90px", resize: "vertical" }
-const textAreaErrorStyle = { ...textAreaStyle, borderColor: "#f87171" }
-const primaryButtonStyle = { padding: "11px 14px", borderRadius: "8px", border: "none", background: "#0ea5a4", color: "#022c22", fontWeight: 800, cursor: "pointer" }
-const secondaryButtonStyle = { padding: "10px 13px", borderRadius: "8px", border: "1px solid #334155", background: "#1f2937", color: "#e5e7eb", cursor: "pointer" }
-const dangerButtonStyle = { ...secondaryButtonStyle, borderColor: "#7f1d1d", background: "#7f1d1d" }
+const textAreaErrorStyle = { ...textAreaStyle, borderColor: "var(--erp-danger)" }
+const primaryButtonStyle = { padding: "11px 14px", borderRadius: "8px", border: "none", background: "var(--erp-primary)", color: "#f0fdfa", fontWeight: 800, cursor: "pointer" }
+const secondaryButtonStyle = { padding: "10px 13px", borderRadius: "8px", border: "1px solid var(--erp-border)", background: "var(--erp-surface-2)", color: "var(--erp-text-primary)", cursor: "pointer" }
+const dangerButtonStyle = { ...secondaryButtonStyle, borderColor: "var(--erp-danger)", background: "var(--erp-danger)" }
 const dangerMiniButtonStyle = { ...dangerButtonStyle, padding: "6px 10px" }
 const disabledButtonStyle = { ...secondaryButtonStyle, opacity: 0.55, cursor: "not-allowed" }
 const smallButtonStyle = { ...secondaryButtonStyle, padding: "6px 10px" }
@@ -4112,61 +4112,61 @@ const quickChoiceButtonStyle = { ...secondaryButtonStyle, display: "inline-flex"
 const categoryEditorColumnsStyle = { display: "grid", gridTemplateColumns: "minmax(420px, 1fr) minmax(235px, 300px)", gap: "18px", alignItems: "start" }
 const categoryFieldsStyle = { display: "grid", gap: "16px" }
 const fieldStackStyle = { display: "grid", gap: "7px" }
-const fieldTitleStyle = { color: "#f1f5f9", fontWeight: 800, fontSize: ".9rem" }
-const fieldHintStyle = { color: "#94a3b8", fontSize: ".8rem" }
+const fieldTitleStyle = { color: "var(--erp-text-primary)", fontWeight: 800, fontSize: ".9rem" }
+const fieldHintStyle = { color: "var(--erp-text-secondary)", fontSize: ".8rem" }
 const iconPickerGridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(112px, 1fr))", gap: "8px" }
-const iconPickerButtonStyle = { display: "grid", justifyItems: "center", gap: "4px", minHeight: "66px", padding: "8px 5px", borderRadius: "8px", border: "1px solid #334155", background: "#111827", color: "#cbd5e1", cursor: "pointer", fontSize: ".72rem" }
-const iconPickerSelectedStyle = { ...iconPickerButtonStyle, borderColor: "#14b8a6", background: "#134e4a", color: "#ecfeff" }
+const iconPickerButtonStyle = { display: "grid", justifyItems: "center", gap: "4px", minHeight: "66px", padding: "8px 5px", borderRadius: "8px", border: "1px solid var(--erp-border)", background: "var(--erp-surface-2)", color: "var(--erp-text-primary)", cursor: "pointer", fontSize: ".72rem" }
+const iconPickerSelectedStyle = { ...iconPickerButtonStyle, borderColor: "var(--erp-primary)", background: "var(--erp-primary-soft)", color: "var(--erp-text-primary)" }
 const iconPickerEmojiStyle = { fontSize: "1.45rem" }
 const colorControlsStyle = { display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }
-const colorInputStyle = { width: "50px", height: "40px", padding: "3px", borderRadius: "8px", border: "1px solid #334155", background: "#111827", cursor: "pointer" }
+const colorInputStyle = { width: "50px", height: "40px", padding: "3px", borderRadius: "8px", border: "1px solid var(--erp-border)", background: "var(--erp-surface-2)", cursor: "pointer" }
 const colorPaletteStyle = { display: "flex", gap: "8px", flexWrap: "wrap" }
 const colorSwatchButtonStyle = { width: "27px", height: "27px", borderRadius: "7px", border: "1px solid rgba(255,255,255,.22)", cursor: "pointer" }
-const activeToggleStyle = { display: "flex", gap: "12px", alignItems: "center", padding: "12px", borderRadius: "8px", border: "1px solid #334155", background: "#111827", color: "#f8fafc" }
-const categoryPreviewPanelStyle = { position: "sticky", top: "18px", display: "grid", gap: "12px", padding: "16px", borderRadius: "8px", border: "1px solid #334155", background: "#111827" }
+const activeToggleStyle = { display: "flex", gap: "12px", alignItems: "center", padding: "12px", borderRadius: "8px", border: "1px solid var(--erp-border)", background: "var(--erp-surface-2)", color: "var(--erp-text-primary)" }
+const categoryPreviewPanelStyle = { position: "sticky", top: "18px", display: "grid", gap: "12px", padding: "16px", borderRadius: "8px", border: "1px solid var(--erp-border)", background: "var(--erp-surface-2)" }
 const categoryPreviewTabStyle = { display: "flex", gap: "9px", alignItems: "center", padding: "12px 14px", borderRadius: "8px", color: "#fff" }
 const categoryPreviewIconStyle = { fontSize: "1.35rem" }
-const activeCategoryBadgeStyle = { width: "fit-content", padding: "5px 9px", borderRadius: "7px", background: "#064e3b", color: "#d1fae5", fontSize: ".78rem", fontWeight: 800 }
-const inactiveCategoryBadgeStyle = { ...activeCategoryBadgeStyle, background: "#374151", color: "#cbd5e1" }
-const errorBoxStyle = { padding: "12px", borderRadius: "10px", border: "1px solid #fca5a5", background: "#7f1d1d", color: "#fee2e2" }
+const activeCategoryBadgeStyle = { width: "fit-content", padding: "5px 9px", borderRadius: "7px", background: "var(--erp-success-soft)", color: "#d1fae5", fontSize: ".78rem", fontWeight: 800 }
+const inactiveCategoryBadgeStyle = { ...activeCategoryBadgeStyle, background: "#374151", color: "var(--erp-text-primary)" }
+const errorBoxStyle = { padding: "12px", borderRadius: "10px", border: "1px solid #fca5a5", background: "var(--erp-danger)", color: "#fee2e2" }
 const warningBoxStyle = { padding: "12px", borderRadius: "10px", border: "1px solid #f59e0b", background: "#451a03", color: "#fde68a" }
-const readinessPanelStyle = { display: "grid", gap: "7px", padding: "12px", borderRadius: "10px", border: "1px solid #334155", background: "#111827" }
+const readinessPanelStyle = { display: "grid", gap: "7px", padding: "12px", borderRadius: "10px", border: "1px solid var(--erp-border)", background: "var(--erp-surface-2)" }
 const readinessBadgesStyle = { display: "flex", gap: "7px", flexWrap: "wrap", marginTop: "7px" }
-const readyBadgeStyle = { padding: "5px 8px", borderRadius: "999px", background: "#064e3b", color: "#a7f3d0", fontSize: ".76rem", fontWeight: 800 }
-const invalidBadgeStyle = { ...readyBadgeStyle, background: "#7f1d1d", color: "#fecaca" }
+const readyBadgeStyle = { padding: "5px 8px", borderRadius: "999px", background: "var(--erp-success-soft)", color: "var(--erp-success)", fontSize: ".76rem", fontWeight: 800 }
+const invalidBadgeStyle = { ...readyBadgeStyle, background: "var(--erp-danger)", color: "var(--erp-danger)" }
 const productionErrorPanelStyle = { display: "grid", gap: "10px", padding: "12px", borderRadius: "10px", border: "1px solid #f97316", background: "#431407", color: "#ffedd5", marginBottom: "12px" }
 const productionErrorItemStyle = { display: "grid", gap: "8px", padding: "10px", borderRadius: "8px", background: "#29140c" }
 const cashierStatusStyle = { padding: "9px 11px", borderRadius: "8px", border: "1px solid #0284c7", background: "#082f49", color: "#bae6fd", fontWeight: 700 }
-const paidStatusStyle = { padding: "9px 11px", borderRadius: "8px", border: "1px solid #059669", background: "#052e2b", color: "#a7f3d0", fontWeight: 700 }
-const previewStyle = { width: "180px", height: "130px", objectFit: "cover", borderRadius: "10px", border: "1px solid #334155" }
+const paidStatusStyle = { padding: "9px 11px", borderRadius: "8px", border: "1px solid #059669", background: "#052e2b", color: "var(--erp-success)", fontWeight: 700 }
+const previewStyle = { width: "180px", height: "130px", objectFit: "cover", borderRadius: "10px", border: "1px solid var(--erp-border)" }
 const itemListStyle = { display: "grid", gap: "12px" }
-const itemRowStyle = { display: "flex", alignItems: "center", gap: "12px", padding: "14px", borderRadius: "12px", border: "1px solid #334155", background: "#0f172a" }
-const thumbStyle = { width: "76px", height: "64px", objectFit: "cover", borderRadius: "10px", background: "#111827" }
-const mutedStyle = { color: "#94a3b8", margin: "4px 0" }
-const sessionBadgeStyle = { padding: "8px 12px", borderRadius: "999px", background: "#064e3b", color: "#d1fae5" }
+const itemRowStyle = { display: "flex", alignItems: "center", gap: "12px", padding: "14px", borderRadius: "12px", border: "1px solid var(--erp-border)", background: "var(--erp-surface)" }
+const thumbStyle = { width: "76px", height: "64px", objectFit: "cover", borderRadius: "10px", background: "var(--erp-surface-2)" }
+const mutedStyle = { color: "var(--erp-text-secondary)", margin: "4px 0" }
+const sessionBadgeStyle = { padding: "8px 12px", borderRadius: "999px", background: "var(--erp-success-soft)", color: "#d1fae5" }
 const posShellStyle = { display: "grid", gridTemplateColumns: "minmax(520px, 1fr) minmax(340px, 410px)", gap: "16px", alignItems: "start" }
 const menuPanelStyle = { display: "grid", gap: "14px" }
-const catalogSearchStyle = { display: "grid", gap: "6px", padding: "12px", borderRadius: "12px", border: "1px solid #334155", background: "#0f172a" }
+const catalogSearchStyle = { display: "grid", gap: "6px", padding: "12px", borderRadius: "12px", border: "1px solid var(--erp-border)", background: "var(--erp-surface)" }
 const tabsStyle = { display: "flex", flexWrap: "wrap", gap: "8px" }
 const tabIconStyle = { display: "inline-flex", marginRight: "7px", fontWeight: 900 }
 const areaTabGroupStyle = { display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }
-const croquisGuideStyle = { display: "flex", flexWrap: "wrap", gap: "10px", padding: "10px 12px", borderRadius: "8px", border: "1px solid #1f3b4d", background: "#0b1826", color: "#cbd5e1", fontSize: ".88rem" }
+const croquisGuideStyle = { display: "flex", flexWrap: "wrap", gap: "10px", padding: "10px 12px", borderRadius: "8px", border: "1px solid #1f3b4d", background: "#0b1826", color: "var(--erp-text-primary)", fontSize: ".88rem" }
 const areaNavigatorStyle = { display: "grid", gap: "10px", padding: "10px", borderRadius: "8px", border: "1px solid #243244", background: "#0b1220" }
 const areaTabsOnlyStyle = { display: "flex", flexWrap: "wrap", gap: "8px" }
-const selectedAreaActionsStyle = { display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center", paddingTop: "10px", borderTop: "1px solid #1f2937", color: "#cbd5e1" }
+const selectedAreaActionsStyle = { display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center", paddingTop: "10px", borderTop: "1px solid #1f2937", color: "var(--erp-text-primary)" }
 const tabStyle = { ...secondaryButtonStyle }
 const activeTabStyle = { ...primaryButtonStyle }
-const floorPlanSectionStyle = { display: "grid", gap: "12px", padding: "16px", borderRadius: "8px", border: "1px solid #334155", background: "#0f172a" }
-const layoutToolbarStyle = { display: "flex", justifyContent: "space-between", gap: "12px", flexWrap: "wrap", alignItems: "center", paddingBottom: "12px", borderBottom: "1px solid #1f2937" }
-const snapToggleStyle = { display: "inline-flex", gap: "7px", alignItems: "center", padding: "9px 11px", borderRadius: "8px", border: "1px solid #334155", background: "#111827", color: "#e5e7eb", fontSize: ".88rem" }
-const zoomValueStyle = { minWidth: "48px", color: "#cbd5e1", fontWeight: 700, textAlign: "center" }
-const successInlineStyle = { padding: "9px 12px", borderRadius: "8px", border: "1px solid #0f766e", background: "#042f2e", color: "#99f6e4", fontWeight: 700 }
-const liveNoticeStyle = { ...successInlineStyle, borderColor: "#22c55e", color: "#bbf7d0", marginTop: "10px" }
+const floorPlanSectionStyle = { display: "grid", gap: "12px", padding: "16px", borderRadius: "8px", border: "1px solid var(--erp-border)", background: "var(--erp-surface)" }
+const layoutToolbarStyle = { display: "flex", justifyContent: "space-between", gap: "12px", flexWrap: "wrap", alignItems: "center", paddingBottom: "12px", borderBottom: "1px solid var(--erp-border-subtle)" }
+const snapToggleStyle = { display: "inline-flex", gap: "7px", alignItems: "center", padding: "9px 11px", borderRadius: "8px", border: "1px solid var(--erp-border)", background: "var(--erp-surface-2)", color: "var(--erp-text-primary)", fontSize: ".88rem" }
+const zoomValueStyle = { minWidth: "48px", color: "var(--erp-text-primary)", fontWeight: 700, textAlign: "center" }
+const successInlineStyle = { padding: "9px 12px", borderRadius: "8px", border: "1px solid var(--erp-primary)", background: "var(--erp-primary-soft)", color: "var(--erp-accent)", fontWeight: 700 }
+const liveNoticeStyle = { ...successInlineStyle, borderColor: "var(--erp-success)", color: "var(--erp-success)", marginTop: "10px" }
 const liveBadgeStyle = { display: "inline-flex", alignItems: "center", gap: "7px", padding: "7px 10px", borderRadius: "999px", border: "1px solid #166534", background: "#052e24", color: "#86efac", fontSize: ".84rem", fontWeight: 700 }
-const connectingBadgeStyle = { ...liveBadgeStyle, borderColor: "#334155", background: "#111827", color: "#94a3b8" }
-const liveDotStyle = { display: "inline-block", width: "9px", height: "9px", borderRadius: "50%", background: "#22c55e", boxShadow: "0 0 8px #22c55e" }
+const connectingBadgeStyle = { ...liveBadgeStyle, borderColor: "#334155", background: "var(--erp-surface-2)", color: "var(--erp-text-secondary)" }
+const liveDotStyle = { display: "inline-block", width: "9px", height: "9px", borderRadius: "50%", background: "var(--erp-success)", boxShadow: "0 0 8px #22c55e" }
 const connectingDotStyle = { ...liveDotStyle, background: "#64748b", boxShadow: "none" }
-const areaFormStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "10px", alignItems: "end", padding: "14px", borderRadius: "8px", border: "1px solid #334155", background: "#111827" }
+const areaFormStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "10px", alignItems: "end", padding: "14px", borderRadius: "8px", border: "1px solid var(--erp-border)", background: "var(--erp-surface-2)" }
 const floorPlanLayoutStyle = { display: "grid", gridTemplateColumns: "minmax(420px, 1fr) minmax(285px, 340px)", gap: "14px", alignItems: "start" }
 const floorPlanStyle = {
   position: "relative",
@@ -4187,7 +4187,7 @@ const tableAssemblyStyle = {
   border: "none",
   borderRadius: "8px",
   background: "transparent",
-  color: "#f8fafc",
+  color: "var(--erp-text-primary)",
   transition: "transform .08s ease, outline-color .12s ease",
   touchAction: "none"
 }
@@ -4221,78 +4221,78 @@ const chairStyle = {
 }
 const tableStatusStyles = {
   disponible: { background: "#065f46", borderColor: "#34d399" },
-  ocupada: { background: "#7f1d1d", borderColor: "#f87171" },
+  ocupada: { background: "var(--erp-danger)", borderColor: "#f87171" },
   en_servicio: { background: "#1d4ed8", borderColor: "#60a5fa" },
   nuevos_sin_enviar: { background: "#854d0e", borderColor: "#facc15" },
   esperando_cuenta: { background: "#581c87", borderColor: "#c084fc" },
   pago_en_proceso: { background: "#3730a3", borderColor: "#818cf8" },
   pagada: { background: "#065f46", borderColor: "#34d399" },
-  problema: { background: "#7f1d1d", borderColor: "#f87171" },
+  problema: { background: "var(--erp-danger)", borderColor: "#f87171" },
   en_produccion: { background: "#9a3412", borderColor: "#fb923c" },
   lista_para_servir: { background: "#0f766e", borderColor: "#2dd4bf", boxShadow: "0 0 16px rgba(45,212,191,.45)" },
   reservada: { background: "#78350f", borderColor: "#fbbf24" },
   limpieza: { background: "#1e3a8a", borderColor: "#60a5fa" },
   inactiva: { background: "#374151", borderColor: "#94a3b8" }
 }
-const tableEditPanelStyle = { padding: "14px", borderRadius: "8px", border: "1px solid #334155", background: "#111827", display: "grid", gap: "12px" }
-const tablePreviewStyle = { position: "relative", height: "128px", borderRadius: "8px", border: "1px solid #253347", background: "#0f172a" }
-const emptyPlanStyle = { minHeight: "220px", display: "grid", placeItems: "center", borderRadius: "8px", border: "1px dashed #475569", color: "#94a3b8" }
+const tableEditPanelStyle = { padding: "14px", borderRadius: "8px", border: "1px solid var(--erp-border)", background: "var(--erp-surface-2)", display: "grid", gap: "12px" }
+const tablePreviewStyle = { position: "relative", height: "128px", borderRadius: "8px", border: "1px solid #253347", background: "var(--erp-surface)" }
+const emptyPlanStyle = { minHeight: "220px", display: "grid", placeItems: "center", borderRadius: "8px", border: "1px dashed #475569", color: "var(--erp-text-secondary)" }
 const menuGridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))", gap: "14px" }
-const menuCardStyle = { padding: "14px", borderRadius: "12px", border: "1px solid #334155", background: "#0f172a" }
-const emptyCatalogStyle = { gridColumn: "1 / -1", padding: "20px", borderRadius: "12px", border: "1px dashed #334155", color: "#94a3b8", textAlign: "center" }
-const menuImageStyle = { width: "100%", aspectRatio: "4 / 3", objectFit: "cover", borderRadius: "10px", background: "#111827" }
+const menuCardStyle = { padding: "14px", borderRadius: "12px", border: "1px solid var(--erp-border)", background: "var(--erp-surface)" }
+const emptyCatalogStyle = { gridColumn: "1 / -1", padding: "20px", borderRadius: "12px", border: "1px dashed #334155", color: "var(--erp-text-secondary)", textAlign: "center" }
+const menuImageStyle = { width: "100%", aspectRatio: "4 / 3", objectFit: "cover", borderRadius: "10px", background: "var(--erp-surface-2)" }
 const availableStyle = { color: "#34d399", fontWeight: 700 }
 const unavailableStyle = { color: "#f87171", fontWeight: 700 }
-const orderPanelStyle = { position: "sticky", top: "20px", padding: "16px", borderRadius: "12px", border: "1px solid #334155", background: "#0f172a" }
-const selectedTableStyle = { display: "grid", gap: "8px", padding: "12px", borderRadius: "10px", border: "1px solid #334155", background: "#111827", marginBottom: "12px" }
-const tableStateBadgeStyle = { padding: "5px 9px", borderRadius: "999px", border: "1px solid #334155", color: "#f8fafc", fontSize: ".74rem", fontWeight: 800 }
+const orderPanelStyle = { position: "sticky", top: "20px", padding: "16px", borderRadius: "12px", border: "1px solid var(--erp-border)", background: "var(--erp-surface)" }
+const selectedTableStyle = { display: "grid", gap: "8px", padding: "12px", borderRadius: "10px", border: "1px solid var(--erp-border)", background: "var(--erp-surface-2)", marginBottom: "12px" }
+const tableStateBadgeStyle = { padding: "5px 9px", borderRadius: "999px", border: "1px solid var(--erp-border)", color: "var(--erp-text-primary)", fontSize: ".74rem", fontWeight: 800 }
 const tableSummaryGridStyle = { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "8px" }
-const summaryMetricStyle = { display: "grid", gap: "4px", padding: "8px", borderRadius: "8px", background: "#0f172a", color: "#f8fafc", fontSize: ".85rem" }
-const readySummaryStyle = { gridColumn: "1 / -1", border: "1px solid #14b8a6", color: "#99f6e4", background: "#042f2e" }
+const summaryMetricStyle = { display: "grid", gap: "4px", padding: "8px", borderRadius: "8px", background: "var(--erp-surface)", color: "var(--erp-text-primary)", fontSize: ".85rem" }
+const readySummaryStyle = { gridColumn: "1 / -1", border: "1px solid #14b8a6", color: "var(--erp-accent)", background: "var(--erp-primary-soft)" }
 const compactInputStyle = { ...inputStyle, padding: "7px" }
-const historyPanelStyle = { display: "grid", gap: "10px", padding: "12px", borderRadius: "10px", border: "1px solid #334155", background: "#111827", marginBottom: "12px" }
+const historyPanelStyle = { display: "grid", gap: "10px", padding: "12px", borderRadius: "10px", border: "1px solid var(--erp-border)", background: "var(--erp-surface-2)", marginBottom: "12px" }
 const historyHeaderStyle = { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", flexWrap: "wrap" }
-const eventRowStyle = { display: "grid", gap: "3px", padding: "8px", borderRadius: "8px", background: "#0f172a", border: "1px solid #253347" }
-const sentOrderCardStyle = { display: "grid", gap: "8px", padding: "12px", borderRadius: "10px", border: "1px solid #334155", background: "#0f172a" }
+const eventRowStyle = { display: "grid", gap: "3px", padding: "8px", borderRadius: "8px", background: "var(--erp-surface)", border: "1px solid #253347" }
+const sentOrderCardStyle = { display: "grid", gap: "8px", padding: "12px", borderRadius: "10px", border: "1px solid var(--erp-border)", background: "var(--erp-surface)" }
 const delayedOrderCardStyle = { ...sentOrderCardStyle, borderColor: "#f97316", background: "#431407" }
 const delayAlertStyle = { padding: "8px 10px", borderRadius: "8px", background: "#9a3412", color: "#ffedd5", fontWeight: 800 }
-const orderStatusStyle = { padding: "4px 8px", borderRadius: "999px", background: "#1f2937", color: "#e5e7eb", fontSize: "0.85rem" }
+const orderStatusStyle = { padding: "4px 8px", borderRadius: "999px", background: "#1f2937", color: "var(--erp-text-primary)", fontSize: "0.85rem" }
 const sentItemRowStyle = { display: "flex", justifyContent: "space-between", gap: "8px", alignItems: "center", flexWrap: "wrap", color: "#d1d5db", padding: "4px 0" }
 const orderItemBadgeStyle = { padding: "4px 8px", borderRadius: "999px", fontSize: ".76rem", fontWeight: 800 }
 const modifierTextStyle = { display: "block", color: "#fef3c7", marginTop: "4px" }
-const auditBoxStyle = { display: "grid", gap: "3px", padding: "8px", borderRadius: "8px", background: "#111827", color: "#94a3b8", width: "100%" }
+const auditBoxStyle = { display: "grid", gap: "3px", padding: "8px", borderRadius: "8px", background: "var(--erp-surface-2)", color: "var(--erp-text-secondary)", width: "100%" }
 const editSentModifierStyle = { display: "grid", gap: "8px", width: "100%", marginTop: "8px" }
 const modalOverlayStyle = { position: "fixed", inset: 0, background: "rgba(2, 6, 23, .72)", display: "grid", placeItems: "center", zIndex: 40, padding: "20px" }
-const modifierModalStyle = { width: "min(560px, 100%)", display: "grid", gap: "14px", padding: "20px", borderRadius: "14px", border: "1px solid #334155", background: "#0f172a", boxShadow: "0 24px 60px rgba(0,0,0,.38)" }
-const deliveryWizardModalStyle = { width: "min(720px, 100%)", maxHeight: "92vh", overflow: "auto", display: "grid", gap: "14px", padding: "20px", borderRadius: "14px", border: "1px solid #0ea5a4", background: "#0f172a", boxShadow: "0 24px 60px rgba(0,0,0,.42)" }
+const modifierModalStyle = { width: "min(560px, 100%)", display: "grid", gap: "14px", padding: "20px", borderRadius: "14px", border: "1px solid var(--erp-border)", background: "var(--erp-surface)", boxShadow: "0 24px 60px rgba(0,0,0,.38)" }
+const deliveryWizardModalStyle = { width: "min(720px, 100%)", maxHeight: "92vh", overflow: "auto", display: "grid", gap: "14px", padding: "20px", borderRadius: "14px", border: "1px solid #0ea5a4", background: "var(--erp-surface)", boxShadow: "0 24px 60px rgba(0,0,0,.42)" }
 const deliveryWizardStepsStyle = { display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: "7px" }
-const wizardStepStyle = { padding: "8px", borderRadius: "8px", border: "1px solid #334155", color: "#94a3b8", textAlign: "center", fontSize: ".78rem", fontWeight: 800 }
-const activeWizardStepStyle = { ...wizardStepStyle, borderColor: "#0ea5a4", background: "#042f2e", color: "#99f6e4" }
+const wizardStepStyle = { padding: "8px", borderRadius: "8px", border: "1px solid var(--erp-border)", color: "var(--erp-text-secondary)", textAlign: "center", fontSize: ".78rem", fontWeight: 800 }
+const activeWizardStepStyle = { ...wizardStepStyle, borderColor: "#0ea5a4", background: "var(--erp-primary-soft)", color: "var(--erp-accent)" }
 const deliveryWizardGridStyle = { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "10px" }
 const modifierDishHeaderStyle = { display: "flex", gap: "12px", alignItems: "center" }
-const modifierDishImageStyle = { width: "96px", height: "76px", objectFit: "cover", borderRadius: "10px", border: "1px solid #334155" }
+const modifierDishImageStyle = { width: "96px", height: "76px", objectFit: "cover", borderRadius: "10px", border: "1px solid var(--erp-border)" }
 const transferPanelStyle = { display: "grid", gap: "8px", padding: "10px", borderRadius: "10px", border: "1px solid #0ea5a4", background: "#082f2e" }
 const deliveryPanelStyle = { display: "grid", gap: "10px", padding: "12px", borderRadius: "10px", border: "1px solid #0ea5a4", background: "#082f2e", marginBottom: "12px" }
 const deliveryHeaderStyle = { display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "flex-start", flexWrap: "wrap" }
 const deliverySearchStyle = { display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: "8px", alignItems: "center" }
-const customerResultsStyle = { display: "grid", gap: "8px", padding: "8px", borderRadius: "8px", border: "1px solid #134e4a", background: "#042f2e" }
+const customerResultsStyle = { display: "grid", gap: "8px", padding: "8px", borderRadius: "8px", border: "1px solid #134e4a", background: "var(--erp-primary-soft)" }
 const customerResultStyle = { display: "flex", flexWrap: "wrap", gap: "6px", alignItems: "center" }
 const deliveryGridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "9px" }
 const deliverySummaryCardsStyle = { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "8px" }
-const deliverySummaryStyle = { padding: "10px", borderRadius: "8px", background: "#0f172a", color: "#d1fae5", fontWeight: 700 }
+const deliverySummaryStyle = { padding: "10px", borderRadius: "8px", background: "var(--erp-surface)", color: "#d1fae5", fontWeight: 700 }
 const deliveryPreviewStyle = { margin: 0, whiteSpace: "pre-wrap", padding: "10px", borderRadius: "8px", border: "1px solid #134e4a", background: "#041f1e", color: "#ccfbf1", fontSize: ".78rem", lineHeight: 1.45 }
-const orderSectionStyle = { display: "grid", gap: "8px", marginBottom: "14px", padding: "10px", borderRadius: "10px", border: "1px solid #253347", background: "#111827" }
-const orderFooterStyle = { position: "sticky", bottom: 0, display: "grid", gap: "10px", marginTop: "14px", padding: "12px 0 4px", background: "#0f172a" }
+const orderSectionStyle = { display: "grid", gap: "8px", marginBottom: "14px", padding: "10px", borderRadius: "10px", border: "1px solid #253347", background: "var(--erp-surface-2)" }
+const orderFooterStyle = { position: "sticky", bottom: 0, display: "grid", gap: "10px", marginTop: "14px", padding: "12px 0 4px", background: "var(--erp-surface)" }
 const orderItemStyle = { display: "grid", gap: "8px", padding: "10px 0", borderBottom: "1px solid #334155" }
 const qtyRowStyle = { display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }
 const timerStyle = { color: "#fdba74", fontWeight: 700 }
 const servedButtonStyle = { ...primaryButtonStyle, background: "#10b981", color: "#052e24" }
-const totalsBreakdownStyle = { display: "grid", gap: "5px", padding: "10px", borderRadius: "10px", border: "1px solid #253347", background: "#111827" }
+const totalsBreakdownStyle = { display: "grid", gap: "5px", padding: "10px", borderRadius: "10px", border: "1px solid #253347", background: "var(--erp-surface-2)" }
 const totalStyle = { paddingTop: "6px", borderTop: "1px solid #334155", fontSize: "1.25rem", fontWeight: 800 }
 const quickActionsStyle = { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "8px" }
 const categoryTableStyle = { display: "grid", gap: "8px" }
-const categoryHeaderStyle = { display: "grid", gridTemplateColumns: "72px minmax(150px, 1fr) minmax(150px, .9fr) 90px 90px minmax(300px, 1.6fr)", gap: "10px", padding: "10px 12px", color: "#94a3b8", fontSize: ".8rem", fontWeight: 800, textTransform: "uppercase" }
-const categoryRowStyle = { ...categoryHeaderStyle, alignItems: "center", color: "#e5e7eb", fontSize: ".88rem", fontWeight: 400, textTransform: "none", borderRadius: "8px", border: "1px solid #334155", background: "#0f172a" }
+const categoryHeaderStyle = { display: "grid", gridTemplateColumns: "72px minmax(150px, 1fr) minmax(150px, .9fr) 90px 90px minmax(300px, 1.6fr)", gap: "10px", padding: "10px 12px", color: "var(--erp-text-secondary)", fontSize: ".8rem", fontWeight: 800, textTransform: "uppercase" }
+const categoryRowStyle = { ...categoryHeaderStyle, alignItems: "center", color: "var(--erp-text-primary)", fontSize: ".88rem", fontWeight: 400, textTransform: "none", borderRadius: "8px", border: "1px solid var(--erp-border)", background: "var(--erp-surface)" }
 const categoryIdentityStyle = { display: "flex", alignItems: "center", gap: "9px" }
 const categorySwatchStyle = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: "32px", height: "32px", borderRadius: "7px", color: "#fff", fontWeight: 900 }
 

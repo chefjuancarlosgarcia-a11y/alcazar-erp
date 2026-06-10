@@ -10,16 +10,16 @@
   gap: 12px;
   min-height: 158px;
   padding: 17px;
-  border: 1px solid #1f6f68;
+  border: 1px solid var(--erp-primary);
   border-radius: 12px;
-  background: #08252c;
-  color: #e6fffb;
+  background: var(--erp-primary-soft);
+  color: var(--erp-text-primary);
 }
 
 .goal-widget.muted {
-  border-color: #334155;
-  background: #0f172a;
-  color: #cbd5e1;
+  border-color: var(--erp-border);
+  background: var(--erp-surface);
+  color: var(--erp-text-primary);
 }
 
 .goal-widget-header {
@@ -31,18 +31,18 @@
 
 .goal-widget-header span,
 .goal-widget small {
-  color: #99f6e4;
+  color: var(--erp-accent);
   font-size: 13px;
 }
 
 .goal-widget-header strong {
-  color: #ffffff;
+  color: var(--erp-text-primary);
   font-size: 24px;
 }
 
 .goal-widget p {
   margin: 0;
-  color: #f8fafc;
+  color: var(--erp-text-primary);
   font-weight: 700;
 }
 
@@ -50,14 +50,14 @@
   height: 12px;
   overflow: hidden;
   border-radius: 999px;
-  background: #12384a;
+  background: var(--erp-surface-2);
 }
 
 .goal-progress i {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, #14b8a6, #facc15);
+  background: linear-gradient(90deg, var(--erp-primary), var(--erp-accent));
 }
 
 .goal-ranking-list {
@@ -75,16 +75,16 @@
   align-items: center;
   padding: 9px 10px;
   border-radius: 9px;
-  background: #0f172a;
+  background: var(--erp-surface);
 }
 
 .goal-ranking-list li span {
-  color: #facc15;
+  color: var(--erp-accent);
   font-weight: 800;
 }
 
 .goal-ranking-list li strong {
-  color: #f8fafc;
+  color: var(--erp-text-primary);
 }
 
 @media (max-width: 640px) {

@@ -292,6 +292,22 @@ export function applyBrandingTheme(branding, target = document.documentElement) 
   })
   target.style.setProperty("--sidebar-accent", tokens.primaryColor)
   target.style.setProperty("--accent", tokens.primaryColor)
+  target.style.setProperty(
+    "--erp-surface-2",
+    `color-mix(in srgb, ${tokens.surfaceColor} 76%, ${tokens.primaryColor} 24%)`
+  )
+  target.style.setProperty(
+    "--erp-border",
+    `color-mix(in srgb, ${tokens.primaryColor} 14%, ${tokens.surfaceColor} 86%)`
+  )
+  target.style.setProperty(
+    "--erp-border-subtle",
+    `color-mix(in srgb, ${tokens.primaryColor} 8%, ${tokens.surfaceColor} 92%)`
+  )
+  target.style.setProperty(
+    "--erp-primary-soft",
+    `color-mix(in srgb, ${tokens.primaryColor} 12%, ${tokens.surfaceColor} 88%)`
+  )
   target.dataset.erpThemeMode = tokens.themeMode
   target.dataset.erpDensity = branding.density || "normal"
   target.dataset.erpBorderStyle = branding.borderStyle || "soft"

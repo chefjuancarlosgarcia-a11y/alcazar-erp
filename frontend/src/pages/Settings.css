@@ -2,15 +2,15 @@
   display: flex;
   flex-direction: column;
   min-height: 100%;
-  background: #071023;
+  background: var(--erp-background);
 }
 
 .settings-tabs {
   display: flex;
   gap: 0;
   padding: 0 28px;
-  border-bottom: 1px solid #264653;
-  background: #0f172a;
+  border-bottom: 1px solid var(--erp-border);
+  background: var(--erp-surface);
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
@@ -20,7 +20,7 @@
   border: none;
   border-bottom: 3px solid transparent;
   background: transparent;
-  color: #94a3b8;
+  color: var(--erp-text-secondary);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
@@ -29,13 +29,13 @@
 }
 
 .settings-tab:hover {
-  color: #cbd5e1;
+  color: var(--erp-text-primary);
   background: rgba(45, 212, 191, 0.05);
 }
 
 .settings-tab.active {
-  color: #2dd4bf;
-  border-bottom-color: #2dd4bf;
+  color: var(--erp-accent);
+  border-bottom-color: var(--erp-accent);
 }
 
 .settings-content {
@@ -59,26 +59,26 @@
   display: grid;
   gap: 14px;
   padding: 20px;
-  border: 1px solid #1f3046;
+  border: 1px solid var(--erp-border);
   border-radius: 18px;
   background: rgba(15, 23, 42, .78);
-  color: #e2e8f0;
+  color: var(--erp-text-primary);
   box-shadow: 0 18px 42px rgba(2, 8, 23, .22);
 }
 
 .settings-card h2 {
   margin: 0;
-  color: #f8fafc;
+  color: var(--erp-text-primary);
 }
 
 .settings-card p {
   margin: 4px 0 0;
-  color: #94a3b8;
+  color: var(--erp-text-secondary);
 }
 
 .settings-eyebrow {
   margin: 0 !important;
-  color: #2dd4bf !important;
+  color: var(--erp-accent) !important;
   font-size: 12px;
   font-weight: 900;
   letter-spacing: .12em;
@@ -88,16 +88,16 @@
 .settings-card label {
   display: grid;
   gap: 7px;
-  color: #cbd5e1;
+  color: var(--erp-text-primary);
   font-weight: 800;
 }
 
 .settings-card input {
   min-height: 44px;
-  border: 1px solid #334155;
+  border: 1px solid var(--erp-border);
   border-radius: 11px;
-  background: #0f172a;
-  color: #f8fafc;
+  background: var(--erp-surface);
+  color: var(--erp-text-primary);
   padding: 10px 12px;
   font: inherit;
 }
@@ -109,9 +109,9 @@
 
 .settings-card button {
   min-height: 46px;
-  border: 1px solid #0f766e;
+  border: 1px solid var(--erp-primary);
   border-radius: 12px;
-  background: #0f766e;
+  background: var(--erp-primary);
   color: #ecfeff;
   font-weight: 900;
   cursor: pointer;
@@ -122,7 +122,7 @@
   border: 1px solid rgba(45, 212, 191, .28);
   border-radius: 12px;
   background: rgba(20, 184, 166, .1);
-  color: #99f6e4;
+  color: var(--erp-accent);
   font-weight: 800;
 }
 
@@ -136,7 +136,7 @@
   display: grid;
   gap: 8px;
   padding: 16px;
-  border: 1px solid #1f3046;
+  border: 1px solid var(--erp-border);
   border-radius: 18px;
   background: linear-gradient(180deg, #0f172a 0%, #0b1220 100%);
 }
@@ -146,7 +146,7 @@
   gap: 12px;
   align-items: center;
   padding: 12px;
-  border: 1px solid #1f3046;
+  border: 1px solid var(--erp-border);
   border-radius: 16px;
   background: rgba(15, 23, 42, .72);
   margin-bottom: 10px;
@@ -172,7 +172,7 @@
 
 .sidebar-preview-brand small {
   display: block;
-  color: #94a3b8;
+  color: var(--erp-text-secondary);
   margin-top: 3px;
 }
 
@@ -180,7 +180,7 @@
   padding: 11px 12px 11px 14px;
   border: 1px solid transparent;
   border-radius: 12px;
-  color: #cbd5e1;
+  color: var(--erp-text-primary);
   font-weight: 750;
 }
 

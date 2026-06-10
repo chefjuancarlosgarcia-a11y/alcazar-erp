@@ -3,8 +3,8 @@
   gap: 18px;
   min-height: 100%;
   padding: 8px;
-  color: #e5edf8;
-  background: radial-gradient(circle at top, #0d1a31 0, #071023 42%);
+  color: var(--erp-text-primary);
+  background: radial-gradient(circle at top, color-mix(in srgb, var(--erp-primary) 10%, var(--erp-background)) 0, var(--erp-background) 42%);
 }
 
 .kds-page:fullscreen {
@@ -27,7 +27,7 @@
   align-items: start;
   gap: 22px;
   padding: 18px;
-  border: 1px solid #1c2c43;
+  border: 1px solid var(--erp-border);
   border-radius: 18px;
   background: linear-gradient(135deg, rgba(11, 20, 38, .92), rgba(15, 23, 42, .82));
   box-shadow: 0 18px 42px rgba(2, 8, 23, .24);
@@ -36,13 +36,13 @@
 .kds-header h1,
 .kds-unassigned h1 {
   margin: 3px 0 5px;
-  color: #f8fafc;
+  color: var(--erp-text-primary);
   font-size: 36px;
 }
 
 .kds-eyebrow {
   margin: 0;
-  color: #2dd4bf;
+  color: var(--erp-accent);
   font-size: 12px;
   font-weight: 800;
   letter-spacing: .14em;
@@ -51,7 +51,7 @@
 
 .kds-muted {
   margin: 0;
-  color: #94a3b8;
+  color: var(--erp-text-secondary);
 }
 
 .kds-header-meta {
@@ -68,7 +68,7 @@
   display: inline-flex;
   align-items: center;
   padding: 7px 10px;
-  border: 1px solid #203149;
+  border: 1px solid var(--erp-border);
   border-radius: 999px;
   background: rgba(15, 23, 42, .72);
   color: #a7f3d0;
@@ -78,7 +78,7 @@
 
 .kds-live {
   gap: 7px;
-  color: #94a3b8;
+  color: var(--erp-text-secondary);
 }
 
 .kds-live i {
@@ -89,8 +89,8 @@
 }
 
 .kds-live.connected { color: #86efac; }
-.kds-live.connected i { background: #22c55e; box-shadow: 0 0 9px #22c55e; }
-.kds-feedback.live-notice { border-color: #22c55e; color: #bbf7d0; }
+.kds-live.connected i { background: var(--erp-success); box-shadow: 0 0 9px #22c55e; }
+.kds-feedback.live-notice { border-color: var(--erp-success); color: #bbf7d0; }
 
 .kds-header-actions {
   display: grid;
@@ -115,7 +115,7 @@
   border-radius: 999px;
   background: rgba(45, 212, 191, .12);
   border: 1px solid rgba(45, 212, 191, .3);
-  color: #99f6e4;
+  color: var(--erp-accent);
   font-weight: 900;
 }
 
@@ -139,11 +139,11 @@
 }
 
 .kds-alert-settings strong {
-  color: #f8fafc;
+  color: var(--erp-text-primary);
 }
 
 .kds-alert-settings span {
-  color: #94a3b8;
+  color: var(--erp-text-secondary);
   font-size: 12px;
   font-weight: 800;
 }
@@ -154,14 +154,14 @@
   border: 0;
   border-radius: 11px;
   padding: 8px 12px;
-  background: #0f766e;
+  background: var(--erp-primary);
   color: #ecfeff;
   font-weight: 900;
 }
 
 .kds-alert-settings .secondary {
-  background: #1e293b;
-  color: #cbd5e1;
+  background: var(--erp-surface-2);
+  color: var(--erp-text-primary);
 }
 
 .kds-alert-settings input[type="range"] {
@@ -171,13 +171,13 @@
 .kds-alert-settings input[type="checkbox"] {
   width: 20px;
   height: 20px;
-  accent-color: #14b8a6;
+  accent-color: var(--erp-primary);
 }
 
 .kds-select-label {
   display: grid;
   gap: 5px;
-  color: #94a3b8;
+  color: var(--erp-text-secondary);
   font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
@@ -189,10 +189,10 @@
 .kds-modal textarea {
   min-width: 190px;
   padding: 12px;
-  border: 1px solid #334155;
+  border: 1px solid var(--erp-border);
   border-radius: 9px;
-  background: #0f172a;
-  color: #f8fafc;
+  background: var(--erp-surface);
+  color: var(--erp-text-primary);
   font: inherit;
 }
 
@@ -201,9 +201,9 @@
 .kds-modal button {
   min-height: 47px;
   padding: 12px 16px;
-  border: 1px solid #0f766e;
+  border: 1px solid var(--erp-primary);
   border-radius: 10px;
-  background: #0f766e;
+  background: var(--erp-primary);
   color: #f0fdfa;
   font: inherit;
   font-weight: 750;
@@ -212,22 +212,22 @@
 
 .kds-fullscreen.secondary {
   border-color: #24344a;
-  background: #152238;
-  color: #dbeafe;
+  background: var(--erp-surface-2);
+  color: var(--erp-text-primary);
 }
 
 .kds-fullscreen.active {
-  border-color: #2dd4bf;
-  background: #0f766e;
+  border-color: var(--erp-accent);
+  background: var(--erp-primary);
   color: #ecfeff;
 }
 
 .kds-feedback {
   padding: 12px 15px;
-  border: 1px solid #0f766e;
+  border: 1px solid var(--erp-primary);
   border-radius: 11px;
-  background: #082f2e;
-  color: #99f6e4;
+  background: var(--erp-primary-soft);
+  color: var(--erp-accent);
   font-weight: 700;
 }
 
@@ -241,23 +241,23 @@
   display: grid;
   gap: 8px;
   padding: 13px 15px;
-  border: 1px solid #25364d;
+  border: 1px solid var(--erp-border);
   border-radius: 12px;
-  background: #0f172a;
+  background: var(--erp-surface);
 }
 
 .kds-metric.new { border-color: #64748b; }
 .kds-metric.working { border-color: #f97316; }
-.kds-metric.ready { border-color: #14b8a6; background: #082f2e; }
-.kds-metric.ready strong { color: #5eead4; }
+.kds-metric.ready { border-color: var(--erp-primary); background: var(--erp-primary-soft); }
+.kds-metric.ready strong { color: var(--erp-accent); }
 
 .kds-metric span {
-  color: #94a3b8;
+  color: var(--erp-text-secondary);
   font-size: 13px;
 }
 
 .kds-metric strong {
-  color: #f8fafc;
+  color: var(--erp-text-primary);
   font-size: 27px;
 }
 
@@ -281,15 +281,15 @@
   gap: 11px;
   min-height: 310px;
   padding: 12px;
-  border: 1px solid #1c2c43;
+  border: 1px solid var(--erp-border);
   border-radius: 14px;
-  background: #0b1426;
+  background: var(--erp-surface);
 }
 
 .kds-column.pending { border-top: 4px solid #94a3b8; }
-.kds-column.in_production { border-top: 4px solid #f97316; }
-.kds-column.ready { border-top: 4px solid #14b8a6; background: #081d25; }
-.kds-column.problem { border-top: 4px solid #ef4444; }
+.kds-column.in_production { border-top: 4px solid var(--erp-warning); }
+.kds-column.ready { border-top: 4px solid var(--erp-primary); background: #081d25; }
+.kds-column.problem { border-top: 4px solid var(--erp-danger); }
 
 .kds-column > header {
   display: flex;
@@ -299,7 +299,7 @@
 
 .kds-column h2 {
   margin: 0;
-  color: #e2e8f0;
+  color: var(--erp-text-primary);
   font-size: 18px;
 }
 
@@ -323,7 +323,7 @@
 }
 
 .kds-ticket.new-alert {
-  border-color: #2dd4bf;
+  border-color: var(--erp-accent);
   box-shadow: 0 0 0 3px rgba(45, 212, 191, .16), 0 18px 40px rgba(45, 212, 191, .12);
   animation: kdsNewTicketPulse 1.2s ease-in-out infinite;
 }
@@ -334,12 +334,12 @@
 }
 
 .kds-ticket.status-ready {
-  border-color: #14b8a6;
-  background: #082f2e;
+  border-color: var(--erp-primary);
+  background: var(--erp-primary-soft);
 }
 
 .kds-ticket.status-problem {
-  border-color: #ef4444;
+  border-color: var(--erp-danger);
 }
 
 .kds-ticket.warning {
@@ -361,7 +361,7 @@
 
 .kds-ticket h3 {
   margin: 0 0 4px;
-  color: #f8fafc;
+  color: var(--erp-text-primary);
   font-size: 22px;
 }
 
@@ -380,7 +380,7 @@
 }
 
 .kds-time {
-  color: #f8fafc;
+  color: var(--erp-text-primary);
   white-space: nowrap;
   padding: 7px 9px;
   border-radius: 9px;
@@ -398,7 +398,7 @@
   padding: 4px 8px;
   border-radius: 99px;
   background: #17263a;
-  color: #cbd5e1;
+  color: var(--erp-text-primary);
   font-size: 12px;
   font-weight: 700;
 }
@@ -416,7 +416,7 @@
 
 .kds-badges .state.pending {
   background: #1e3a8a;
-  color: #dbeafe;
+  color: var(--erp-text-primary);
 }
 
 .kds-badges .state.in_production {
@@ -506,19 +506,19 @@
   display: grid;
   gap: 12px;
   padding: 16px;
-  border: 1px solid #1c2c43;
+  border: 1px solid var(--erp-border);
   border-radius: 14px;
-  background: #0b1426;
+  background: var(--erp-surface);
 }
 
 .kds-history h2 {
   margin: 0;
-  color: #f1f5f9;
+  color: var(--erp-text-primary);
   font-size: 20px;
 }
 
 .kds-history-title span {
-  color: #94a3b8;
+  color: var(--erp-text-secondary);
   font-size: 13px;
 }
 
@@ -538,7 +538,7 @@
 
 .kds-history-card span,
 .kds-history-card small {
-  color: #94a3b8;
+  color: var(--erp-text-secondary);
 }
 
 .kds-modal-backdrop {
@@ -556,15 +556,15 @@
   gap: 13px;
   width: min(470px, 100%);
   padding: 22px;
-  border: 1px solid #334155;
+  border: 1px solid var(--erp-border);
   border-radius: 16px;
-  background: #0f172a;
+  background: var(--erp-surface);
   box-shadow: 0 24px 64px rgba(0, 0, 0, .42);
 }
 
 .kds-modal h2 {
   margin: 0;
-  color: #f8fafc;
+  color: var(--erp-text-primary);
 }
 
 .kds-modal label {
@@ -596,18 +596,18 @@
   gap: 10px;
   max-width: 500px;
   padding: 25px;
-  border: 1px solid #25364d;
+  border: 1px solid var(--erp-border);
   border-radius: 15px;
-  background: #0f172a;
+  background: var(--erp-surface);
 }
 
 .kds-unassigned p {
-  color: #e2e8f0;
+  color: var(--erp-text-primary);
   font-size: 18px;
 }
 
 .kds-unassigned small {
-  color: #94a3b8;
+  color: var(--erp-text-secondary);
 }
 
 @media (max-width: 1320px) {

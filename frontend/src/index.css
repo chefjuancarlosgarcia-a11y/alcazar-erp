@@ -17,6 +17,14 @@
   --erp-accent: var(--erp-accent-color);
   --erp-background: var(--erp-background-color);
   --erp-surface: var(--erp-surface-color);
+  --erp-surface-2: color-mix(in srgb, var(--erp-surface-color) 76%, var(--erp-primary-color) 24%);
+  --erp-border: color-mix(in srgb, var(--erp-primary-color) 14%, var(--erp-surface-color) 86%);
+  --erp-border-subtle: color-mix(in srgb, var(--erp-primary-color) 8%, var(--erp-surface-color) 92%);
+  --erp-primary-soft: color-mix(in srgb, var(--erp-primary-color) 12%, var(--erp-surface-color) 88%);
+  --erp-primary-muted: color-mix(in srgb, var(--erp-primary-color) 14%, transparent);
+  --erp-success-soft: color-mix(in srgb, var(--erp-success-color) 12%, var(--erp-surface-color) 88%);
+  --erp-warning-soft: color-mix(in srgb, var(--erp-warning-color) 14%, var(--erp-surface-color) 86%);
+  --erp-danger-soft: color-mix(in srgb, var(--erp-danger-color) 14%, var(--erp-surface-color) 86%);
   --erp-success: var(--erp-success-color);
   --erp-warning: var(--erp-warning-color);
   --erp-danger: var(--erp-danger-color);
@@ -25,7 +33,7 @@
   --text: var(--erp-text-secondary);
   --text-h: var(--erp-text-primary);
   --bg: var(--erp-background-color);
-  --border: #24344a;
+  --border: var(--erp-border);
   --code-bg: #111827;
   --accent: var(--erp-primary-color);
   --accent-bg: color-mix(in srgb, var(--erp-primary-color) 12%, transparent);
@@ -58,7 +66,7 @@
     --text: var(--erp-text-secondary);
     --text-h: var(--erp-text-primary);
     --bg: var(--erp-background-color);
-    --border: #2e303a;
+    --border: var(--erp-border);
     --code-bg: #1f2028;
     --accent: var(--erp-primary-color);
     --accent-bg: color-mix(in srgb, var(--erp-primary-color) 15%, transparent);
