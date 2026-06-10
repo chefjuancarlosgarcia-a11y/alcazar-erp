@@ -6,11 +6,20 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { BRANDING } from "../branding"
 import {
   getAttendanceMarks,
+  getAttendanceSecurityStatus,
   getAttendanceTerminalProfiles,
+  getOrRegisterAttendanceDevice,
   registerAttendanceMark,
   uploadAttendanceEvidence
 } from "../services/attendanceService"
-import { buildAttendanceDevicePayload } from "../utils/attendanceDevice"
+import {
+  buildAttendanceDevicePayload,
+  formatAttendanceDeviceLabel,
+  getOrCreateAttendanceDeviceId,
+  inferAttendanceDeviceType,
+  resolveAttendanceDeviceName,
+  shortenAttendanceDeviceId
+} from "../utils/attendanceDevice"
 import "./AttendanceTerminal.css"
 
 const MARK_LABELS = {
@@ -38,22 +47,33 @@ function AttendanceTerminal({ kiosk = false }) {
   const [cameraReady, setCameraReady] = useState(false)
   const [cameraError, setCameraError] = useState("")
   const [observation, setObservation] = useState("")
-  const [deviceId] = useState(() => getOrCreateDeviceId())
+  const [deviceId] = useState(() => getOrCreateAttendanceDeviceId())
+  const [registeredDevice, setRegisteredDevice] = useState(null)
+  const [securityStatus, setSecurityStatus] = useState(null)
+  const [securityLoading, setSecurityLoading] = useState(true)
   const [pendingMarkType, setPendingMarkType] = useState("")
   const [photoPhase, setPhotoPhase] = useState("live")
   const [capturedBlob, setCapturedBlob] = useState(null)
   const [previewUrl, setPreviewUrl] = useState("")
 
+  const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : ""
+  const suggestedDeviceName = resolveAttendanceDeviceName(userAgent)
+  const canMark = securityStatus?.can_mark === true
+
   useEffect(() => {
-    refresh()
+    initializeSecurity()
     return () => stopCamera()
   }, [])
 
   useEffect(() => {
-    if (selected) startCamera()
+    if (canMark) refresh()
+  }, [canMark])
+
+  useEffect(() => {
+    if (selected && canMark) startCamera()
     else resetPhotoCapture()
     return () => stopCamera()
-  }, [selected])
+  }, [selected, canMark])
 
   useEffect(() => () => {
     if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current)
@@ -67,7 +87,40 @@ function AttendanceTerminal({ kiosk = false }) {
   const isCheckedIn = lastShiftMark?.mark_type === "entrada"
   const activeMeal = selectedMarks.find((mark) => ["salida_comida", "bano_inicio"].includes(mark.mark_type) && !selectedMarks.some((candidate) => candidate.related_mark_id === mark.id && ["regreso_comida", "bano_regreso"].includes(candidate.mark_type)))
 
+  async function initializeSecurity() {
+    setSecurityLoading(true)
+    setError("")
+    const devicePayload = buildAttendanceDevicePayload("")
+    const registerResult = await getOrRegisterAttendanceDevice({
+      deviceId,
+      deviceName: suggestedDeviceName,
+      userAgent: devicePayload.userAgent,
+      deviceType: inferAttendanceDeviceType(devicePayload.userAgent)
+    })
+    if (registerResult.error) {
+      setError(registerResult.error.message || "No se pudo registrar el dispositivo de marcaje.")
+      setSecurityLoading(false)
+      setLoading(false)
+      return
+    }
+    setRegisteredDevice(registerResult.data)
+
+    const statusResult = await getAttendanceSecurityStatus({
+      deviceId,
+      userAgent: devicePayload.userAgent
+    })
+    if (statusResult.error) {
+      setError(statusResult.error.message || "No se pudo validar la seguridad del dispositivo.")
+      setSecurityLoading(false)
+      setLoading(false)
+      return
+    }
+    setSecurityStatus(statusResult.data || null)
+    setSecurityLoading(false)
+  }
+
   async function refresh() {
+    if (!canMark) return
     setLoading(true)
     const [profilesResult, marksResult] = await Promise.all([
       getAttendanceTerminalProfiles(),
@@ -131,7 +184,7 @@ function AttendanceTerminal({ kiosk = false }) {
     setPreviewUrl("")
     setCapturedBlob(null)
     setPhotoPhase("live")
-    if (selected && !streamRef.current) startCamera()
+    if (selected && canMark && !streamRef.current) startCamera()
   }
 
   function selectMarkType(markType) {
@@ -141,6 +194,10 @@ function AttendanceTerminal({ kiosk = false }) {
   }
 
   async function takePhoto() {
+    if (!canMark) {
+      setError(securityStatus?.message || "Este dispositivo no esta autorizado para marcaje.")
+      return
+    }
     if (!pendingMarkType) {
       setError("Selecciona primero el tipo de marcaje.")
       return
@@ -172,6 +229,10 @@ function AttendanceTerminal({ kiosk = false }) {
   }
 
   async function confirmPhotoAndMark() {
+    if (!canMark) {
+      setError(securityStatus?.message || "Este dispositivo no esta autorizado para marcaje.")
+      return
+    }
     if (!selected || !pendingMarkType || !capturedBlob) {
       setError("Debes tomar y confirmar una foto antes de marcar.")
       return
@@ -199,7 +260,7 @@ function AttendanceTerminal({ kiosk = false }) {
         markType: pendingMarkType,
         photoPath: upload.data.path,
         deviceId,
-        deviceName: devicePayload.deviceName,
+        deviceName: registeredDevice?.device_name || devicePayload.deviceName,
         observation: devicePayload.observation
       })
       if (result.error) throw result.error
@@ -229,6 +290,34 @@ function AttendanceTerminal({ kiosk = false }) {
     setMessage("")
   }
 
+  function renderSecurityGate() {
+    const status = securityStatus?.device_status || registeredDevice?.status || "pending"
+    const title = status === "blocked"
+      ? "Este dispositivo está bloqueado para marcaje."
+      : "Este dispositivo aún no está autorizado para registrar asistencia."
+    const body = status === "blocked"
+      ? "Contacta a Administración si necesitas rehabilitar este equipo."
+      : "Solicita a Administración que autorice esta tablet o terminal desde Recursos Humanos → Dispositivos de marcaje."
+
+    return (
+      <section className="attendance-panel attendance-security-gate">
+        <div className="attendance-security-icon" aria-hidden="true">🔒</div>
+        <h2>{title}</h2>
+        <p>{body}</p>
+        <div className="attendance-security-meta">
+          <div><span>ID del dispositivo</span><strong>{shortenAttendanceDeviceId(deviceId)}</strong></div>
+          <div><span>Nombre sugerido</span><strong>{registeredDevice?.device_name || suggestedDeviceName}</strong></div>
+          <div><span>Tipo detectado</span><strong>{formatAttendanceDeviceLabel(registeredDevice?.user_agent || userAgent)}</strong></div>
+          <div><span>Estado</span><strong>{status === "blocked" ? "Bloqueado" : "Pendiente de autorización"}</strong></div>
+        </div>
+        {securityStatus?.message && <p className="attendance-security-note">{securityStatus.message}</p>}
+        <button type="button" className="attendance-security-retry" onClick={initializeSecurity} disabled={securityLoading}>
+          {securityLoading ? "Verificando..." : "Verificar nuevamente"}
+        </button>
+      </section>
+    )
+  }
+
   return (
     <main className={`attendance-terminal ${kiosk ? "kiosk" : ""}`}>
       <section className="attendance-shell">
@@ -243,11 +332,15 @@ function AttendanceTerminal({ kiosk = false }) {
         {message && <div className="attendance-success">{message}</div>}
         {error && <div className="attendance-error">{error}</div>}
 
-        {!selected ? (
+        {securityLoading ? (
+          <section className="attendance-panel"><p className="attendance-empty">Verificando dispositivo autorizado...</p></section>
+        ) : !canMark ? (
+          renderSecurityGate()
+        ) : !selected ? (
           <section className="attendance-panel">
             <div className="attendance-panel-head">
               <h2>Selecciona tu perfil</h2>
-              <span>Dispositivo {deviceId}</span>
+              <span>Dispositivo {shortenAttendanceDeviceId(deviceId)} · Autorizado</span>
             </div>
             {loading ? <p className="attendance-empty">Cargando colaboradores...</p> : (
               <div className="attendance-employee-grid">
@@ -349,15 +442,6 @@ function normalizeProfile(profile) {
     areaName: profile.area_name || "",
     pinConfigured: profile.pin_configured === true
   }
-}
-
-function getOrCreateDeviceId() {
-  const key = "attendanceKioskDeviceId"
-  const stored = localStorage.getItem(key)
-  if (stored) return stored
-  const created = `kiosk-${Math.random().toString(36).slice(2, 8)}-${Date.now().toString(36)}`
-  localStorage.setItem(key, created)
-  return created
 }
 
 function capturePhotoBlob(video, canvas) {

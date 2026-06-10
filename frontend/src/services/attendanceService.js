@@ -43,7 +43,7 @@ export async function uploadAttendanceEvidence(blob, employeeId) {
   return { data: error ? null : { path }, error }
 }
 
-export function registerAttendanceMark({ employeeId, pin, markType, photoPath, deviceId, deviceName, observation = "" }) {
+export function registerAttendanceMark({ employeeId, pin, markType, photoPath, deviceId, deviceName, observation = "", clientIp = null }) {
   return supabase.rpc("register_attendance_mark", {
     p_employee_id: employeeId,
     p_pin: pin,
@@ -51,7 +51,63 @@ export function registerAttendanceMark({ employeeId, pin, markType, photoPath, d
     p_photo_path: photoPath,
     p_device_id: deviceId,
     p_device_name: deviceName,
-    p_observation: observation || null
+    p_observation: observation || null,
+    p_client_ip: clientIp || null
+  })
+}
+
+export function getOrRegisterAttendanceDevice({ deviceId, deviceName, userAgent, deviceType, clientIp = null }) {
+  return supabase.rpc("get_or_register_attendance_device", {
+    p_device_id: deviceId,
+    p_device_name: deviceName || null,
+    p_user_agent: userAgent || null,
+    p_device_type: deviceType || null,
+    p_client_ip: clientIp || null
+  })
+}
+
+export function getAttendanceSecurityStatus({ deviceId, clientIp = null, userAgent = null }) {
+  return supabase.rpc("get_attendance_security_status", {
+    p_device_id: deviceId,
+    p_client_ip: clientIp || null,
+    p_user_agent: userAgent || null
+  })
+}
+
+export function getAttendanceDevices() {
+  return supabase.rpc("get_attendance_devices")
+}
+
+export function authorizeAttendanceDevice(deviceId, deviceName = "", notes = "") {
+  return supabase.rpc("authorize_attendance_device", {
+    p_device_id: deviceId,
+    p_device_name: deviceName || null,
+    p_notes: notes || null
+  })
+}
+
+export function blockAttendanceDevice(deviceId, notes = "") {
+  return supabase.rpc("block_attendance_device", {
+    p_device_id: deviceId,
+    p_notes: notes || null
+  })
+}
+
+export function updateAttendanceDevice(deviceId, deviceName = "", notes = "") {
+  return supabase.rpc("update_attendance_device", {
+    p_device_id: deviceId,
+    p_device_name: deviceName || null,
+    p_notes: notes || null
+  })
+}
+
+export function getAttendanceSecuritySettings() {
+  return supabase.rpc("get_attendance_security_settings")
+}
+
+export function updateAttendanceSecuritySettings(value) {
+  return supabase.rpc("update_attendance_security_settings", {
+    p_value: value
   })
 }
 

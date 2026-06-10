@@ -107,3 +107,29 @@ export function extractUserObservation(mark = {}) {
   if (!observation) return ""
   return observation.replace(new RegExp(`\\n?${UA_TAG.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}.+$`, "m"), "").trim()
 }
+
+const DEVICE_ID_STORAGE_KEY = "attendanceKioskDeviceId"
+
+export function getOrCreateAttendanceDeviceId() {
+  if (typeof localStorage === "undefined") return `kiosk-${Date.now().toString(36)}`
+  const stored = localStorage.getItem(DEVICE_ID_STORAGE_KEY)
+  if (stored) return stored
+  const created = `kiosk-${Math.random().toString(36).slice(2, 8)}-${Date.now().toString(36)}`
+  localStorage.setItem(DEVICE_ID_STORAGE_KEY, created)
+  return created
+}
+
+export function shortenAttendanceDeviceId(deviceId = "") {
+  const value = String(deviceId || "").trim()
+  if (!value) return "—"
+  if (value.length <= 12) return value
+  return `${value.slice(0, 6)}…${value.slice(-4)}`
+}
+
+export function inferAttendanceDeviceType(userAgent = typeof navigator !== "undefined" ? navigator.userAgent : "") {
+  const label = resolveAttendanceDeviceName(userAgent)
+  if (/celular/i.test(label)) return "mobile"
+  if (/tablet|ipad/i.test(label)) return "tablet"
+  if (/pc|mac/i.test(label)) return "desktop"
+  return "unknown"
+}

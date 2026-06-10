@@ -1,0 +1,154 @@
+.attendance-devices-page .profiles-panel,
+.attendance-devices-settings {
+  border: 1px solid #24344a;
+  border-radius: 16px;
+  background: #0f172a;
+  padding: 18px;
+}
+
+.profiles-panel-head h2 {
+  margin: 0 0 4px;
+  color: #f8fafc;
+}
+
+.attendance-devices-settings-form {
+  display: grid;
+  gap: 14px;
+}
+
+.attendance-devices-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #e2e8f0;
+  font-weight: 700;
+}
+
+.attendance-devices-field {
+  display: grid;
+  gap: 8px;
+  color: #cbd5e1;
+  font-weight: 700;
+}
+
+.attendance-devices-field textarea {
+  width: 100%;
+  min-height: 96px;
+  padding: 12px;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: #101b2d;
+  color: #e2e8f0;
+  font: inherit;
+  box-sizing: border-box;
+}
+
+.attendance-devices-table {
+  display: grid;
+  gap: 10px;
+}
+
+.attendance-devices-table-head,
+.attendance-devices-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.4fr) minmax(90px, .7fr) minmax(100px, .7fr) minmax(150px, 1fr) minmax(130px, .9fr) minmax(220px, 1.2fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.attendance-devices-table-head {
+  padding: 0 4px 8px;
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.attendance-devices-row {
+  padding: 12px;
+  border: 1px solid #24344a;
+  border-radius: 12px;
+  background: #101b2d;
+}
+
+.attendance-devices-name {
+  display: grid;
+  gap: 4px;
+}
+
+.attendance-devices-name input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0b1628;
+  color: #f8fafc;
+  font: inherit;
+  box-sizing: border-box;
+}
+
+.attendance-devices-name small {
+  color: #94a3b8;
+}
+
+.attendance-devices-row code {
+  color: #7dd3fc;
+  font-size: 12px;
+}
+
+.attendance-device-status {
+  display: inline-flex;
+  width: max-content;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.attendance-device-status.pending {
+  background: #45310b;
+  color: #fde68a;
+}
+
+.attendance-device-status.authorized {
+  background: #123427;
+  color: #86efac;
+}
+
+.attendance-device-status.blocked {
+  background: #441620;
+  color: #fca5a5;
+}
+
+.attendance-devices-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.profiles-success {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #123427;
+  color: #86efac;
+}
+
+.profiles-error {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #441620;
+  color: #fca5a5;
+}
+
+@media (max-width: 1080px) {
+  .attendance-devices-table-head {
+    display: none;
+  }
+
+  .attendance-devices-row {
+    grid-template-columns: 1fr;
+  }
+}

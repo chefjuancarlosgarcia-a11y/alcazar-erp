@@ -2,11 +2,13 @@
  * Registro de asistencia (flujo oficial):
  * - /hr?section=asistencia → AttendanceTerminal.jsx
  * - /kiosk → AttendanceTerminal.jsx (modo kiosco)
+ * - /hr?section=dispositivosMarcaje → AttendanceDevicesManagement.jsx
  * Reportes: /hr?section=reportesAsistencia → LegacyInventoryApp (solo lectura).
  */
 import { lazy, Suspense } from "react"
 import ProfileManagement from "./ProfileManagement"
 import ScheduleManagement from "./ScheduleManagement"
+import AttendanceDevicesManagement from "./AttendanceDevicesManagement"
 import AttendanceTerminal from "../components/AttendanceTerminal"
 import { useLocation } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
@@ -33,6 +35,10 @@ function HR() {
 
   if (selectedSection === "asistencia") {
     return <AttendanceTerminal />
+  }
+
+  if (selectedSection === "dispositivosMarcaje") {
+    return <AttendanceDevicesManagement />
   }
 
   return <Suspense fallback={<p>Cargando módulo...</p>}><LegacyInventoryApp initialSeccion={selectedSection} hideLegacyNavigation focusEmployeeId={profileId} editFocusedEmployee={editProfile} /></Suspense>
