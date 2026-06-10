@@ -354,6 +354,43 @@ export function formatOperationalTime(value) {
   return `${String(displayHour).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")} ${period}`
 }
 
+export function buildDueAtIso(dueDate, dueTime) {
+  if (!dueDate || !dueTime) return null
+  const parsed = new Date(`${dueDate}T${dueTime}:00`)
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString()
+}
+
+export function resolveTaskDueAt(task) {
+  if (task?.due_at) {
+    const parsed = new Date(task.due_at)
+    return Number.isNaN(parsed.getTime()) ? null : parsed
+  }
+  const dueDate = task?.dueDate || task?.date
+  const dueTime = task?.scheduledEnd
+  if (!dueDate || !dueTime) return null
+  const parsed = new Date(`${dueDate}T${dueTime}:00`)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
+export function formatTaskDueAt(task) {
+  const dueAt = resolveTaskDueAt(task)
+  if (!dueAt) return "Sin limite"
+  return dueAt.toLocaleString("es-GT", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  })
+}
+
+export function isTaskOverdue(task, reference = new Date()) {
+  if (["completed", "cancelled"].includes(task?.status)) return false
+  const dueAt = resolveTaskDueAt(task)
+  return Boolean(dueAt && dueAt.getTime() < reference.getTime())
+}
+
 export function generateDailyTaskSchedule(assignedTasks, shift) {
   const priorityOrder = { critical: 0, high: 1, medium: 2, low: 3 }
   let cursor = minutesFromTime(shift.start)
@@ -364,7 +401,15 @@ export function generateDailyTaskSchedule(assignedTasks, shift) {
       const start = task.scheduledStart ? minutesFromTime(task.scheduledStart) : Math.max(cursor, recommended || cursor)
       const end = start + Number(task.estimatedMinutes || 0)
       cursor = end
-      return { ...task, scheduledStart: timeFromMinutes(start), scheduledEnd: timeFromMinutes(end) }
+      const scheduledEnd = timeFromMinutes(end)
+      const dueDate = task.dueDate || task.date
+      return {
+        ...task,
+        scheduledStart: timeFromMinutes(start),
+        scheduledEnd,
+        dueDate,
+        due_at: task.due_at || buildDueAtIso(dueDate, scheduledEnd)
+      }
     })
 }
 
@@ -398,9 +443,9 @@ export function markTaskNotificationsRead(userId) {
 }
 
 export function withComputedTaskStatus(task) {
-  if (["completed", "cancelled"].includes(task.status) || !task.date || !task.scheduledEnd) return task
-  const dueAt = new Date(`${task.date}T${task.scheduledEnd}:00`)
-  return dueAt.getTime() < Date.now() ? { ...task, status: "late" } : task
+  if (["completed", "cancelled"].includes(task.status)) return task
+  if (!resolveTaskDueAt(task)) return task
+  return isTaskOverdue(task) ? { ...task, status: "late" } : task
 }
 
 export function updateTaskPerformance(tasks) {

@@ -47,6 +47,10 @@ import {
   assignTasksManually,
   createTaskNotifications,
   formatOperationalTime,
+  formatTaskDueAt,
+  buildDueAtIso,
+  resolveTaskDueAt,
+  isTaskOverdue,
   getCurrentUserTaskId,
   loadAssignedTasks,
   loadOperationalEmployees,
@@ -248,18 +252,24 @@ function resolveTaskShiftId(startTime) {
   return match?.id || OPERATIONAL_SHIFTS[0]?.id || "opening"
 }
 
-function validateManualTaskAssignment({ assigneeId, date, startTime, dueTime }, actorRole) {
+function validateManualTaskAssignment({ assigneeId, date, startTime, dueDate, dueTime, requiresDeadline = true }, actorRole) {
   if (!assigneeId) return "Selecciona un colaborador para continuar."
   if (!date) return "Selecciona la fecha de ejecucion."
   if (!startTime) return "Selecciona la hora de inicio."
-  if (!dueTime) return "Selecciona la hora limite."
-  if (toDateTime(date, dueTime).getTime() < toDateTime(date, startTime).getTime()) return "La hora limite no puede ser anterior a la hora de inicio."
+  if (requiresDeadline && !dueDate) return "Selecciona la fecha limite."
+  if (requiresDeadline && !dueTime) return "Selecciona la hora limite."
+  const startAt = toDateTime(date, startTime)
+  const dueAt = toDateTime(dueDate, dueTime)
+  if (dueAt.getTime() < startAt.getTime()) return "La fecha y hora limite no puede ser anterior al inicio."
+  if (dueAt.getTime() < Date.now()) return "La fecha y hora limite no puede ser anterior al momento actual."
   if (isPastTaskSchedule(date, startTime, actorRole)) return "No puedes asignar tareas en el pasado con tu rol actual."
   return ""
 }
 
 function buildManualTaskRecord(template, assigneeId, assignment, assignedBy) {
   const shiftId = resolveTaskShiftId(assignment.startTime)
+  const dueDate = assignment.dueDate || assignment.date
+  const due_at = buildDueAtIso(dueDate, assignment.dueTime)
   return {
     id: `task-${Date.now()}-${Math.floor(Math.random() * 100000)}`,
     templateId: template.id,
@@ -274,6 +284,8 @@ function buildManualTaskRecord(template, assigneeId, assignment, assignedBy) {
     shiftId,
     scheduledStart: assignment.startTime,
     scheduledEnd: assignment.dueTime,
+    dueDate,
+    due_at,
     estimatedMinutes: Number(template.estimatedMinutes) || 0,
     recommendedTimeBlock: template.recommendedTimeBlock || "",
     priority: template.priority,
@@ -487,7 +499,8 @@ function Tasks() {
     }
     const existing = loadTaskNotifications()
     currentTasks.filter((task) => !["completed", "cancelled"].includes(task.status)).forEach((task) => {
-      const dueAt = new Date(`${task.date}T${task.scheduledEnd || "23:59"}:00`).getTime()
+      const dueAt = resolveTaskDueAt(task)?.getTime()
+      if (!dueAt) return
       const minutesUntilDue = Math.round((dueAt - Date.now()) / 60000)
       const type = task.status === "late" ? "task_late" : minutesUntilDue >= 0 && minutesUntilDue <= 30 ? "task_due_soon" : ""
       if (!type) return
@@ -739,6 +752,7 @@ function TaskAssignWizard({ template, user, employees, areas, onClose, onSubmit 
   const actorRole = normalizeRole(user?.role)
   const [step, setStep] = useState(1)
   const [date, setDate] = useState(TODAY)
+  const [dueDate, setDueDate] = useState(TODAY)
   const [startTime, setStartTime] = useState(template?.recommendedTimeBlock || "08:00")
   const [dueTime, setDueTime] = useState(addMinutesToTime(template?.recommendedTimeBlock || "08:00", Number(template?.estimatedMinutes) || 30))
   const [error, setError] = useState("")
@@ -755,7 +769,8 @@ function TaskAssignWizard({ template, user, employees, areas, onClose, onSubmit 
   )
   const [assigneeId, setAssigneeId] = useState("")
   const selectedEmployee = candidates.find((employee) => employee.taskId === assigneeId) || null
-  const validationError = validateManualTaskAssignment({ assigneeId, date, startTime, dueTime }, actorRole)
+  const validationError = validateManualTaskAssignment({ assigneeId, date, startTime, dueDate, dueTime }, actorRole)
+  const dueAtPreview = buildDueAtIso(dueDate, dueTime)
   const areaName = areas.find((area) => area.id === template.areaId)?.name || template.areaName || "Sin area"
 
   useEffect(() => {
@@ -813,6 +828,7 @@ function TaskAssignWizard({ template, user, employees, areas, onClose, onSubmit 
         assigneeId: selectedEmployee.taskId,
         assigneeName: selectedEmployee.name,
         date,
+        dueDate,
         startTime,
         dueTime
       })
@@ -902,12 +918,19 @@ function TaskAssignWizard({ template, user, employees, areas, onClose, onSubmit 
           <div className="tasks-wizard-body">
             <div className="tasks-form-grid">
               <Field label={<><span aria-hidden="true">📅</span> Fecha de ejecucion</>} hint={["admin", "gerente_general"].includes(actorRole) ? "Puedes asignar fechas pasadas si hace falta corregir una carga operativa." : "No se permiten fechas pasadas con tu rol actual."}>
-                <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+                <input type="date" value={date} onChange={(event) => {
+                  const nextDate = event.target.value
+                  setDate(nextDate)
+                  if (!dueDate || dueDate < nextDate) setDueDate(nextDate)
+                }} />
               </Field>
               <Field label={<><span aria-hidden="true">🕒</span> Hora de inicio sugerida</>}>
                 <input type="time" value={startTime} onChange={(event) => setStartTime(event.target.value)} />
               </Field>
-              <Field label={<><span aria-hidden="true">🕒</span> Hora limite</>}>
+              <Field label={<><span aria-hidden="true">📅</span> Fecha limite</>} hint="Obligatoria. Define cuando debe quedar completada la tarea.">
+                <input type="date" value={dueDate} min={date} onChange={(event) => setDueDate(event.target.value)} />
+              </Field>
+              <Field label={<><span aria-hidden="true">🕒</span> Hora limite</>} hint="No puede ser anterior al momento actual.">
                 <input type="time" value={dueTime} onChange={(event) => setDueTime(event.target.value)} />
               </Field>
             </div>
@@ -915,6 +938,12 @@ function TaskAssignWizard({ template, user, employees, areas, onClose, onSubmit 
               <span>Turno sugerido</span>
               <strong>{OPERATIONAL_SHIFTS.find((shift) => shift.id === resolveTaskShiftId(startTime))?.name || "Manual"}</strong>
             </div>
+            {dueAtPreview && (
+              <div className="tasks-inline-summary">
+                <span>Limite programado</span>
+                <strong>{formatTaskDueAt({ due_at: dueAtPreview })}</strong>
+              </div>
+            )}
             {validationError && <p className="tasks-warning">{validationError}</p>}
             {assigneeId && availability[baseCandidates.find((employee) => employee.taskId === assigneeId)?.profileId] && (
               <p className="tasks-warning">
@@ -930,9 +959,9 @@ function TaskAssignWizard({ template, user, employees, areas, onClose, onSubmit 
             <div className="tasks-confirm-list">
               <div><span>Tarea</span><strong>{template.title}</strong></div>
               <div><span>Asignado a</span><strong>{selectedEmployee?.name || "Sin seleccionar"}</strong></div>
-              <div><span>Fecha</span><strong>{formatTaskDate(date)}</strong></div>
+              <div><span>Fecha de ejecucion</span><strong>{formatTaskDate(date)}</strong></div>
               <div><span>Hora de inicio</span><strong>{formatOperationalTime(startTime)}</strong></div>
-              <div><span>Hora limite</span><strong>{formatOperationalTime(dueTime)}</strong></div>
+              <div><span>Limite</span><strong>{dueAtPreview ? formatTaskDueAt({ due_at: dueAtPreview }) : "Sin definir"}</strong></div>
               <div><span>Prioridad</span><strong>{getTaskOptionLabel(TASK_PRIORITIES, template.priority, template.priority)}</strong></div>
             </div>
             {validationError && <p className="tasks-warning">{validationError}</p>}
@@ -1149,8 +1178,8 @@ function OperationalCalendar({ tasks, employees, areas }) {
       <div className="tasks-timeline">
         {shown.map((task) => (
           <article className={`tasks-timeline-row ${task.status}`} key={task.id}>
-            <time>{formatOperationalTime(task.scheduledStart)}<small>{formatOperationalTime(task.scheduledEnd)}</small></time>
-            <div><strong>{task.title}</strong><span>{task.areaName} · {task.estimatedMinutes} min</span></div>
+            <time>{formatOperationalTime(task.scheduledStart)}<small>{formatTaskDueAt(task)}</small></time>
+            <div><strong>{task.title}</strong><span>{task.areaName} · {task.estimatedMinutes} min · Limite: {formatTaskDueAt(task)}</span></div>
             <span>{employeeNames(task.assignedTo, employees) || "Sin asignar"}</span>
             <Badge type="status" value={task.status} />
             <Badge type="priority" value={task.priority} />
@@ -1223,7 +1252,13 @@ function MyTasks({ initialTaskId = "", tasks, user, allTasks, persistAllTasks })
               <h3><Badge type="status" value={status} /></h3>
               {tasks.filter((task) => task.status === status).map((task) => (
                 <button type="button" className="tasks-own-card" key={task.id} onClick={() => { setSelectedTaskId(task.id); setNotes(task.completionNotes || "") }}>
-                  <strong>{task.title}</strong><small>{task.date} · {task.areaName} · {task.estimatedMinutes} min</small><Badge type="priority" value={task.priority} />
+                  <strong>{task.title}</strong>
+                  <small>{task.date} · {task.areaName} · {task.estimatedMinutes} min</small>
+                  <small className="tasks-own-deadline">Limite: {formatTaskDueAt(task)}</small>
+                  <div className="tasks-own-card-badges">
+                    {task.status === "late" && <Badge type="status" value="late" />}
+                    <Badge type="priority" value={task.priority} />
+                  </div>
                 </button>
               ))}
             </div>
@@ -1234,7 +1269,12 @@ function MyTasks({ initialTaskId = "", tasks, user, allTasks, persistAllTasks })
         <article className="tasks-panel tasks-detail">
           <div className="tasks-panel-title"><h2>{selectedTask.title}</h2><button type="button" onClick={() => setSelectedTaskId("")}>Cerrar</button></div>
           <p>{selectedTask.description}</p>
-          <div className="tasks-card-badges"><Badge type="status" value={selectedTask.status} /><Badge type="priority" value={selectedTask.priority} /></div>
+          <div className="tasks-card-badges">
+            <Badge type="status" value={selectedTask.status} />
+            <Badge type="priority" value={selectedTask.priority} />
+            {selectedTask.status === "late" && <Badge type="status" value="late" />}
+          </div>
+          <p className="tasks-muted">Limite: {formatTaskDueAt(selectedTask)}</p>
           {selectedTask.status === "pending" && <button className="tasks-primary" type="button" onClick={() => start(selectedTask)}>Iniciar tarea</button>}
           <h3>Checklist</h3>
           {(selectedTask.checklistItems || []).map((item) => (
@@ -2914,7 +2954,18 @@ function employeeNames(ids = [], employees) {
 }
 
 function CompactTask({ task, employees }) {
-  return <div className="tasks-compact"><div><strong>{task.title}</strong><span>{formatOperationalTime(task.scheduledStart)} · {employeeNames(task.assignedTo, employees) || "Sin asignar"}</span></div><Badge type="priority" value={task.priority} /></div>
+  return (
+    <div className="tasks-compact">
+      <div>
+        <strong>{task.title}</strong>
+        <span>{formatOperationalTime(task.scheduledStart)} · {employeeNames(task.assignedTo, employees) || "Sin asignar"} · Limite: {formatTaskDueAt(task)}</span>
+      </div>
+      <div className="tasks-compact-badges">
+        {task.status === "late" && <Badge type="status" value="late" />}
+        <Badge type="priority" value={task.priority} />
+      </div>
+    </div>
+  )
 }
 
 function Badge({ type, value }) {

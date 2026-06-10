@@ -576,6 +576,7 @@
 .tasks-compact {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   gap: 10px;
   padding: 11px;
   border-radius: 9px;
@@ -652,6 +653,18 @@
 
 .tasks-own-card small {
   color: #94a3b8;
+}
+
+.tasks-own-deadline {
+  color: #cbd5e1 !important;
+  font-weight: 700;
+}
+
+.tasks-own-card-badges,
+.tasks-compact-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .tasks-detail {
