@@ -915,38 +915,63 @@ function TaskAssignWizard({ template, user, employees, areas, onClose, onSubmit 
         )}
 
         {step === 3 && (
-          <div className="tasks-wizard-body">
-            <div className="tasks-form-grid">
-              <Field label={<><span aria-hidden="true">📅</span> Fecha de ejecucion</>} hint={["admin", "gerente_general"].includes(actorRole) ? "Puedes asignar fechas pasadas si hace falta corregir una carga operativa." : "No se permiten fechas pasadas con tu rol actual."}>
-                <input type="date" value={date} onChange={(event) => {
-                  const nextDate = event.target.value
-                  setDate(nextDate)
-                  if (!dueDate || dueDate < nextDate) setDueDate(nextDate)
-                }} />
-              </Field>
-              <Field label={<><span aria-hidden="true">🕒</span> Hora de inicio sugerida</>}>
-                <input type="time" value={startTime} onChange={(event) => setStartTime(event.target.value)} />
-              </Field>
-              <Field label={<><span aria-hidden="true">📅</span> Fecha limite</>} hint="Obligatoria. Define cuando debe quedar completada la tarea.">
-                <input type="date" value={dueDate} min={date} onChange={(event) => setDueDate(event.target.value)} />
-              </Field>
-              <Field label={<><span aria-hidden="true">🕒</span> Hora limite</>} hint="No puede ser anterior al momento actual.">
-                <input type="time" value={dueTime} onChange={(event) => setDueTime(event.target.value)} />
-              </Field>
-            </div>
-            <div className="tasks-inline-summary">
-              <span>Turno sugerido</span>
-              <strong>{OPERATIONAL_SHIFTS.find((shift) => shift.id === resolveTaskShiftId(startTime))?.name || "Manual"}</strong>
-            </div>
-            {dueAtPreview && (
-              <div className="tasks-inline-summary">
-                <span>Limite programado</span>
-                <strong>{formatTaskDueAt({ due_at: dueAtPreview })}</strong>
+          <div className="tasks-wizard-body tasks-wizard-schedule">
+            <section className="tasks-wizard-schedule-section">
+              <header className="tasks-wizard-schedule-heading">
+                <span className="tasks-wizard-schedule-icon" aria-hidden="true">▶</span>
+                <div>
+                  <h3>Ejecucion</h3>
+                  <p>Cuando debe iniciarse la tarea.</p>
+                </div>
+              </header>
+              <div className="tasks-wizard-schedule-grid">
+                <Field label="Fecha de ejecucion" hint={["admin", "gerente_general"].includes(actorRole) ? "Admin puede usar fechas pasadas para corregir cargas." : "Tu rol no permite fechas pasadas."}>
+                  <input type="date" className="tasks-schedule-input" value={date} onChange={(event) => {
+                    const nextDate = event.target.value
+                    setDate(nextDate)
+                    if (!dueDate || dueDate < nextDate) setDueDate(nextDate)
+                  }} />
+                </Field>
+                <Field label="Hora de inicio sugerida" hint="Hora estimada para comenzar.">
+                  <input type="time" className="tasks-schedule-input" value={startTime} onChange={(event) => setStartTime(event.target.value)} />
+                </Field>
               </div>
-            )}
-            {validationError && <p className="tasks-warning">{validationError}</p>}
+            </section>
+
+            <section className="tasks-wizard-schedule-section">
+              <header className="tasks-wizard-schedule-heading">
+                <span className="tasks-wizard-schedule-icon deadline" aria-hidden="true">⏱</span>
+                <div>
+                  <h3>Fecha limite</h3>
+                  <p>Cuando debe quedar completada la tarea.</p>
+                </div>
+              </header>
+              <div className="tasks-wizard-schedule-grid">
+                <Field label="Fecha limite" hint="Obligatoria. No puede ser anterior a la ejecucion.">
+                  <input type="date" className="tasks-schedule-input" value={dueDate} min={date} onChange={(event) => setDueDate(event.target.value)} />
+                </Field>
+                <Field label="Hora limite" hint="Debe ser posterior al momento actual.">
+                  <input type="time" className="tasks-schedule-input" value={dueTime} onChange={(event) => setDueTime(event.target.value)} />
+                </Field>
+              </div>
+            </section>
+
+            <div className="tasks-wizard-summary-row">
+              <div className="tasks-inline-summary">
+                <span>Turno sugerido</span>
+                <strong>{OPERATIONAL_SHIFTS.find((shift) => shift.id === resolveTaskShiftId(startTime))?.name || "Manual"}</strong>
+              </div>
+              {dueAtPreview && (
+                <div className="tasks-inline-summary highlight">
+                  <span>Limite programado</span>
+                  <strong>{formatTaskDueAt({ due_at: dueAtPreview })}</strong>
+                </div>
+              )}
+            </div>
+
+            {validationError && <p className="tasks-warning tasks-wizard-schedule-alert">{validationError}</p>}
             {assigneeId && availability[baseCandidates.find((employee) => employee.taskId === assigneeId)?.profileId] && (
-              <p className="tasks-warning">
+              <p className="tasks-warning tasks-wizard-schedule-alert">
                 El colaborador seleccionado no esta disponible en esta fecha: {availability[baseCandidates.find((employee) => employee.taskId === assigneeId)?.profileId]}.
               </p>
             )}

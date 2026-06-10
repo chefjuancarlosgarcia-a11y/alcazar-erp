@@ -485,6 +485,102 @@
   align-items: center;
 }
 
+.tasks-wizard-schedule {
+  gap: 14px;
+}
+
+.tasks-wizard-schedule-section {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #24354a;
+  border-radius: 14px;
+  background: #0d1628;
+}
+
+.tasks-wizard-schedule-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.tasks-wizard-schedule-heading h3 {
+  margin: 0 0 2px;
+  color: #f8fafc;
+  font-size: 15px;
+}
+
+.tasks-wizard-schedule-heading p {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.tasks-wizard-schedule-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: #123454;
+  color: #7dd3fc;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.tasks-wizard-schedule-icon.deadline {
+  background: #3b2f14;
+  color: #fde68a;
+}
+
+.tasks-wizard-schedule-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.tasks-wizard-schedule-grid .tasks-field {
+  grid-template-rows: auto auto 1fr;
+  align-content: start;
+  min-height: 108px;
+}
+
+.tasks-wizard-schedule-grid .tasks-field-hint {
+  min-height: 32px;
+  line-height: 1.35;
+}
+
+.tasks-schedule-input,
+.tasks-wizard-schedule-grid .tasks-field input {
+  min-height: 44px;
+  height: 44px;
+}
+
+.tasks-wizard-summary-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.tasks-wizard-summary-row .tasks-inline-summary {
+  min-height: 56px;
+}
+
+.tasks-inline-summary.highlight {
+  border-color: rgba(20, 184, 166, 0.35);
+  background: rgba(15, 118, 110, 0.12);
+}
+
+.tasks-inline-summary.highlight strong {
+  color: #5eead4;
+}
+
+.tasks-wizard-schedule-alert {
+  margin: 0;
+}
+
 .tasks-assignee-card {
   max-width: 340px;
 }
@@ -1800,8 +1896,14 @@
 
   .tasks-wizard-steps,
   .tasks-summary-grid,
-  .tasks-confirm-list {
+  .tasks-confirm-list,
+  .tasks-wizard-schedule-grid,
+  .tasks-wizard-summary-row {
     grid-template-columns: 1fr;
+  }
+
+  .tasks-wizard-schedule-grid .tasks-field {
+    min-height: 0;
   }
 
   .tasks-modal {
