@@ -15,8 +15,11 @@ export function parseUserAgentToFriendly(userAgent = "") {
 }
 
 export function looksLikeUserAgent(value = "") {
-  const raw = String(value || "")
-  return /Mozilla\/|AppleWebKit|Chrome\/|Safari\/|Android|Windows NT/i.test(raw)
+  const raw = String(value || "").trim()
+  if (/^(Tablet \/ Android|Celular \/ Android|PC \/ (Windows|Linux)|iPhone|iPad|Mac|Dispositivo desconocido)$/i.test(raw)) {
+    return false
+  }
+  return /Mozilla\/|AppleWebKit|KHTML|Chrome\/|Safari\/|Windows NT|Macintosh|; Android/i.test(raw)
 }
 
 export function formatAttendanceDeviceLabel(deviceNameOrUa = "") {
@@ -24,7 +27,37 @@ export function formatAttendanceDeviceLabel(deviceNameOrUa = "") {
   if (!raw) return "Dispositivo desconocido"
   if (looksLikeUserAgent(raw)) return parseUserAgentToFriendly(raw)
   if (/^(Tablet|Celular|PC|iPhone|iPad|Mac|Dispositivo)/i.test(raw)) return raw
+  if (raw.length > 60 && /WebKit|Gecko|Mobile|Windows NT|Macintosh/i.test(raw)) {
+    return parseUserAgentToFriendly(raw)
+  }
   return raw
+}
+
+export function formatAttendanceDevice(record = {}) {
+  for (const field of [record.device_name, record.registradoPor, record.dispositivoLabel]) {
+    const value = String(field || "").trim()
+    if (!value) continue
+    const label = formatAttendanceDeviceLabel(value)
+    if (!looksLikeUserAgent(label)) return label
+  }
+
+  const ua = extractStoredUserAgent(record)
+  if (ua) {
+    const label = formatAttendanceDeviceLabel(ua)
+    if (!looksLikeUserAgent(label)) return label
+  }
+
+  return "Dispositivo desconocido"
+}
+
+export function resolveAttendanceUserAgent(record = {}) {
+  const fromObservation = extractStoredUserAgent(record)
+  if (fromObservation) return fromObservation
+  const deviceName = String(record.device_name || record.registradoPor || "").trim()
+  if (looksLikeUserAgent(deviceName)) return deviceName
+  const cachedLabel = String(record.dispositivoLabel || "").trim()
+  if (looksLikeUserAgent(cachedLabel)) return cachedLabel
+  return ""
 }
 
 export function buildAttendanceDevicePayload(userObservation = "") {

@@ -26,9 +26,9 @@ import {
   getAttendanceTerminalProfiles
 } from "../services/attendanceService"
 import {
-  extractStoredUserAgent,
   extractUserObservation,
-  formatAttendanceDeviceLabel
+  formatAttendanceDevice,
+  resolveAttendanceUserAgent
 } from "../utils/attendanceDevice"
 import {
   createArea as createSupabaseArea,
@@ -1325,10 +1325,10 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
           tipo: mark.mark_type,
           estado: mark.device_alert ? "Dispositivo no autorizado" : "válido",
           registradoPor: mark.device_name,
-          dispositivoLabel: formatAttendanceDeviceLabel(mark.device_name),
+          dispositivoLabel: formatAttendanceDevice(mark),
           observacion: mark.observation || "",
           notas: extractUserObservation(mark),
-          userAgent: extractStoredUserAgent(mark),
+          userAgent: resolveAttendanceUserAgent(mark),
           fotoMarcaje: mark.photo_url,
           deviceId: mark.device_id,
           dispositivoNoAutorizado: mark.device_alert,
@@ -7669,7 +7669,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
                           <td style={attendanceTdStyle}>{movimiento.hora}</td>
                           <td style={attendanceTdStyle}>{movimiento.colaboradorNombre}</td>
                           <td style={attendanceTdStyle}>{getAttendanceMarkLabel(movimiento.tipo)}</td>
-                          <td style={attendanceTdStyle}>{movimiento.dispositivoLabel || formatAttendanceDeviceLabel(movimiento.registradoPor)}</td>
+                          <td style={attendanceTdStyle}>{formatAttendanceDevice(movimiento)}</td>
                           <td style={attendanceTdStyle}>{movimiento.fotoMarcaje ? <button type="button" onClick={() => setAsistenciaFotoAmpliada(movimiento.fotoMarcaje)} style={attendancePhotoButtonStyle} title="Ver foto ampliada"><img src={movimiento.fotoMarcaje} alt="Marcaje" style={attendancePhotoThumbStyle} /></button> : "-"}</td>
                           <td style={attendanceTdStyle}>
                             <button type="button" onClick={() => setAsistenciaDetalleMarcaje(movimiento)} style={attendanceDetailButtonStyle}>Ver</button>
@@ -7689,13 +7689,13 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
                       <div><strong>Hora</strong><span>{asistenciaDetalleMarcaje.hora}</span></div>
                       <div><strong>Colaborador</strong><span>{asistenciaDetalleMarcaje.colaboradorNombre}</span></div>
                       <div><strong>Movimiento</strong><span>{getAttendanceMarkLabel(asistenciaDetalleMarcaje.tipo)}</span></div>
-                      <div><strong>Dispositivo</strong><span>{asistenciaDetalleMarcaje.dispositivoLabel || formatAttendanceDeviceLabel(asistenciaDetalleMarcaje.registradoPor)}</span></div>
+                      <div><strong>Dispositivo</strong><span>{formatAttendanceDevice(asistenciaDetalleMarcaje)}</span></div>
                       <div><strong>Estado</strong><span>{asistenciaDetalleMarcaje.dispositivoNoAutorizado ? "Dispositivo no autorizado" : asistenciaDetalleMarcaje.estado}</span></div>
                       {asistenciaDetalleMarcaje.notas ? <div style={{ gridColumn: "1 / -1" }}><strong>Notas</strong><span>{asistenciaDetalleMarcaje.notas}</span></div> : null}
-                      {asistenciaDetalleMarcaje.userAgent ? (
+                      {resolveAttendanceUserAgent(asistenciaDetalleMarcaje) ? (
                         <div style={{ gridColumn: "1 / -1" }}>
                           <strong>User agent (auditoría)</strong>
-                          <span style={attendanceUserAgentStyle}>{asistenciaDetalleMarcaje.userAgent}</span>
+                          <span style={attendanceUserAgentStyle}>{resolveAttendanceUserAgent(asistenciaDetalleMarcaje)}</span>
                         </div>
                       ) : null}
                     </div>
