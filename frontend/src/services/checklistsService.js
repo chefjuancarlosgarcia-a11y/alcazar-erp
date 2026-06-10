@@ -79,7 +79,7 @@ function templatePayload(payload) {
     recurrence_rule: recurrence.recurrence_rule,
     skip_non_work_days: payload.skip_non_work_days !== false,
     auto_generate: Boolean(payload.auto_generate),
-    requires_approval: payload.requires_approval !== false
+    requires_approval: false
   }
 }
 
@@ -132,7 +132,7 @@ function requestPayload(payload, items) {
     recurrence_rule: recurrence.recurrence_rule,
     skip_non_work_days: payload.skip_non_work_days !== false,
     auto_generate: Boolean(payload.auto_generate),
-    requires_approval: payload.requires_approval !== false,
+    requires_approval: false,
     items_snapshot: (items || []).map((item, index) => ({
       item_order: index,
       title: item.title?.trim(),
@@ -362,6 +362,23 @@ export function deactivateChecklistTemplate(id) {
     .single()
 }
 
+export function reactivateChecklistTemplate(id) {
+  return supabase
+    .from("checklist_templates")
+    .update({ status: "active" })
+    .eq("id", id)
+    .select(TEMPLATE_SELECT)
+    .single()
+}
+
+export async function notifyOverdueChecklistRuns() {
+  const result = await supabase.rpc("notify_overdue_checklist_runs")
+  if (!result.error && Number(result.data?.notified_count || 0) > 0) {
+    window.dispatchEvent(new CustomEvent("notifications-updated"))
+  }
+  return result
+}
+
 export async function deleteChecklistTemplate(id) {
   const { count, error: countError } = await supabase
     .from("checklist_runs")
@@ -400,12 +417,13 @@ export async function createChecklistRunFromTemplate(templateId, assignmentPaylo
     p_notes: assignmentPayload.notes?.trim() || null
   })
   if (error) return { data: null, error }
-  if (assignmentPayload.area || assignmentPayload.assigned_role) {
+  if (assignmentPayload.area || assignmentPayload.assigned_role || assignmentPayload.due_time) {
     const { error: updateError } = await supabase
       .from("checklist_runs")
       .update({
         area: assignmentPayload.area || run.area || null,
-        assigned_role: assignmentPayload.assigned_role || run.assigned_role || null
+        assigned_role: assignmentPayload.assigned_role || run.assigned_role || null,
+        due_time: assignmentPayload.due_time || run.due_time || null
       })
       .eq("id", run.id)
     if (updateError) return { data: null, error: updateError }
