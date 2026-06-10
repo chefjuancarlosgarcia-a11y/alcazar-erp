@@ -12,6 +12,7 @@ function activeTemplateItems(items) {
 }
 const RUN_SELECT = "*, checklist_templates(title, description, frequency, shift_context), checklist_run_items(*)"
 const INCIDENT_SELECT = "*, checklist_runs(run_date, area, checklist_templates(title)), checklist_run_items(title, response_type, checked, response_text, response_number, photo_url, comment), profiles!checklist_incidents_reported_by_fkey(full_name, username)"
+const MANAGEMENT_ALERT_SELECT = "*, checklist_runs(run_date, area, checklist_templates(title)), sender:sender_profile_id(full_name, username)"
 const RRULE_DAY_TO_ISO = { MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6, SU: 7 }
 const ISO_TO_RRULE_DAY = { 1: "MO", 2: "TU", 3: "WE", 4: "TH", 5: "FR", 6: "SA", 7: "SU" }
 
@@ -456,6 +457,35 @@ export async function updateChecklistIncidentStatus(id, status, resolutionNotes 
     p_resolution_notes: resolutionNotes || null
   })
   window.dispatchEvent(new CustomEvent("notifications-updated"))
+  return result
+}
+
+export async function createChecklistManagementAlert(runId, priority, message) {
+  const result = await supabase.rpc("create_checklist_management_alert", {
+    p_checklist_run_id: runId,
+    p_priority: priority,
+    p_message: message
+  })
+  if (!result.error) {
+    window.dispatchEvent(new CustomEvent("notifications-updated"))
+  }
+  return result
+}
+
+export async function getChecklistManagementAlerts(filters = {}) {
+  let query = supabase.from("checklist_management_alerts").select(MANAGEMENT_ALERT_SELECT)
+  if (filters.status) query = query.eq("status", filters.status)
+  if (filters.priority) query = query.eq("priority", filters.priority)
+  const { data, error } = await query.order("created_at", { ascending: false })
+  return { data: data || [], error }
+}
+
+export async function updateChecklistManagementAlertStatus(id, status, resolutionNotes = "") {
+  const result = await supabase.rpc("update_checklist_management_alert_status", {
+    p_alert_id: id,
+    p_status: status,
+    p_resolution_notes: resolutionNotes || null
+  })
   return result
 }
 

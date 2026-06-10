@@ -10,12 +10,14 @@ import {
   checkTemplateHasRuns,
   createChecklistRunFromTemplate,
   createChecklistChangeRequest,
+  createChecklistManagementAlert,
   createChecklistTemplate,
   createChecklistTemplateSuggestion,
   deactivateChecklistTemplate,
   deleteChecklistTemplate,
   getChecklistChangeRequests,
   getChecklistIncidents,
+  getChecklistManagementAlerts,
   getChecklistProfiles,
   getChecklistRuns,
   getChecklistTemplateSuggestions,
@@ -27,6 +29,7 @@ import {
   submitChecklistChangeRequest,
   updateChecklistRunItem,
   updateChecklistIncidentStatus,
+  updateChecklistManagementAlertStatus,
   updateChecklistChangeRequest,
   updateChecklistTemplate,
   updateChecklistTemplateSuggestionStatus
@@ -103,6 +106,8 @@ const CHECKLIST_TEMPLATE_MANAGERS = ["admin", "gerente_general", "gerente", "sup
 const CHECKLIST_TEMPLATE_APPROVERS = ["admin", "gerente_general", "gerente"]
 const CHECKLIST_INCIDENT_SEVERITIES = [["low", "Baja"], ["medium", "Media"], ["high", "Alta"], ["critical", "Critica"]]
 const CHECKLIST_INCIDENT_STATUSES = [["open", "Abiertas"], ["acknowledged", "Reconocidas"], ["in_progress", "En proceso"], ["resolved", "Resueltas"], ["dismissed", "Descartadas"]]
+const CHECKLIST_ALERT_PRIORITIES = [["informativo", "Informativo"], ["atencion", "Requiere atencion"], ["critico", "Critico"]]
+const CHECKLIST_ALERT_STATUSES = [["open", "Abiertos"], ["reviewed", "Revisados"], ["resolved", "Resueltos"], ["dismissed", "Descartados"]]
 const CHECKLIST_INCIDENT_NOTIFY_ROLES = [["admin", "Admin"], ["gerente_general", "Gerencia General"], ["gerente", "Gerente"], ["supervisor", "Supervisor"]]
 
 const EMPTY_TEMPLATE = {
@@ -1159,10 +1164,12 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   const isSupervisorOnly = userRole === "supervisor"
   const canProposeChecklistEdits = isSupervisorOnly
   const canDeleteTemplates = ["admin", "gerente_general"].includes(userRole)
-  const [section, setSection] = useState(initialChecklistView === "incidents" ? "incidents" : "today")
+  const canManageManagementAlerts = ["admin", "gerente_general"].includes(userRole)
+  const [section, setSection] = useState(initialChecklistView === "incidents" ? "incidents" : initialChecklistView === "alerts" ? "alerts" : "today")
   const [templates, setTemplates] = useState([])
   const [runs, setRuns] = useState([])
   const [incidents, setIncidents] = useState([])
+  const [managementAlerts, setManagementAlerts] = useState([])
   const [changeRequests, setChangeRequests] = useState([])
   const [suggestions, setSuggestions] = useState([])
   const [profiles, setProfiles] = useState([])
@@ -1171,6 +1178,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   const [editingTemplate, setEditingTemplate] = useState(null)
   const [selectedRunId, setSelectedRunId] = useState("")
   const [selectedIncidentId, setSelectedIncidentId] = useState(initialChecklistView === "incidents" ? initialRunId : "")
+  const [selectedAlertId, setSelectedAlertId] = useState(initialChecklistView === "alerts" ? initialRunId : "")
   const selectedRun = runs.find((run) => run.id === selectedRunId)
   const activeTemplates = templates.filter((template) => template.status === "active")
   const visibleRuns = runs.filter((run) => run.status !== "cancelled" && canSeeChecklistRun(run, user, profiles))
@@ -1178,28 +1186,33 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
     ["today", "Hoy"],
     ...(canViewChecklistLibrary ? [["templates", "Checklists"]] : []),
     ...(canCreateChecklists || editingTemplate ? [["create", editingTemplate ? "Editar checklist" : "Crear checklist"]] : []),
+    ...(canManageManagementAlerts ? [["alerts", "Avisos a Gerencia"]] : []),
     ...(canViewChecklistLibrary ? [["incidents", "Incidencias"], ["approvals", "Aprobaciones"], ["reports", "Reportes"]] : [])
   ]
 
   async function refresh() {
     setLoading(true)
     if (canViewChecklistLibrary) await generateDueChecklistRuns(TODAY)
-    const [templateResult, runResult, incidentResult, requestResult, suggestionResult, profileResult] = await Promise.all([
+    const requests = [
       getChecklistTemplates(),
       getChecklistRuns(),
       getChecklistIncidents(),
       getChecklistChangeRequests(),
       getChecklistTemplateSuggestions(),
       getChecklistProfiles()
-    ])
-    if (templateResult.error || runResult.error || incidentResult.error || requestResult.error || suggestionResult.error) {
-      setMessage(templateResult.error?.message || runResult.error?.message || incidentResult.error?.message || requestResult.error?.message || suggestionResult.error?.message || "No se pudieron cargar checklists.")
+    ]
+    if (canManageManagementAlerts) requests.push(getChecklistManagementAlerts())
+    const results = await Promise.all(requests)
+    const [templateResult, runResult, incidentResult, requestResult, suggestionResult, profileResult, alertResult] = results
+    if (templateResult.error || runResult.error || incidentResult.error || requestResult.error || suggestionResult.error || alertResult?.error) {
+      setMessage(templateResult.error?.message || runResult.error?.message || incidentResult.error?.message || requestResult.error?.message || suggestionResult.error?.message || alertResult?.error?.message || "No se pudieron cargar checklists.")
     } else {
       setTemplates(templateResult.data || [])
       setRuns(markOverdueRuns(runResult.data || []))
       setIncidents(incidentResult.data || [])
       setChangeRequests(requestResult.data || [])
       setSuggestions(suggestionResult.data || [])
+      if (alertResult) setManagementAlerts(alertResult.data || [])
     }
     if (!profileResult.error) setProfiles(profileResult.data || [])
     setLoading(false)
@@ -1210,7 +1223,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   }, [])
 
   useEffect(() => {
-    if (!initialRunId || initialChecklistView === "incidents") return
+    if (!initialRunId || ["incidents", "alerts"].includes(initialChecklistView)) return
     setSection("today")
     setSelectedRunId(initialRunId)
   }, [initialRunId, initialChecklistView])
@@ -1224,6 +1237,12 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
     if (initialChecklistView !== "incidents") return
     setSection("incidents")
     if (initialRunId) setSelectedIncidentId(initialRunId)
+  }, [initialChecklistView, initialRunId])
+
+  useEffect(() => {
+    if (initialChecklistView !== "alerts") return
+    setSection("alerts")
+    if (initialRunId) setSelectedAlertId(initialRunId)
   }, [initialChecklistView, initialRunId])
 
   async function saveTemplate(form, items, options = {}) {
@@ -1410,6 +1429,13 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
     refresh()
   }
 
+  async function updateManagementAlertStatus(alertId, status, notes = "") {
+    const result = await updateChecklistManagementAlertStatus(alertId, status, notes)
+    if (result.error) return setMessage(result.error.message || "No se pudo actualizar el aviso.")
+    setMessage(status === "resolved" ? "Aviso resuelto." : "Aviso actualizado.")
+    refresh()
+  }
+
   async function completeRun(runId) {
     const result = await completeChecklistRun(runId)
     if (result.error) return setMessage(result.error.message || "Completa los items obligatorios antes de finalizar.")
@@ -1502,6 +1528,15 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
           onCancel={() => { setEditingTemplate(null); setSection("templates") }}
           onSave={saveTemplate}
           approvalMode={isSupervisorOnly}
+        />
+      )}
+      {section === "alerts" && canManageManagementAlerts && (
+        <ChecklistManagementAlertsView
+          alerts={managementAlerts}
+          profiles={profiles}
+          selectedAlertId={selectedAlertId}
+          onSelect={setSelectedAlertId}
+          onStatus={updateManagementAlertStatus}
         />
       )}
       {section === "incidents" && canViewChecklistLibrary && (
@@ -2059,6 +2094,7 @@ function ChecklistGuidedRun({ run, profiles, onClose, onUpdateItem, onComplete, 
   const noCount = (run.checklist_run_items || []).filter((item) => String(item.response_text || "").toLowerCase() === "no").length
   const photoCount = (run.checklist_run_items || []).filter((item) => item.photo_url).length
   const canEdit = !["completed", "pending_review"].includes(run.status)
+  const canSendManagementAlert = !["cancelled", "completed"].includes(run.status)
   const itemGroups = groupChecklistRunItems(run.checklist_run_items || [])
   return (
     <article className="checklist-guided">
@@ -2089,6 +2125,7 @@ function ChecklistGuidedRun({ run, profiles, onClose, onUpdateItem, onComplete, 
           )
         })}
       </div>
+      {canSendManagementAlert && <ChecklistManagementAlertForm run={run} />}
       {run.status === "pending_review" && canApprove && (
         <div className="checklist-sticky-actions review">
           <Field label="Comentario de revision"><textarea value={reviewNotes} onChange={(event) => setReviewNotes(event.target.value)} placeholder="Obligatorio si rechazas" /></Field>
@@ -2170,6 +2207,161 @@ function ChecklistRunItem({ item, index = 0, disabled, onSave }) {
       {needsPhoto && <Field label="Fotografia / evidencia"><input disabled={disabled} type="file" accept="image/*" capture="environment" onChange={(event) => readEvidenceFile(event, (photo_url) => { const next = { ...draft, photo_url }; setDraft(next); save(next) })} />{draft.photo_url && <img className="checklist-evidence-preview" src={draft.photo_url} alt="Evidencia" />}</Field>}
       {(needsComment || incidentWillTrigger) && <Field label={incidentWillTrigger ? "Describe que esta pasando" : "Comentario"}><textarea disabled={disabled} value={draft.comment} onChange={(event) => { const next = { ...draft, comment: event.target.value }; setDraft(next); latestDraftRef.current = next; if (!checklistItemWouldFail(item, next) || next.comment.trim()) scheduleSave(next) }} onBlur={() => save()} /></Field>}
       {needsIncidentComment && <p className="tasks-warning">Agrega un comentario para guardar la incidencia.</p>}
+    </div>
+  )
+}
+
+function ChecklistManagementAlertForm({ run }) {
+  const [message, setMessage] = useState("")
+  const [priority, setPriority] = useState("informativo")
+  const [feedback, setFeedback] = useState("")
+  const [error, setError] = useState("")
+  const [sending, setSending] = useState(false)
+  const trimmed = message.trim()
+  const isCritical = priority === "critico"
+
+  async function submitAlert(event) {
+    event.preventDefault()
+    setError("")
+    setFeedback("")
+    if (trimmed.length < 10) {
+      setError("El aviso debe tener al menos 10 caracteres.")
+      return
+    }
+    if (trimmed.length > 1000) {
+      setError("El aviso no puede superar 1000 caracteres.")
+      return
+    }
+    setSending(true)
+    const result = await createChecklistManagementAlert(run.id, priority, trimmed)
+    setSending(false)
+    if (result.error) {
+      setError(result.error.message || "No se pudo enviar el aviso. Intenta nuevamente.")
+      return
+    }
+    setMessage("")
+    setPriority("informativo")
+    setFeedback(result.data?.notification_warning || "Aviso enviado a Gerencia correctamente.")
+  }
+
+  return (
+    <section className={`checklist-management-alert-panel${isCritical ? " critical" : ""}`}>
+      <div className="tasks-panel-title">
+        <div>
+          <h3>Aviso a Gerencia</h3>
+          <p className="tasks-muted">Usa este espacio solo si encontraste un problema, falla, falta de insumo, equipo danado o situacion que Gerencia deba conocer.</p>
+        </div>
+      </div>
+      <p className="tasks-muted checklist-alert-guidance">Describe el problema observado, no ataques personales. Este aviso es un reporte unidireccional; Gerencia no puede responder aqui.</p>
+      <form className="checklist-management-alert-form" onSubmit={submitAlert}>
+        <Field label="Detalle del aviso">
+          <textarea
+            value={message}
+            onChange={(event) => setMessage(event.target.value.slice(0, 1000))}
+            placeholder="Ejemplo: La camara fria esta marcando temperatura alta."
+            rows={4}
+            maxLength={1000}
+          />
+        </Field>
+        <Field label="Prioridad">
+          <select className={isCritical ? "checklist-alert-priority-critical" : ""} value={priority} onChange={(event) => setPriority(event.target.value)}>
+            {CHECKLIST_ALERT_PRIORITIES.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+          </select>
+        </Field>
+        {isCritical && <p className="tasks-warning">Prioridad critica: Gerencia recibira este aviso como urgente.</p>}
+        {error && <p className="tasks-warning">{error}</p>}
+        {feedback && <p className="tasks-success">{feedback}</p>}
+        <div className="checklist-actions">
+          <button type="submit" className={isCritical ? "tasks-primary danger" : "tasks-primary"} disabled={sending || trimmed.length < 10}>
+            {sending ? "Enviando..." : "Enviar aviso a Gerencia"}
+          </button>
+        </div>
+      </form>
+    </section>
+  )
+}
+
+function ChecklistManagementAlertsView({ alerts, profiles, selectedAlertId, onSelect, onStatus }) {
+  const [filter, setFilter] = useState("open")
+  const [notes, setNotes] = useState("")
+  const visible = alerts.filter((alert) => !filter || alert.status === filter)
+  const selected = alerts.find((alert) => alert.id === selectedAlertId) || visible[0]
+  const openCount = alerts.filter((alert) => ["open", "reviewed"].includes(alert.status)).length
+  const criticalCount = alerts.filter((alert) => alert.priority === "critico" && !["resolved", "dismissed"].includes(alert.status)).length
+
+  return (
+    <div className="checklist-approvals-layout">
+      <article className="tasks-panel">
+        <div className="tasks-panel-title">
+          <div>
+            <h2>Avisos a Gerencia</h2>
+            <p className="tasks-muted">{openCount} pendientes · {criticalCount} criticos</p>
+          </div>
+        </div>
+        <div className="tasks-filters">
+          <select value={filter} onChange={(event) => setFilter(event.target.value)}>
+            <option value="">Todos</option>
+            {CHECKLIST_ALERT_STATUSES.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+          </select>
+        </div>
+        <div className="checklist-management-alerts-table-wrap">
+          <table className="checklist-management-alerts-table">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Colaborador</th>
+                <th>Checklist</th>
+                <th>Prioridad</th>
+                <th>Mensaje</th>
+                <th>Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map((alert) => (
+                <tr
+                  key={alert.id}
+                  className={selected?.id === alert.id ? "selected" : ""}
+                  onClick={() => { onSelect(alert.id); setNotes("") }}
+                >
+                  <td>{new Date(alert.created_at).toLocaleString("es-GT")}</td>
+                  <td>{profileDisplayName(profiles, alert.sender_profile_id, alert.sender?.full_name || alert.sender?.username)}</td>
+                  <td>{alert.checklist_runs?.checklist_templates?.title || "Checklist"}</td>
+                  <td><Badge type="priority" value={alert.priority === "critico" ? "critical" : alert.priority === "atencion" ? "high" : "low"} /></td>
+                  <td>{alert.message}</td>
+                  <td><Badge type="status" value={alert.status} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!visible.length && <FriendlyEmpty title="No hay avisos." text="Los reportes voluntarios de checklists apareceran aqui." />}
+        </div>
+      </article>
+
+      {selected && (
+        <article className="tasks-panel checklist-approval-detail">
+          <div className="tasks-panel-title">
+            <div>
+              <h2>Aviso de {profileDisplayName(profiles, selected.sender_profile_id, selected.sender?.full_name || selected.sender?.username)}</h2>
+              <p className="tasks-muted">{selected.checklist_runs?.checklist_templates?.title || "Checklist"} · {new Date(selected.created_at).toLocaleString("es-GT")}</p>
+            </div>
+            <Badge type="priority" value={selected.priority === "critico" ? "critical" : selected.priority === "atencion" ? "high" : "low"} />
+          </div>
+          <div className="checklist-review-summary">
+            <div><span>Estado</span><strong>{alertStatusLabel(selected.status)}</strong></div>
+            <div><span>Prioridad</span><strong>{alertPriorityLabel(selected.priority)}</strong></div>
+            <div><span>Checklist</span><strong>{selected.checklist_runs?.checklist_templates?.title || "Checklist"}</strong></div>
+            <div><span>Area</span><strong>{selected.checklist_runs?.area || "Sin area"}</strong></div>
+          </div>
+          <p className="checklist-alert-message">{selected.message}</p>
+          {selected.resolution_notes && <p className="tasks-success">{selected.resolution_notes}</p>}
+          <Field label="Notas internas de resolucion"><textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Solo para registro interno de Gerencia." /></Field>
+          <div className="checklist-actions">
+            <button type="button" className="tasks-secondary" onClick={() => onStatus(selected.id, "reviewed", notes)}>Marcar revisado</button>
+            <button type="button" className="tasks-primary" onClick={() => onStatus(selected.id, "resolved", notes)}>Marcar resuelto</button>
+            <button type="button" className="tasks-link danger" onClick={() => onStatus(selected.id, "dismissed", notes)}>Descartar</button>
+          </div>
+        </article>
+      )}
     </div>
   )
 }
@@ -2528,6 +2720,14 @@ function incidentStatusLabel(value) {
   return CHECKLIST_INCIDENT_STATUSES.find(([id]) => id === value)?.[1] || value
 }
 
+function alertStatusLabel(value) {
+  return CHECKLIST_ALERT_STATUSES.find(([id]) => id === value)?.[1] || value
+}
+
+function alertPriorityLabel(value) {
+  return CHECKLIST_ALERT_PRIORITIES.find(([id]) => id === value)?.[1] || value
+}
+
 function canSeeChecklistRun(run, user, profiles) {
   const role = normalizeRole(user?.role)
   if (["admin", "gerente_general", "recursos_humanos", "rrhh"].includes(role)) return true
@@ -2541,9 +2741,9 @@ function canSeeChecklistRun(run, user, profiles) {
   return false
 }
 
-function profileDisplayName(profiles, profileId) {
+function profileDisplayName(profiles, profileId, fallbackName = "") {
   const profile = profiles.find((item) => item.id === profileId)
-  return profile?.full_name || profile?.username || "Supervisor"
+  return profile?.full_name || profile?.username || fallbackName || "Colaborador"
 }
 
 function markOverdueRuns(runs) {
@@ -2612,7 +2812,7 @@ function CompactTask({ task, employees }) {
 }
 
 function Badge({ type, value }) {
-  const labels = { low: "Baja", medium: "Media", high: "Alta", critical: "Crítica", easy: "Fácil", hard: "Difícil", expert: "Experta", pending: "Pendiente", open: "Abierta", acknowledged: "Reconocida", in_progress: "En proceso", resolved: "Resuelta", dismissed: "Descartada", pending_review: "En revision", completed: "Completada", late: "Atrasada", overdue: "Atrasada", rejected: "Devuelta", cancelled: "Cancelada", review_required: "Requiere revisión" }
+  const labels = { low: "Baja", medium: "Media", high: "Alta", critical: "Crítica", easy: "Fácil", hard: "Difícil", expert: "Experta", pending: "Pendiente", open: "Abierta", reviewed: "Revisado", acknowledged: "Reconocida", in_progress: "En proceso", resolved: "Resuelta", dismissed: "Descartada", pending_review: "En revision", completed: "Completada", late: "Atrasada", overdue: "Atrasada", rejected: "Devuelta", cancelled: "Cancelada", review_required: "Requiere revisión" }
   return <span className={`tasks-badge ${type}-${value}`}>{labels[value] || value}</span>
 }
 
