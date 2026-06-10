@@ -160,17 +160,122 @@
 .attendance-camera {
   position: relative;
   overflow: hidden;
-  min-height: 320px;
+  min-height: min(62vh, 620px);
   border: 1px solid #25364d;
   border-radius: 18px;
   background: #020617;
+  display: grid;
 }
 
-.attendance-camera video {
+.attendance-camera video,
+.attendance-photo-preview {
   width: 100%;
-  height: min(52vh, 520px);
+  height: min(62vh, 620px);
   object-fit: cover;
   display: block;
+  background: #020617;
+}
+
+.attendance-camera.preview-mode video {
+  display: none;
+}
+
+.attendance-camera-guide {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.attendance-camera-frame {
+  width: min(72vw, 360px);
+  height: min(52vh, 420px);
+  border: 3px solid rgba(45, 212, 191, .92);
+  border-radius: 28px;
+  box-shadow: 0 0 0 9999px rgba(2, 6, 23, .42);
+}
+
+.attendance-camera-guide p {
+  position: absolute;
+  bottom: 72px;
+  margin: 0;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(2, 6, 23, .78);
+  color: #99f6e4;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.attendance-camera-instructions {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  right: 16px;
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(2, 6, 23, .78);
+  color: #e2e8f0;
+  font-size: 17px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.attendance-pending-mark {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid #0f766e;
+  border-radius: 12px;
+  background: #052e2c;
+  color: #99f6e4;
+  font-size: 18px;
+}
+
+.attendance-pending-mark strong {
+  color: #f8fafc;
+}
+
+.attendance-photo-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.attendance-capture-btn,
+.attendance-confirm-btn,
+.attendance-retake-btn {
+  min-height: 72px;
+  border: 0;
+  border-radius: 18px;
+  font-size: 24px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.attendance-capture-btn,
+.attendance-confirm-btn {
+  background: #0f766e;
+  color: #f0fdfa;
+}
+
+.attendance-retake-btn {
+  background: #1e293b;
+  color: #e2e8f0;
+  border: 1px solid #334155;
+}
+
+.attendance-capture-btn:disabled,
+.attendance-confirm-btn:disabled,
+.attendance-retake-btn:disabled {
+  opacity: .4;
+  cursor: not-allowed;
+}
+
+.attendance-actions-select button.selected {
+  outline: 3px solid #99f6e4;
+  outline-offset: 3px;
 }
 
 .attendance-camera canvas {

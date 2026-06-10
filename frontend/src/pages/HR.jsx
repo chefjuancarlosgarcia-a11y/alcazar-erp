@@ -1,3 +1,9 @@
+/**
+ * Registro de asistencia (flujo oficial):
+ * - /hr?section=asistencia → AttendanceTerminal.jsx
+ * - /kiosk → AttendanceTerminal.jsx (modo kiosco)
+ * Reportes: /hr?section=reportesAsistencia → LegacyInventoryApp (solo lectura).
+ */
 import { lazy, Suspense } from "react"
 import ProfileManagement from "./ProfileManagement"
 import ScheduleManagement from "./ScheduleManagement"

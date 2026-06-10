@@ -1,3 +1,7 @@
+/**
+ * Componente oficial de registro de asistencia.
+ * Rutas: /hr?section=asistencia (terminal) y /kiosk (modo kiosco).
+ */
 import { useEffect, useMemo, useRef, useState } from "react"
 import { BRANDING } from "../branding"
 import {
@@ -6,6 +10,7 @@ import {
   registerAttendanceMark,
   uploadAttendanceEvidence
 } from "../services/attendanceService"
+import { buildAttendanceDevicePayload } from "../utils/attendanceDevice"
 import "./AttendanceTerminal.css"
 
 const MARK_LABELS = {
@@ -15,10 +20,13 @@ const MARK_LABELS = {
   salida_final: "Salida final"
 }
 
+const MIN_PHOTO_BYTES = 4096
+
 function AttendanceTerminal({ kiosk = false }) {
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
   const streamRef = useRef(null)
+  const previewUrlRef = useRef("")
   const [profiles, setProfiles] = useState([])
   const [marks, setMarks] = useState([])
   const [selected, setSelected] = useState(null)
@@ -31,6 +39,10 @@ function AttendanceTerminal({ kiosk = false }) {
   const [cameraError, setCameraError] = useState("")
   const [observation, setObservation] = useState("")
   const [deviceId] = useState(() => getOrCreateDeviceId())
+  const [pendingMarkType, setPendingMarkType] = useState("")
+  const [photoPhase, setPhotoPhase] = useState("live")
+  const [capturedBlob, setCapturedBlob] = useState(null)
+  const [previewUrl, setPreviewUrl] = useState("")
 
   useEffect(() => {
     refresh()
@@ -39,9 +51,13 @@ function AttendanceTerminal({ kiosk = false }) {
 
   useEffect(() => {
     if (selected) startCamera()
-    else stopCamera()
+    else resetPhotoCapture()
     return () => stopCamera()
   }, [selected])
+
+  useEffect(() => () => {
+    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current)
+  }, [])
 
   const selectedMarks = useMemo(() => (
     marks.filter((mark) => String(mark.employee_id) === String(selected?.id))
@@ -70,13 +86,23 @@ function AttendanceTerminal({ kiosk = false }) {
   async function startCamera() {
     setCameraError("")
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false })
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: "user",
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        },
+        audio: false
+      })
       streamRef.current = stream
-      if (videoRef.current) videoRef.current.srcObject = stream
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+        await videoRef.current.play()
+      }
       setCameraReady(true)
     } catch {
       setCameraReady(false)
-      setCameraError("No se pudo activar la cámara. Revisa permisos del navegador.")
+      setCameraError("No se pudo acceder a la cámara. Revisa permisos del navegador.")
     }
   }
 
@@ -86,36 +112,101 @@ function AttendanceTerminal({ kiosk = false }) {
     setCameraReady(false)
   }
 
-  async function mark(markType) {
-    if (!selected) return
+  function resetPhotoCapture() {
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current)
+      previewUrlRef.current = ""
+    }
+    setPreviewUrl("")
+    setCapturedBlob(null)
+    setPhotoPhase("live")
+    setPendingMarkType("")
+  }
+
+  function clearPreview() {
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current)
+      previewUrlRef.current = ""
+    }
+    setPreviewUrl("")
+    setCapturedBlob(null)
+    setPhotoPhase("live")
+    if (selected && !streamRef.current) startCamera()
+  }
+
+  function selectMarkType(markType) {
+    setPendingMarkType(markType)
+    setError("")
+    if (photoPhase === "preview") clearPreview()
+  }
+
+  async function takePhoto() {
+    if (!pendingMarkType) {
+      setError("Selecciona primero el tipo de marcaje.")
+      return
+    }
     if (!/^\d{4}$/.test(pin)) {
       setError("Ingresa tu PIN de 4 dígitos.")
       return
     }
     if (!cameraReady) {
-      setError("La cámara debe estar activa para registrar el marcaje.")
+      setError("La cámara debe estar activa para tomar la foto.")
       return
     }
+    setError("")
+    try {
+      const blob = await capturePhotoBlob(videoRef.current, canvasRef.current)
+      if (!blob || blob.size < MIN_PHOTO_BYTES) {
+        throw new Error("La imagen capturada no es válida. Intenta tomar la foto nuevamente.")
+      }
+      stopCamera()
+      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current)
+      const nextUrl = URL.createObjectURL(blob)
+      previewUrlRef.current = nextUrl
+      setCapturedBlob(blob)
+      setPreviewUrl(nextUrl)
+      setPhotoPhase("preview")
+    } catch (caught) {
+      setError(caught?.message || "No se pudo capturar la foto.")
+    }
+  }
+
+  async function confirmPhotoAndMark() {
+    if (!selected || !pendingMarkType || !capturedBlob) {
+      setError("Debes tomar y confirmar una foto antes de marcar.")
+      return
+    }
+    if (!/^\d{4}$/.test(pin)) {
+      setError("Ingresa tu PIN de 4 dígitos.")
+      return
+    }
+    if (capturedBlob.size < MIN_PHOTO_BYTES) {
+      setError("La imagen capturada no es válida. Intenta tomar la foto nuevamente.")
+      clearPreview()
+      return
+    }
+
     setSaving(true)
     setError("")
     setMessage("")
     try {
-      const blob = await capturePhotoBlob(videoRef.current, canvasRef.current)
-      const upload = await uploadAttendanceEvidence(blob, selected.id)
+      const upload = await uploadAttendanceEvidence(capturedBlob, selected.id)
       if (upload.error) throw upload.error
+      const devicePayload = buildAttendanceDevicePayload(observation)
       const result = await registerAttendanceMark({
         employeeId: selected.id,
         pin,
-        markType,
+        markType: pendingMarkType,
         photoPath: upload.data.path,
         deviceId,
-        deviceName: navigator.userAgent.slice(0, 120),
-        observation
+        deviceName: devicePayload.deviceName,
+        observation: devicePayload.observation
       })
       if (result.error) throw result.error
-      setMessage(`${MARK_LABELS[markType]} registrada correctamente para ${selected.fullName}.`)
+      setMessage(`${MARK_LABELS[pendingMarkType]} registrada correctamente para ${selected.fullName}.`)
       setPin("")
       setObservation("")
+      resetPhotoCapture()
       await refresh()
       window.setTimeout(() => {
         setSelected(null)
@@ -126,6 +217,16 @@ function AttendanceTerminal({ kiosk = false }) {
     } finally {
       setSaving(false)
     }
+  }
+
+  function handleChangeEmployee() {
+    resetPhotoCapture()
+    stopCamera()
+    setSelected(null)
+    setPin("")
+    setObservation("")
+    setError("")
+    setMessage("")
   }
 
   return (
@@ -165,7 +266,7 @@ function AttendanceTerminal({ kiosk = false }) {
         ) : (
           <section className="attendance-mark-panel">
             <div className="attendance-profile">
-              <button type="button" onClick={() => setSelected(null)}>Cambiar colaborador</button>
+              <button type="button" onClick={handleChangeEmployee}>Cambiar colaborador</button>
               {selected.avatarUrl ? <img src={selected.avatarUrl} alt="" /> : <span>{initials(selected.fullName)}</span>}
               <div>
                 <h2>{selected.fullName}</h2>
@@ -173,28 +274,65 @@ function AttendanceTerminal({ kiosk = false }) {
               </div>
             </div>
 
-            <div className="attendance-camera">
-              <video ref={videoRef} autoPlay playsInline muted />
+            <label className="attendance-pin">
+              PIN
+              <input value={pin} onChange={(event) => setPin(event.target.value.replace(/\D/g, "").slice(0, 4))} type="password" inputMode="numeric" maxLength={4} placeholder="••••" autoFocus />
+            </label>
+
+            <div className="attendance-actions attendance-actions-select">
+              <button type="button" className={`entry ${pendingMarkType === "entrada" ? "selected" : ""}`} disabled={saving || isCheckedIn} onClick={() => selectMarkType("entrada")}>Entrada</button>
+              <button type="button" className={`meal ${pendingMarkType === "salida_comida" ? "selected" : ""}`} disabled={saving || !isCheckedIn || Boolean(activeMeal)} onClick={() => selectMarkType("salida_comida")}>Salida a comida</button>
+              <button type="button" className={`meal ${pendingMarkType === "regreso_comida" ? "selected" : ""}`} disabled={saving || !isCheckedIn || !activeMeal} onClick={() => selectMarkType("regreso_comida")}>Regreso de comida</button>
+              <button type="button" className={`exit ${pendingMarkType === "salida_final" ? "selected" : ""}`} disabled={saving || !isCheckedIn || Boolean(activeMeal)} onClick={() => selectMarkType("salida_final")}>Salida final</button>
+            </div>
+
+            {pendingMarkType && (
+              <p className="attendance-pending-mark">
+                Marcaje seleccionado: <strong>{MARK_LABELS[pendingMarkType]}</strong>
+              </p>
+            )}
+
+            <div className={`attendance-camera ${photoPhase === "preview" ? "preview-mode" : ""}`}>
+              {photoPhase === "live" ? (
+                <>
+                  <video ref={videoRef} autoPlay playsInline muted />
+                  <div className="attendance-camera-guide" aria-hidden="true">
+                    <div className="attendance-camera-frame" />
+                    <p>Centra tu rostro aquí</p>
+                  </div>
+                  <p className="attendance-camera-instructions">
+                    Coloca tu rostro dentro del recuadro y evita tapar la cámara.
+                  </p>
+                </>
+              ) : (
+                <img src={previewUrl} alt="Vista previa del marcaje" className="attendance-photo-preview" />
+              )}
               <canvas ref={canvasRef} />
               {cameraError && <div className="attendance-camera-alert">{cameraError}</div>}
               {saving && <div className="attendance-saving">Guardando marcaje...</div>}
             </div>
 
-            <label className="attendance-pin">
-              PIN
-              <input value={pin} onChange={(event) => setPin(event.target.value.replace(/\D/g, "").slice(0, 4))} type="password" inputMode="numeric" maxLength={4} placeholder="••••" autoFocus />
-            </label>
+            <div className="attendance-photo-actions">
+              {photoPhase === "live" ? (
+                <button type="button" className="attendance-capture-btn" disabled={saving || !cameraReady || !pendingMarkType} onClick={takePhoto}>
+                  Tomar foto
+                </button>
+              ) : (
+                <>
+                  <button type="button" className="attendance-confirm-btn" disabled={saving || !capturedBlob} onClick={confirmPhotoAndMark}>
+                    {pendingMarkType ? `Usar foto y marcar ${MARK_LABELS[pendingMarkType]}` : "Usar foto y marcar"}
+                  </button>
+                  <button type="button" className="attendance-retake-btn" disabled={saving} onClick={clearPreview}>
+                    Tomar nuevamente
+                  </button>
+                </>
+              )}
+            </div>
+
             <label className="attendance-pin">
               Observacion opcional
               <input value={observation} onChange={(event) => setObservation(event.target.value)} type="text" maxLength={160} placeholder="Ej. olvide marcar comida" />
             </label>
-
-            <div className="attendance-actions">
-              <button type="button" className="entry" disabled={saving || isCheckedIn} onClick={() => mark("entrada")}>Entrada</button>
-              <button type="button" className="meal" disabled={saving || !isCheckedIn || Boolean(activeMeal)} onClick={() => mark("salida_comida")}>Salida a comida</button>
-              <button type="button" className="meal" disabled={saving || !isCheckedIn || !activeMeal} onClick={() => mark("regreso_comida")}>Regreso de comida</button>
-              <button type="button" className="exit" disabled={saving || !isCheckedIn || Boolean(activeMeal)} onClick={() => mark("salida_final")}>Salida final</button>
-            </div>
           </section>
         )}
       </section>
@@ -230,6 +368,10 @@ function capturePhotoBlob(video, canvas) {
     }
     const width = video.videoWidth || 960
     const height = video.videoHeight || 720
+    if (!width || !height) {
+      reject(new Error("La cámara aún no está lista. Espera un momento e intenta de nuevo."))
+      return
+    }
     canvas.width = width
     canvas.height = height
     const context = canvas.getContext("2d")

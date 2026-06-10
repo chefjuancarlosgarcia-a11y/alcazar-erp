@@ -1,4 +1,5 @@
 ﻿import { useState, useEffect, useCallback, useRef } from "react"
+import { useNavigate } from "react-router-dom"
 import Cropper from "react-easy-crop"
 import "react-easy-crop/react-easy-crop.css"
 import { BrowserMultiFormatReader } from "@zxing/browser"
@@ -10,7 +11,6 @@ import Dashboard from "./LegacyDashboard"
 import InfoTooltip from "../components/InfoTooltip"
 import { BRANDING } from "../branding"
 import { useAuth } from "../context/AuthContext"
-import { useDevice } from "../context/DeviceContext"
 import { supabase } from "../lib/supabase"
 import { createNotification, notifyRoles } from "../services/notificationsService"
 import { getPurchaseOrders, savePurchaseOrder } from "../services/purchaseOrdersService"
@@ -23,11 +23,13 @@ import {
 } from "../services/suppliersService"
 import {
   getAttendanceMarks,
-  getAttendanceTerminalProfiles,
-  registerAttendanceMark,
-  uploadAttendanceEvidence,
-  verifyAttendancePin
+  getAttendanceTerminalProfiles
 } from "../services/attendanceService"
+import {
+  extractStoredUserAgent,
+  extractUserObservation,
+  formatAttendanceDeviceLabel
+} from "../utils/attendanceDevice"
 import {
   createArea as createSupabaseArea,
   deactivateArea as deactivateSupabaseArea,
@@ -780,8 +782,11 @@ function getAttendanceMarkLabel(type) {
   return {
     entrada: "Entrada",
     salida: "Salida",
+    salida_comida: "Salida a comida",
+    regreso_comida: "Regreso de comida",
+    salida_final: "Salida final",
     bano_inicio: "Baño / Break",
-    bano_regreso: "Regreso"
+    bano_regreso: "Regreso de baño"
   }[type] || type
 }
 
@@ -826,16 +831,13 @@ function generateTemporaryPassword() {
 
 function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrderView = "", initialPurchaseOrderId = "", hideLegacyNavigation = false, focusEmployeeId = "", editFocusedEmployee = false }) {
   const { user: authenticatedUser } = useAuth()
-  const device = useDevice()
+  const navigate = useNavigate()
   const [busqueda, setBusqueda] = useState("")
   const [mostrarSugerenciasIngredientes, setMostrarSugerenciasIngredientes] = useState(false)
   const [ingredienteResaltadoId, setIngredienteResaltadoId] = useState(null)
   const buscadorIngredientesRef = useRef(null)
   const barcodeVideoRef = useRef(null)
   const barcodeControlsRef = useRef(null)
-  const asistenciaVideoRef = useRef(null)
-  const asistenciaCanvasRef = useRef(null)
-  const asistenciaStreamRef = useRef(null)
   const [barcodeSearch, setBarcodeSearch] = useState("")
   const [barcodeScannerActive, setBarcodeScannerActive] = useState(false)
   const [barcodeMessage, setBarcodeMessage] = useState("")
@@ -1041,7 +1043,6 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
   useEffect(() => {
     return () => {
       barcodeControlsRef.current?.stop()
-      cerrarCamaraAsistencia()
     }
   }, [])
 
@@ -1216,29 +1217,14 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
   const [croppedAreaPixels, setCroppedAreaPixels] = useState(null)
   const [asistenciaBusqueda, setAsistenciaBusqueda] = useState("")
   const [asistenciaFechaFiltro, setAsistenciaFechaFiltro] = useState(() => obtenerFechaLocal())
-  const [asistenciaColaboradorId, setAsistenciaColaboradorId] = useState(null)
   const [asistenciaReporteColaboradorId, setAsistenciaReporteColaboradorId] = useState("")
-  const [asistenciaPin, setAsistenciaPin] = useState("")
-  const [asistenciaLoginError, setAsistenciaLoginError] = useState("")
   const [asistenciaRecoveryType, setAsistenciaRecoveryType] = useState("")
   const [asistenciaRecoveryValue, setAsistenciaRecoveryValue] = useState("")
   const [asistenciaRecoveryMessage, setAsistenciaRecoveryMessage] = useState("")
-  const [colaboradorMarcaje, setColaboradorMarcaje] = useState(null)
-  const [asistenciaCamaraActiva, setAsistenciaCamaraActiva] = useState(false)
-  const [asistenciaCountdown, setAsistenciaCountdown] = useState(0)
-  const [asistenciaTipoPendiente, setAsistenciaTipoPendiente] = useState("")
-  const [mensajeAsistencia, setMensajeAsistencia] = useState("")
   const [asistenciaPerfiles, setAsistenciaPerfiles] = useState([])
   const [asistenciaCargando, setAsistenciaCargando] = useState(false)
-  const [asistenciaGuardando, setAsistenciaGuardando] = useState(false)
   const [asistenciaFotoAmpliada, setAsistenciaFotoAmpliada] = useState("")
-  const [asistenciaDeviceId] = useState(() => {
-    const stored = localStorage.getItem("attendance-device-id")
-    if (stored) return stored
-    const created = `terminal-${crypto.randomUUID()}`
-    localStorage.setItem("attendance-device-id", created)
-    return created
-  })
+  const [asistenciaDetalleMarcaje, setAsistenciaDetalleMarcaje] = useState(null)
   const [asistenciaMovimientos, setAsistenciaMovimientos] = useState(() => {
     const datos = localStorage.getItem("asistenciaMovimientos")
     return datos ? JSON.parse(datos) : []
@@ -1303,37 +1289,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
   }, [asistenciaMovimientos])
 
   useEffect(() => {
-    if (!asistenciaCamaraActiva || !asistenciaVideoRef.current || !asistenciaStreamRef.current) return
-    let cancelled = false
-    let timerId
-    const video = asistenciaVideoRef.current
-    video.srcObject = asistenciaStreamRef.current
-    video.play()
-      .then(() => {
-        if (cancelled) return
-        let seconds = 3
-        setAsistenciaCountdown(seconds)
-        const tick = () => {
-          if (cancelled) return
-          seconds -= 1
-          setAsistenciaCountdown(seconds)
-          if (seconds === 0) {
-            tomarFotoYGuardarMarcaje()
-            return
-          }
-          timerId = window.setTimeout(tick, 1000)
-        }
-        timerId = window.setTimeout(tick, 1000)
-      })
-      .catch(() => setMensajeAsistencia("Se requiere foto para registrar asistencia."))
-    return () => {
-      cancelled = true
-      window.clearTimeout(timerId)
-    }
-  }, [asistenciaCamaraActiva])
-
-  useEffect(() => {
-    if (!["asistencia", "reportesAsistencia"].includes(seccionActiva)) return
+    if (seccionActiva !== "reportesAsistencia") return
     cargarAsistenciaSupabase()
   }, [seccionActiva])
 
@@ -1341,7 +1297,6 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
     setAsistenciaCargando(true)
     const { data: profiles, error: profilesError } = await getAttendanceTerminalProfiles()
     if (profilesError) {
-      setMensajeAsistencia("No se pudieron cargar los colaboradores activos desde Supabase.")
       setAsistenciaCargando(false)
       return
     }
@@ -1370,6 +1325,10 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
           tipo: mark.mark_type,
           estado: mark.device_alert ? "Dispositivo no autorizado" : "válido",
           registradoPor: mark.device_name,
+          dispositivoLabel: formatAttendanceDeviceLabel(mark.device_name),
+          observacion: mark.observation || "",
+          notas: extractUserObservation(mark),
+          userAgent: extractStoredUserAgent(mark),
           fotoMarcaje: mark.photo_url,
           deviceId: mark.device_id,
           dispositivoNoAutorizado: mark.device_alert,
@@ -2060,63 +2019,6 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
     )
   }
 
-  function obtenerBanoActivo(colaboradorId) {
-    const movimientosHoy = obtenerMovimientosColaboradorHoy(colaboradorId)
-    return movimientosHoy.find((movimiento) =>
-      movimiento.tipo === "bano_inicio" &&
-      !movimientosHoy.some((item) => item.tipo === "bano_regreso" && item.banoInicioId === movimiento.id)
-    )
-  }
-
-  function obtenerConteoBanosHoy(colaboradorId) {
-    return obtenerMovimientosColaboradorHoy(colaboradorId).filter((movimiento) => movimiento.tipo === "bano_inicio").length
-  }
-
-  function registrarMovimientoAsistencia(colaborador, tipo, extra = {}) {
-    const ahora = new Date()
-    const turnosColaborador = obtenerTurnosColaborador(colaborador)
-    const movimiento = {
-      id: `${Date.now()}-${Math.floor(Math.random() * 9999)}`,
-      colaboradorId: colaborador.id,
-      colaboradorNombre: colaborador.nombre,
-      colaboradorUsername: colaborador.username,
-      fecha: obtenerFechaLocal(ahora),
-      hora: obtenerHoraLocal(ahora),
-      fechaHoraISO: ahora.toISOString(),
-      tipo,
-      estado: "válido",
-      registradoPor: usuarioActual ? usuarioActual.username : "sistema",
-      turno: turnosColaborador[0] ? formatearTurno(turnosColaborador[0]) : "Sin turno",
-      ...extra
-    }
-
-    setAsistenciaMovimientos((actuales) => [movimiento, ...actuales])
-    return movimiento
-  }
-
-  function marcarEntradaSalida(colaborador, fotoMarcaje = "") {
-    const ultimo = obtenerUltimoMovimientoEntradaSalida(colaborador.id)
-
-    if (!ultimo || ultimo.tipo === "salida") {
-      registrarMovimientoAsistencia(colaborador, "entrada", { fotoMarcaje })
-      setMensajeAsistencia(`Entrada registrada para ${colaborador.nombre}.`)
-      return
-    }
-
-    if (ultimo.tipo === "entrada") {
-      registrarMovimientoAsistencia(colaborador, "salida", { fotoMarcaje })
-      setMensajeAsistencia(`Salida registrada para ${colaborador.nombre}.`)
-    }
-  }
-
-  function seleccionarColaboradorMarcaje(usuario) {
-    setAsistenciaLoginError("")
-    setMensajeAsistencia("")
-    setColaboradorMarcaje(usuario)
-    setAsistenciaColaboradorId(usuario.id)
-    setAsistenciaPin("")
-  }
-
   function abrirRecuperacionAsistencia(type) {
     setAsistenciaRecoveryType(type)
     setAsistenciaRecoveryValue("")
@@ -2152,155 +2054,6 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
     if (!asistenciaRecoveryValue.trim()) return
     crearSolicitudRecuperacionAsistencia(asistenciaRecoveryType, asistenciaRecoveryValue)
     setAsistenciaRecoveryMessage("Si la información coincide con un usuario registrado, se enviará una solicitud de recuperación.")
-  }
-
-  function cerrarSesionMarcajeAsistencia() {
-    cerrarCamaraAsistencia()
-    setColaboradorMarcaje(null)
-    setAsistenciaPin("")
-    setAsistenciaTipoPendiente("")
-    setMensajeAsistencia("")
-  }
-
-  async function abrirCamaraAsistencia(tipo) {
-    if (!/^\d{4}$/.test(asistenciaPin)) {
-      setAsistenciaLoginError("Ingresa tu PIN de marcaje de 4 dígitos antes de continuar.")
-      return
-    }
-    if (!colaboradorMarcaje?.pinConfigurado) {
-      setAsistenciaLoginError("Este colaborador aún no tiene PIN de marcaje configurado. Contacta a RRHH.")
-      return
-    }
-    const { data: validPin, error: pinError } = await verifyAttendancePin(colaboradorMarcaje.id, asistenciaPin)
-    if (pinError) {
-      setAsistenciaLoginError(`No se pudo validar el PIN en Supabase: ${pinError.message}. Verifica que la migración 019 esté aplicada.`)
-      return
-    }
-    if (!validPin) {
-      setAsistenciaLoginError("PIN incorrecto. Si te asignaron un PIN nuevo, confirma con Administración o RRHH que fue guardado y activado.")
-      return
-    }
-    setAsistenciaTipoPendiente(tipo)
-    setAsistenciaLoginError("")
-    setMensajeAsistencia("")
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setMensajeAsistencia("Se requiere foto para registrar asistencia.")
-      return
-    }
-
-    try {
-      cerrarCamaraAsistencia()
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false })
-      asistenciaStreamRef.current = stream
-      setAsistenciaCamaraActiva(true)
-      setMensajeAsistencia("Mira a la cámara. La foto se tomará automáticamente en 3 segundos.")
-    } catch {
-      setMensajeAsistencia("Se requiere foto para registrar asistencia.")
-      setAsistenciaCamaraActiva(false)
-    }
-  }
-
-  function cerrarCamaraAsistencia() {
-    if (asistenciaStreamRef.current) {
-      asistenciaStreamRef.current.getTracks().forEach((track) => track.stop())
-      asistenciaStreamRef.current = null
-    }
-    setAsistenciaCamaraActiva(false)
-    setAsistenciaCountdown(0)
-  }
-
-  function getAttendanceDevice() {
-    const type = device.isMobile ? "Celular" : device.isTablet ? "Tablet" : "PC"
-    const system = device.isAndroid ? "Android" : device.isIOS ? "iOS" : "Otro"
-    return { id: asistenciaDeviceId, name: `${type} / ${system}` }
-  }
-
-  async function tomarFotoYGuardarMarcaje() {
-    if (!colaboradorMarcaje || !asistenciaVideoRef.current || !asistenciaCanvasRef.current || !asistenciaTipoPendiente) return
-    const video = asistenciaVideoRef.current
-    const canvas = asistenciaCanvasRef.current
-    canvas.width = video.videoWidth || 960
-    canvas.height = video.videoHeight || 720
-    const context = canvas.getContext("2d")
-    if (!context) {
-      setMensajeAsistencia("No se pudo tomar la foto del marcaje.")
-      return
-    }
-    context.drawImage(video, 0, 0, canvas.width, canvas.height)
-    setAsistenciaGuardando(true)
-    const fotoMarcaje = canvas.toDataURL("image/jpeg", 0.9)
-    const photoBlob = await (await fetch(fotoMarcaje)).blob()
-    const uploadResult = await uploadAttendanceEvidence(photoBlob, colaboradorMarcaje.id)
-    if (uploadResult.error) {
-      setMensajeAsistencia("No se pudo guardar la foto. Se requiere foto para registrar asistencia.")
-      setAsistenciaGuardando(false)
-      return
-    }
-    const terminal = getAttendanceDevice()
-    const { error } = await registerAttendanceMark({
-      employeeId: colaboradorMarcaje.id,
-      pin: asistenciaPin,
-      markType: asistenciaTipoPendiente,
-      photoPath: uploadResult.data.path,
-      deviceId: terminal.id,
-      deviceName: terminal.name
-    })
-    if (error) {
-      setAsistenciaLoginError(error.message?.includes("PIN") ? "PIN incorrecto. No se registró el marcaje." : `No se pudo registrar el marcaje: ${error.message}`)
-      setAsistenciaGuardando(false)
-      cerrarCamaraAsistencia()
-      return
-    }
-    setMensajeAsistencia(`${getAttendanceMarkLabel(asistenciaTipoPendiente)} registrada para ${colaboradorMarcaje.nombre}.`)
-    cerrarCamaraAsistencia()
-    setAsistenciaTipoPendiente("")
-    setAsistenciaPin("")
-    await cargarAsistenciaSupabase()
-    setAsistenciaGuardando(false)
-  }
-
-  function iniciarBano(colaborador) {
-    const activo = obtenerBanoActivo(colaborador.id)
-    if (activo) {
-      setMensajeAsistencia(`${colaborador.nombre} ya tiene un baño activo.`)
-      return
-    }
-
-    if (obtenerConteoBanosHoy(colaborador.id) >= 2) {
-      setMensajeAsistencia(`${colaborador.nombre} ya utilizó los 2 baños permitidos por turno.`)
-      return
-    }
-
-    const ultimo = obtenerUltimoMovimientoEntradaSalida(colaborador.id)
-    if (!ultimo || ultimo.tipo !== "entrada") {
-      setMensajeAsistencia("No se puede iniciar baño sin una entrada activa.")
-      return
-    }
-
-    registrarMovimientoAsistencia(colaborador, "bano_inicio", { limiteMinutos: 10 })
-    setMensajeAsistencia(`Baño iniciado para ${colaborador.nombre}. Tiempo permitido: 10 minutos.`)
-  }
-
-  function marcarRegresoBano(colaborador) {
-    const activo = obtenerBanoActivo(colaborador.id)
-    if (!activo) {
-      setMensajeAsistencia("No hay baño activo para este colaborador.")
-      return
-    }
-
-    const ahora = new Date()
-    const duracionMinutos = calcularMinutosEntre(activo.fechaHoraISO, ahora.toISOString())
-    registrarMovimientoAsistencia(colaborador, "bano_regreso", {
-      banoInicioId: activo.id,
-      duracionMinutos,
-      excedido: duracionMinutos > 10,
-      horaInicioBano: activo.hora
-    })
-    setMensajeAsistencia(
-      duracionMinutos > 10
-        ? `Regreso de baño registrado. Duración: ${duracionMinutos} min, excedido.`
-        : `Regreso de baño registrado. Duración: ${duracionMinutos} min.`
-    )
   }
 
   function agregarTurno() {
@@ -6078,10 +5831,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    setSeccionActiva("asistencia")
-                    setMensajeAsistencia("")
-                  }}
+                  onClick={() => navigate("/hr?section=asistencia")}
                   style={secondaryPanelButtonStyle}
                 >
                   Marcaje de asistencia
@@ -7852,136 +7602,22 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
 
           {seccionActiva === "asistencia" && (
             <div style={cardStyle}>
+              {/*
+                Registro legacy desactivado (Fase 1 consolidación).
+                Flujo oficial: /hr?section=asistencia y /kiosk → AttendanceTerminal.jsx
+              */}
               <h2>Marcaje de asistencia</h2>
               <p style={{ marginBottom: "18px", color: "#cbd5e1" }}>
-                Selecciona tu perfil, ingresa tu PIN y toma una foto para cada marcaje.
+                El flujo oficial de marcaje ahora usa la terminal de asistencia.
               </p>
-
-              {mensajeAsistencia && <div style={profileSuccessMessageStyle}>{mensajeAsistencia}</div>}
-
-              {!colaboradorMarcaje ? (
-                <div style={attendanceTerminalSelectorStyle}>
-                  <h3 style={{ margin: 0 }}>¿Quién eres?</h3>
-                  <p style={attendanceTerminalDeviceStyle}>Terminal: <strong>{asistenciaDeviceId}</strong></p>
-                  {asistenciaLoginError && <div style={ingredientFormErrorStyle}>{asistenciaLoginError}</div>}
-                  {asistenciaCargando ? <p>Cargando colaboradores...</p> : (
-                    <div style={attendanceEmployeeGridStyle}>
-                      {asistenciaPerfiles.map((colaborador) => (
-                        <button type="button" key={colaborador.id} onClick={() => seleccionarColaboradorMarcaje(colaborador)} style={attendanceEmployeeButtonStyle}>
-                          {colaborador.fotoColaborador ? (
-                            <img src={colaborador.fotoColaborador} alt="" style={attendanceEmployeeAvatarStyle} />
-                          ) : (
-                            <span style={attendanceEmployeeAvatarPlaceholderStyle}>{obtenerInicialesColaborador(colaborador.nombre)}</span>
-                          )}
-                          <strong>{colaborador.nombre}</strong>
-                          <small>{colaborador.departamento || "Sin área"}</small>
-                        </button>
-                      ))}
-                      {!asistenciaPerfiles.length && <p>No hay colaboradores activos disponibles.</p>}
-                    </div>
-                  )}
-                  <div style={attendanceRecoveryLinksStyle}>
-                    <span style={{ color: "#94a3b8" }}>Tu PIN es administrado por RRHH.</span>
-                  </div>
-                </div>
-              ) : (
-                <div style={attendanceMiniProfileStyle}>
-                  {(() => {
-                    const ultimoMovimiento = obtenerUltimoMovimientoEntradaSalida(colaboradorMarcaje.id)
-                    const banoActivo = obtenerBanoActivo(colaboradorMarcaje.id)
-                    const banosUsados = obtenerConteoBanosHoy(colaboradorMarcaje.id)
-                    const puedeMarcarSalida = ultimoMovimiento?.tipo === "entrada"
-                    const tipoPendiente = puedeMarcarSalida ? "salida" : "entrada"
-                    const etiquetaMarcaje = puedeMarcarSalida ? "Tomar foto y marcar salida" : "Tomar foto y marcar entrada"
-
-                    return (
-                      <>
-                        <div style={profileHeaderStyle}>
-                          {colaboradorMarcaje.fotoColaborador ? (
-                            <img src={colaboradorMarcaje.fotoColaborador} alt={colaboradorMarcaje.nombre} style={profileAvatarStyle} />
-                          ) : (
-                            <div style={profileAvatarPlaceholderStyle}>{obtenerInicialesColaborador(colaboradorMarcaje.nombre)}</div>
-                          )}
-                          <div style={{ flex: 1 }}>
-                            <h2 style={{ margin: 0 }}>{colaboradorMarcaje.nombre}</h2>
-                            <p style={{ color: "#cbd5e1" }}>{colaboradorMarcaje.departamento || "Sin departamento"}</p>
-                            <p style={{ color: "#e5e7eb" }}>Estado del turno: {puedeMarcarSalida ? "Dentro del turno" : "Fuera del turno"}</p>
-                            <p style={{ color: "#e5e7eb" }}>Último marcaje: {ultimoMovimiento ? `${ultimoMovimiento.tipo} ${ultimoMovimiento.hora}` : "Sin marcaje hoy"}</p>
-                            <p style={{ color: "#e5e7eb" }}>Baños usados hoy: {banosUsados}/2</p>
-                            <p style={{ color: "#94a3b8" }}>Horario: {obtenerTurnosColaborador(colaboradorMarcaje).length ? obtenerTurnosColaborador(colaboradorMarcaje).map(formatearTurno).join(", ") : "Sin horario asignado"}</p>
-                          </div>
-                        </div>
-
-                        {banoActivo && <div style={attendanceWarningStyle}>Baño activo desde {banoActivo.hora}.</div>}
-
-                        {asistenciaLoginError && <div style={{ ...ingredientFormErrorStyle, margin: "16px" }}>{asistenciaLoginError}</div>}
-                        <div style={attendancePinBoxStyle}>
-                          <label style={fieldLabelStyle}>PIN de marcaje</label>
-                          <input
-                            type="password"
-                            inputMode="numeric"
-                            maxLength={6}
-                            placeholder="Ingresa tu PIN"
-                            value={asistenciaPin}
-                            onChange={(event) => setAsistenciaPin(event.target.value.replace(/\D/g, "").slice(0, 4))}
-                            style={inputStyle}
-                          />
-                          <p style={{ margin: 0, color: "#94a3b8" }}>La foto es obligatoria para registrar cualquier movimiento.</p>
-                        </div>
-
-                        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", padding: "16px" }}>
-                          <button type="button" onClick={() => abrirCamaraAsistencia(tipoPendiente)} style={buttonStyle}>{etiquetaMarcaje}</button>
-                          {banoActivo ? (
-                            <button type="button" onClick={() => abrirCamaraAsistencia("bano_regreso")} style={editButtonStyle}>Tomar foto y marcar regreso</button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => abrirCamaraAsistencia("bano_inicio")}
-                              style={banosUsados >= 2 || ultimoMovimiento?.tipo !== "entrada" ? disabledButtonStyle : editButtonStyle}
-                              disabled={banosUsados >= 2 || ultimoMovimiento?.tipo !== "entrada"}
-                            >
-                              Tomar foto y marcar Baño / Break
-                            </button>
-                          )}
-                          <button type="button" onClick={cerrarSesionMarcajeAsistencia} style={cancelButtonStyle}>Salir del marcaje</button>
-                        </div>
-
-                        {asistenciaCamaraActiva && (
-                          <div style={attendanceCameraBoxStyle}>
-                            <div style={attendanceCameraPreviewStyle}>
-                              <video ref={asistenciaVideoRef} autoPlay playsInline muted style={barcodeVideoStyle} />
-                              {asistenciaCountdown > 0 && (
-                                <div style={attendanceCountdownStyle}>
-                                  <strong style={attendanceCountdownNumberStyle}>{asistenciaCountdown}</strong>
-                                  <span>Prepárate para la foto</span>
-                                </div>
-                              )}
-                              {asistenciaGuardando && <div style={attendanceSavingOverlayStyle}>Guardando marcaje...</div>}
-                            </div>
-                            <canvas ref={asistenciaCanvasRef} style={{ display: "none" }} />
-                            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-                              <span style={attendanceAutoCaptureTextStyle}>La foto y la hora se guardarán automáticamente.</span>
-                              <button type="button" onClick={cerrarCamaraAsistencia} disabled={asistenciaGuardando} style={cancelButtonStyle}>Cancelar</button>
-                            </div>
-                          </div>
-                        )}
-
-                        <div style={{ padding: "0 16px 16px" }}>
-                          <div style={profileCardStyle}>
-                            <h3>Mi historial básico</h3>
-                            {asistenciaMovimientos
-                              .filter((movimiento) => movimiento.colaboradorId === colaboradorMarcaje.id)
-                              .slice(0, 10)
-                              .map((movimiento) => (
-                                <p key={movimiento.id}>{movimiento.fecha} {movimiento.hora} · {movimiento.tipo}</p>
-                              ))}
-                          </div>
-                        </div>
-                      </>
-                    )
-                  })()}
-                </div>
-              )}
+              <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                <button type="button" onClick={() => navigate("/hr?section=asistencia")} style={buttonStyle}>
+                  Abrir terminal de marcaje
+                </button>
+                <button type="button" onClick={() => navigate("/kiosk")} style={editButtonStyle}>
+                  Abrir modo kiosco
+                </button>
+              </div>
             </div>
           )}
 
@@ -8021,7 +7657,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
                         <th style={attendanceThStyle}>Hora</th>
                         <th style={attendanceThStyle}>Colaborador</th>
                         <th style={attendanceThStyle}>Movimiento</th>
-                        <th style={attendanceThStyle}>Registró</th>
+                        <th style={attendanceThStyle}>Dispositivo</th>
                         <th style={attendanceThStyle}>Foto</th>
                         <th style={attendanceThStyle}>Detalle</th>
                       </tr>
@@ -8032,16 +7668,46 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
                           <td style={attendanceTdStyle}>{movimiento.fecha}</td>
                           <td style={attendanceTdStyle}>{movimiento.hora}</td>
                           <td style={attendanceTdStyle}>{movimiento.colaboradorNombre}</td>
-                          <td style={attendanceTdStyle}>{movimiento.tipo}</td>
-                          <td style={attendanceTdStyle}>{movimiento.registradoPor}</td>
-                          <td style={attendanceTdStyle}>{movimiento.fotoMarcaje ? <button type="button" onClick={() => setAsistenciaFotoAmpliada(movimiento.fotoMarcaje)} style={attendancePhotoButtonStyle}><img src={movimiento.fotoMarcaje} alt="Marcaje" style={attendancePhotoThumbStyle} /></button> : "-"}</td>
-                          <td style={attendanceTdStyle}>{movimiento.dispositivoNoAutorizado ? <span style={attendanceDeviceAlertStyle}>Dispositivo no autorizado</span> : movimiento.estado}</td>
+                          <td style={attendanceTdStyle}>{getAttendanceMarkLabel(movimiento.tipo)}</td>
+                          <td style={attendanceTdStyle}>{movimiento.dispositivoLabel || formatAttendanceDeviceLabel(movimiento.registradoPor)}</td>
+                          <td style={attendanceTdStyle}>{movimiento.fotoMarcaje ? <button type="button" onClick={() => setAsistenciaFotoAmpliada(movimiento.fotoMarcaje)} style={attendancePhotoButtonStyle} title="Ver foto ampliada"><img src={movimiento.fotoMarcaje} alt="Marcaje" style={attendancePhotoThumbStyle} /></button> : "-"}</td>
+                          <td style={attendanceTdStyle}>
+                            <button type="button" onClick={() => setAsistenciaDetalleMarcaje(movimiento)} style={attendanceDetailButtonStyle}>Ver</button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
               </div>
+              {asistenciaDetalleMarcaje && (
+                <div style={cropModalOverlayStyle} onClick={() => setAsistenciaDetalleMarcaje(null)}>
+                  <div style={attendanceDetailModalStyle} onClick={(event) => event.stopPropagation()}>
+                    <h3 style={{ marginTop: 0 }}>Detalle de marcaje</h3>
+                    <div style={attendanceDetailGridStyle}>
+                      <div><strong>Fecha</strong><span>{asistenciaDetalleMarcaje.fecha}</span></div>
+                      <div><strong>Hora</strong><span>{asistenciaDetalleMarcaje.hora}</span></div>
+                      <div><strong>Colaborador</strong><span>{asistenciaDetalleMarcaje.colaboradorNombre}</span></div>
+                      <div><strong>Movimiento</strong><span>{getAttendanceMarkLabel(asistenciaDetalleMarcaje.tipo)}</span></div>
+                      <div><strong>Dispositivo</strong><span>{asistenciaDetalleMarcaje.dispositivoLabel || formatAttendanceDeviceLabel(asistenciaDetalleMarcaje.registradoPor)}</span></div>
+                      <div><strong>Estado</strong><span>{asistenciaDetalleMarcaje.dispositivoNoAutorizado ? "Dispositivo no autorizado" : asistenciaDetalleMarcaje.estado}</span></div>
+                      {asistenciaDetalleMarcaje.notas ? <div style={{ gridColumn: "1 / -1" }}><strong>Notas</strong><span>{asistenciaDetalleMarcaje.notas}</span></div> : null}
+                      {asistenciaDetalleMarcaje.userAgent ? (
+                        <div style={{ gridColumn: "1 / -1" }}>
+                          <strong>User agent (auditoría)</strong>
+                          <span style={attendanceUserAgentStyle}>{asistenciaDetalleMarcaje.userAgent}</span>
+                        </div>
+                      ) : null}
+                    </div>
+                    {asistenciaDetalleMarcaje.fotoMarcaje ? (
+                      <button type="button" onClick={() => setAsistenciaFotoAmpliada(asistenciaDetalleMarcaje.fotoMarcaje)} style={attendancePhotoButtonStyle}>
+                        <img src={asistenciaDetalleMarcaje.fotoMarcaje} alt="Evidencia de marcaje" style={attendanceDetailPhotoStyle} />
+                      </button>
+                    ) : <p style={{ color: "#94a3b8" }}>Sin foto disponible.</p>}
+                    <button type="button" onClick={() => setAsistenciaDetalleMarcaje(null)} style={cancelButtonStyle}>Cerrar</button>
+                  </div>
+                </div>
+              )}
               {asistenciaFotoAmpliada && (
                 <div style={cropModalOverlayStyle} onClick={() => setAsistenciaFotoAmpliada("")}>
                   <div style={attendancePhotoPreviewStyle} onClick={(event) => event.stopPropagation()}>
@@ -9964,6 +9630,56 @@ const attendancePhotoButtonStyle = {
   border: 0,
   background: "transparent",
   cursor: "zoom-in"
+}
+
+const attendanceDetailButtonStyle = {
+  minHeight: "36px",
+  padding: "7px 12px",
+  border: "1px solid #334155",
+  borderRadius: "8px",
+  background: "#111827",
+  color: "#dbeafe",
+  fontWeight: 700,
+  cursor: "pointer"
+}
+
+const attendanceDetailModalStyle = {
+  display: "grid",
+  gap: "14px",
+  width: "min(760px, calc(100vw - 30px))",
+  maxHeight: "90vh",
+  overflow: "auto",
+  padding: "18px",
+  borderRadius: "15px",
+  border: "1px solid #334155",
+  backgroundColor: "#0f172a",
+  color: "#e2e8f0"
+}
+
+const attendanceDetailGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(180px, 1fr))",
+  gap: "12px"
+}
+
+const attendanceUserAgentStyle = {
+  display: "block",
+  marginTop: "6px",
+  padding: "10px",
+  borderRadius: "8px",
+  background: "#111827",
+  color: "#94a3b8",
+  fontSize: "12px",
+  lineHeight: 1.45,
+  wordBreak: "break-word"
+}
+
+const attendanceDetailPhotoStyle = {
+  width: "100%",
+  maxHeight: "320px",
+  objectFit: "contain",
+  borderRadius: "10px",
+  border: "1px solid #334155"
 }
 
 const attendanceDeviceAlertStyle = {
