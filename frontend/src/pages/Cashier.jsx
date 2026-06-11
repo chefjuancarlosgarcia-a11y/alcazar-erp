@@ -25,9 +25,13 @@ import {
   openCashSession,
   refundPayment,
   registerCashMovement,
-  returnPreBillToWaiter
+  registerSplitPaymentLocal,
+  returnPreBillToWaiter,
+  syncSupabaseFullPayment
 } from "../utils/cashier"
+import { getPosOrderPaymentStatus } from "../services/posOrdersService"
 import { printFinalCheck } from "../services/posPrintService"
+import SplitPaymentModal from "../components/SplitPaymentModal"
 import useOperationalAlerts from "../hooks/useOperationalAlerts"
 import OperationalAlertToast from "../components/OperationalAlertToast"
 import "./Cashier.css"
@@ -114,7 +118,7 @@ function Cashier() {
   }
   const session = getOpenCashSession(user)
   const summary = getCashSummary(session)
-  const requests = store.preBills.filter((bill) => bill.status === "sent_to_cashier")
+  const requests = store.preBills.filter((bill) => ["sent_to_cashier", "partially_paid"].includes(bill.status))
   const selectedBill = selectedBillId
     ? store.preBills.find((bill) => String(bill.id) === String(selectedBillId) && bill.status !== "paid")
     : requests[0]
@@ -314,13 +318,40 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
   const [splitId, setSplitId] = useState("")
   const [message, setMessage] = useState("")
   const [processingPayment, setProcessingPayment] = useState(false)
+  const [paymentMode, setPaymentMode] = useState("full")
+  const [showSplitModal, setShowSplitModal] = useState(false)
+  const [paymentStatus, setPaymentStatus] = useState(null)
+  const isSupabaseBill = bill?.source === "supabase_pos" && bill?.orderId
   const splitBill = splitBills.find((split) => String(split.preBillId) === String(bill?.id))
   const split = splitBill?.splits.find((part) => part.id === splitId)
-  const subtotal = Number(split?.subtotal ?? bill?.subtotal ?? 0)
-  const total = Math.max(0, subtotal - Number(discount || 0) + Number(tip || 0))
+  const productSubtotal = Number(split?.subtotal ?? (paymentStatus ? paymentStatus.balance_due : null) ?? bill?.subtotal ?? 0)
+  const total = Math.max(0, productSubtotal - Number(discount || 0) + Number(tip || 0))
   const paid = methods.reduce((sum, method) => sum + Number(method.amount || 0), 0)
   const change = Math.max(0, paid - total)
   const approvedAuthorization = requests.find((request) => request.status === "approved" && !request.usedAt && request.requestedById === (user.id || user.username))
+
+  useEffect(() => {
+    if (!isSupabaseBill) {
+      setPaymentStatus(null)
+      return
+    }
+    let cancelled = false
+    getPosOrderPaymentStatus(bill.orderId).then(({ data }) => {
+      if (!cancelled) setPaymentStatus(data)
+    })
+    return () => { cancelled = true }
+  }, [bill?.orderId, isSupabaseBill, showSplitModal])
+
+  useEffect(() => {
+    if (!bill) return
+    const baseTotal = Number(paymentStatus?.balance_due ?? bill.total ?? 0)
+    setMethods((current) => {
+      if (current.length === 1 && (!current[0].amount || Number(current[0].amount) === Number(bill.total))) {
+        return [{ ...current[0], amount: String(baseTotal) }]
+      }
+      return current
+    })
+  }, [bill?.id, bill?.total, paymentStatus?.balance_due])
 
   if (!bill) return <article className="cashier-panel"><Empty text="Selecciona una solicitud de cobro." /></article>
   if (!session) return <article className="cashier-panel"><h2>Cobrar mesa</h2><Empty text="Abre una caja desde Dashboard Caja antes de cobrar." /></article>
@@ -329,11 +360,49 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
     setMethods((current) => [...current, { method: "card", amount: "", reference: "" }])
   }
 
+  async function refreshPaymentStatus() {
+    if (!isSupabaseBill) return
+    const { data } = await getPosOrderPaymentStatus(bill.orderId)
+    setPaymentStatus(data)
+  }
+
+  async function handleSplitPaid(result) {
+    const local = registerSplitPaymentLocal({
+      preBillId: bill.id,
+      amount: result.subtotal ?? result.selectedLines?.reduce((sum, line) => sum + Number(line.line_total || 0), 0),
+      methods: result.methods || [],
+      user,
+      orderFullyPaid: result.orderFullyPaid,
+      paidByLabel: result.paid_by_label || result.paidByLabel || "",
+      paymentNumber: result.payment_number
+    })
+    if (!local.ok) {
+      setMessage(`Subcuenta registrada en sistema, pero caja local fallo: ${local.message}`)
+      return
+    }
+    setShowSplitModal(false)
+    if (result.orderFullyPaid) {
+      onPaymentComplete(`Subcuenta cobrada. Cuenta cerrada. Saldo restante: Q0.00`)
+      return
+    }
+    await refreshPaymentStatus()
+    setMessage(`Subcuenta cobrada. Saldo restante: Q${Number(result.balanceDue || 0).toFixed(2)}`)
+    onRefresh("")
+  }
+
   async function submit() {
     if (processingPayment) return
     setProcessingPayment(true)
     setMessage("Procesando pago...")
     try {
+      if (isSupabaseBill) {
+        const syncResult = await syncSupabaseFullPayment(bill.orderId, methods, "Cuenta completa")
+        if (!syncResult.ok) {
+          setMessage(`Error en Caja > Cobrar mesa > Supabase: ${syncResult.message}`)
+          return
+        }
+      }
+
       const result = confirmPayment({
         preBillId: bill.id,
         splitId,
@@ -341,7 +410,8 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
         discountAmount: Number(discount),
         methods,
         authorizationId: approvedAuthorization?.id || "",
-        authorizedBy: approvedAuthorization?.approvedBy || ""
+        authorizedBy: approvedAuthorization?.approvedBy || "",
+        productSubtotalOverride: isSupabaseBill ? productSubtotal : undefined
       }, user)
       if (result.requiresAuthorization) {
         createAuthorizationRequest("Descuento o cortesía", result.message, Number(discount), user)
@@ -394,7 +464,10 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
           {bill.items.map((item) => <div key={item.lineId || item.id}><span>{item.cantidad} x {item.nombre}</span><strong>Q{(item.precio * item.cantidad).toFixed(2)}</strong></div>)}
         </div>
         <div className="cashier-totals">
-          <p>Subtotal <strong>Q{subtotal.toFixed(2)}</strong></p>
+          {paymentStatus && Number(paymentStatus.amount_paid) > 0 && (
+            <p className="cashier-partial-status">Ya pagado <strong>Q{Number(paymentStatus.amount_paid).toFixed(2)}</strong> · Saldo restante <strong>Q{Number(paymentStatus.balance_due).toFixed(2)}</strong></p>
+          )}
+          <p>Subtotal <strong>Q{productSubtotal.toFixed(2)}</strong></p>
           <label>Descuento<input type="number" min="0" step="0.01" value={discount} onChange={(event) => setDiscount(event.target.value)} /></label>
           <label>Propina<input type="number" min="0" step="0.01" value={tip} onChange={(event) => setTip(event.target.value)} /></label>
           <p className="total">Total final <strong>Q{total.toFixed(2)}</strong></p>
@@ -402,6 +475,17 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
       </article>
       <article className="cashier-panel">
         <h2>Pago</h2>
+        {isSupabaseBill && (
+          <div className="cashier-payment-mode">
+            <button type="button" className={paymentMode === "full" ? "active" : ""} onClick={() => setPaymentMode("full")}>Pagar cuenta completa</button>
+            <button type="button" className={paymentMode === "split" ? "active" : ""} onClick={() => { setPaymentMode("split"); setShowSplitModal(true) }}>Pagar por separado</button>
+          </div>
+        )}
+        {paymentMode === "split" && isSupabaseBill && !showSplitModal && (
+          <p className="cashier-split-hint">Selecciona productos para armar la subcuenta de cada cliente.</p>
+        )}
+        {(!isSupabaseBill || paymentMode === "full") && (
+          <>
         {splitBill && (
           <label className="cashier-field">Parte a pagar
             <select value={splitId} onChange={(event) => setSplitId(event.target.value)}>
@@ -424,6 +508,11 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
         {approvedAuthorization && <div className="cashier-approved">Autorización aprobada por {approvedAuthorization.approvedBy}</div>}
         {message && <div className="cashier-feedback">{message}</div>}
         <button type="button" disabled={processingPayment} onClick={submit}>{processingPayment ? "Procesando..." : "Confirmar pago"}</button>
+          </>
+        )}
+        {paymentMode === "split" && isSupabaseBill && (
+          <button type="button" className="secondary" onClick={() => setShowSplitModal(true)}>Abrir division por productos</button>
+        )}
       </article>
       <article className="cashier-panel cashier-split">
         <h2>Dividir cuenta</h2>
@@ -438,6 +527,14 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
         {splitMode && <button type="button" className="secondary" onClick={buildSplit}>Crear división</button>}
         {splitBill?.splits.map((part) => <div className="cashier-row" key={part.id}><span>{part.name}</span><strong>Q{part.total.toFixed(2)} · {part.paid ? "Pagada" : "Pendiente"}</strong></div>)}
       </article>
+      {showSplitModal && isSupabaseBill && (
+        <SplitPaymentModal
+          bill={bill}
+          user={user}
+          onClose={() => setShowSplitModal(false)}
+          onPaid={handleSplitPaid}
+        />
+      )}
     </div>
   )
 }

@@ -61,7 +61,7 @@ async function queryOrder(query, label) {
 
 export async function getOpenOrderByTable(tableId) {
   return queryOrder(
-    supabase.from("pos_orders").select(orderSelect).eq("table_id", String(tableId)).in("status", ["open", "awaiting_bill", "sent_to_cashier"]).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+    supabase.from("pos_orders").select(orderSelect).eq("table_id", String(tableId)).in("status", ["open", "awaiting_bill", "sent_to_cashier", "partially_paid"]).order("created_at", { ascending: false }).limit(1).maybeSingle(),
     "cargar orden abierta POS"
   )
 }
@@ -307,6 +307,29 @@ export async function requestOrderBill(orderId) {
 
 export async function sendOrderToCashier(orderId) {
   return runOrderAction("send_pos_order_to_cashier", { p_order_id: orderId }, "enviar cuenta a caja")
+}
+
+export async function getPosOrderPaymentStatus(orderId) {
+  const { data, error } = await withTimeout(
+    supabase.rpc("get_pos_order_payment_status", { p_order_id: orderId }),
+    10000,
+    "consultar pagos parciales POS"
+  )
+  return { data: data || null, error, message: error ? formatSupabaseError(error) : "" }
+}
+
+export async function createPosSplitPayment({ orderId, items, methods, paidByLabel = "" }) {
+  const { data, error } = await withTimeout(
+    supabase.rpc("create_pos_split_payment", {
+      p_order_id: orderId,
+      p_items: items,
+      p_methods: methods,
+      p_paid_by_label: paidByLabel || null
+    }),
+    15000,
+    "registrar subcuenta POS"
+  )
+  return { data: data || null, error, message: error ? formatSupabaseError(error) : "" }
 }
 
 export async function clearLegacyPOSOrders() {

@@ -128,6 +128,35 @@ export async function printPreCheck(order, options = {}) {
   }))
 }
 
+export async function printSubCheck(order, payment = {}, options = {}) {
+  const items = payment.items || []
+  const total = Number(payment.totalAmount || items.reduce((sum, item) => sum + Number(item.line_total || 0), 0))
+  const methods = (payment.methods || []).map((method) => method.method).join(", ") || "-"
+  return printHtml(buildReceiptHtml({
+    title: options.restaurantName || DEFAULT_RESTAURANT_NAME,
+    width: options.paperWidth || "80mm",
+    footer: "Subcuenta pagada.",
+    lines: [
+      { text: "SUBCUENTA", className: "center" },
+      { text: `Mesa: ${order?.tableName || order?.mesa || "-"}` },
+      { text: payment.paidByLabel ? `Cliente: ${payment.paidByLabel}` : "" },
+      { text: payment.paymentNumber ? `Pago #${payment.paymentNumber}` : "" },
+      { text: `Fecha: ${new Date().toLocaleString()}` },
+      { text: `Pago: ${methods}` },
+      { type: "hr" },
+      ...items.map((item) => ({
+        type: "item",
+        name: item.product_name || itemName(item),
+        qty: item.quantity_paid ?? itemQuantity(item),
+        price: money(item.unit_price ?? itemPrice(item)),
+        total: money(item.line_total ?? (Number(item.quantity_paid || 0) * Number(item.unit_price || 0)))
+      })),
+      { type: "hr" },
+      { type: "total", label: "Total subcuenta", value: money(total) }
+    ].filter((line) => line.text !== "")
+  }))
+}
+
 export async function printFinalCheck(order, payment = {}, options = {}) {
   const ticketType = options.ticketType || ticketTypeFor(order, "final_bill")
   try {

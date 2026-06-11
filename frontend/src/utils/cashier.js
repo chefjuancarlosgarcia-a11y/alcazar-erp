@@ -318,6 +318,134 @@ export function beginPayment(preBillId, user) {
   return { ok: true, order }
 }
 
+export function registerSplitPaymentLocal({ preBillId, amount, methods, user, orderFullyPaid, paidByLabel = "", paymentNumber = null }) {
+  const session = getOpenCashSession(user)
+  if (!session) return { ok: false, message: "Debes abrir caja antes de cobrar." }
+  const preBill = loadPreBills().find((bill) => String(bill.id) === String(preBillId))
+  if (!preBill) return { ok: false, message: "Precuenta no encontrada." }
+
+  const normalizedMethods = methods.filter((method) => Number(method.amount) > 0).map((method) => ({ ...method, amount: money(method.amount) }))
+  const totalAmount = money(amount)
+  const paidAmount = money(normalizedMethods.reduce((sum, method) => sum + method.amount, 0))
+  if (!normalizedMethods.length || paidAmount < totalAmount) {
+    return { ok: false, message: "El pago local esta incompleto." }
+  }
+
+  const excess = money(paidAmount - totalAmount)
+  const cashPaid = money(normalizedMethods.filter((method) => method.method === "cash").reduce((sum, method) => sum + method.amount, 0))
+  if (excess > 0 && cashPaid < excess) return { ok: false, message: "Solo el pago en efectivo puede generar vuelto." }
+
+  const payment = {
+    id: id("payment"),
+    cashSessionId: session.id,
+    orderId: preBill.orderId,
+    tableId: preBill.tableId,
+    cashierId: actorId(user),
+    cashierName: actorName(user),
+    waiterId: preBill.waiterId,
+    waiterName: preBill.waiterName,
+    totalAmount,
+    paidAmount,
+    changeGiven: excess,
+    methods: normalizedMethods,
+    tipAmount: 0,
+    discountAmount: 0,
+    splitId: "",
+    splitPayment: true,
+    paidByLabel,
+    paymentNumber,
+    status: "completed",
+    createdAt: new Date().toISOString()
+  }
+  saveArray(PAYMENTS_KEY, [payment, ...loadPayments()])
+
+  const saleMovements = normalizedMethods.map((method) => ({
+    id: id("movement"),
+    cashSessionId: session.id,
+    type: "sale",
+    amount: money(method.amount - (method.method === "cash" ? excess : 0)),
+    method: method.method,
+    reason: paidByLabel ? `Subcuenta ${preBill.tableName} · ${paidByLabel}` : `Subcuenta ${preBill.tableName}`,
+    relatedOrderId: preBill.orderId,
+    createdBy: actorName(user),
+    createdAt: new Date().toISOString()
+  }))
+  saveArray(CASH_MOVEMENTS_KEY, [...saleMovements, ...loadCashMovements()])
+
+  if (orderFullyPaid) {
+    saveArray(PRE_BILLS_KEY, loadPreBills().map((bill) => bill.id === preBill.id ? { ...bill, status: "paid", paidAt: new Date().toISOString(), balanceDue: 0 } : bill))
+    const order = updateOrder(preBill.orderId, (current) => ({
+      ...current,
+      status: "paid",
+      estado: "pagada",
+      paymentId: payment.id,
+      pagadaEn: new Date().toISOString(),
+      items: (current.items || []).map((item) => item.status === "cancelled" ? item : ({ ...item, status: "paid" }))
+    }))
+    if (order) releaseTable(order)
+    addNotification(preBill.waiterId, "table_paid", "Mesa pagada", `${preBill.tableName} pagada.`, payment.id)
+  } else {
+    const balanceDue = money(Math.max(0, Number(preBill.total || 0) - loadPayments().filter((entry) => entry.orderId === preBill.orderId && entry.status === "completed").reduce((sum, entry) => sum + entry.totalAmount, 0)))
+    saveArray(PRE_BILLS_KEY, loadPreBills().map((bill) => bill.id === preBill.id ? { ...bill, status: "partially_paid", balanceDue } : bill))
+    updateOrder(preBill.orderId, (current) => ({ ...current, status: "partially_paid", estado: "pago parcial" }))
+  }
+
+  audit("split_payment", "payment", payment.id, null, payment, user, paidByLabel, "")
+  emit()
+  return { ok: true, payment, orderFullyPaid }
+}
+
+export async function syncSupabaseFullPayment(orderId, methods, paidByLabel = "Cuenta completa") {
+  const { getPosOrderPaymentStatus, createPosSplitPayment } = await import("../services/posOrdersService")
+  const statusResult = await getPosOrderPaymentStatus(orderId)
+  if (statusResult.error) return { ok: false, message: statusResult.message || "No se pudo consultar el saldo de la orden." }
+
+  const remainingItems = (statusResult.data?.items || [])
+    .filter((item) => Number(item.quantity_remaining) > 0)
+    .map((item) => ({ order_item_id: item.order_item_id, quantity_paid: Number(item.quantity_remaining) }))
+
+  if (!remainingItems.length) {
+    return { ok: true, orderFullyPaid: true, balanceDue: 0, data: statusResult.data }
+  }
+
+  const productTotal = money((statusResult.data?.items || [])
+    .filter((item) => Number(item.quantity_remaining) > 0)
+    .reduce((sum, item) => sum + Number(item.line_remaining || 0), 0))
+
+  const paymentMethods = methodsForProductTotal(methods, productTotal)
+  if (!paymentMethods.length) {
+    return { ok: false, message: "Indica el monto del pago para los productos pendientes." }
+  }
+
+  const result = await createPosSplitPayment({ orderId, items: remainingItems, methods: paymentMethods, paidByLabel })
+  if (result.error) return { ok: false, message: result.message || "No se pudo registrar el pago en Supabase." }
+
+  return {
+    ok: true,
+    orderFullyPaid: money(result.data?.balance_due ?? 0) <= 0,
+    balanceDue: money(result.data?.balance_due ?? 0),
+    data: result.data
+  }
+}
+
+function methodsForProductTotal(methods, productTotal) {
+  const active = methods.filter((method) => Number(method.amount) > 0)
+  const totalPaid = money(active.reduce((sum, method) => sum + Number(method.amount), 0))
+  if (!active.length || productTotal <= 0) return []
+  if (totalPaid <= productTotal) {
+    return active.map((method) => ({ method: method.method, amount: money(method.amount), reference: method.reference || null }))
+  }
+  let remaining = productTotal
+  return active.map((method, index) => {
+    if (index === active.length - 1) {
+      return { method: method.method, amount: remaining, reference: method.reference || null }
+    }
+    const share = money(productTotal * (Number(method.amount) / totalPaid))
+    remaining = money(remaining - share)
+    return { method: method.method, amount: share, reference: method.reference || null }
+  })
+}
+
 export function returnPreBillToWaiter(preBillId, reason, user) {
   let changed
   const bills = loadPreBills().map((bill) => {
@@ -547,7 +675,7 @@ export function confirmPayment(data, user) {
   if (unfinished) return { ok: false, message: "No puedes cobrar: hay productos que aún no están preparados o servidos." }
   const splitBill = loadSplitBills().find((split) => String(split.preBillId) === String(preBill.id))
   const splitPart = data.splitId ? splitBill?.splits.find((split) => String(split.id) === String(data.splitId)) : null
-  const subtotal = money(splitPart?.subtotal ?? preBill.subtotal)
+  const subtotal = money(data.productSubtotalOverride ?? splitPart?.subtotal ?? preBill.subtotal)
   const discount = money(data.discountAmount)
   const approvedRequest = data.authorizationId
     ? loadAuthorizationRequests().find((request) => request.id === data.authorizationId && request.status === "approved" && !request.usedAt)

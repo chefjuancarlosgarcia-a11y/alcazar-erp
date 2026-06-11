@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useLocation } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
 import useSupabaseRealtime from "../hooks/useSupabaseRealtime"
@@ -38,6 +38,13 @@ import {
   updateOrderItemNotes,
   updateOrderItemQuantity
 } from "../services/posOrdersService"
+import {
+  deletePosFloorTable,
+  deletePosFloorZone,
+  getPosFloorLayout,
+  migrateLocalFloorLayout,
+  savePosFloorLayout
+} from "../services/posFloorPlanService"
 import "./POS.css"
 
 const POS_CATEGORIES_KEY = "posCategories"
@@ -45,6 +52,7 @@ const POS_LAYOUT_KEY = "posLayout"
 const LEGACY_POS_AREAS_KEY = "posRestaurantAreas"
 const POS_LAYOUT_SYNC_EVENT = "pos-layout-updated"
 const DEFAULT_LAYOUT_SETTINGS = { snapToGrid: true, gridSize: 24, zoom: 1 }
+const OPERATIONAL_TABLE_FIELDS = ["orderTotal", "orderCreatedAt", "activeMinutes", "readyCount"]
 const TABLE_TIME_THRESHOLDS = { normalMinutes: 60, criticalMinutes: 90 }
 const SALES_CHANNELS = [
   { id: "dine_in", label: "Salón", tableLabel: "Mesa" },
@@ -541,21 +549,53 @@ function loadPosLayout() {
   }
 }
 
+function stripOperationalTable(table) {
+  const copy = { ...table }
+  OPERATIONAL_TABLE_FIELDS.forEach((key) => delete copy[key])
+  return copy
+}
+
 function buildPosLayoutPayload(areas, settings) {
   const physicalAreas = normalizeLayoutAreas(areas)
   return {
     areas: physicalAreas.map(({ mesas, ...area }) => ({ ...area, mesasTotales: mesas.length })),
-    tables: physicalAreas.flatMap((area) => area.mesas.map((table, index) => normalizeLayoutTable(table, area.id, index))),
+    tables: physicalAreas.flatMap((area) => area.mesas.map((table, index) => normalizeLayoutTable(stripOperationalTable(table), area.id, index))),
     settings
   }
 }
 
-function syncPosLayoutStorage(areas, settings) {
-  const physicalAreas = normalizeLayoutAreas(areas)
-  localStorage.setItem(POS_LAYOUT_KEY, JSON.stringify(buildPosLayoutPayload(physicalAreas, settings)))
+function hydrateLayoutFromPayload(payload) {
+  const tables = Array.isArray(payload?.tables) ? payload.tables : []
+  const areas = (Array.isArray(payload?.areas) ? payload.areas : [])
+    .map((area, index) => normalizeLayoutArea(area, index, tables))
+    .filter((area) => !isSalesChannelName(area.nombre || area.name || area.id))
+  return {
+    areas: normalizeLayoutAreas(areas),
+    settings: { ...DEFAULT_LAYOUT_SETTINGS, ...(payload?.settings || {}) }
+  }
+}
+
+function persistLayoutCache(areas, settings) {
+  const payload = buildPosLayoutPayload(areas, settings)
+  const physicalAreas = payload.areas.map((area, index) => normalizeLayoutArea(area, index, payload.tables))
+  localStorage.setItem(POS_LAYOUT_KEY, JSON.stringify(payload))
   localStorage.setItem(LEGACY_POS_AREAS_KEY, JSON.stringify(physicalAreas))
   window.dispatchEvent(new CustomEvent(POS_LAYOUT_SYNC_EVENT, { detail: { areas: physicalAreas, settings } }))
-  return physicalAreas
+  return normalizeLayoutAreas(physicalAreas)
+}
+
+function syncPosLayoutStorage(areas, settings) {
+  return persistLayoutCache(areas, settings)
+}
+
+function floorSyncStatusLabel(source, status) {
+  if (status === "loading") return "Cargando plano..."
+  if (status === "saving") return "Guardando..."
+  if (status === "error") return "Error al guardar"
+  if (status === "dirty") return "Cambios sin guardar"
+  if (source === "supabase" && status === "synced") return "Sincronizado en la nube"
+  if (source === "local" || status === "local-only") return "Guardado local solamente"
+  return "Plano listo"
 }
 
 function TableWithChairs({ table, selected = false, editing = false, zoom = 1, onPointerDown, onClick, showSelectLabel = false }) {
@@ -646,6 +686,12 @@ function POS() {
   const posSession = user
   const [areasRestaurante, setAreasRestaurante] = useState(() => loadPosLayout().areas)
   const [layoutSettings, setLayoutSettings] = useState(() => loadPosLayout().settings)
+  const [floorLayoutSource, setFloorLayoutSource] = useState("loading")
+  const [floorSyncStatus, setFloorSyncStatus] = useState("loading")
+  const [localLayoutAvailable, setLocalLayoutAvailable] = useState(false)
+  const [floorLayoutLoading, setFloorLayoutLoading] = useState(true)
+  const [migratingFloorLayout, setMigratingFloorLayout] = useState(false)
+  const floorLayoutSkipRemoteRef = useRef(false)
   const [mostrarAreaForm, setMostrarAreaForm] = useState(false)
   const [areaForm, setAreaForm] = useState(emptyAreaForm)
   const [areaErrors, setAreaErrors] = useState({})
@@ -907,9 +953,79 @@ function POS() {
     return undefined
   }, [posCategories, activeCategories, categoriaActiva])
 
+  const applyHydratedLayout = useCallback((hydrated, source) => {
+    setAreasRestaurante(hydrated.areas)
+    setLayoutSettings(hydrated.settings)
+    setAreaActivaId((current) => {
+      if (current && hydrated.areas.some((area) => area.id === current && area.active !== false)) return current
+      return hydrated.areas.find((area) => area.active !== false)?.id || hydrated.areas[0]?.id || null
+    })
+    persistLayoutCache(hydrated.areas, hydrated.settings)
+    setFloorLayoutSource(source)
+    setFloorSyncStatus(source === "supabase" ? "synced" : source === "local" ? "local-only" : "synced")
+  }, [])
+
+  const reloadFloorFromCloud = useCallback(async (fromRemote = false) => {
+    if (floorLayoutSkipRemoteRef.current) return
+    const result = await getPosFloorLayout()
+    if (result.error || !result.data?.areas?.length) {
+      if (fromRemote) return
+      setLayoutError(result.message || "No se pudo recargar el plano desde la nube.")
+      setFloorSyncStatus("error")
+      return
+    }
+    if (fromRemote && floorSyncStatus === "dirty") {
+      showToast("Plano actualizado en otro dispositivo. Tienes cambios sin guardar en este equipo.", "warning", 4000)
+      return
+    }
+    applyHydratedLayout(hydrateLayoutFromPayload(result.data), "supabase")
+    if (fromRemote) {
+      showToast("Plano actualizado desde otro dispositivo.", "info", 3000)
+    }
+  }, [applyHydratedLayout, floorSyncStatus, showToast])
+
   useEffect(() => {
-    syncPosLayoutStorage(areasRestaurante, layoutSettings)
-  }, [areasRestaurante, layoutSettings])
+    let cancelled = false
+    async function bootstrapFloorLayout() {
+      setFloorLayoutLoading(true)
+      const localSnapshot = loadPosLayout()
+      const hasLocal = localSnapshot.areas.length > 0
+      if (!cancelled) setLocalLayoutAvailable(hasLocal)
+
+      const remote = await getPosFloorLayout()
+      if (cancelled) return
+
+      if (!remote.error && remote.data?.areas?.length) {
+        applyHydratedLayout(hydrateLayoutFromPayload(remote.data), "supabase")
+      } else if (hasLocal) {
+        applyHydratedLayout(localSnapshot, "local")
+      } else {
+        setAreasRestaurante([])
+        setLayoutSettings(DEFAULT_LAYOUT_SETTINGS)
+        setFloorLayoutSource("empty")
+        setFloorSyncStatus("synced")
+      }
+      setFloorLayoutLoading(false)
+    }
+    bootstrapFloorLayout()
+    return () => { cancelled = true }
+  }, [applyHydratedLayout])
+
+  useSupabaseRealtime({
+    table: "pos_floor_zones",
+    enabled: floorLayoutSource === "supabase",
+    onChange: () => { reloadFloorFromCloud(true) }
+  })
+  useSupabaseRealtime({
+    table: "pos_floor_tables",
+    enabled: floorLayoutSource === "supabase",
+    onChange: () => { reloadFloorFromCloud(true) }
+  })
+
+  function markLayoutDirty() {
+    if (floorLayoutSource === "supabase") setFloorSyncStatus("dirty")
+    else if (floorLayoutSource === "local" || floorLayoutSource === "empty") setFloorSyncStatus("local-only")
+  }
 
   function obtenerMesaKey(areaId, mesaId) {
     return `${areaId}:${mesaId}`
@@ -1029,10 +1145,15 @@ function POS() {
     setPosCategories(ordered.map((category, position) => ({ ...category, sortOrder: position + 1 })))
   }
 
-  function guardarAreas(nextAreas, message = "Cambios guardados en este equipo.") {
-    const syncedAreas = syncPosLayoutStorage(nextAreas, layoutSettings)
+  function guardarAreas(nextAreas, message = "", options = {}) {
+    const syncedAreas = normalizeLayoutAreas(nextAreas)
     setAreasRestaurante(syncedAreas)
     setLayoutError("")
+    if (!options.skipDirty) markLayoutDirty()
+    if (floorLayoutSource === "local" || floorLayoutSource === "empty") {
+      persistLayoutCache(syncedAreas, layoutSettings)
+      if (floorLayoutSource === "empty") setFloorLayoutSource("local")
+    }
     if (message) setLayoutMessage(message)
     if (!areaActivaId && syncedAreas.length > 0) setAreaActivaId(syncedAreas.find((area) => area.active !== false)?.id || syncedAreas[0].id)
     if (areaActivaId && !syncedAreas.some((area) => area.id === areaActivaId && area.active !== false)) {
@@ -1098,7 +1219,7 @@ function POS() {
     setLayoutError("")
   }
 
-  function eliminarArea(areaId) {
+  async function eliminarArea(areaId) {
     const area = areasRestaurante.find((item) => item.id === areaId)
     if (!area) return
     if ((area.mesas || []).some((mesa) => mesaTieneOrdenesActivas(area.id, mesa.id))) {
@@ -1111,10 +1232,18 @@ function POS() {
       setLayoutError("No se puede eliminar la zona física porque todavia tiene mesas. Elimina o mueve las mesas primero.")
       return
     }
+    if (floorLayoutSource === "supabase") {
+      const result = await deletePosFloorZone(areaId)
+      if (result.error) {
+        setLayoutError(result.message || "No se pudo eliminar la zona.")
+        return
+      }
+    }
     const nextAreas = areasRestaurante
       .filter((item) => item.id !== areaId)
       .map((item, index) => ({ ...item, sortOrder: index + 1 }))
-    guardarAreas(nextAreas, "Zona física eliminada en este equipo.")
+    guardarAreas(nextAreas, floorLayoutSource === "supabase" ? "Zona eliminada y sincronizada." : "Zona física eliminada.", { skipDirty: floorLayoutSource === "supabase" })
+    if (floorLayoutSource === "supabase") setFloorSyncStatus("synced")
     if (ordenMesa?.areaId === areaId) setOrdenMesa(null)
     setMesaSeleccionada(null)
   }
@@ -1128,8 +1257,9 @@ function POS() {
     guardarAreas(ordered.map((area, position) => ({ ...area, sortOrder: position + 1 })))
   }
 
-  function actualizarArea(areaId, updater) {
+  function actualizarArea(areaId, updater, options = {}) {
     setAreasRestaurante((actuales) => actuales.map((area) => area.id === areaId ? updater(area) : area))
+    if (options.persistable) markLayoutDirty()
   }
 
   function agregarMesa() {
@@ -1212,6 +1342,7 @@ function POS() {
       }
       return remaining.length !== area.mesas.length ? { ...area, mesas: remaining, mesasTotales: remaining.length } : area
     }))
+    markLayoutDirty()
     setAreaActivaId(destinationId)
     setMesaSeleccionada(updatedTable.id)
     setMesaError("")
@@ -1219,19 +1350,28 @@ function POS() {
     setLayoutMessage("Mesa guardada.")
   }
 
-  function eliminarMesa(mesaId) {
+  async function eliminarMesa(mesaId) {
     if (!areaActiva) return
     if (mesaTieneOrdenesActivas(areaActiva.id, mesaId) && !window.confirm("Esta mesa tiene una orden activa. Deseas eliminarla?")) return
-    actualizarArea(areaActiva.id, (area) => ({
-      ...area,
-      mesasTotales: Math.max(0, area.mesas.length - 1),
-      mesas: area.mesas.filter((mesa) => mesa.id !== mesaId)
-    }))
+    if (floorLayoutSource === "supabase") {
+      const result = await deletePosFloorTable(mesaId)
+      if (result.error) {
+        setMesaError(result.message || "No se pudo eliminar la mesa.")
+        setLayoutError(result.message || "No se pudo eliminar la mesa.")
+        return
+      }
+    }
+    const nextAreas = areasRestaurante.map((area) => (
+      area.id === areaActiva.id
+        ? { ...area, mesas: area.mesas.filter((mesa) => mesa.id !== mesaId), mesasTotales: Math.max(0, area.mesas.length - 1) }
+        : area
+    ))
+    guardarAreas(nextAreas, floorLayoutSource === "supabase" ? "Mesa eliminada y sincronizada." : "Mesa eliminada.", { skipDirty: floorLayoutSource === "supabase" })
+    if (floorLayoutSource === "supabase") setFloorSyncStatus("synced")
     if (ordenMesa?.mesaId === mesaId) setOrdenMesa(null)
     setMesaSeleccionada(null)
     setMesaForm(emptyMesaForm)
     setLayoutError("")
-    setLayoutMessage("Mesa eliminada.")
   }
 
   function duplicarMesa() {
@@ -1274,21 +1414,69 @@ function POS() {
     actualizarArea(areaActiva.id, (area) => ({
       ...area,
       mesas: area.mesas.map((mesa) => mesa.id === draggingTableId ? { ...mesa, x, y } : mesa)
-    }))
+    }), { persistable: true })
   }
 
   function terminarArrastreMesa() {
     if (!draggingTableId) return
     setDraggingTableId(null)
     setLayoutError("")
-    setLayoutMessage("Posición guardada en este equipo.")
+    setLayoutMessage(floorLayoutSource === "supabase"
+      ? "Posicion actualizada. Guarda el plano en la nube para sincronizar."
+      : "Posicion actualizada.")
   }
 
-  function guardarLayoutManual() {
-    const syncedAreas = syncPosLayoutStorage(areasRestaurante, layoutSettings)
-    setAreasRestaurante(syncedAreas)
+  async function guardarLayoutManual() {
     setLayoutError("")
-    setLayoutMessage("Plano guardado en este equipo.")
+    setLayoutMessage("Guardando plano...")
+    setFloorSyncStatus("saving")
+    floorLayoutSkipRemoteRef.current = true
+    const payload = buildPosLayoutPayload(areasRestaurante, layoutSettings)
+    const result = await savePosFloorLayout(payload)
+    floorLayoutSkipRemoteRef.current = false
+    if (result.error) {
+      setFloorSyncStatus("error")
+      setLayoutMessage("")
+      setLayoutError(result.message || "No se pudo guardar el plano en la nube.")
+      return
+    }
+    const hydrated = hydrateLayoutFromPayload(result.data)
+    applyHydratedLayout(hydrated, "supabase")
+    setLayoutMessage("Plano guardado y sincronizado correctamente.")
+  }
+
+  async function migrarPlanoLocal() {
+    const localSnapshot = loadPosLayout()
+    if (!localSnapshot.areas.length) {
+      setLayoutError("No hay un plano local para migrar.")
+      return
+    }
+    setMigratingFloorLayout(true)
+    setLayoutError("")
+    setLayoutMessage("Migrando plano local a Supabase...")
+    setFloorSyncStatus("saving")
+    floorLayoutSkipRemoteRef.current = true
+    const payload = buildPosLayoutPayload(localSnapshot.areas, localSnapshot.settings)
+    const result = await migrateLocalFloorLayout(payload)
+    floorLayoutSkipRemoteRef.current = false
+    setMigratingFloorLayout(false)
+    if (result.error) {
+      setFloorSyncStatus("error")
+      setLayoutMessage("")
+      setLayoutError(result.message || "No se pudo migrar el plano local.")
+      return
+    }
+    const hydrated = hydrateLayoutFromPayload(result.data)
+    applyHydratedLayout(hydrated, "supabase")
+    setLocalLayoutAvailable(false)
+    setLayoutMessage("Plano migrado a la nube correctamente.")
+    showToast("Plano migrado a Supabase.", "success", 2500)
+  }
+
+  async function recargarPlanoDesdeNube() {
+    setLayoutMessage("Recargando plano desde la nube...")
+    await reloadFloorFromCloud(false)
+    setLayoutMessage("Plano recargado desde la nube.")
   }
 
   function estadoMesaPorOrden(order) {
@@ -3130,7 +3318,25 @@ function POS() {
             </header>
 
             <div style={warningBoxStyle} role="status">
-              El plano del restaurante se guarda actualmente en este equipo. Otros dispositivos pueden no ver estos cambios hasta la próxima fase de sincronización.
+              {floorLayoutLoading ? "Cargando plano del restaurante..." : floorLayoutSource === "supabase"
+                ? "Plano sincronizado en la nube. Otros dispositivos verán estos cambios."
+                : "El plano está guardado solo en este equipo. Migra a la nube para sincronizarlo."}
+            </div>
+
+            {localLayoutAvailable && floorLayoutSource !== "supabase" && (
+              <div style={successInlineStyle} role="status">
+                Encontramos un plano guardado en este equipo. Puedes migrarlo a la nube para usarlo en todos los dispositivos.
+                <div style={{ ...buttonRowStyle, marginTop: "10px" }}>
+                  <button type="button" disabled={migratingFloorLayout} onClick={migrarPlanoLocal} style={primaryButtonStyle}>
+                    {migratingFloorLayout ? "Migrando..." : "Migrar plano a Supabase"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div style={liveBadgeStyle} role="status">
+              <span style={floorSyncStatus === "synced" && floorLayoutSource === "supabase" ? liveDotStyle : connectingDotStyle} />
+              {floorSyncStatusLabel(floorLayoutSource, floorSyncStatus)}
             </div>
 
             <section style={floorPlanSectionStyle}>
@@ -3144,14 +3350,19 @@ function POS() {
                 </div>
                 <div style={buttonRowStyle}>
                   <label style={snapToggleStyle}>
-                    <input type="checkbox" checked={layoutSettings.snapToGrid} onChange={(event) => setLayoutSettings((actual) => ({ ...actual, snapToGrid: event.target.checked }))} />
+                    <input type="checkbox" checked={layoutSettings.snapToGrid} onChange={(event) => { setLayoutSettings((actual) => ({ ...actual, snapToGrid: event.target.checked })); markLayoutDirty() }} />
                     Snap grid
                   </label>
-                  <button type="button" title="Alejar" onClick={() => setLayoutSettings((actual) => ({ ...actual, zoom: Math.max(0.7, Number((actual.zoom - 0.1).toFixed(1))) }))} style={smallButtonStyle}>-</button>
+                  <button type="button" title="Alejar" onClick={() => { setLayoutSettings((actual) => ({ ...actual, zoom: Math.max(0.7, Number((actual.zoom - 0.1).toFixed(1))) })); markLayoutDirty() }} style={smallButtonStyle}>-</button>
                   <span style={zoomValueStyle}>{Math.round(layoutSettings.zoom * 100)}%</span>
-                  <button type="button" title="Acercar" onClick={() => setLayoutSettings((actual) => ({ ...actual, zoom: Math.min(1.4, Number((actual.zoom + 0.1).toFixed(1))) }))} style={smallButtonStyle}>+</button>
-                  <button type="button" onClick={() => setLayoutSettings((actual) => ({ ...actual, zoom: 1 }))} style={secondaryButtonStyle}>Reset</button>
-                  <button type="button" onClick={guardarLayoutManual} style={secondaryButtonStyle}>Guardar plano en este equipo</button>
+                  <button type="button" title="Acercar" onClick={() => { setLayoutSettings((actual) => ({ ...actual, zoom: Math.min(1.4, Number((actual.zoom + 0.1).toFixed(1))) })); markLayoutDirty() }} style={smallButtonStyle}>+</button>
+                  <button type="button" onClick={() => { setLayoutSettings((actual) => ({ ...actual, zoom: 1 })); markLayoutDirty() }} style={secondaryButtonStyle}>Reset</button>
+                  <button type="button" onClick={guardarLayoutManual} style={secondaryButtonStyle} disabled={floorSyncStatus === "saving"}>
+                    {floorSyncStatus === "saving" ? "Guardando..." : "Guardar plano en la nube"}
+                  </button>
+                  {floorLayoutSource === "supabase" && (
+                    <button type="button" onClick={recargarPlanoDesdeNube} style={secondaryButtonStyle}>Recargar desde nube</button>
+                  )}
                 </div>
               </div>
               {layoutMessage && <div style={successInlineStyle}>{layoutMessage}</div>}
