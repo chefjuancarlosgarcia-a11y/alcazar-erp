@@ -3,7 +3,8 @@ import { useNavigate } from "react-router-dom"
 import { getNotifications, markNotificationRead } from "../services/notificationsService"
 import "./NotificationsBell.css"
 
-const APPROVAL_ROLES = ["admin", "gerente_general"]
+const PURCHASE_ORDER_APPROVAL_ROLES = ["admin", "gerente_general"]
+const CHECKLIST_APPROVAL_ROLES = ["admin", "gerente_general", "gerente", "recursos_humanos", "rrhh"]
 
 function isInternalActionUrl(url) {
   const value = String(url || "").trim()
@@ -65,6 +66,8 @@ function NotificationsBell({ currentUser }) {
       navigate(`/tasks?tab=checklists&view=run&id=${encodeURIComponent(notification.entity_id || "")}`)
     } else if (notification.entity_type === "checklist_management_alert") {
       navigate(notification.action_url || `/tasks?tab=checklists&view=alerts&id=${encodeURIComponent(notification.entity_id || "")}`)
+    } else if (["checklist_template_change_request", "checklist_approval_result"].includes(notification.entity_type)) {
+      navigate(notification.action_url || `/tasks?tab=checklists&view=approvals&id=${encodeURIComponent(notification.entity_id || "")}`)
     } else if (notification.entity_type === "task") {
       navigate("/tasks?view=mine")
     }
@@ -110,10 +113,22 @@ function NotificationsBell({ currentUser }) {
                   {["employee_schedule", "schedule_week"].includes(notification.entity_type) && <button type="button" onClick={() => viewEntity(notification)}>Ver horario</button>}
                   {notification.entity_type === "checklist_run" && <button type="button" onClick={() => viewEntity(notification)}>Abrir checklist</button>}
                   {notification.entity_type === "task" && <button type="button" onClick={() => viewEntity(notification)}>Ir a tarea</button>}
-                  {notification.entity_type === "checklist_template_change_request" && <button type="button" onClick={() => viewEntity(notification)}>Revisar solicitud</button>}
+                  {notification.entity_type === "checklist_template_change_request" && (
+                    <button type="button" onClick={() => viewEntity(notification)}>
+                      {CHECKLIST_APPROVAL_ROLES.includes(currentUser?.role) ? "Revisar y aprobar" : "Ver solicitud"}
+                    </button>
+                  )}
+                  {notification.entity_type === "checklist_approval_result" && (
+                    <button type="button" onClick={() => viewEntity(notification)}>
+                      {notification.title?.toLowerCase().includes("aprobada") ? "Ir a checklists" : "Ver detalle"}
+                    </button>
+                  )}
+                  {notification.type === "checklist_approval_pending" && (
+                    <button type="button" onClick={() => viewEntity(notification)}>Ver estado</button>
+                  )}
                   {notification.entity_type === "checklist_management_alert" && <button type="button" onClick={() => viewEntity(notification)}>Ver aviso</button>}
                   {notification.action_url && !["purchase_order", "employee_schedule", "schedule_week", "checklist_run", "checklist_template_change_request", "checklist_management_alert", "task"].includes(notification.entity_type) && <button type="button" onClick={() => viewEntity(notification)}>Abrir</button>}
-                  {notification.entity_type === "purchase_order" && notification.type === "purchase_order_pending" && APPROVAL_ROLES.includes(currentUser?.role) && (
+                  {notification.entity_type === "purchase_order" && notification.type === "purchase_order_pending" && PURCHASE_ORDER_APPROVAL_ROLES.includes(currentUser?.role) && (
                     <>
                       <button type="button" className="approve" onClick={() => processOrder(notification, "approve")}>Aprobar</button>
                       <button type="button" className="reject" onClick={() => processOrder(notification, "reject")}>Rechazar</button>

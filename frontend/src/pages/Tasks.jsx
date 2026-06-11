@@ -111,7 +111,7 @@ const CHECKLIST_RRULE_TO_WEEKDAY = { MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6, S
 const CHECKLIST_WEEKDAY_SHORT = { 1: "Lun", 2: "Mar", 3: "Mie", 4: "Jue", 5: "Vie", 6: "Sab", 7: "Dom" }
 const CHECKLIST_SUGGESTION_TYPES = [["add_item", "Agregar item"], ["remove_item", "Eliminar item"], ["edit_item_text", "Editar texto de item"], ["change_order", "Cambiar orden"], ["change_frequency", "Cambiar frecuencia"], ["change_responsible", "Cambiar responsable"], ["change_evidence", "Cambiar evidencia requerida"], ["other", "Otro"]]
 const CHECKLIST_TEMPLATE_MANAGERS = ["admin", "gerente_general", "gerente", "supervisor"]
-const CHECKLIST_TEMPLATE_APPROVERS = ["admin", "gerente_general", "gerente"]
+const CHECKLIST_TEMPLATE_APPROVERS = ["admin", "gerente_general", "gerente", "recursos_humanos", "rrhh"]
 const CHECKLIST_INCIDENT_SEVERITIES = [["low", "Baja"], ["medium", "Media"], ["high", "Alta"], ["critical", "Critica"]]
 const CHECKLIST_INCIDENT_STATUSES = [["open", "Abiertas"], ["acknowledged", "Reconocidas"], ["in_progress", "En proceso"], ["resolved", "Resueltas"], ["dismissed", "Descartadas"]]
 const CHECKLIST_ALERT_PRIORITIES = [["informativo", "Informativo"], ["atencion", "Requiere atencion"], ["critico", "Critico"]]
@@ -1360,7 +1360,11 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
     ...(canViewChecklistLibrary ? [["templates", "Checklists"]] : []),
     ...(canCreateDirectly || canProposeEdits || editingTemplate ? [["create", editingTemplate ? "Editar checklist" : "Crear checklist"]] : []),
     ...(canManageManagementAlerts ? [["alerts", "Avisos a Gerencia"]] : []),
-    ...(canViewChecklistLibrary ? [["incidents", "Incidencias"], ["approvals", "Aprobaciones de plantillas"], ["reports", "Reportes"]] : [])
+    ...(canViewChecklistLibrary ? [
+      ["incidents", "Incidencias"],
+      ["approvals", canApproveTemplateChanges ? "Aprobaciones de plantillas" : "Mis solicitudes"],
+      ["reports", "Reportes"]
+    ] : [])
   ]
 
   const refresh = useCallback(async ({ silent = false } = {}) => {
@@ -1500,7 +1504,9 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
         setEditingTemplate(null)
         setSection("approvals")
         await refresh()
-        const successMessage = templateId ? "Cambios enviados a verificacion." : "Solicitud de checklist enviada a verificacion."
+        const successMessage = templateId
+          ? "Tu checklist tiene cambios pendientes de aprobacion. Gerencia, RRHH o admin deben autorizarlos antes de usarlos."
+          : "Tu checklist esta pendiente de aprobacion. Podras asignarla y utilizarla cuando gerencia, RRHH o admin la autoricen."
         setMessage(successMessage)
         return { ok: true, message: successMessage }
       }
@@ -1532,6 +1538,14 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
 
   async function assignTemplate(payload) {
     if (!payload.template_id) return setMessage("Selecciona una plantilla.")
+    const template = templates.find((item) => item.id === payload.template_id)
+    const pendingRequest = template ? getTemplatePendingRequest(template, changeRequests) : null
+    if (pendingRequest?.status === "pending_review") {
+      return setMessage("Esta checklist tiene cambios pendientes de aprobacion. No se puede asignar ni utilizar hasta que gerencia, RRHH o admin la autoricen.")
+    }
+    if (template?.status !== "active") {
+      return setMessage("Esta checklist aun no esta activa. Espera la aprobacion antes de asignarla.")
+    }
     setLoading(true)
     const result = await createChecklistRunFromTemplate(payload.template_id, payload)
     setLoading(false)
@@ -1767,7 +1781,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
           onApprove={async (request, notes) => {
             const result = await approveChecklistChangeRequest(request.id, notes)
             if (result.error) return setMessage(result.error.message || "No se pudo aprobar la solicitud.")
-            setMessage("Checklist aprobada y publicada.")
+            setMessage("Checklist aprobada. El supervisor ya puede asignarla y utilizarla.")
             refresh()
           }}
           onReject={async (request, notes) => {
@@ -1971,6 +1985,9 @@ function ChecklistTemplatesView({ templates, changeRequests = [], profiles, curr
           <span className="checklist-template-card-responsible-label">Responsable sugerido</span>
           <span className="checklist-template-card-responsible-name">{responsibleName || "Sin responsable sugerido"}</span>
         </div>
+        {pendingRequest?.status === "pending_review" && (
+          <p className="tasks-warning">Cambios pendientes de aprobacion. Esta checklist no se puede asignar ni utilizar con la version propuesta hasta que gerencia, RRHH o admin la autoricen.</p>
+        )}
         {pendingRequest?.status === "rejected" && pendingRequest.review_notes && (
           <p className="tasks-warning">{pendingRequest.review_notes}</p>
         )}
@@ -2010,6 +2027,12 @@ function ChecklistTemplatesView({ templates, changeRequests = [], profiles, curr
           <span className={`checklist-template-status ${badge.className}`}>{badge.label}</span>
         </header>
         {request.description && <p className="checklist-template-card-description">{request.description}</p>}
+        {request.status === "pending_review" && (
+          <p className="tasks-warning">Tu checklist esta pendiente de aprobacion. Podras asignarla y utilizarla cuando gerencia, RRHH o admin la autoricen.</p>
+        )}
+        {request.status === "rejected" && request.review_notes && (
+          <p className="tasks-warning">{request.review_notes}</p>
+        )}
         <div className="checklist-template-card-tags">
           <span className="checklist-template-tag items">{itemCount} items</span>
           <span className="checklist-template-tag frequency">{friendlyChecklistLabel(CHECKLIST_FREQUENCIES, request.frequency)}</span>
@@ -2022,11 +2045,16 @@ function ChecklistTemplatesView({ templates, changeRequests = [], profiles, curr
         {request.status === "rejected" && request.review_notes && (
           <p className="tasks-warning">{request.review_notes}</p>
         )}
-        {(canProposeEdits || isLibraryAdmin) && request.submitted_by === currentUser?.id && (
+        {(canProposeEdits || isLibraryAdmin) && request.submitted_by === currentUser?.id && request.status !== "pending_review" && (
           <footer className="checklist-template-card-footer">
             <div className="checklist-template-card-actions">
               <button type="button" className="tasks-secondary" onClick={() => onEditRequest(request)}>Ver / editar solicitud</button>
             </div>
+          </footer>
+        )}
+        {(canProposeEdits || isLibraryAdmin) && request.submitted_by === currentUser?.id && request.status === "pending_review" && (
+          <footer className="checklist-template-card-footer">
+            <p className="tasks-muted">En espera de autorizacion. Recibiras una notificacion cuando sea aprobada o rechazada.</p>
           </footer>
         )}
       </article>
@@ -2823,7 +2851,7 @@ function ChecklistApprovalsCenter({ requests, suggestions, templates, profiles, 
             <h2>Aprobaciones de plantillas</h2>
             <p className="tasks-muted">
               {canApprove
-                ? `${pendingCount} solicitud(es) pendiente(s) de revision. Solo admin y gerente general pueden aprobar.`
+                ? `${pendingCount} solicitud(es) pendiente(s) de revision. Admin, gerencia y RRHH pueden aprobar.`
                 : "Tus solicitudes de plantillas nuevas o cambios enviados a verificacion."}
             </p>
           </div>
@@ -2875,9 +2903,14 @@ function ChecklistApprovalsCenter({ requests, suggestions, templates, profiles, 
                 <strong>{request.title}</strong>
                 <small>{request.request_type === "create" ? "Nueva plantilla" : "Cambio de plantilla"} · {profileDisplayName(profiles, request.submitted_by)} · {new Date(request.submitted_at || request.created_at).toLocaleString("es-GT")}</small>
                 <p>{request.description || "Sin descripcion."}</p>
+                {request.status === "pending_review" && (
+                  <p className="tasks-warning">Tu checklist esta pendiente de aprobacion. No podras asignarla ni utilizarla hasta que gerencia, RRHH o admin la autoricen.</p>
+                )}
                 {request.review_notes && <p className="tasks-warning">{request.review_notes}</p>}
                 <div className="checklist-actions">
-                  <button type="button" className="tasks-secondary" onClick={() => onEditRequest(request)}>Ver / editar</button>
+                  {request.status !== "pending_review" && (
+                    <button type="button" className="tasks-secondary" onClick={() => onEditRequest(request)}>Ver / editar</button>
+                  )}
                 </div>
               </article>
             ))}
@@ -3310,7 +3343,7 @@ function resolveChecklistLibraryPermissions(userRole) {
     canEditDirectly: ["admin", "gerente_general", "recursos_humanos", "rrhh"].includes(role),
     isSupervisorOnly: role === "supervisor",
     canProposeEdits: role === "supervisor",
-    canApproveTemplateChanges: ["admin", "gerente_general"].includes(role),
+    canApproveTemplateChanges: CHECKLIST_TEMPLATE_APPROVERS.includes(role),
     isLibraryAdmin: ["admin", "gerente_general", "gerente", "recursos_humanos", "rrhh"].includes(role),
     canAssignChecklists: ["admin", "gerente_general", "gerente", "recursos_humanos", "rrhh", "supervisor"].includes(role),
     canDeleteTemplates: ["admin", "gerente_general"].includes(role)
