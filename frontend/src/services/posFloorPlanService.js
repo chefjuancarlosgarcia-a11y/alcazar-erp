@@ -2,6 +2,15 @@ import { supabase } from "../lib/supabase"
 import { formatSupabaseError, withTimeout } from "./productionTicketsService"
 
 const DEFAULT_SETTINGS = { snapToGrid: true, gridSize: 24, zoom: 1 }
+const MANUAL_TABLE_STATUSES = new Set(["disponible", "ocupada", "reservada", "limpieza", "inactiva"])
+
+export function sanitizeManualTableStatus(status) {
+  const value = String(status || "").trim()
+  if (MANUAL_TABLE_STATUSES.has(value)) return value
+  if (["pagada", "pago_en_proceso", "esperando_cuenta"].includes(value)) return "disponible"
+  if (["en_servicio", "nuevos_sin_enviar", "en_produccion", "lista_para_servir", "problema"].includes(value)) return "ocupada"
+  return "disponible"
+}
 
 function mapSettings(raw) {
   if (!raw) return { ...DEFAULT_SETTINGS }
@@ -65,7 +74,7 @@ export async function upsertPosFloorTable(table) {
     p_shape: table.shape || "square",
     p_x: Number(table.x ?? 50),
     p_y: Number(table.y ?? 50),
-    p_manual_status: table.manual_status || table.status || table.estado || "disponible",
+    p_manual_status: sanitizeManualTableStatus(table.manual_status || table.status || table.estado || "disponible"),
     p_sort_order: Number(table.sortOrder ?? table.sort_order ?? 0),
     p_active: table.active !== false
   }, "guardar mesa del plano")

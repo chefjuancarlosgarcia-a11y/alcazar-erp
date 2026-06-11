@@ -43,6 +43,7 @@ import {
   deletePosFloorZone,
   getPosFloorLayout,
   migrateLocalFloorLayout,
+  sanitizeManualTableStatus,
   savePosFloorLayout
 } from "../services/posFloorPlanService"
 import "./POS.css"
@@ -552,7 +553,8 @@ function loadPosLayout() {
 function stripOperationalTable(table) {
   const copy = { ...table }
   OPERATIONAL_TABLE_FIELDS.forEach((key) => delete copy[key])
-  return copy
+  const status = sanitizeManualTableStatus(copy.status || copy.estado || copy.manual_status)
+  return { ...copy, status, estado: status, manual_status: status }
 }
 
 function buildPosLayoutPayload(areas, settings) {
