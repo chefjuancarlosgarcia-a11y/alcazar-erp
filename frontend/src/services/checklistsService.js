@@ -44,10 +44,13 @@ function normalizeRecurrenceConfig(payload = {}) {
 
 function orderTemplate(template) {
   const recurrence = normalizeRecurrenceConfig(template || {})
+  const items = Array.isArray(template?.checklist_template_items)
+    ? template.checklist_template_items
+    : (template?.checklist_template_items?.length ? template.checklist_template_items : [])
   return template ? {
     ...template,
     ...recurrence,
-    checklist_template_items: activeTemplateItems(template.checklist_template_items)
+    checklist_template_items: activeTemplateItems(items)
       .sort((a, b) => Number(a.item_order || 0) - Number(b.item_order || 0))
   } : template
 }
@@ -262,11 +265,27 @@ export async function rejectChecklistChangeRequest(id, reviewNotes) {
 }
 
 export async function getChecklistTemplates() {
-  const { data, error } = await supabase
-    .from("checklist_templates")
-    .select(TEMPLATE_SELECT)
-    .order("created_at", { ascending: false })
-  return { data: (data || []).map(orderTemplate), error }
+  const { data, error } = await supabase.rpc("get_checklist_templates_library")
+  if (error) {
+    const fallback = await supabase
+      .from("checklist_templates")
+      .select("*, creator:profiles!checklist_templates_created_by_fkey(full_name, username), checklist_template_items(*)")
+      .order("created_at", { ascending: false })
+    return {
+      data: (fallback.data || []).map((template) => orderTemplate({
+        ...template,
+        creator_name: template.creator?.full_name || template.creator?.username || null
+      })),
+      error: fallback.error
+    }
+  }
+  return {
+    data: (data || []).map((template) => orderTemplate({
+      ...template,
+      checklist_template_items: template.checklist_template_items || []
+    })),
+    error: null
+  }
 }
 
 export async function getChecklistTemplateById(id) {

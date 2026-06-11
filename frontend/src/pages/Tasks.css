@@ -993,6 +993,21 @@
   color: #9ca3af;
 }
 
+.checklist-template-status.pending {
+  background: #3b2f14;
+  color: #fde68a;
+}
+
+.checklist-template-status.draft {
+  background: #1e293b;
+  color: #cbd5e1;
+}
+
+.checklist-template-status.rejected {
+  background: #3f1d1d;
+  color: #fca5a5;
+}
+
 .checklist-template-card-description {
   margin: 0;
   padding: 0 18px 12px;

@@ -1322,14 +1322,20 @@ function MyTasks({ initialTaskId = "", tasks, user, allTasks, persistAllTasks })
 
 function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }) {
   const userRole = normalizeRole(user?.role)
-  const canViewChecklistLibrary = ["admin", "gerente_general", "gerente", "recursos_humanos", "rrhh", "supervisor"].includes(userRole)
-  const canCreateChecklists = ["admin", "gerente_general"].includes(userRole)
-  const canEditChecklistsDirectly = ["admin", "gerente_general"].includes(userRole)
-  const canAssignChecklists = ["admin", "gerente_general", "gerente", "recursos_humanos", "rrhh"].includes(userRole)
-  const canApproveTemplateChanges = ["admin", "gerente_general"].includes(userRole)
-  const isSupervisorOnly = userRole === "supervisor"
-  const canProposeChecklistEdits = isSupervisorOnly
-  const canDeleteTemplates = ["admin", "gerente_general"].includes(userRole)
+  const checklistPerms = resolveChecklistLibraryPermissions(userRole)
+  const {
+    canViewChecklistLibrary,
+    canCreateDirectly,
+    canEditDirectly,
+    canAssignChecklists,
+    canApproveTemplateChanges,
+    isSupervisorOnly,
+    canProposeEdits,
+    canDeleteTemplates,
+    isLibraryAdmin
+  } = checklistPerms
+  const canCreateChecklists = canCreateDirectly
+  const canEditChecklistsDirectly = canEditDirectly
   const canManageManagementAlerts = ["admin", "gerente_general"].includes(userRole)
   const [section, setSection] = useState(initialChecklistView === "incidents" ? "incidents" : initialChecklistView === "alerts" ? "alerts" : "today")
   const [templates, setTemplates] = useState([])
@@ -1351,14 +1357,14 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   const sections = [
     ["today", "Hoy"],
     ...(canViewChecklistLibrary ? [["templates", "Checklists"]] : []),
-    ...(canCreateChecklists || editingTemplate ? [["create", editingTemplate ? "Editar checklist" : "Crear checklist"]] : []),
+    ...(canCreateDirectly || canProposeEdits || editingTemplate ? [["create", editingTemplate ? "Editar checklist" : "Crear checklist"]] : []),
     ...(canManageManagementAlerts ? [["alerts", "Avisos a Gerencia"]] : []),
     ...(canViewChecklistLibrary ? [["incidents", "Incidencias"], ["approvals", "Aprobaciones de plantillas"], ["reports", "Reportes"]] : [])
   ]
 
   async function refresh() {
     setLoading(true)
-    if (canViewChecklistLibrary) await generateDueChecklistRuns(TODAY)
+    if (isLibraryAdmin) await generateDueChecklistRuns(TODAY)
     if (canManageManagementAlerts) await notifyOverdueChecklistRuns()
     const requests = [
       getChecklistTemplates(),
@@ -1436,8 +1442,13 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
           status_after_approval: form.status || "active"
         }
         const existingDraft = templateId
-          ? changeRequests.find((request) => request.template_id === templateId && request.status === "draft")
-          : null
+          ? changeRequests.find((request) => request.template_id === templateId && ["draft", "rejected"].includes(request.status))
+          : changeRequests.find((request) =>
+            request.request_type === "create" &&
+            !request.template_id &&
+            request.submitted_by === user?.id &&
+            ["draft", "rejected"].includes(request.status)
+          )
         const draftResult = existingDraft
           ? await updateChecklistChangeRequest(existingDraft.id, payload, cleanedItems)
           : await createChecklistChangeRequest(payload, cleanedItems)
@@ -1446,23 +1457,23 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
           return { ok: false, error: draftResult.error.message || "No se pudo guardar el borrador." }
         }
 
-        if (options.submitForReview) {
-          const submitResult = await submitChecklistChangeRequest(draftResult.data.id)
-          if (submitResult.error) {
-            return { ok: false, error: submitResult.error.message || "No se pudo mandar a verificacion." }
-          }
+        if (options.saveDraft) {
           setEditingTemplate(null)
           setSection("approvals")
           await refresh()
-          const successMessage = templateId ? "Cambios enviados a verificacion." : "Solicitud de checklist enviada a verificacion."
+          const successMessage = templateId ? "Borrador de cambios actualizado." : "Borrador de checklist guardado."
           setMessage(successMessage)
           return { ok: true, message: successMessage }
         }
 
+        const submitResult = await submitChecklistChangeRequest(draftResult.data.id)
+        if (submitResult.error) {
+          return { ok: false, error: submitResult.error.message || "No se pudo mandar a verificacion." }
+        }
         setEditingTemplate(null)
         setSection("approvals")
         await refresh()
-        const successMessage = templateId ? "Borrador de cambios actualizado." : "Borrador de checklist guardado."
+        const successMessage = templateId ? "Cambios enviados a verificacion." : "Solicitud de checklist enviada a verificacion."
         setMessage(successMessage)
         return { ok: true, message: successMessage }
       }
@@ -1504,6 +1515,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   }
 
   async function duplicateTemplate(template) {
+    if (!canCreateDirectly) return setMessage("No tienes permiso para duplicar plantillas.")
     const result = await createChecklistTemplate(
       { ...template, title: `${template.title} (copia)`, status: "active" },
       template.checklist_template_items || []
@@ -1640,10 +1652,36 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       {section === "templates" && canViewChecklistLibrary && (
         <ChecklistTemplatesView
           templates={templates}
+          changeRequests={changeRequests}
           profiles={profiles}
           currentUser={user}
           userRole={userRole}
+          isLibraryAdmin={isLibraryAdmin}
+          isSupervisorOnly={isSupervisorOnly}
           onEdit={(template) => { setEditingTemplate(template); setSection("create") }}
+          onEditRequest={(request) => {
+            if (request.template_id) {
+              const template = templates.find((item) => item.id === request.template_id)
+              if (template) {
+                setEditingTemplate(template)
+                setSection("create")
+                return
+              }
+            }
+            setEditingTemplate({
+              id: "",
+              title: request.title,
+              description: request.description,
+              area: request.area,
+              assigned_role: request.assigned_role,
+              assigned_profile_id: request.assigned_profile_id,
+              frequency: request.frequency,
+              shift_context: request.shift_context,
+              status: request.status_after_approval || "active",
+              checklist_template_items: request.items_snapshot || []
+            })
+            setSection("create")
+          }}
           onAssign={assignTemplate}
           onDuplicate={duplicateTemplate}
           onDeactivate={deactivate}
@@ -1651,7 +1689,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
           onDelete={removeTemplateWithArchiveUX}
           canDelete={canDeleteTemplates}
           canEdit={canEditChecklistsDirectly}
-          canProposeEdits={canProposeChecklistEdits}
+          canProposeEdits={canProposeEdits}
           canAssign={canAssignChecklists}
           canSuggest={isSupervisorOnly}
           onSuggest={async (payload) => {
@@ -1662,7 +1700,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
           }}
         />
       )}
-      {section === "create" && (canCreateChecklists || editingTemplate) && (
+      {section === "create" && (canCreateDirectly || canProposeEdits || editingTemplate) && (
         <ChecklistTemplateWizard
           key={editingTemplate?.id || "new-checklist-template"}
           templateId={editingTemplate?.id || ""}
@@ -1724,7 +1762,32 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
             setEditingTemplate(template)
             setSection("create")
           }}
+          onEditRequest={(request) => {
+            if (request.template_id) {
+              const template = templates.find((item) => item.id === request.template_id)
+              if (template) {
+                setEditingTemplate(template)
+                setSection("create")
+                return
+              }
+            }
+            setEditingTemplate({
+              id: "",
+              title: request.title,
+              description: request.description,
+              area: request.area,
+              assigned_role: request.assigned_role,
+              assigned_profile_id: request.assigned_profile_id,
+              frequency: request.frequency,
+              shift_context: request.shift_context,
+              status: request.status_after_approval || "active",
+              checklist_template_items: request.items_snapshot || []
+            })
+            setSection("create")
+          }}
           canApprove={canApproveTemplateChanges}
+          isSupervisorOnly={isSupervisorOnly}
+          currentUserId={user?.id}
         />
       )}
       {section === "reports" && canViewChecklistLibrary && <ChecklistReports runs={runs} templates={templates} profiles={profiles} />}
@@ -1795,95 +1858,160 @@ function formatChecklistRole(role) {
   return String(role).replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase())
 }
 
-function ChecklistTemplatesView({ templates, profiles, currentUser, userRole, onEdit, onAssign, onDuplicate, onDeactivate, onReactivate, onDelete, canDelete, canEdit, canProposeEdits, canAssign, canSuggest, onSuggest }) {
-  const [filters, setFilters] = useState({ area: "", frequency: "", status: "active" })
+function ChecklistTemplatesView({ templates, changeRequests = [], profiles, currentUser, userRole, isLibraryAdmin, isSupervisorOnly, onEdit, onEditRequest, onAssign, onDuplicate, onDeactivate, onReactivate, onDelete, canDelete, canEdit, canProposeEdits, canAssign, canSuggest, onSuggest }) {
+  const [filters, setFilters] = useState({ area: "", frequency: "", status: "all" })
   const [assigning, setAssigning] = useState(null)
   const [suggesting, setSuggesting] = useState(null)
-  const filtered = templates.filter((template) =>
-    (!filters.area || template.area === filters.area) &&
-    (!filters.frequency || template.frequency === filters.frequency) &&
-    (filters.status === "all" || template.status === filters.status) &&
-    (!canSuggest || !currentUser?.area_name || template.area === currentUser.area_name)
-  )
+  const pendingCreates = getVisiblePendingCreateRequests(changeRequests, currentUser?.id, isLibraryAdmin, isSupervisorOnly)
+  const filtered = templates.filter((template) => {
+    const pendingRequest = getTemplatePendingRequest(template, changeRequests)
+    const libraryStatus = templateLibraryBadge(template, pendingRequest).label.toLowerCase()
+    const statusMatch = filters.status === "all"
+      || (filters.status === "active" && template.status === "active" && pendingRequest?.status !== "pending_review")
+      || (filters.status === "inactive" && template.status === "inactive")
+      || (filters.status === "pending" && pendingRequest?.status === "pending_review")
+      || (filters.status === "draft" && pendingRequest?.status === "draft")
+      || (filters.status === "rejected" && pendingRequest?.status === "rejected")
+    return (!filters.area || template.area === filters.area) &&
+      (!filters.frequency || template.frequency === filters.frequency) &&
+      statusMatch &&
+      (!isSupervisorOnly || template.status === "active" || template.created_by === currentUser?.id)
+  })
+  const filteredPendingCreates = pendingCreates.filter((request) => {
+    if (filters.area && request.area !== filters.area) return false
+    if (filters.frequency && request.frequency !== filters.frequency) return false
+    if (filters.status === "active" || filters.status === "inactive") return false
+    if (filters.status === "pending") return request.status === "pending_review"
+    if (filters.status === "draft") return request.status === "draft"
+    if (filters.status === "rejected") return request.status === "rejected"
+    return true
+  })
+
+  function renderTemplateCard(template) {
+    const pendingRequest = getTemplatePendingRequest(template, changeRequests)
+    const badge = templateLibraryBadge(template, pendingRequest)
+    const creatorName = template.creator_name || profileDisplayName(profiles, template.created_by)
+    const responsibleName = profileDisplayName(profiles, template.assigned_profile_id)
+    const itemCount = template.checklist_template_items?.length || 0
+    const primaryActions = [
+      canEdit && { key: "edit", label: "Editar", className: "tasks-secondary", onClick: () => onEdit(template) },
+      canProposeEdits && !canEdit && { key: "edit-propose", label: "Editar checklist", className: "tasks-secondary", onClick: () => onEdit(template) },
+      canSuggest && { key: "suggest", label: "Sugerir cambios", className: "tasks-secondary", onClick: () => setSuggesting(template) },
+      canAssign && template.status === "active" && pendingRequest?.status !== "pending_review" && { key: "assign", label: "Asignar", className: "tasks-secondary", onClick: () => setAssigning(template) },
+      canEdit && { key: "duplicate", label: "Duplicar", className: "tasks-secondary", onClick: () => onDuplicate(template) },
+      canEdit && template.status !== "active" && pendingRequest?.status !== "pending_review" && { key: "reactivate", label: "Reactivar", className: "tasks-primary", onClick: () => onReactivate(template.id) }
+    ].filter(Boolean)
+    const secondaryActions = [
+      canEdit && template.status === "active" && pendingRequest?.status !== "pending_review" && { key: "deactivate", label: "Desactivar", onClick: () => onDeactivate(template.id) },
+      canDelete && { key: "delete", label: "Eliminar", onClick: () => onDelete(template) }
+    ].filter(Boolean)
+
+    return (
+      <article className="checklist-template-card" key={template.id}>
+        <header className="checklist-template-card-header">
+          <div className="checklist-template-card-heading">
+            <h3>{template.title}</h3>
+            <p>{template.area ? checklistAreaLabel(template.area) : "Todas las areas"}</p>
+          </div>
+          <span className={`checklist-template-status ${badge.className}`}>{badge.label}</span>
+        </header>
+        {template.description && <p className="checklist-template-card-description">{template.description}</p>}
+        <div className="checklist-template-card-tags" aria-label="Detalles de la checklist">
+          <span className="checklist-template-tag items">{itemCount} items</span>
+          <span className="checklist-template-tag frequency">{checklistFrequencyBadge(template)}</span>
+          <span className="checklist-template-tag">{friendlyChecklistLabel(CHECKLIST_CONTEXTS, template.shift_context)}</span>
+        </div>
+        <div className="checklist-template-card-responsible">
+          <span className="checklist-template-card-responsible-label">Creada por</span>
+          <span className="checklist-template-card-responsible-name">{creatorName}</span>
+        </div>
+        <div className="checklist-template-card-responsible">
+          <span className="checklist-template-card-responsible-label">Responsable sugerido</span>
+          <span className="checklist-template-card-responsible-name">{responsibleName || "Sin responsable sugerido"}</span>
+        </div>
+        {pendingRequest?.status === "rejected" && pendingRequest.review_notes && (
+          <p className="tasks-warning">{pendingRequest.review_notes}</p>
+        )}
+        {(primaryActions.length > 0 || secondaryActions.length > 0) && (
+          <footer className="checklist-template-card-footer">
+            {primaryActions.length > 0 && (
+              <div className="checklist-template-card-actions">
+                {primaryActions.map((action) => (
+                  <button key={action.key} type="button" className={action.className} onClick={action.onClick}>{action.label}</button>
+                ))}
+              </div>
+            )}
+            {secondaryActions.length > 0 && (
+              <div className="checklist-template-card-links">
+                {secondaryActions.map((action) => (
+                  <button key={action.key} type="button" className="tasks-link danger" onClick={action.onClick}>{action.label}</button>
+                ))}
+              </div>
+            )}
+          </footer>
+        )}
+      </article>
+    )
+  }
+
+  function renderPendingCreateCard(request) {
+    const badge = templateLibraryBadge({ status: "inactive" }, request)
+    const creatorName = profileDisplayName(profiles, request.submitted_by)
+    const itemCount = (request.items_snapshot || []).length
+    return (
+      <article className="checklist-template-card pending-create" key={`request-${request.id}`}>
+        <header className="checklist-template-card-header">
+          <div className="checklist-template-card-heading">
+            <h3>{request.title}</h3>
+            <p>{request.area ? checklistAreaLabel(request.area) : "Todas las areas"}</p>
+          </div>
+          <span className={`checklist-template-status ${badge.className}`}>{badge.label}</span>
+        </header>
+        {request.description && <p className="checklist-template-card-description">{request.description}</p>}
+        <div className="checklist-template-card-tags">
+          <span className="checklist-template-tag items">{itemCount} items</span>
+          <span className="checklist-template-tag frequency">{friendlyChecklistLabel(CHECKLIST_FREQUENCIES, request.frequency)}</span>
+          <span className="checklist-template-tag">Nueva plantilla</span>
+        </div>
+        <div className="checklist-template-card-responsible">
+          <span className="checklist-template-card-responsible-label">Creada por</span>
+          <span className="checklist-template-card-responsible-name">{creatorName}</span>
+        </div>
+        {request.status === "rejected" && request.review_notes && (
+          <p className="tasks-warning">{request.review_notes}</p>
+        )}
+        {(canProposeEdits || isLibraryAdmin) && request.submitted_by === currentUser?.id && (
+          <footer className="checklist-template-card-footer">
+            <div className="checklist-template-card-actions">
+              <button type="button" className="tasks-secondary" onClick={() => onEditRequest(request)}>Ver / editar solicitud</button>
+            </div>
+          </footer>
+        )}
+      </article>
+    )
+  }
+
   return (
     <div className="checklists-admin-layout">
       <article className="tasks-panel">
-        <div className="tasks-panel-title"><div><h2>Checklists</h2><p className="tasks-muted">Biblioteca permanente de checklists operativas.</p></div></div>
+        <div className="tasks-panel-title"><div><h2>Checklists</h2><p className="tasks-muted">Biblioteca de plantillas operativas.{isLibraryAdmin ? " Vista completa del catalogo." : " Plantillas activas y solicitudes propias."}</p></div></div>
         <div className="tasks-filters">
           <select value={filters.area} onChange={(event) => setFilters((current) => ({ ...current, area: event.target.value }))}><option value="">Todas las areas</option>{CHECKLIST_AREAS.map((area) => <option key={area} value={area}>{checklistAreaLabel(area)}</option>)}</select>
           <select value={filters.frequency} onChange={(event) => setFilters((current) => ({ ...current, frequency: event.target.value }))}><option value="">Todas las frecuencias</option>{CHECKLIST_FREQUENCIES.map(([id, label]) => <option value={id} key={id}>{label}</option>)}</select>
-          <select value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))}><option value="active">Activas</option><option value="inactive">Inactivas / Archivadas</option><option value="all">Todas</option></select>
+          <select value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))}>
+            <option value="all">Todas</option>
+            <option value="active">Activas</option>
+            <option value="pending">Pendiente aprobacion</option>
+            <option value="draft">Borrador</option>
+            <option value="rejected">Rechazadas</option>
+            <option value="inactive">Archivadas</option>
+          </select>
         </div>
       </article>
       <div className="checklists-card-grid">
-        {filtered.map((template) => {
-          const responsibleName = profileDisplayName(profiles, template.assigned_profile_id)
-          const itemCount = template.checklist_template_items?.length || 0
-          const primaryActions = [
-            canEdit && { key: "edit", label: "Editar", className: "tasks-secondary", onClick: () => onEdit(template) },
-            canProposeEdits && !canEdit && { key: "edit-propose", label: "Editar checklist", className: "tasks-secondary", onClick: () => onEdit(template) },
-            canSuggest && { key: "suggest", label: "Sugerir cambios", className: "tasks-secondary", onClick: () => setSuggesting(template) },
-            canAssign && template.status === "active" && { key: "assign", label: "Asignar", className: "tasks-secondary", onClick: () => setAssigning(template) },
-            canEdit && { key: "duplicate", label: "Duplicar", className: "tasks-secondary", onClick: () => onDuplicate(template) },
-            canEdit && template.status !== "active" && { key: "reactivate", label: "Reactivar", className: "tasks-primary", onClick: () => onReactivate(template.id) }
-          ].filter(Boolean)
-          const secondaryActions = [
-            canEdit && template.status === "active" && { key: "deactivate", label: "Desactivar", onClick: () => onDeactivate(template.id) },
-            canDelete && { key: "delete", label: "Eliminar", onClick: () => onDelete(template) }
-          ].filter(Boolean)
-
-          return (
-          <article className="checklist-template-card" key={template.id}>
-            <header className="checklist-template-card-header">
-              <div className="checklist-template-card-heading">
-                <h3>{template.title}</h3>
-                <p>{template.area ? checklistAreaLabel(template.area) : "Todas las areas"}</p>
-              </div>
-              <span className={`checklist-template-status ${template.status === "active" ? "active" : "archived"}`}>
-                {template.status === "active" ? "Activa" : "Archivada"}
-              </span>
-            </header>
-
-            {template.description && (
-              <p className="checklist-template-card-description">{template.description}</p>
-            )}
-
-            <div className="checklist-template-card-tags" aria-label="Detalles de la checklist">
-              <span className="checklist-template-tag items">{itemCount} items</span>
-              <span className="checklist-template-tag frequency">{checklistFrequencyBadge(template)}</span>
-              <span className="checklist-template-tag">{friendlyChecklistLabel(CHECKLIST_CONTEXTS, template.shift_context)}</span>
-              <span className="checklist-template-tag">{formatChecklistRole(template.assigned_role)}</span>
-            </div>
-
-            <div className="checklist-template-card-responsible">
-              <span className="checklist-template-card-responsible-label">Responsable</span>
-              <span className="checklist-template-card-responsible-name" title={responsibleName || "Sin responsable sugerido"}>
-                {responsibleName || "Sin responsable sugerido"}
-              </span>
-            </div>
-
-            {(primaryActions.length > 0 || secondaryActions.length > 0) && (
-              <footer className="checklist-template-card-footer">
-                {primaryActions.length > 0 && (
-                  <div className="checklist-template-card-actions">
-                    {primaryActions.map((action) => (
-                      <button key={action.key} type="button" className={action.className} onClick={action.onClick}>{action.label}</button>
-                    ))}
-                  </div>
-                )}
-                {secondaryActions.length > 0 && (
-                  <div className="checklist-template-card-links">
-                    {secondaryActions.map((action) => (
-                      <button key={action.key} type="button" className="tasks-link danger" onClick={action.onClick}>{action.label}</button>
-                    ))}
-                  </div>
-                )}
-              </footer>
-            )}
-          </article>
-          )
-        })}
-        {!filtered.length && <FriendlyEmpty title="Crea tu primera plantilla de apertura." text="Usa Crear plantilla para definir pasos simples por area." />}
+        {filtered.map(renderTemplateCard)}
+        {filteredPendingCreates.map(renderPendingCreateCard)}
+        {!filtered.length && !filteredPendingCreates.length && <FriendlyEmpty title="Crea tu primera plantilla de apertura." text={isSupervisorOnly ? "Usa Crear checklist para enviar una nueva plantilla a aprobacion." : "Usa Crear checklist para definir pasos simples por area."} />}
       </div>
       {assigning && <ChecklistAssignPanel template={assigning} profiles={profiles} onClose={() => setAssigning(null)} onAssign={(payload) => { onAssign(payload); setAssigning(null) }} />}
       {suggesting && <ChecklistSuggestionPanel template={suggesting} currentUser={currentUser} onClose={() => setSuggesting(null)} onSubmit={(payload) => { onSuggest(payload); setSuggesting(null) }} />}
@@ -2205,8 +2333,8 @@ function ChecklistTemplateWizard({ templateId = "", editingTemplate, profiles, o
           <button type="button" className="tasks-primary" onClick={() => setStep((current) => Math.min(4, current + 1))}>Siguiente</button>
         ) : approvalMode ? (
           <>
-            <button type="button" className="tasks-secondary" disabled={finalActionDisabled} title={saveBlockReason || ""} onClick={() => handleSave({ submitForReview: false })}>{saving ? "Guardando..." : "Guardar borrador"}</button>
-            <button type="button" className="tasks-primary" disabled={finalActionDisabled} title={saveBlockReason || ""} onClick={() => handleSave({ submitForReview: true })}>{saving ? "Enviando..." : "Mandar a verificacion"}</button>
+            <button type="button" className="tasks-secondary" disabled={finalActionDisabled} title={saveBlockReason || ""} onClick={() => handleSave({ saveDraft: true })}>{saving ? "Guardando..." : "Guardar borrador"}</button>
+            <button type="button" className="tasks-primary" disabled={finalActionDisabled} title={saveBlockReason || ""} onClick={() => handleSave()}>{saving ? "Enviando..." : templateId ? "Enviar cambios a aprobacion" : "Enviar a aprobacion"}</button>
           </>
         ) : (
           <button type="button" className="tasks-primary" disabled={finalActionDisabled} title={saveBlockReason || ""} onClick={() => handleSave()}>{saving ? "Guardando..." : templateId ? "Guardar cambios" : "Guardar plantilla"}</button>
@@ -2605,17 +2733,24 @@ function ChecklistIncidentsView({ incidents, profiles, selectedIncidentId, userR
   )
 }
 
-function ChecklistApprovalsCenter({ requests, suggestions, templates, profiles, onApprove, onReject, onUpdateSuggestion, onEditTemplate, canApprove }) {
-  const [notes, setNotes] = useState("")
+function ChecklistApprovalsCenter({ requests, suggestions, templates, profiles, initialRequestId = "", onApprove, onReject, onUpdateSuggestion, onEditTemplate, onEditRequest, canApprove, isSupervisorOnly, currentUserId }) {
   const pendingSuggestions = (suggestions || []).filter((suggestion) => ["pending", "approved"].includes(suggestion.status))
-  const visibleRequests = (requests || []).filter((request) => canApprove || request.submitted_by)
+  const formalRequests = (requests || []).filter((request) =>
+    canApprove ? ["pending_review", "draft", "rejected"].includes(request.status) : request.submitted_by === currentUserId
+  )
+  const pendingCount = formalRequests.filter((request) => request.status === "pending_review").length
+
   return (
     <div className="checklists-admin-layout">
       <article className="tasks-panel">
         <div className="tasks-panel-title">
           <div>
             <h2>Aprobaciones de plantillas</h2>
-            <p className="tasks-muted">Solo plantillas nuevas o cambios propuestos por supervisores. Las ejecuciones completadas no pasan por aprobacion.</p>
+            <p className="tasks-muted">
+              {canApprove
+                ? `${pendingCount} solicitud(es) pendiente(s) de revision. Solo admin y gerente general pueden aprobar.`
+                : "Tus solicitudes de plantillas nuevas o cambios enviados a verificacion."}
+            </p>
           </div>
         </div>
       </article>
@@ -2645,20 +2780,33 @@ function ChecklistApprovalsCenter({ requests, suggestions, templates, profiles, 
         </article>
       )}
 
-      {canApprove && (
+      {canApprove ? (
+        <ChecklistApprovals
+          requests={formalRequests}
+          templates={templates}
+          profiles={profiles}
+          initialRequestId={initialRequestId}
+          onApprove={onApprove}
+          onReject={onReject}
+          canApprove={canApprove}
+        />
+      ) : (
         <article className="tasks-panel">
-          <div className="tasks-panel-title"><div><h2>Cambios formales de plantilla</h2><p className="tasks-muted">Solicitudes enviadas a verificacion.</p></div></div>
+          <div className="tasks-panel-title"><div><h2>Mis solicitudes</h2><p className="tasks-muted">{formalRequests.length} registro(s)</p></div></div>
           <div className="checklists-card-grid">
-            {visibleRequests.map((request) => (
+            {formalRequests.map((request) => (
               <article className="checklist-approval-card" key={request.id}>
                 <span className="tasks-badge">{approvalStatusLabel(request.status)}</span>
                 <strong>{request.title}</strong>
-                <small>{request.request_type} · {request.area || "Sin area"} · {profileDisplayName(profiles, request.submitted_by)}</small>
-                {request.status === "pending_review" && <Field label="Nota de revision"><textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Obligatoria si rechazas" /></Field>}
-                {request.status === "pending_review" && <div className="checklist-actions"><button type="button" className="tasks-primary" onClick={() => { onApprove(request, notes); setNotes("") }}>Aprobar</button><button type="button" className="tasks-secondary" onClick={() => { onReject(request, notes); setNotes("") }}>Rechazar</button></div>}
+                <small>{request.request_type === "create" ? "Nueva plantilla" : "Cambio de plantilla"} · {profileDisplayName(profiles, request.submitted_by)} · {new Date(request.submitted_at || request.created_at).toLocaleString("es-GT")}</small>
+                <p>{request.description || "Sin descripcion."}</p>
+                {request.review_notes && <p className="tasks-warning">{request.review_notes}</p>}
+                <div className="checklist-actions">
+                  <button type="button" className="tasks-secondary" onClick={() => onEditRequest(request)}>Ver / editar</button>
+                </div>
               </article>
             ))}
-            {!visibleRequests.length && <FriendlyEmpty title="No hay cambios de plantilla." text="Las solicitudes formales apareceran aqui." />}
+            {!formalRequests.length && <FriendlyEmpty title="No tienes solicitudes." text="Cuando envies una checklist a aprobacion aparecera aqui." />}
           </div>
         </article>
       )}
@@ -2669,7 +2817,7 @@ function ChecklistApprovalsCenter({ requests, suggestions, templates, profiles, 
 function ChecklistApprovals({ requests, templates, profiles, initialRequestId = "", onApprove, onReject, canApprove }) {
   const [selectedId, setSelectedId] = useState(initialRequestId || "")
   const [notes, setNotes] = useState("")
-  const visible = requests.filter((request) => canApprove || request.submitted_by)
+  const visible = (requests || []).filter((request) => canApprove || request.submitted_by)
   const selected = visible.find((request) => request.id === selectedId) || visible.find((request) => request.status === "pending_review")
   const currentTemplate = selected?.template_id ? templates.find((template) => template.id === selected.template_id) : null
 
@@ -2680,25 +2828,30 @@ function ChecklistApprovals({ requests, templates, profiles, initialRequestId = 
   return (
     <div className="checklist-approvals-layout">
       <article className="tasks-panel">
-        <div className="tasks-panel-title"><div><h2>Aprobaciones</h2><p className="tasks-muted">Cambios propuestos por supervisores antes de publicarse.</p></div></div>
+        <div className="tasks-panel-title"><div><h2>Cambios formales de plantilla</h2><p className="tasks-muted">Nuevas plantillas y cambios enviados por supervisores.</p></div></div>
         <div className="checklists-card-grid">
           {visible.map((request) => (
             <button type="button" className={selected?.id === request.id ? "checklist-approval-card selected" : "checklist-approval-card"} key={request.id} onClick={() => { setSelectedId(request.id); setNotes("") }}>
               <span className="tasks-badge">{approvalStatusLabel(request.status)}</span>
               <strong>{request.title}</strong>
-              <small>{request.request_type} · {request.area || "Sin area"} · {profileDisplayName(profiles, request.submitted_by)}</small>
+              <small>{request.request_type === "create" ? "Nueva plantilla" : "Cambio de plantilla"} · {profileDisplayName(profiles, request.submitted_by)} · {new Date(request.submitted_at || request.created_at).toLocaleDateString("es-GT")}</small>
             </button>
           ))}
-          {!visible.length && <FriendlyEmpty title="No hay solicitudes pendientes." text="Cuando un supervisor mande cambios a verificación aparecerán aquí." />}
+          {!visible.length && <FriendlyEmpty title="No hay solicitudes pendientes." text="Cuando un supervisor envie una plantilla a aprobacion aparecera aqui." />}
         </div>
       </article>
 
       {selected && (
         <article className="tasks-panel checklist-approval-detail">
-          <div className="tasks-panel-title"><div><h2>{selected.title}</h2><p className="tasks-muted">{approvalStatusLabel(selected.status)} · {selected.request_type}</p></div><span className="tasks-badge">{selected.area || "Sin area"}</span></div>
+          <div className="tasks-panel-title"><div><h2>{selected.title}</h2><p className="tasks-muted">{approvalStatusLabel(selected.status)} · {selected.request_type === "create" ? "Nueva plantilla" : "Cambio de plantilla"}</p></div><span className="tasks-badge">{selected.area || "Sin area"}</span></div>
+          <div className="checklist-review-summary">
+            <div><span>Creador</span><strong>{profileDisplayName(profiles, selected.submitted_by)}</strong></div>
+            <div><span>Fecha</span><strong>{new Date(selected.submitted_at || selected.created_at).toLocaleString("es-GT")}</strong></div>
+            <div><span>Items</span><strong>{(selected.items_snapshot || []).length}</strong></div>
+          </div>
           <div className="checklist-compare-grid">
-            <ChecklistVersionSummary title="Versión actual" template={currentTemplate} />
-            <ChecklistRequestSummary title="Versión propuesta" request={selected} />
+            <ChecklistVersionSummary title="Version actual" template={currentTemplate} />
+            <ChecklistRequestSummary title="Version propuesta" request={selected} />
           </div>
           <div className="checklist-preview-items">
             {(selected.items_snapshot || []).map((item, index) => <div key={`${selected.id}-${index}`}><strong>{index + 1}. {item.title}</strong><span>{friendlyResponseType(item.response_type)}{item.requires_photo ? " · foto" : ""}{item.requires_comment ? " · comentario" : ""}</span></div>)}
@@ -2706,7 +2859,7 @@ function ChecklistApprovals({ requests, templates, profiles, initialRequestId = 
           {selected.review_notes && <p className="tasks-warning">{selected.review_notes}</p>}
           {canApprove && selected.status === "pending_review" && (
             <>
-              <Field label="Nota de revisión"><textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Obligatoria si rechazas" /></Field>
+              <Field label="Nota de revision"><textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Obligatoria si rechazas" /></Field>
               <div className="checklist-actions">
                 <button type="button" className="tasks-primary" onClick={() => onApprove(selected, notes)}>Aprobar</button>
                 <button type="button" className="tasks-secondary" onClick={() => onReject(selected, notes)}>Rechazar</button>
@@ -3039,6 +3192,45 @@ function templateToForm(template) {
     materialsNeeded: (template.materialsNeeded || []).join("\n"),
     checklistItems: (template.checklistItems || []).map((item) => item.text).join("\n")
   }
+}
+
+function resolveChecklistLibraryPermissions(userRole) {
+  const role = normalizeRole(userRole)
+  return {
+    canViewChecklistLibrary: ["admin", "gerente_general", "gerente", "recursos_humanos", "rrhh", "supervisor"].includes(role),
+    canCreateDirectly: ["admin", "gerente_general", "recursos_humanos", "rrhh"].includes(role),
+    canEditDirectly: ["admin", "gerente_general", "recursos_humanos", "rrhh"].includes(role),
+    isSupervisorOnly: role === "supervisor",
+    canProposeEdits: role === "supervisor",
+    canApproveTemplateChanges: ["admin", "gerente_general"].includes(role),
+    isLibraryAdmin: ["admin", "gerente_general", "gerente", "recursos_humanos", "rrhh"].includes(role),
+    canAssignChecklists: ["admin", "gerente_general", "gerente", "recursos_humanos", "rrhh", "supervisor"].includes(role),
+    canDeleteTemplates: ["admin", "gerente_general"].includes(role)
+  }
+}
+
+function getTemplatePendingRequest(template, changeRequests) {
+  return (changeRequests || []).find((request) =>
+    request.template_id === template.id &&
+    ["draft", "pending_review", "rejected"].includes(request.status)
+  ) || null
+}
+
+function getVisiblePendingCreateRequests(changeRequests, userId, isLibraryAdmin, isSupervisorOnly) {
+  return (changeRequests || []).filter((request) =>
+    request.request_type === "create" &&
+    ["draft", "pending_review", "rejected"].includes(request.status) &&
+    (isLibraryAdmin || (isSupervisorOnly && request.submitted_by === userId))
+  )
+}
+
+function templateLibraryBadge(template, pendingRequest) {
+  if (pendingRequest?.status === "pending_review") return { label: "Pendiente aprobacion", className: "pending" }
+  if (pendingRequest?.status === "draft") return { label: "Borrador", className: "draft" }
+  if (pendingRequest?.status === "rejected") return { label: "Rechazada", className: "rejected" }
+  if (template.status === "inactive") return { label: "Archivada", className: "archived" }
+  if (template.status === "active") return { label: "Activa", className: "active" }
+  return { label: template.status || "Plantilla", className: "" }
 }
 
 export default Tasks
