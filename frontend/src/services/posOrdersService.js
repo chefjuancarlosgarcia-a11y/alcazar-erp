@@ -66,6 +66,25 @@ export async function getOpenOrderByTable(tableId) {
   )
 }
 
+export async function getActiveOrdersForTables(tableIds = []) {
+  const ids = [...new Set((tableIds || []).map((id) => String(id)).filter(Boolean))]
+  if (!ids.length) return { data: [], error: null, message: "" }
+  const { data, error } = await withTimeout(
+    supabase.from("pos_orders").select(orderSelect).in("table_id", ids).in("status", ["open", "awaiting_bill", "sent_to_cashier", "partially_paid"]).order("created_at", { ascending: false }),
+    15000,
+    "cargar ordenes activas por mesa"
+  )
+  if (error) return { data: [], error, message: formatSupabaseError(error) }
+  const seen = new Set()
+  const deduped = (data || []).filter((row) => {
+    const tableKey = String(row.table_id)
+    if (seen.has(tableKey)) return false
+    seen.add(tableKey)
+    return true
+  }).map(mapOrder)
+  return { data: deduped, error: null, message: "" }
+}
+
 export async function getTableOrderHistory(tableId) {
   const { data, error } = await withTimeout(
     supabase.from("pos_orders").select(orderSelect).eq("table_id", String(tableId)).order("created_at", { ascending: false }).limit(30),
@@ -153,18 +172,29 @@ export async function updateOrderNotes(orderId, notes = "") {
 }
 
 export async function updateOrderSalesChannel(orderId, payload = {}) {
+  const update = {}
+  if (payload.salesChannel !== undefined) update.sales_channel = payload.salesChannel
+  if (payload.customerId !== undefined) update.customer_id = payload.customerId
+  if (payload.customerAddressId !== undefined) update.customer_address_id = payload.customerAddressId
+  if (payload.deliveryNotes !== undefined) update.delivery_notes = payload.deliveryNotes
+  if (payload.assignedDriverId !== undefined) update.assigned_driver_id = payload.assignedDriverId
+  if (payload.externalSource !== undefined) update.external_source = payload.externalSource
+  if (payload.externalOrderId !== undefined) update.external_order_id = payload.externalOrderId
+  if (payload.notes !== undefined) update.notes = payload.notes
+  return queryOrder(
+    supabase.from("pos_orders").update(update).eq("id", orderId).select(orderSelect).single(),
+    "guardar canal de venta POS"
+  )
+}
+
+export async function linkOrderBillingCustomer(orderId, { customerId = null, customerAddressId = null } = {}) {
+  if (!orderId) return { data: null, error: new Error("Orden no encontrada."), message: "Orden no encontrada." }
   return queryOrder(
     supabase.from("pos_orders").update({
-      sales_channel: payload.salesChannel || "dine_in",
-      customer_id: payload.customerId || null,
-      customer_address_id: payload.customerAddressId || null,
-      delivery_notes: payload.deliveryNotes || null,
-      assigned_driver_id: payload.assignedDriverId || null,
-      external_source: payload.externalSource || null,
-      external_order_id: payload.externalOrderId || null,
-      notes: payload.notes || null
+      customer_id: customerId || null,
+      customer_address_id: customerAddressId || null
     }).eq("id", orderId).select(orderSelect).single(),
-    "guardar canal de venta POS"
+    "vincular cliente a orden POS"
   )
 }
 

@@ -20,6 +20,16 @@ export async function searchPOSCustomers(term = "") {
   return { data: data || [], error, message: error ? formatSupabaseError(error) : "" }
 }
 
+export async function getPOSCustomerById(customerId) {
+  if (!customerId) return { data: null, error: null, message: "" }
+  const { data, error } = await withTimeout(
+    supabase.from("customers").select(customerSelect).eq("id", customerId).maybeSingle(),
+    10000,
+    "cargar cliente POS"
+  )
+  return { data, error, message: error ? formatSupabaseError(error) : "" }
+}
+
 export async function savePOSCustomerFromDelivery(form) {
   const fullName = String(form.cliente || "").trim()
   if (!fullName) return { data: null, error: new Error("Nombre del cliente obligatorio."), message: "Nombre del cliente obligatorio." }

@@ -171,6 +171,7 @@ export async function printFinalCheck(order, payment = {}, options = {}) {
   const discounts = Number(payment.discountAmount || order?.discounts || 0)
   const paid = Number(payment.totalAmount ?? order?.total ?? subtotal - discounts)
   const methods = (payment.methods || []).map((method) => method.method).join(", ") || payment.method || "-"
+  const billing = payment.billingCustomer || order?.billingCustomer || {}
   return printHtml(buildReceiptHtml({
     title: options.restaurantName || DEFAULT_RESTAURANT_NAME,
     width,
@@ -181,6 +182,9 @@ export async function printFinalCheck(order, payment = {}, options = {}) {
       { text: `Mesa: ${order?.tableName || order?.mesa || "-"}` },
       { text: `Fecha: ${new Date().toLocaleString()}` },
       { text: `Mesero: ${order?.waiterName || order?.usuarioNombre || "-"}` },
+      ...(billing.nit ? [{ text: `NIT: ${billing.nit}` }] : []),
+      ...(billing.name ? [{ text: `Cliente: ${billing.name}` }] : []),
+      ...(billing.phone ? [{ text: `Telefono: ${billing.phone}` }] : []),
       { text: `Pago: ${methods}` },
       { type: "hr" },
       ...items.map((item) => ({ type: "item", name: itemName(item), qty: itemQuantity(item), price: money(itemPrice(item)), total: money(itemQuantity(item) * itemPrice(item)) })),

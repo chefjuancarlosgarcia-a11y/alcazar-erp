@@ -190,6 +190,11 @@ export async function deactivatePOSProduct(id) {
   return { data: mapPOSProductFromSupabase(data), error }
 }
 
+export async function activatePOSProduct(id) {
+  const { data, error } = await supabase.from("pos_products").update({ active: true }).eq("id", id).select(productSelect).single()
+  return { data: mapPOSProductFromSupabase(data), error }
+}
+
 export async function savePOSCatalogProduct(product, variants = [], modifiers = []) {
   const payload = serializeProduct(product)
   const variantPayload = (Array.isArray(variants) ? variants : []).map((variant, index) => serializeVariant(variant, index, payload.name))

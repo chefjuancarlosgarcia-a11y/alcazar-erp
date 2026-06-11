@@ -328,10 +328,440 @@
   flex: 1 1 90px;
 }
 
-.cashier-charge-layout {
+.cashier-charge-layout,
+.cashier-charge-terminal {
   display: grid;
+  gap: 14px;
+}
+
+.cashier-charge-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 14px 16px;
+  border: 2px solid color-mix(in srgb, var(--erp-primary, #0f766e) 55%, #334155);
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(15, 118, 110, 0.18), #0f172a 58%);
+}
+
+.cashier-charge-hero-main {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.cashier-charge-hero-main small {
+  color: #94a3b8;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.cashier-charge-hero-main strong {
+  color: #f8fafc;
+  font-size: 1.65rem;
+  line-height: 1.1;
+}
+
+.cashier-charge-hero-main span {
+  color: #cbd5e1;
+  font-size: 0.88rem;
+}
+
+.cashier-charge-hero-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.cashier-charge-hero-meta div {
+  display: grid;
+  gap: 2px;
+}
+
+.cashier-charge-hero-meta small {
+  color: #94a3b8;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+}
+
+.cashier-charge-hero-meta strong {
+  color: #e2e8f0;
+  font-size: 0.92rem;
+}
+
+.cashier-charge-hero-total {
+  display: grid;
+  gap: 2px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid #334155;
+  background: rgba(15, 23, 42, 0.72);
+  text-align: right;
+}
+
+.cashier-charge-hero-total small {
+  color: #94a3b8;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+}
+
+.cashier-charge-hero-total strong {
+  color: #5eead4;
+  font-size: 1.55rem;
+}
+
+.cashier-charge-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.cashier-charge-order,
+.cashier-charge-payment {
+  min-height: 0;
+}
+
+.cashier-items-table-wrap {
+  overflow: auto;
+  max-height: 42vh;
+  border: 1px solid #24344a;
+  border-radius: 12px;
+}
+
+.cashier-items-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.cashier-items-table th,
+.cashier-items-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #1e293b;
+  text-align: left;
+}
+
+.cashier-items-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #111827;
+  color: #94a3b8;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.cashier-items-table th:nth-child(n + 2),
+.cashier-items-table td:nth-child(n + 2) {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.cashier-items-table tbody tr:hover {
+  background: rgba(30, 41, 59, 0.45);
+}
+
+.cashier-item-qty {
+  color: #2dd4bf;
+  font-weight: 800;
+}
+
+.cashier-totals-block {
+  display: grid;
+  gap: 10px;
+}
+
+.cashier-totals-grid {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #24344a;
+  border-radius: 12px;
+  background: #111827;
+}
+
+.cashier-totals-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  color: #cbd5e1;
+}
+
+.cashier-totals-row.editable span {
+  flex-shrink: 0;
+}
+
+.cashier-totals-row.editable input {
+  max-width: 140px;
+  text-align: right;
+}
+
+.cashier-tip-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.cashier-tip-quick button {
+  min-height: 34px;
+  padding: 0 10px;
+  font-size: 0.82rem;
+}
+
+.cashier-grand-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 2px solid #7f1d1d;
+  background: linear-gradient(180deg, #450a0a 0%, #1a0f12 100%);
+  color: #fecaca;
+}
+
+.cashier-grand-total span {
+  font-size: 0.95rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cashier-grand-total strong {
+  color: #fef2f2;
+  font-size: 1.75rem;
+}
+
+.cashier-reconciliation {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #24344a;
+  border-radius: 12px;
+  background: #111827;
+}
+
+.cashier-reconciliation-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: #94a3b8;
+  font-weight: 700;
+}
+
+.cashier-reconciliation-row strong {
+  color: #e2e8f0;
+}
+
+.cashier-reconciliation-row.is-short strong {
+  color: #fca5a5;
+}
+
+.cashier-reconciliation-row.is-balanced strong {
+  color: #86efac;
+}
+
+.cashier-reconciliation-row.highlight {
+  padding-top: 8px;
+  border-top: 1px dashed #334155;
+  color: #cbd5e1;
+}
+
+.cashier-reconciliation-row.highlight strong {
+  color: #5eead4;
+  font-size: 1.1rem;
+}
+
+.cashier-payment-warning {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #991b1b;
+  border-radius: 10px;
+  background: #450a0a;
+  color: #fecaca;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.cashier-confirm-pay {
+  min-height: 58px !important;
+  width: 100%;
+  border-width: 2px !important;
+  border-radius: 12px !important;
+  background: linear-gradient(180deg, #0d9488 0%, #0f766e 100%) !important;
+  box-shadow: 0 8px 22px rgba(15, 118, 110, 0.28);
+  font-size: 1rem !important;
+  letter-spacing: 0.02em;
+}
+
+.cashier-confirm-pay:disabled {
+  opacity: 0.45;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+.cashier-fill-amount {
+  min-height: 42px;
+  padding: 0 10px !important;
+  white-space: nowrap;
+}
+
+.cashier-charge-split-panel {
+  padding: 12px 14px;
+  border: 1px solid #24344a;
+  border-radius: 12px;
+  background: #0f172a;
+}
+
+.cashier-charge-split-panel summary {
+  cursor: pointer;
+  color: #cbd5e1;
+  font-weight: 800;
+}
+
+.cashier-charge-split-body {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.cashier-charge-footer {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 14px;
+  border: 1px solid #24344a;
+  border-radius: 12px;
+  background: #0b1220;
+  color: #94a3b8;
+  font-size: 0.88rem;
+}
+
+.cashier-charge-footer div {
+  display: grid;
+  gap: 2px;
+}
+
+.cashier-charge-footer strong {
+  color: #e2e8f0;
+}
+
+.cashier-charge-footer-time {
+  text-align: right;
+  color: #cbd5e1;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.cashier-billing-customer {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #24344a;
+  border-radius: 12px;
+  background: #111827;
+}
+
+.cashier-billing-customer-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.cashier-billing-customer-head h3 {
+  margin: 0;
+  color: #f8fafc;
+  font-size: 1rem;
+}
+
+.cashier-billing-customer-head p {
+  margin: 4px 0 0;
+}
+
+.cashier-billing-linked {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid #0f766e;
+  background: #082f2e;
+  color: #99f6e4;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.cashier-billing-search,
+.cashier-billing-fields {
+  display: grid;
+  gap: 8px;
+}
+
+.cashier-billing-fields {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.cashier-billing-address {
+  grid-column: 1 / -1;
+}
+
+.cashier-billing-search-hint {
+  color: #94a3b8;
+  font-size: 0.82rem;
+}
+
+.cashier-billing-search-results {
+  display: grid;
+  gap: 6px;
+  max-height: 180px;
+  overflow: auto;
+}
+
+.cashier-billing-search-item {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: #0f172a;
+  color: #e2e8f0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cashier-billing-search-item:hover {
+  border-color: #0f766e;
+  background: #082f2e;
+}
+
+.cashier-billing-search-item strong {
+  color: #f8fafc;
+}
+
+.cashier-billing-search-item span {
+  color: #94a3b8;
+  font-size: 0.84rem;
+}
+
+.cashier-billing-reset {
+  justify-self: start;
+}
+
+.cashier-charge-payment h2 {
+  margin-top: 4px;
+}
+
+.cashier-charge-layout {
   grid-template-columns: .95fr 1.05fr;
-  gap: 13px;
   align-items: start;
 }
 
@@ -367,7 +797,7 @@
 
 .cashier-payment-method {
   display: grid;
-  grid-template-columns: .85fr .7fr 1fr;
+  grid-template-columns: .85fr .7fr 1fr auto;
   gap: 7px;
 }
 
@@ -532,8 +962,34 @@
 @media (max-width: 980px) {
   .cashier-metrics,
   .cashier-summary,
-  .cashier-charge-layout {
+  .cashier-charge-layout,
+  .cashier-charge-main,
+  .cashier-charge-hero {
     grid-template-columns: 1fr;
+  }
+
+  .cashier-charge-hero-total {
+    text-align: left;
+  }
+
+  .cashier-charge-hero-meta {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .cashier-charge-footer {
+    grid-template-columns: 1fr;
+  }
+
+  .cashier-charge-footer-time {
+    text-align: left;
+  }
+
+  .cashier-billing-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .cashier-items-table-wrap {
+    max-height: none;
   }
 
   .cashier-columns {

@@ -27,13 +27,22 @@ import {
   registerCashMovement,
   registerSplitPaymentLocal,
   returnPreBillToWaiter,
-  syncSupabaseFullPayment
+  syncSupabaseFullPayment,
+  savePreBillBillingCustomer
 } from "../utils/cashier"
-import { getPosOrderPaymentStatus } from "../services/posOrdersService"
+import { getPosOrderPaymentStatus, getOrderWithItems, linkOrderBillingCustomer } from "../services/posOrdersService"
 import { printFinalCheck } from "../services/posPrintService"
 import SplitPaymentModal from "../components/SplitPaymentModal"
+import CashierBillingCustomer from "../components/CashierBillingCustomer"
 import useOperationalAlerts from "../hooks/useOperationalAlerts"
 import OperationalAlertToast from "../components/OperationalAlertToast"
+import {
+  DEFAULT_BILLING_CUSTOMER,
+  billingCustomerFromDelivery,
+  billingCustomerFromSupabase,
+  normalizeBillingCustomer,
+  orderWithBillingCustomer
+} from "../utils/billingCustomer"
 import "./Cashier.css"
 
 const TABS = [
@@ -321,6 +330,7 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
   const [paymentMode, setPaymentMode] = useState("full")
   const [showSplitModal, setShowSplitModal] = useState(false)
   const [paymentStatus, setPaymentStatus] = useState(null)
+  const [billingCustomer, setBillingCustomer] = useState(DEFAULT_BILLING_CUSTOMER)
   const isSupabaseBill = bill?.source === "supabase_pos" && bill?.orderId
   const splitBill = splitBills.find((split) => String(split.preBillId) === String(bill?.id))
   const split = splitBill?.splits.find((part) => part.id === splitId)
@@ -328,7 +338,27 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
   const total = Math.max(0, productSubtotal - Number(discount || 0) + Number(tip || 0))
   const paid = methods.reduce((sum, method) => sum + Number(method.amount || 0), 0)
   const change = Math.max(0, paid - total)
+  const shortfall = Math.max(0, total - paid)
+  const paymentBalanced = shortfall < 0.01
   const approvedAuthorization = requests.find((request) => request.status === "approved" && !request.usedAt && request.requestedById === (user.id || user.username))
+  const comandaNo = bill?.orderId
+    ? String(bill.orderId).slice(0, 8).toUpperCase()
+    : String(bill?.id || "").slice(0, 8).toUpperCase()
+  const billTimestamp = bill?.sentAt || bill?.createdAt
+
+  function applyTipPercent(percent) {
+    setTip((productSubtotal * (percent / 100)).toFixed(2))
+  }
+
+  function fillRemainingAmount(index) {
+    const otherPaid = methods.reduce((sum, method, itemIndex) => (
+      itemIndex === index ? sum : sum + Number(method.amount || 0)
+    ), 0)
+    const remaining = Math.max(0, total - otherPaid)
+    setMethods((current) => current.map((entry, itemIndex) => (
+      itemIndex === index ? { ...entry, amount: remaining.toFixed(2) } : entry
+    )))
+  }
 
   useEffect(() => {
     if (!isSupabaseBill) {
@@ -352,6 +382,35 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
       return current
     })
   }, [bill?.id, bill?.total, paymentStatus?.balance_due])
+
+  useEffect(() => {
+    if (!bill) {
+      setBillingCustomer(DEFAULT_BILLING_CUSTOMER)
+      return undefined
+    }
+    let cancelled = false
+    async function hydrateBillingCustomer() {
+      if (bill.billingCustomer) {
+        if (!cancelled) setBillingCustomer(normalizeBillingCustomer(bill.billingCustomer))
+        return
+      }
+      if (bill.salesChannel === "delivery" && bill.delivery) {
+        if (!cancelled) setBillingCustomer(billingCustomerFromDelivery(bill.delivery))
+        return
+      }
+      if (bill.source === "supabase_pos" && bill.orderId) {
+        const { data } = await getOrderWithItems(bill.orderId)
+        if (cancelled) return
+        if (data?.customer) {
+          setBillingCustomer(billingCustomerFromSupabase(data.customer, data.customer_address))
+          return
+        }
+      }
+      setBillingCustomer(DEFAULT_BILLING_CUSTOMER)
+    }
+    hydrateBillingCustomer()
+    return () => { cancelled = true }
+  }, [bill?.id])
 
   if (!bill) return <article className="cashier-panel"><Empty text="Selecciona una solicitud de cobro." /></article>
   if (!session) return <article className="cashier-panel"><h2>Cobrar mesa</h2><Empty text="Abre una caja desde Dashboard Caja antes de cobrar." /></article>
@@ -395,6 +454,19 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
     setProcessingPayment(true)
     setMessage("Procesando pago...")
     try {
+      const normalizedBilling = normalizeBillingCustomer(billingCustomer)
+      savePreBillBillingCustomer(bill.id, normalizedBilling)
+
+      if (isSupabaseBill && normalizedBilling.customerId) {
+        const linkResult = await linkOrderBillingCustomer(bill.orderId, {
+          customerId: normalizedBilling.customerId,
+          customerAddressId: normalizedBilling.addressId || null
+        })
+        if (linkResult.error) {
+          console.warn("[Cashier] No se pudo vincular cliente a la orden.", linkResult.message || linkResult.error)
+        }
+      }
+
       if (isSupabaseBill) {
         const syncResult = await syncSupabaseFullPayment(bill.orderId, methods, "Cuenta completa")
         if (!syncResult.ok) {
@@ -411,7 +483,8 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
         methods,
         authorizationId: approvedAuthorization?.id || "",
         authorizedBy: approvedAuthorization?.approvedBy || "",
-        productSubtotalOverride: isSupabaseBill ? productSubtotal : undefined
+        productSubtotalOverride: isSupabaseBill ? productSubtotal : undefined,
+        billingCustomer: normalizedBilling
       }, user)
       if (result.requiresAuthorization) {
         createAuthorizationRequest("Descuento o cortesía", result.message, Number(discount), user)
@@ -431,7 +504,10 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
 
       let finalMessage = "Pago completado correctamente. Orden liberada."
       try {
-        const printed = await printFinalCheck(bill, result.payment)
+        const printed = await printFinalCheck(
+          orderWithBillingCustomer(bill, normalizedBilling),
+          { ...result.payment, billingCustomer: normalizedBilling }
+        )
         if (!printed) finalMessage = "Pago completado correctamente. No se pudo abrir la impresión automática."
       } catch (error) {
         console.error("[Cashier] Error imprimiendo cuenta final.", error)
@@ -456,77 +532,205 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
   }
 
   return (
-    <div className="cashier-charge-layout">
-      <article className="cashier-panel">
-        <div className="cashier-panel-title"><h2>{bill.tableName}</h2><span>{bill.waiterName}</span></div>
-        {bill.salesChannel === "delivery" && <DeliveryBillSummary bill={bill} />}
-        <div className="cashier-items">
-          {bill.items.map((item) => <div key={item.lineId || item.id}><span>{item.cantidad} x {item.nombre}</span><strong>Q{(item.precio * item.cantidad).toFixed(2)}</strong></div>)}
+    <div className="cashier-charge-terminal">
+      <header className="cashier-charge-hero">
+        <div className="cashier-charge-hero-main">
+          <small>Cuenta activa</small>
+          <strong>{bill.tableName}</strong>
+          <span>
+            {bill.salesChannel === "delivery" ? "Delivery" : bill.salesChannel === "takeout" ? "Para llevar" : "Salón"}
+            {" · "}
+            Mesero {bill.waiterName || "—"}
+            {" · "}
+            {waitingMinutes(bill)} min en caja
+          </span>
         </div>
-        <div className="cashier-totals">
-          {paymentStatus && Number(paymentStatus.amount_paid) > 0 && (
-            <p className="cashier-partial-status">Ya pagado <strong>Q{Number(paymentStatus.amount_paid).toFixed(2)}</strong> · Saldo restante <strong>Q{Number(paymentStatus.balance_due).toFixed(2)}</strong></p>
+        <div className="cashier-charge-hero-meta">
+          <div><small>Comanda</small><strong>{comandaNo || "—"}</strong></div>
+          <div><small>Fecha</small><strong>{formatDate(billTimestamp)}</strong></div>
+          {bill.peopleCount ? <div><small>Personas</small><strong>{bill.peopleCount}</strong></div> : null}
+        </div>
+        <div className="cashier-charge-hero-total">
+          <small>Total a cobrar</small>
+          <strong>Q{total.toFixed(2)}</strong>
+        </div>
+      </header>
+
+      <div className="cashier-charge-main">
+        <section className="cashier-panel cashier-charge-order">
+          {bill.salesChannel === "delivery" && <DeliveryBillSummary bill={bill} />}
+          <div className="cashier-items-table-wrap">
+            <table className="cashier-items-table">
+              <thead>
+                <tr>
+                  <th>Producto</th>
+                  <th>Precio</th>
+                  <th>Desc.</th>
+                  <th>Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bill.items.map((item) => {
+                  const lineTotal = Number(item.precio) * Number(item.cantidad)
+                  const lineDiscount = Number(item.descuento || item.discount || 0)
+                  return (
+                    <tr key={item.lineId || item.id}>
+                      <td><span className="cashier-item-qty">{item.cantidad}×</span> {item.nombre}</td>
+                      <td>Q{Number(item.precio).toFixed(2)}</td>
+                      <td>{lineDiscount > 0 ? `-Q${lineDiscount.toFixed(2)}` : "—"}</td>
+                      <td><strong>Q{lineTotal.toFixed(2)}</strong></td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="cashier-totals-block">
+            {paymentStatus && Number(paymentStatus.amount_paid) > 0 && (
+              <p className="cashier-partial-status">
+                Ya pagado <strong>Q{Number(paymentStatus.amount_paid).toFixed(2)}</strong>
+                {" · "}
+                Saldo restante <strong>Q{Number(paymentStatus.balance_due).toFixed(2)}</strong>
+              </p>
+            )}
+            <div className="cashier-totals-grid">
+              <div className="cashier-totals-row">
+                <span>Subtotal</span>
+                <strong>Q{productSubtotal.toFixed(2)}</strong>
+              </div>
+              <label className="cashier-totals-row editable">
+                <span>Descuento</span>
+                <input type="number" min="0" step="0.01" value={discount} onChange={(event) => setDiscount(event.target.value)} />
+              </label>
+              <label className="cashier-totals-row editable">
+                <span>Propina</span>
+                <input type="number" min="0" step="0.01" value={tip} onChange={(event) => setTip(event.target.value)} />
+              </label>
+              <div className="cashier-tip-quick">
+                <button type="button" className="secondary" onClick={() => applyTipPercent(10)}>10%</button>
+                <button type="button" className="secondary" onClick={() => applyTipPercent(15)}>15%</button>
+                <button type="button" className="secondary" onClick={() => applyTipPercent(20)}>20%</button>
+              </div>
+            </div>
+            <div className="cashier-grand-total">
+              <span>Total final</span>
+              <strong>Q{total.toFixed(2)}</strong>
+            </div>
+          </div>
+        </section>
+
+        <section className="cashier-panel cashier-charge-payment">
+          <CashierBillingCustomer
+            value={billingCustomer}
+            onChange={setBillingCustomer}
+            showAddress={bill.salesChannel === "delivery" || Boolean(billingCustomer.address)}
+          />
+          <h2>Pago</h2>
+          {isSupabaseBill && (
+            <div className="cashier-payment-mode">
+              <button type="button" className={paymentMode === "full" ? "active" : ""} onClick={() => setPaymentMode("full")}>Pagar cuenta completa</button>
+              <button type="button" className={paymentMode === "split" ? "active" : ""} onClick={() => { setPaymentMode("split"); setShowSplitModal(true) }}>Pagar por separado</button>
+            </div>
           )}
-          <p>Subtotal <strong>Q{productSubtotal.toFixed(2)}</strong></p>
-          <label>Descuento<input type="number" min="0" step="0.01" value={discount} onChange={(event) => setDiscount(event.target.value)} /></label>
-          <label>Propina<input type="number" min="0" step="0.01" value={tip} onChange={(event) => setTip(event.target.value)} /></label>
-          <p className="total">Total final <strong>Q{total.toFixed(2)}</strong></p>
+          {paymentMode === "split" && isSupabaseBill && !showSplitModal && (
+            <p className="cashier-split-hint">Selecciona productos para armar la subcuenta de cada cliente.</p>
+          )}
+          {(!isSupabaseBill || paymentMode === "full") && (
+            <>
+              {splitBill && (
+                <label className="cashier-field">Parte a pagar
+                  <select value={splitId} onChange={(event) => setSplitId(event.target.value)}>
+                    <option value="">Cuenta completa</option>
+                    {splitBill.splits.map((part) => (
+                      <option key={part.id} disabled={part.paid} value={part.id}>
+                        {part.name} · Q{part.total.toFixed(2)} {part.paid ? "(pagada)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {methods.map((method, index) => (
+                <div className="cashier-payment-method" key={`${method.method}-${index}`}>
+                  <select value={method.method} onChange={(event) => setMethods((current) => current.map((entry, itemIndex) => itemIndex === index ? { ...entry, method: event.target.value } : entry))}>
+                    {PAYMENT_METHODS.map((option) => <option value={option.id} key={option.id}>{option.label}</option>)}
+                  </select>
+                  <input type="number" min="0" step="0.01" placeholder="Monto" value={method.amount} onChange={(event) => setMethods((current) => current.map((entry, itemIndex) => itemIndex === index ? { ...entry, amount: event.target.value } : entry))} />
+                  <input placeholder="Referencia" value={method.reference} onChange={(event) => setMethods((current) => current.map((entry, itemIndex) => itemIndex === index ? { ...entry, reference: event.target.value } : entry))} />
+                  <button type="button" className="secondary cashier-fill-amount" onClick={() => fillRemainingAmount(index)} title="Completar monto faltante">
+                    Total
+                  </button>
+                </div>
+              ))}
+              <button type="button" className="secondary" onClick={addMethod}>+ Pago mixto</button>
+
+              <div className="cashier-reconciliation">
+                <div className="cashier-reconciliation-row">
+                  <span>Recibido</span>
+                  <strong>Q{paid.toFixed(2)}</strong>
+                </div>
+                <div className="cashier-reconciliation-row">
+                  <span>Cambio</span>
+                  <strong>Q{change.toFixed(2)}</strong>
+                </div>
+                <div className={`cashier-reconciliation-row${shortfall >= 0.01 ? " is-short" : " is-balanced"}`}>
+                  <span>{shortfall >= 0.01 ? "Faltan" : "Diferencia"}</span>
+                  <strong>{shortfall >= 0.01 ? `-Q${shortfall.toFixed(2)}` : "Q0.00"}</strong>
+                </div>
+                <div className="cashier-reconciliation-row highlight">
+                  <span>Total a cobrar</span>
+                  <strong>Q{total.toFixed(2)}</strong>
+                </div>
+              </div>
+
+              {approvedAuthorization && <div className="cashier-approved">Autorización aprobada por {approvedAuthorization.approvedBy}</div>}
+              {message && <div className="cashier-feedback">{message}</div>}
+              {!paymentBalanced && (
+                <p className="cashier-payment-warning">El monto recibido no cubre el total. Completa el pago antes de confirmar.</p>
+              )}
+              <button
+                type="button"
+                className="cashier-confirm-pay"
+                disabled={processingPayment || !paymentBalanced}
+                onClick={submit}
+              >
+                {processingPayment ? "Procesando pago..." : `Confirmar pago · Q${total.toFixed(2)}`}
+              </button>
+            </>
+          )}
+          {paymentMode === "split" && isSupabaseBill && (
+            <button type="button" className="secondary" onClick={() => setShowSplitModal(true)}>Abrir división por productos</button>
+          )}
+        </section>
+      </div>
+
+      <details className="cashier-charge-split-panel">
+        <summary>Dividir cuenta (partes iguales o personalizado)</summary>
+        <div className="cashier-charge-split-body">
+          <select value={splitMode} onChange={(event) => setSplitMode(event.target.value)}>
+            <option value="">Selecciona opción</option>
+            <option value="products">Por productos (usa el botón arriba si la orden es Supabase)</option>
+            <option value="equal">Partes iguales</option>
+            <option value="custom">Monto personalizado</option>
+          </select>
+          {splitMode === "equal" && <input type="number" min="2" value={splitConfig} onChange={(event) => setSplitConfig(event.target.value)} placeholder="Personas" />}
+          {splitMode === "custom" && <input value={splitConfig} onChange={(event) => setSplitConfig(event.target.value)} placeholder="Ej: 100, 150.50, 80" />}
+          {splitMode && splitMode !== "products" && <button type="button" className="secondary" onClick={buildSplit}>Crear división</button>}
+          {splitBill?.splits.map((part) => (
+            <div className="cashier-row" key={part.id}>
+              <span>{part.name}</span>
+              <strong>Q{part.total.toFixed(2)} · {part.paid ? "Pagada" : "Pendiente"}</strong>
+            </div>
+          ))}
         </div>
-      </article>
-      <article className="cashier-panel">
-        <h2>Pago</h2>
-        {isSupabaseBill && (
-          <div className="cashier-payment-mode">
-            <button type="button" className={paymentMode === "full" ? "active" : ""} onClick={() => setPaymentMode("full")}>Pagar cuenta completa</button>
-            <button type="button" className={paymentMode === "split" ? "active" : ""} onClick={() => { setPaymentMode("split"); setShowSplitModal(true) }}>Pagar por separado</button>
-          </div>
-        )}
-        {paymentMode === "split" && isSupabaseBill && !showSplitModal && (
-          <p className="cashier-split-hint">Selecciona productos para armar la subcuenta de cada cliente.</p>
-        )}
-        {(!isSupabaseBill || paymentMode === "full") && (
-          <>
-        {splitBill && (
-          <label className="cashier-field">Parte a pagar
-            <select value={splitId} onChange={(event) => setSplitId(event.target.value)}>
-              <option value="">Cuenta completa</option>
-              {splitBill.splits.map((part) => <option key={part.id} disabled={part.paid} value={part.id}>{part.name} · Q{part.total.toFixed(2)} {part.paid ? "(pagada)" : ""}</option>)}
-            </select>
-          </label>
-        )}
-        {methods.map((method, index) => (
-          <div className="cashier-payment-method" key={`${method.method}-${index}`}>
-            <select value={method.method} onChange={(event) => setMethods((current) => current.map((entry, itemIndex) => itemIndex === index ? { ...entry, method: event.target.value } : entry))}>
-              {PAYMENT_METHODS.map((option) => <option value={option.id} key={option.id}>{option.label}</option>)}
-            </select>
-            <input type="number" min="0" step="0.01" placeholder="Monto" value={method.amount} onChange={(event) => setMethods((current) => current.map((entry, itemIndex) => itemIndex === index ? { ...entry, amount: event.target.value } : entry))} />
-            <input placeholder="Referencia" value={method.reference} onChange={(event) => setMethods((current) => current.map((entry, itemIndex) => itemIndex === index ? { ...entry, reference: event.target.value } : entry))} />
-          </div>
-        ))}
-        <button type="button" className="secondary" onClick={addMethod}>+ Pago mixto</button>
-        <p className="cashier-change">Pagado: Q{paid.toFixed(2)} · Vuelto: Q{change.toFixed(2)}</p>
-        {approvedAuthorization && <div className="cashier-approved">Autorización aprobada por {approvedAuthorization.approvedBy}</div>}
-        {message && <div className="cashier-feedback">{message}</div>}
-        <button type="button" disabled={processingPayment} onClick={submit}>{processingPayment ? "Procesando..." : "Confirmar pago"}</button>
-          </>
-        )}
-        {paymentMode === "split" && isSupabaseBill && (
-          <button type="button" className="secondary" onClick={() => setShowSplitModal(true)}>Abrir division por productos</button>
-        )}
-      </article>
-      <article className="cashier-panel cashier-split">
-        <h2>Dividir cuenta</h2>
-        <select value={splitMode} onChange={(event) => setSplitMode(event.target.value)}>
-          <option value="">Selecciona opción</option>
-          <option value="products">Por productos</option>
-          <option value="equal">Partes iguales</option>
-          <option value="custom">Monto personalizado</option>
-        </select>
-        {splitMode === "equal" && <input type="number" min="2" value={splitConfig} onChange={(event) => setSplitConfig(event.target.value)} placeholder="Personas" />}
-        {splitMode === "custom" && <input value={splitConfig} onChange={(event) => setSplitConfig(event.target.value)} placeholder="Ej: 100, 150.50, 80" />}
-        {splitMode && <button type="button" className="secondary" onClick={buildSplit}>Crear división</button>}
-        {splitBill?.splits.map((part) => <div className="cashier-row" key={part.id}><span>{part.name}</span><strong>Q{part.total.toFixed(2)} · {part.paid ? "Pagada" : "Pendiente"}</strong></div>)}
-      </article>
+      </details>
+
+      <footer className="cashier-charge-footer">
+        <div><strong>{user?.name || user?.email || "Cajero"}</strong><span>{session.cashierName ? `Turno · ${session.cashierName}` : "Caja activa"}</span></div>
+        <div><strong>{bill.tableName}</strong><span>Comanda {comandaNo}</span></div>
+        <div className="cashier-charge-footer-time">{new Date().toLocaleString()}</div>
+      </footer>
+
       {showSplitModal && isSupabaseBill && (
         <SplitPaymentModal
           bill={bill}

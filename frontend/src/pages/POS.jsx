@@ -14,6 +14,7 @@ import {
   createOrUpdatePOSProductFromRecipe,
   createPOSProduct,
   deactivatePOSProduct,
+  activatePOSProduct,
   getPOSProductById,
   getPOSProducts,
   savePOSCatalogProduct
@@ -24,6 +25,7 @@ import {
   clearDraftItems,
   clearLegacyPOSOrders,
   createOrGetOpenOrder,
+  getActiveOrdersForTables,
   getOpenOrderByTable,
   getTableOrderEvents,
   getOrderWithItems,
@@ -46,6 +48,8 @@ import {
   sanitizeManualTableStatus,
   savePosFloorLayout
 } from "../services/posFloorPlanService"
+import PosClassicOperation from "../components/PosClassicOperation"
+import PosDishCatalog from "../components/PosDishCatalog"
 import "./POS.css"
 
 const POS_CATEGORIES_KEY = "posCategories"
@@ -668,6 +672,9 @@ function POS() {
   const [itemsLoading, setItemsLoading] = useState(true)
   const [migratingLocalProducts, setMigratingLocalProducts] = useState(false)
   const [mostrarFormulario, setMostrarFormulario] = useState(false)
+  const [postSaveHint, setPostSaveHint] = useState(null)
+  const [catalogFeedbackTone, setCatalogFeedbackTone] = useState("success")
+  const [migrationProgress, setMigrationProgress] = useState(null)
   const [form, setForm] = useState(emptyItemForm)
   const [editandoId, setEditandoId] = useState(null)
   const [errores, setErrores] = useState({})
@@ -714,6 +721,9 @@ function POS() {
   const [salesChannel, setSalesChannel] = useState("dine_in")
   const [personasOrden, setPersonasOrden] = useState("1")
   const [posStep, setPosStep] = useState(1)
+  const [mesaCargando, setMesaCargando] = useState(false)
+  const [showProductCatalog, setShowProductCatalog] = useState(false)
+  const [showPosSearch, setShowPosSearch] = useState(false)
   const [seatNames, setSeatNames] = useState(["Persona 1"])
   const [selectedAssignment, setSelectedAssignment] = useState("Mesa completa")
   const [deliveryForm, setDeliveryForm] = useState(emptyDeliveryForm)
@@ -747,6 +757,23 @@ function POS() {
   const productSearchRef = useRef(null)
 
   const activeCategories = useMemo(() => posCategories.filter((category) => category.active !== false).sort((a, b) => Number(a.sortOrder) - Number(b.sortOrder)), [posCategories])
+  const classicCategories = useMemo(
+    () => activeCategories.map((category) => ({
+      ...category,
+      isPizza: /pizza/i.test(category.name || "")
+    })),
+    [activeCategories]
+  )
+  const posFooterTime = useMemo(
+    () => new Date(tick).toLocaleString("es-GT", {
+      weekday: "short",
+      day: "2-digit",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit"
+    }),
+    [tick]
+  )
   const finalRecipes = standardRecipes.filter((recipe) => recipe.recipe_type === "final_product" && recipe.active !== false)
   const itemsCategoria = useMemo(
     () => items.filter((item) => {
@@ -759,6 +786,7 @@ function POS() {
   const totalOrden = Number(currentOrder?.total ?? orden.reduce((total, item) => total + item.precio * item.cantidad, 0))
   const draftItems = orden.filter((item) => (item.status || "draft") === "draft")
   const sentItems = orden.filter((item) => !["draft", "cancelled"].includes(item.status || "draft"))
+  const mesaEnServicioActivo = ordenActivaEnMesa(currentOrder)
   const allowHistoricalOrderActions = false
   const orderSections = [
     { id: "draft", title: "Productos nuevos / sin enviar", statuses: ["draft"] },
@@ -795,8 +823,9 @@ function POS() {
   const historialMesaActual = mesaKeyActual ? ordenesEnviadas.filter((ordenItem) => ordenItem.mesaKey === mesaKeyActual && ordenItem.id !== currentOrder?.id).slice(0, 5) : []
   const mesaBloqueadaPorCobro = ["awaiting_bill", "sent_to_cashier", "payment_in_progress"].includes(currentOrder?.status)
     || historialMesaActual.some((order) => ["sent_to_cashier", "payment_in_progress"].includes(order.status))
+  const getCatalogItemState = useCallback((item) => getProductProductionState(item, finalRecipes, productionAreas, activeCategories), [finalRecipes, productionAreas, activeCategories])
   const invalidActiveProducts = items.filter((item) => {
-    const state = getProductProductionState(item, finalRecipes, productionAreas, activeCategories)
+    const state = getCatalogItemState(item)
     return state.active && !state.productionReady
   })
   const formProductType = form.productType || "simple"
@@ -860,6 +889,31 @@ function POS() {
       console.error("POS realtime refresh error:", realtimeError)
       setOrdenError(`No se pudo actualizar la mesa en vivo: ${realtimeError.message}`)
     }
+  }
+
+  function salirOrdenActual() {
+    setOrdenMesa(null)
+    setCurrentOrder(null)
+    setActiveOrderId("")
+    setOrden([])
+    setOrderEvents([])
+    setOrdenError("")
+    setOrdenMessage("")
+    setShowProductCatalog(false)
+    setPosStep(1)
+    setSalesChannel("dine_in")
+  }
+
+  function etiquetaRolPos(role) {
+    return ({
+      admin: "Administrador",
+      gerente_general: "Gerente general",
+      supervisor: "Supervisor",
+      mesero: "Mesero",
+      caja: "Caja",
+      gerente: "Gerente",
+      gerente_operaciones: "Gerente operaciones"
+    })[role] || role || "Operador"
   }
 
   const ordersRealtime = useSupabaseRealtime({
@@ -980,7 +1034,9 @@ function POS() {
       showToast("Plano actualizado en otro dispositivo. Tienes cambios sin guardar en este equipo.", "warning", 4000)
       return
     }
-    applyHydratedLayout(hydrateLayoutFromPayload(result.data), "supabase")
+    const hydrated = hydrateLayoutFromPayload(result.data)
+    const withOrders = await hydrateMesasFromOrders(hydrated.areas)
+    applyHydratedLayout({ ...hydrated, areas: withOrders }, "supabase")
     if (fromRemote) {
       showToast("Plano actualizado desde otro dispositivo.", "info", 3000)
     }
@@ -998,7 +1054,9 @@ function POS() {
       if (cancelled) return
 
       if (!remote.error && remote.data?.areas?.length) {
-        applyHydratedLayout(hydrateLayoutFromPayload(remote.data), "supabase")
+        const hydrated = hydrateLayoutFromPayload(remote.data)
+        const withOrders = await hydrateMesasFromOrders(hydrated.areas)
+        applyHydratedLayout({ ...hydrated, areas: withOrders }, "supabase")
       } else if (hasLocal) {
         applyHydratedLayout(localSnapshot, "local")
       } else {
@@ -1484,6 +1542,7 @@ function POS() {
   function estadoMesaPorOrden(order) {
     if (!order || !order.items?.some((item) => item.status !== "cancelled")) return "disponible"
     if (order.status === "paid") return "pagada"
+    if (order.status === "partially_paid") return "pago_en_proceso"
     if (order.status === "sent_to_cashier") return "pago_en_proceso"
     if (order.status === "awaiting_bill") return "esperando_cuenta"
     if (order.items.some((item) => item.status === "error")) return "problema"
@@ -1491,6 +1550,73 @@ function POS() {
     if (order.items.some((item) => ["sent_to_production", "in_production"].includes(item.status))) return "en_produccion"
     if (order.items.some((item) => item.status === "draft")) return "nuevos_sin_enviar"
     return "en_servicio"
+  }
+
+  function ordenActivaEnMesa(order) {
+    if (!order) return false
+    if (["paid", "cancelled"].includes(order.status)) return false
+    return (order.items || []).some((item) => item.status !== "cancelled")
+  }
+
+  function resolverPasoPos(order) {
+    if (!ordenActivaEnMesa(order)) return 2
+    if (["awaiting_bill", "sent_to_cashier", "partially_paid"].includes(order.status)) return 4
+    const items = order.items || []
+    const hasDraft = items.some((item) => item.status === "draft")
+    const hasSent = items.some((item) => !["draft", "cancelled"].includes(item.status))
+    if (hasSent && !hasDraft) return 4
+    return 3
+  }
+
+  function mesaOrderId(order) {
+    return order && !["paid", "cancelled"].includes(order.status) ? order.id : ""
+  }
+
+  function inferPasoDesdeMesaPlano(mesa) {
+    const estado = mesa?.estado || mesa?.status || "disponible"
+    if (estado === "disponible" || estado === "pagada") return 3
+    if (["esperando_cuenta", "pago_en_proceso"].includes(estado)) return 4
+    if (mesa?.orderCreatedAt || !["disponible", "pagada"].includes(estado)) return 3
+    return 3
+  }
+
+  function restaurarComensalesDesdeOrden(order) {
+    const names = new Set()
+    ;(order?.items || []).forEach((item) => {
+      if (item.status === "cancelled") return
+      const assignment = getOrderItemAssignment(item.modificaciones)
+      if (assignment && assignment !== "Mesa completa") names.add(assignment)
+    })
+    if (!names.size) return
+    const list = [...names]
+    setPersonasOrden(String(list.length))
+    setSeatNames(list)
+    setSelectedAssignment(list[0])
+  }
+
+  async function hydrateMesasFromOrders(areas) {
+    const tableIds = areas.flatMap((area) => (area.mesas || []).map((mesa) => mesa.id))
+    const result = await getActiveOrdersForTables(tableIds)
+    if (result.error || !result.data?.length) return areas
+    const orderByTable = new Map(result.data.map((order) => [String(order.table_id || order.tableId || order.mesaId), order]))
+    return areas.map((area) => ({
+      ...area,
+      mesas: (area.mesas || []).map((mesa) => {
+        const order = orderByTable.get(String(mesa.id))
+        if (!order) return mesa
+        const estado = estadoMesaPorOrden(order)
+        return {
+          ...mesa,
+          estado,
+          status: estado,
+          orderTotal: Number(order.total || 0),
+          orderCreatedAt: order.created_at || null,
+          activeMinutes: order.created_at ? minutosTranscurridos(order.created_at) : null,
+          readyCount: (order.items || []).filter((item) => item.status === "ready").length,
+          waiterName: order.waiter_name || order.usuarioNombre || ""
+        }
+      })
+    }))
   }
 
   function etiquetaEstadoMesa(status) {
@@ -1536,7 +1662,7 @@ function POS() {
     const events = await getTableOrderEvents(tableData.mesaId)
     if (events.error) throw events.error
     setCurrentOrder(order)
-    setActiveOrderId(order?.status === "open" ? order.id : "")
+    setActiveOrderId(mesaOrderId(order))
     setOrden(order?.items || [])
     setOrderEvents(events.data || [])
     setOrdenesEnviadas(history.data || [])
@@ -1570,18 +1696,28 @@ function POS() {
     setPersonasOrden("1")
     setSeatNames(["Persona 1"])
     setSelectedAssignment("Mesa completa")
-    setPosStep(2)
+    setPosStep(inferPasoDesdeMesaPlano(mesa))
+    setMesaCargando(true)
     if (!esPedidoDomicilioParaLlevar(areaActiva.nombre) && !esPedidoDomicilioParaLlevar(mesa.numero)) {
       setDeliveryErrors({})
     }
     try {
       const order = await cargarMesaDesdeSupabase(selectedTable)
-      if (order) {
+      if (order && ordenActivaEnMesa(order)) {
+        restaurarComensalesDesdeOrden(order)
+        setPosStep(resolverPasoPos(order))
+        setOrdenMessage("")
+        await recordOrderEvent(order.id, "table_selected", `${selectedTable.mesaNumero} reabierta en POS.`)
+      } else if (order) {
+        setPosStep(3)
         await recordOrderEvent(order.id, "table_selected", `${selectedTable.mesaNumero} seleccionada en POS.`)
+      } else {
+        setPosStep(3)
+        setOrdenMessage("Mesa disponible. Agrega productos para iniciar el servicio.")
+      }
+      if (order) {
         const events = await getTableOrderEvents(selectedTable.mesaId)
         if (!events.error) setOrderEvents(events.data || [])
-      } else {
-        setOrdenMessage("Mesa disponible. Agrega productos para iniciar orden.")
       }
     } catch (error) {
       console.error("Supabase POS table order error:", error)
@@ -1590,11 +1726,42 @@ function POS() {
       setOrden([])
       setOrderEvents([])
       setOrdenError(`No se pudo cargar la orden de la mesa: ${error.message}`)
+    } finally {
+      setMesaCargando(false)
+    }
+  }
+
+  function seleccionarAreaPlano(areaId) {
+    setAreaActivaId(areaId)
+    setMesaSeleccionada(null)
+    setShowProductCatalog(false)
+    if (salesChannel !== "dine_in") {
+      seleccionarCanalVenta("dine_in")
     }
   }
 
   async function seleccionarCanalVenta(channelId) {
     const channel = SALES_CHANNELS.find((item) => item.id === channelId) || SALES_CHANNELS[0]
+
+    if (channel.id === salesChannel) {
+      if (channel.id === "delivery") {
+        setShowDeliveryModal(true)
+        setShowProductCatalog(true)
+        setOrdenMessage("Revisa los datos de delivery de esta comanda.")
+      } else if (channel.id === "takeout") {
+        setShowProductCatalog(true)
+      }
+      return
+    }
+
+    const itemsActivos = (orden || []).filter((item) => item.status !== "cancelled").length
+    if (itemsActivos > 0) {
+      const mensaje = channel.id === "dine_in"
+        ? "Volver al salón cerrará la comanda del canal actual en pantalla. ¿Continuar?"
+        : `Cambiar a ${channel.label} cerrará la comanda visible y abrirá una nueva. Envía o cobra antes si quieres conservarla. ¿Continuar?`
+      if (!window.confirm(mensaje)) return
+    }
+
     setSalesChannel(channel.id)
     if (channel.id === "dine_in") {
       if (ordenMesa?.isSalesChannel) {
@@ -1604,6 +1771,7 @@ function POS() {
         setOrden([])
         setOrderEvents([])
       }
+      setShowProductCatalog(false)
       setDeliveryErrors({})
       setSelectedCustomer(null)
       setSelectedCustomerAddress(null)
@@ -1636,7 +1804,8 @@ function POS() {
       ...current,
       tipoOrden: channel.id === "delivery" ? "Domicilio" : channel.id === "online" ? "Online" : "Para llevar"
     }))
-    setPosStep(2)
+    setPosStep(3)
+    setShowProductCatalog(true)
     if (channel.id === "delivery") {
       setShowDeliveryModal(true)
       setOrdenMessage("Completa los datos de delivery para crear el pedido.")
@@ -2090,10 +2259,6 @@ function POS() {
       return
     }
     const savedProduct = savedResult.data
-    if (item.active && !savedProduct?.productionReady) {
-      setOrdenError("Producto guardado, pero Supabase no lo marcó listo para producción.")
-      return
-    }
     const nextItems = editandoId
       ? items.map((actual) => (actual.id === editandoId ? savedProduct : actual))
       : [savedProduct, ...items]
@@ -2104,7 +2269,22 @@ function POS() {
     setEditandoId(null)
     setMostrarFormulario(false)
     setErrores({})
-    setOrdenError(item.isTestItem ? "Platillo de prueba guardado. Se enviará a KDS sin consumir inventario." : "Platillo guardado y validado para producción.")
+    const savedState = getProductProductionState(savedProduct, finalRecipes, productionAreas, activeCategories)
+    if (savedState.productionReady) {
+      setPostSaveHint(null)
+      setCatalogFeedbackTone("success")
+      setOrdenError(item.isTestItem ? "Platillo de prueba guardado. Se enviará a KDS sin consumir inventario." : "Platillo guardado y validado para producción.")
+    } else {
+      const needsRecipe = savedState.issues.some((issue) => /receta|tamaño|variante/i.test(issue))
+      setPostSaveHint({
+        title: "Platillo guardado — pasos pendientes",
+        message: "El producto está en Supabase pero aún no puede venderse en POS hasta completar la configuración de producción.",
+        issues: savedState.issues,
+        needsRecipe
+      })
+      setCatalogFeedbackTone("warning")
+      setOrdenError("")
+    }
   }
 
   function editarItem(item) {
@@ -2155,11 +2335,40 @@ function POS() {
     if (!window.confirm(`¿Desactivar "${item.nombre}" del catálogo POS?`)) return
     const result = await deactivatePOSProduct(item.id)
     if (result.error) {
+      setCatalogFeedbackTone("error")
       setOrdenError(`No se pudo desactivar el producto: ${result.error.message}`)
       return
     }
     setItems((current) => current.map((entry) => entry.id === item.id ? result.data : entry))
+    setPostSaveHint(null)
+    setCatalogFeedbackTone("success")
     setOrdenError("Producto POS desactivado.")
+  }
+
+  async function reactivarItem(item) {
+    if (!window.confirm(`¿Reactivar "${item.nombre}" en el catálogo POS?`)) return
+    const result = await activatePOSProduct(item.id)
+    if (result.error) {
+      setCatalogFeedbackTone("error")
+      setOrdenError(`No se pudo reactivar el producto: ${result.error.message}`)
+      return
+    }
+    setItems((current) => current.map((entry) => entry.id === item.id ? result.data : entry))
+    const state = getProductProductionState(result.data, finalRecipes, productionAreas, activeCategories)
+    if (!state.productionReady) {
+      setPostSaveHint({
+        title: `"${item.nombre}" reactivado`,
+        message: "El platillo vuelve a estar activo. Completa receta/KDS y guarda de nuevo si sigue pendiente.",
+        issues: state.issues,
+        needsRecipe: state.issues.some((issue) => /receta|tamaño|variante/i.test(issue))
+      })
+      setCatalogFeedbackTone("warning")
+      setOrdenError("")
+      return
+    }
+    setPostSaveHint(null)
+    setCatalogFeedbackTone("success")
+    setOrdenError(`"${item.nombre}" reactivado y listo para producción.`)
   }
 
   function abrirConfiguracionProducto(item) {
@@ -2554,11 +2763,14 @@ function POS() {
     if (!localPOSProducts.length || migratingLocalProducts) return
     if (!window.confirm("Se crearán productos en Supabase a partir del catálogo POS local. Los incompletos quedarán inactivos. ¿Continuar?")) return
     setMigratingLocalProducts(true)
+    setMigrationProgress({ current: 0, total: localPOSProducts.length, label: "Iniciando..." })
     let created = 0
     let incomplete = 0
     const failures = []
     const migratedIds = new Map()
-    for (const legacyProduct of localPOSProducts) {
+    for (let index = 0; index < localPOSProducts.length; index += 1) {
+      const legacyProduct = localPOSProducts[index]
+      setMigrationProgress({ current: index + 1, total: localPOSProducts.length, label: legacyProduct.nombre || legacyProduct.name || "Producto" })
       const recipeId = productRecipeId(legacyProduct)
       const areaId = productProductionAreaId(legacyProduct)
       const recipe = finalRecipes.find((entry) => String(entry.id) === String(recipeId))
@@ -2608,6 +2820,8 @@ function POS() {
     }
     localStorage.setItem("posItemsMigrationStatus", JSON.stringify({ migratedAt: new Date().toISOString(), imported: created, incomplete, failures }))
     setMigratingLocalProducts(false)
+    setMigrationProgress(null)
+    setCatalogFeedbackTone(failures.length ? "warning" : "success")
     const { data, error } = await getPOSProducts()
     if (error) {
       setOrdenError(`Migración terminada, pero no se pudo refrescar el catálogo: ${error.message}`)
@@ -2944,25 +3158,52 @@ function POS() {
     <section style={pageStyle}>
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       {section === "agregar-item" ? (
-        <div className="pos-dish-manager">
-          <header className="pos-dish-manager-header" style={headerStyle}>
-            <div>
-              <p className="pos-operation-eyebrow">Catálogo del punto de venta</p>
-              <h1>Agregar Platillo</h1>
-              <p>Crea platillos visuales, edítalos y publícalos en el POS.</p>
-            </div>
-            <div style={buttonRowStyle}>
-              {user?.role === "admin" && localPOSProducts.length > 0 && <button type="button" disabled={migratingLocalProducts} onClick={migrateLocalPOSProducts} style={secondaryButtonStyle}>{migratingLocalProducts ? "Migrando..." : "Migrar productos POS locales"}</button>}
-              <button type="button" onClick={() => { setMostrarFormulario((actual) => !actual); setEditandoId(null); setForm(emptyActiveItemForm()); setErrores({}); setOrdenError("") }} style={primaryButtonStyle}>
-                + Nuevo platillo
-              </button>
-            </div>
-          </header>
-          <div style={successInlineStyle}>Fuente oficial del catálogo POS: <strong>Supabase `public.pos_products`</strong>.</div>
-          {localPOSProducts.length > 0 && <div style={warningBoxStyle}>Existen productos POS locales antiguos. Deben migrarse a Supabase; no se usan como catálogo oficial.</div>}
-          {ordenError && <div style={errorBoxStyle}>{ordenError}</div>}
-
-          {mostrarFormulario && (
+        <PosDishCatalog
+          user={user}
+          items={items}
+          itemsLoading={itemsLoading}
+          posCategories={posCategories}
+          productionAreas={productionAreas}
+          getItemState={getCatalogItemState}
+          productProductionAreaId={productProductionAreaId}
+          getProductBasePrice={getProductBasePrice}
+          formatProductTypeLabel={formatProductTypeLabel}
+          isTestProduct={isTestProduct}
+          productInitials={productInitials}
+          formatPizzaSizeLabel={formatPizzaSizeLabel}
+          getActiveProductVariants={getActiveProductVariants}
+          getActiveProductModifiers={getActiveProductModifiers}
+          localPOSProducts={localPOSProducts}
+          migratingLocalProducts={migratingLocalProducts}
+          migrationProgress={migrationProgress}
+          onMigrateLocal={migrateLocalPOSProducts}
+          feedbackMessage={ordenError}
+          feedbackTone={catalogFeedbackTone}
+          postSaveHint={postSaveHint}
+          onDismissPostSave={() => setPostSaveHint(null)}
+          onNewDish={() => {
+            setMostrarFormulario((actual) => !actual)
+            setEditandoId(null)
+            setForm(emptyActiveItemForm())
+            setErrores({})
+            setOrdenError("")
+            setPostSaveHint(null)
+          }}
+          onEditItem={editarItem}
+          onDeactivateItem={desactivarItem}
+          onReactivateItem={reactivarItem}
+          onOpenDiagnostic={openProductDiagnostic}
+          thumbStyle={thumbStyle}
+          headerStyle={headerStyle}
+          buttonRowStyle={buttonRowStyle}
+          primaryButtonStyle={primaryButtonStyle}
+          secondaryButtonStyle={secondaryButtonStyle}
+          dangerMiniButtonStyle={dangerMiniButtonStyle}
+          successInlineStyle={successInlineStyle}
+          warningBoxStyle={warningBoxStyle}
+          errorBoxStyle={errorBoxStyle}
+          itemListStyle={itemListStyle}
+          formPanel={mostrarFormulario && (
             <form className="pos-dish-form" onSubmit={guardarItem} style={formCardStyle}>
               <div className="pos-dish-form-heading">
                 <div>
@@ -3153,44 +3394,7 @@ function POS() {
               </div>
             </form>
           )}
-
-          <div className="pos-dish-grid" style={itemListStyle}>
-                {items.map((item) => {
-                  const state = getProductProductionState(item, finalRecipes, productionAreas, activeCategories)
-                  return (
-                  <article className="pos-dish-card" key={item.id} style={itemRowStyle}>
-                {item.imagen ? <img src={item.imagen} alt={item.nombre} style={thumbStyle} /> : <div className="pos-dish-card-placeholder">{productInitials(item.nombre)}</div>}
-                <div className="pos-dish-card-copy" style={{ flex: 1 }}>
-                  <span className="pos-product-category">{item.categoria}</span>
-                  <h3 style={{ margin: "0 0 4px" }}>{item.nombre}</h3>
-                  {isTestProduct(item) && <span className="pos-test-badge">🧪 PRUEBA</span>}
-                  <p style={mutedStyle}>
-                    {productionAreas.find((area) => area.id === productProductionAreaId(item))?.name || productProductionAreaId(item)}
-                    {" · "}
-                    {(item.productType || item.product_type) === "pizza"
-                      ? `Desde Q${getProductBasePrice(item).toFixed(2)}`
-                      : `Q${Number(item.precio || 0).toFixed(2)}`}
-                    {" · "}
-                    {formatProductTypeLabel(item.productType || item.product_type || "simple")}
-                  </p>
-                  {(item.productType || item.product_type) === "pizza" && (
-                    <small style={mutedStyle}>
-                      {getActiveProductVariants(item).map((variant) => formatPizzaSizeLabel(variant.size)).join(", ") || "Sin tamaños activos"} · {getActiveProductModifiers(item).length} modificador(es)
-                    </small>
-                  )}
-                  <ProductionBadges state={state} />
-                </div>
-                <div className="pos-dish-card-actions">
-                  <button type="button" onClick={() => editarItem(item)} style={secondaryButtonStyle}>Editar platillo</button>
-                  {state.active && <button type="button" onClick={() => desactivarItem(item)} style={dangerMiniButtonStyle}>Eliminar del POS</button>}
-                  {user?.role === "admin" && <button type="button" onClick={() => openProductDiagnostic(item)} style={secondaryButtonStyle}>Diagnóstico</button>}
-                </div>
-              </article>
-                  )
-                })}
-                {!itemsLoading && items.length === 0 && <div className="pos-friendly-empty">No hay platillos registrados.</div>}
-          </div>
-        </div>
+        />
       ) : section === "categorias" ? (
         puedeAdministrarCategorias ? (
           <>
@@ -3483,590 +3687,106 @@ function POS() {
         )
       ) : (
         <>
-          <header className="pos-operation-header" style={headerStyle}>
-            <div>
-              <p className="pos-operation-eyebrow">Servicio de mesas</p>
-              <h1>Punto de Venta</h1>
-              <p className="pos-operation-subtitle">Toma pedidos, envía a cocina y atiende productos listos.</p>
-            </div>
-            {user?.role === "admin" && <button type="button" onClick={limpiarOrdenesLocalesAntiguas} style={secondaryButtonStyle}>Limpiar órdenes locales antiguas</button>}
-            {POS_DEBUG && user?.role === "admin" && <button type="button" onClick={openDiagnostic} style={secondaryButtonStyle}>Diagnóstico POS → KDS</button>}
-            {posSession && <span style={sessionBadgeStyle}>Operador: {posSession.name || posSession.username}</span>}
-            {posSession && <span style={posRealtimeActive ? liveBadgeStyle : connectingBadgeStyle}><i style={posRealtimeActive ? liveDotStyle : connectingDotStyle} />{posRealtimeActive ? "En vivo" : "Conectando..."}</span>}
-          </header>
-          {POS_DEBUG && puedeVerAuditoria && <div style={successInlineStyle}>Catálogo oficial conectado y consumo por receta activo.</div>}
-          {realtimeNotice && <div style={liveNoticeStyle}>{realtimeNotice}</div>}
-          {itemsLoading && <div style={mutedStyle}>Cargando productos POS desde Supabase...</div>}
-          {invalidActiveProducts.length > 0 && (
-            <div style={warningBoxStyle}>{invalidActiveProducts.length} producto(s) activo(s) no se mostrarán para venta porque no están listos para producción. Corrígelos en Agregar Platillo.</div>
-          )}
-
-          <nav className="pos-stepper" aria-label="Flujo del punto de venta">
-            {POS_STEPS.map((step) => (
-              <button
-                className={`${posStep === step.id ? "active" : ""} ${posStep > step.id ? "complete" : ""}`}
-                type="button"
-                key={step.id}
-                disabled={(step.id > 1 && !ordenMesa) || (step.id === 4 && !orden.length) || (step.id === 5 && !sentItems.length)}
-                onClick={() => setPosStep(step.id)}
-              >
-                <span>{step.id}</span>
-                {step.label}
-              </button>
-            ))}
-          </nav>
-
-          <div className={`pos-operation-shell pos-step-${posStep}`} style={posShellStyle}>
-              <main className="pos-menu-panel" style={menuPanelStyle}>
-                <div className="pos-catalog-search" style={catalogSearchStyle}>
-                  <input
-                    ref={productSearchRef}
-                    type="search"
-                    placeholder="Buscar producto..."
-                    value={productSearch}
-                    onChange={(event) => setProductSearch(event.target.value)}
-                    style={inputStyle}
-                  />
-                  <small style={mutedStyle}>Solo se muestran productos activos y listos para producción.</small>
-                </div>
-                <div className="pos-category-strip" style={tabsStyle}>
-                  {activeCategories.map((category) => (
-                    <button className={`pos-category-button ${categoriaActiva === category.id ? "active" : ""}`} key={category.id} type="button" onClick={() => setCategoriaActiva(category.id)} style={categoriaActiva === category.id ? activeTabStyle : tabStyle}>
-                      {category.icon && <span style={tabIconStyle}>{category.icon}</span>}
-                      {category.name}
-                    </button>
-                  ))}
-                </div>
-                <section className="pos-floor-panel" style={floorPlanSectionStyle}>
-                  <div style={headerStyle}>
-                    <div>
-                      <h2 style={{ margin: 0 }}>Canal de venta</h2>
-                      <p style={mutedStyle}>{salesChannel === "dine_in" ? "Selecciona una mesa para asociarla a la orden actual." : "Este pedido no usa una zona física del plano del restaurante."}</p>
-                    </div>
-                  </div>
-
-                  <div style={tabsStyle}>
-                    {SALES_CHANNELS.map((channel) => (
-                      <button key={channel.id} type="button" onClick={() => seleccionarCanalVenta(channel.id)} style={activeSalesChannel.id === channel.id ? activeTabStyle : tabStyle}>
-                        {channel.label}
-                      </button>
-                    ))}
-                  </div>
-
-                  {salesChannel === "dine_in" && (
-                    <div style={tabsStyle}>
-                      {activeFloorAreas.map((area) => (
-                        <button key={area.id} type="button" onClick={() => { setAreaActivaId(area.id); setMesaSeleccionada(null) }} style={areaActiva?.id === area.id ? activeTabStyle : tabStyle}>{area.nombre}</button>
-                      ))}
-                    </div>
-                  )}
-
-                  {salesChannel !== "dine_in" ? (
-                    <div style={emptyPlanStyle}>{activeSalesChannel.label} seleccionado como canal de venta.</div>
-                  ) : areaActiva ? (
-                    <div style={floorPlanLayoutStyle}>
-                      <div className="pos-floor-canvas" style={{ ...floorPlanStyle, minHeight: `${Math.max(360, areaActiva.height || 520)}px` }}>
-                        {areaActiva.mesas.map((mesa, index) => (
-                          <TableWithChairs
-                            key={mesa.id}
-                            table={{
-                              ...normalizeLayoutTable(mesa, areaActiva.id, index),
-                              activeMinutes: mesa.orderCreatedAt ? minutosTranscurridos(mesa.orderCreatedAt) : null
-                            }}
-                            selected={ordenMesa?.mesaId === mesa.id}
-                            onClick={() => seleccionarMesaOperacion(mesa)}
-                            showSelectLabel
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  ) : (
-                    <div style={emptyPlanStyle}>Agrega una zona física para crear el plano del restaurante.</div>
-                  )}
-                </section>
-                <section className="pos-people-panel">
-                  {ordenMesa ? (
-                    <>
-                      <div className="pos-step-heading">
-                        <span>Paso 2</span>
-                        <h2>{ordenMesa?.isSalesChannel ? "Configura el cliente" : "Configura la mesa"}</h2>
-                        <p>{ordenMesa?.isSalesChannel ? "Captura los datos necesarios para el canal seleccionado." : "Indica cuántas personas hay y usa nombres para identificar sus consumos."}</p>
-                      </div>
-                      <div className="pos-people-count">
-                        <label htmlFor="pos-people-count">¿Cuántas personas hay en esta mesa?</label>
-                        <input id="pos-people-count" type="number" min="1" max="30" value={personasOrden} onChange={(event) => actualizarCantidadPersonas(event.target.value)} />
-                      </div>
-                      <div className="pos-seat-grid">
-                        {seatNames.map((name, index) => (
-                          <label key={`seat-${index}`}>
-                            <span>Persona {index + 1}</span>
-                            <input value={name} onChange={(event) => actualizarNombrePersona(index, event.target.value)} placeholder={`Persona ${index + 1}`} />
-                          </label>
-                        ))}
-                      </div>
-                      <div className="pos-step-actions">
-                        <button type="button" onClick={() => setPosStep(1)}>Cambiar mesa</button>
-                        <button className="primary" type="button" onClick={() => setPosStep(3)}>Continuar a productos</button>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="pos-friendly-empty">No hay mesa seleccionada. Escoge una mesa para iniciar.</div>
-                  )}
-                </section>
-                <div className="pos-menu-grid" style={menuGridStyle}>
-                  {itemsCategoria.map((item) => (
-                    <article className="pos-product-card" key={item.id} style={menuCardStyle}>
-                      {item.imagen
-                        ? <img className="pos-product-image" src={item.imagen} alt={item.nombre} style={menuImageStyle} />
-                        : <div className="pos-product-placeholder">{productInitials(item.nombre)}</div>}
-                      <div className="pos-product-copy">
-                        <span className="pos-product-category">{posCategories.find((category) => category.id === productCategoryId(item))?.name || item.categoria || "Producto"}</span>
-                        {isTestProduct(item) && <span className="pos-test-badge">🧪 PRUEBA</span>}
-                        <h3>{item.nombre}</h3>
-                        <strong className="pos-product-price">
-                          {(item.productType || item.product_type) === "pizza"
-                            ? `Desde Q${getProductBasePrice(item).toFixed(2)}`
-                            : `Q${Number(item.precio || 0).toFixed(2)}`}
-                        </strong>
-                      </div>
-                      <p className="pos-product-production" style={mutedStyle}>Producción: {productionAreas.find((area) => area.id === productProductionAreaId(item))?.name || productProductionAreaId(item)}</p>
-                      <p className="pos-product-availability" style={item.estado === "activo" ? availableStyle : unavailableStyle}>{item.estado === "activo" ? "Disponible" : "No disponible"}</p>
-                      <button className="pos-add-product" type="button" disabled={item.estado !== "activo" || mesaBloqueadaPorCobro} onClick={() => agregarAOrden(item)} style={{ ...(item.estado === "activo" && !mesaBloqueadaPorCobro ? primaryButtonStyle : disabledButtonStyle), width: "100%" }}>Agregar</button>
-                    </article>
-                  ))}
-                  {itemsCategoria.length === 0 && (
-                    <div style={emptyCatalogStyle}>
-                      No hay productos listos para producción que coincidan con esta búsqueda.
-                    </div>
-                  )}
-                </div>
-              </main>
-              <aside className="pos-current-order" style={orderPanelStyle}>
-                <div className="pos-step-context">
-                  <small>Paso {posStep} de 5</small>
-                  <strong>{POS_STEPS.find((step) => step.id === posStep)?.label}</strong>
-                  <span>{posStep === 3 ? "Agrega productos y asígnalos a la mesa o a una persona." : posStep === 4 ? "Revisa los productos pendientes antes de enviarlos." : posStep === 5 ? "Cobra la mesa completa o revisa los subtotales por persona." : "Completa este paso para continuar."}</span>
-                </div>
-                <h2 className="pos-order-title">Orden actual</h2>
-                <div className="pos-table-summary" style={selectedTableStyle}>
-                  <div style={historyHeaderStyle}>
-                    <strong>{ordenMesa ? (ordenMesa.isSalesChannel ? ordenMesa.mesaNumero : `Mesa ${ordenMesa.mesaNumero}`) : "Selecciona una mesa"}</strong>
-                    {ordenMesa && <span style={{ ...tableStateBadgeStyle, ...tableStatusStyles[estadoMesaPorOrden(currentOrder)] }}>{etiquetaEstadoMesa(estadoMesaPorOrden(currentOrder))}</span>}
-                  </div>
-                  {ordenMesa && <p style={mutedStyle}>{ordenMesa.areaNombre}</p>}
-                  {ordenMesa && (
-                    <div style={tableSummaryGridStyle}>
-                      <label style={summaryMetricStyle}>
-                        <small>{ordenMesa.isSalesChannel ? "Clientes" : `Personas / capacidad ${selectedLayoutTable?.capacity || selectedLayoutTable?.capacidad || "-"}`}</small>
-                        <input type="number" min="1" max="30" value={personasOrden} onChange={(e) => actualizarCantidadPersonas(e.target.value)} style={compactInputStyle} />
-                      </label>
-                      <div style={summaryMetricStyle}><small>Mesero</small><strong>{currentOrder?.usuarioNombre || user?.name || posSession?.name || "Sin asignar"}</strong></div>
-                      <div style={summaryMetricStyle}><small>Tiempo</small><strong>{activeMinutes == null ? "-" : `${activeMinutes} min`}</strong></div>
-                      <div style={summaryMetricStyle}><small>Total</small><strong>Q{totalOrden.toFixed(2)}</strong></div>
-                      {readyItemsCount > 0 && <div style={{ ...summaryMetricStyle, ...readySummaryStyle }}><small>Por servir</small><strong>{readyItemsCount} producto(s)</strong></div>}
-                    </div>
-                  )}
-                  {ordenMesa && <div className="pos-next-action"><small>Siguiente paso</small><strong>{nextServiceAction}</strong></div>}
-                  {ordenMesa && <button type="button" onClick={refreshSelectedTableLive} style={secondaryButtonStyle}>Actualizar</button>}
-                </div>
-                {ordenMesa && orden.length === 0 && (
-                  <div className="pos-friendly-empty">Agrega productos para iniciar la orden.</div>
-                )}
-                {ordenMesa && orden.length > 0 && (
-                  <div className="pos-order-primary-actions">
-                    {draftItems.length > 0 && <button type="button" className="pos-order-send" disabled={sendingOrder} onClick={handleSendOrderToProduction}>
-                      {sendingOrder ? "Enviando..." : "Enviar cocina"}
-                    </button>}
-                    {canRequestCashier && <button type="button" onClick={() => solicitarCuenta(currentOrder)}>Solicitar cobro</button>}
-                    {canRequestCashier && <button type="button" onClick={() => imprimirPrecuenta(currentOrder)}>Imprimir precuenta</button>}
-                    {canRequestCashier && <button type="button" onClick={() => enviarCuentaACaja(currentOrder)}>Enviar a caja</button>}
-                    {!draftItems.length && !canRequestCashier && <div className="pos-friendly-empty">Completa los datos requeridos antes de enviar a caja.</div>}
-                  </div>
-                )}
-                {ordenMesa && (
-                  <div className="pos-secondary-toggle-row">
-                    <button type="button" onClick={() => setCollapsedOrderSections((current) => ({ ...current, activity: !current.activity }))}>
-                      {collapsedOrderSections.activity ? "Ver actividad" : "Ocultar actividad"}
-                    </button>
-                    <button type="button" onClick={() => setCollapsedOrderSections((current) => ({ ...current, previous: !current.previous }))}>
-                      {collapsedOrderSections.previous ? "Ver anteriores" : "Ocultar anteriores"}
-                    </button>
-                    {puedeVerAuditoria && <button type="button" onClick={() => setCollapsedOrderSections((current) => ({ ...current, audit: !current.audit }))}>
-                      {collapsedOrderSections.audit ? "Ver auditoría" : "Ocultar auditoría"}
-                    </button>}
-                  </div>
-                )}
-                {ordenError && <div style={errorBoxStyle}>{ordenError}</div>}
-                {ordenMessage && <div style={successInlineStyle}>{ordenMessage}</div>}
-                {productionErrors.length > 0 && (
-                  <div style={productionErrorPanelStyle}>
-                    <strong>Productos pendientes de producción</strong>
-                    {productionErrors.map((error, index) => (
-                      <div key={`${error.product}-${index}`} style={productionErrorItemStyle}>
-                        <p style={{ margin: 0 }}><strong>{error.product}:</strong> {error.message}</p>
-                        {error.stockError ? (
-                          <button type="button" onClick={() => solicitarRequisicion(error)} style={secondaryButtonStyle}>Crear requisición</button>
-                        ) : (
-                          <small>Conecta la receta o el área desde Productos POS.</small>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {ordenMesa && !collapsedOrderSections.activity && (
-                  <div className="pos-service-activity" style={historyPanelStyle}>
-                    <strong>Actividad de servicio</strong>
-                    {!currentOrder || serviceEvents.length === 0 ? (
-                      <p style={mutedStyle}>Todavía no hay movimientos de servicio.</p>
-                    ) : serviceEvents.map((event) => (
-                      <div key={event.id} style={eventRowStyle}>
-                        <span>{event.description}</span>
-                        <small style={mutedStyle}>{new Date(event.created_at).toLocaleString()}</small>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {ordenMesa && puedeVerAuditoria && !collapsedOrderSections.audit && (
-                  <div className="pos-technical-audit" style={historyPanelStyle}>
-                    <button type="button" onClick={() => setShowTechnicalAudit((current) => !current)} style={secondaryButtonStyle}>
-                      {showTechnicalAudit ? "Ocultar" : "Mostrar"} historial técnico / auditoría
-                    </button>
-                    {showTechnicalAudit && orderEvents.map((event) => (
-                      <div key={event.id} style={eventRowStyle}>
-                        <strong>{event.event_type}</strong>
-                        <span>{event.description}</span>
-                        <small style={mutedStyle}>{new Date(event.created_at).toLocaleString()}</small>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {ordenMesa && !collapsedOrderSections.previous && (
-                  <div className="pos-previous-orders" style={historyPanelStyle}>
-                    <div style={historyHeaderStyle}>
-                      <strong>Órdenes anteriores de esta mesa</strong>
-                      {allowHistoricalOrderActions && puedeEditarOrdenes && historialMesaActual.length > 0 && (
-                        <button type="button" onClick={() => setTrasladoActivo((actual) => !actual)} style={secondaryButtonStyle}>
-                          Trasladar a otra mesa
-                        </button>
-                      )}
-                    </div>
-                    {trasladoActivo && (
-                      <div style={transferPanelStyle}>
-                        <select value={mesaDestinoId} onChange={(e) => setMesaDestinoId(e.target.value)} style={inputStyle}>
-                          <option value="">Selecciona mesa destino vacía</option>
-                          {mesasDestinoDisponibles.map(({ area, mesa }) => (
-                            <option key={obtenerMesaKey(area.id, mesa.id)} value={obtenerMesaKey(area.id, mesa.id)}>
-                              {area.nombre} · Mesa {mesa.numero}
-                            </option>
-                          ))}
-                        </select>
-                        <button type="button" onClick={trasladarMesa} style={primaryButtonStyle}>Confirmar traslado</button>
-                      </div>
-                    )}
-                    {historialMesaActual.length === 0 ? (
-                      <p style={mutedStyle}>No hay órdenes anteriores registradas.</p>
-                    ) : historialMesaActual.map((ordenEnviada) => {
-                      const minutos = minutosTranscurridos(ordenEnviada.fechaEnvioISO)
-                      const pendienteMas15 = minutos > 15 && !["entregada", "cancelada"].includes(ordenEnviada.estado)
-                      return (
-                        <article key={ordenEnviada.id} style={pendienteMas15 ? delayedOrderCardStyle : sentOrderCardStyle}>
-                          {pendienteMas15 && <div style={delayAlertStyle}>Orden con más de 15 minutos pendiente</div>}
-                          <div style={historyHeaderStyle}>
-                            <strong>{ordenEnviada.horaEnviada || ordenEnviada.creadaEn}</strong>
-                            <span style={orderStatusStyle}>{ordenEnviada.estado}</span>
-                          </div>
-                          <p style={mutedStyle}>Usuario: {ordenEnviada.usuarioNombre || ordenEnviada.usuario}</p>
-                          <p style={mutedStyle}>Tiempo transcurrido: {minutos} min</p>
-                          {allowHistoricalOrderActions && ordenEnviada.items.some((item) => (item.status || "draft") === "draft") && (
-                            <button type="button" onClick={() => procesarOrdenExistente(ordenEnviada.id)} style={primaryButtonStyle}>Enviar productos pendientes</button>
-                          )}
-                          <div>
-                            {ordenEnviada.items.map((item) => (
-                              <div key={`${ordenEnviada.id}-${item.lineId || item.id}`} style={sentItemRowStyle}>
-                                <span>{item.cantidad} x {getOrderItemDisplayName(item)} · Q{(item.precio * item.cantidad).toFixed(2)}</span>
-                                <span style={{ ...orderItemBadgeStyle, ...getOrderItemStatusStyle(item.status) }}>{getOrderItemStatusLabel(item.status)}</span>
-                                {allowHistoricalOrderActions && puedeEditarOrdenes && (item.status || "draft") === "draft" && !item.inventoryConsumed && (
-                                  <span style={qtyRowStyle}>
-                                    <button type="button" onClick={() => cambiarCantidadOrdenEnviada(ordenEnviada.id, item.lineId, -1)} style={smallButtonStyle}>-</button>
-                                    <button type="button" onClick={() => cambiarCantidadOrdenEnviada(ordenEnviada.id, item.lineId, 1)} style={smallButtonStyle}>+</button>
-                                    <button type="button" onClick={() => iniciarEdicionModificacionEnviada(ordenEnviada.id, item)} style={smallButtonStyle}>Editar modificaciones</button>
-                                  </span>
-                                )}
-                                {allowHistoricalOrderActions && item.status !== "cancelled" && (
-                                  <button type="button" onClick={() => cancelarItemEnviado(ordenEnviada.id, item)} style={dangerMiniButtonStyle}>Cancelar producto</button>
-                                )}
-                                {getOrderItemModifierLines(item).length > 0 && <small style={modifierTextStyle}>Modificadores: {getOrderItemModifierLines(item).join(", ")}</small>}
-                                {item.modificaciones && <small style={modifierTextStyle}>Modificaciones: {item.modificaciones}</small>}
-                                {item.historialCambios?.length > 0 && (
-                                  <div style={auditBoxStyle}>
-                                    {item.historialCambios.map((cambio) => (
-                                      <small key={cambio.id}>Editado por {cambio.usuario} · {cambio.fechaHora} · Motivo: {cambio.motivo}</small>
-                                    ))}
-                                  </div>
-                                )}
-                                {allowHistoricalOrderActions && edicionEnviada?.ordenId === ordenEnviada.id && edicionEnviada?.lineId === item.lineId && (
-                                  <div style={editSentModifierStyle}>
-                                    {edicionEnviada.error && <div style={errorBoxStyle}>{edicionEnviada.error}</div>}
-                                    <textarea
-                                      value={edicionEnviada.modificaciones}
-                                      onChange={(e) => setEdicionEnviada((actual) => ({ ...actual, modificaciones: e.target.value, error: "" }))}
-                                      style={textAreaStyle}
-                                    />
-                                    <textarea
-                                      placeholder="Motivo de edición obligatorio"
-                                      value={edicionEnviada.motivo}
-                                      onChange={(e) => setEdicionEnviada((actual) => ({ ...actual, motivo: e.target.value, error: "" }))}
-                                      style={textAreaStyle}
-                                    />
-                                    <div style={buttonRowStyle}>
-                                      <button type="button" onClick={guardarModificacionEnviada} style={primaryButtonStyle}>Guardar edición</button>
-                                      <button type="button" onClick={() => setEdicionEnviada(null)} style={secondaryButtonStyle}>Cancelar</button>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                          <strong>Total: Q{Number(ordenEnviada.total || 0).toFixed(2)}</strong>
-                          <button type="button" onClick={() => verDetalleOrdenAnterior(ordenEnviada.id)} style={secondaryButtonStyle}>Ver detalle</button>
-                          {allowHistoricalOrderActions && !["paid", "cancelled"].includes(ordenEnviada.status) && (
-                            <div style={buttonRowStyle}>
-                              <button type="button" onClick={() => solicitarCuenta(ordenEnviada)} style={secondaryButtonStyle}>Solicitar cuenta</button>
-                              <button type="button" onClick={() => imprimirPrecuenta(ordenEnviada)} style={secondaryButtonStyle}>Imprimir precuenta</button>
-                              <button type="button" onClick={() => enviarCuentaACaja(ordenEnviada)} style={primaryButtonStyle}>Enviar a caja</button>
-                            </div>
-                          )}
-                          {ordenEnviada.status === "sent_to_cashier" && <div style={cashierStatusStyle}>En Caja · esperando cobro final</div>}
-                          {ordenEnviada.status === "payment_in_progress" && <div style={cashierStatusStyle}>Pago en proceso · atendido por Caja</div>}
-                          {ordenEnviada.status === "paid" && <div style={paidStatusStyle}>Pagada · mesa disponible</div>}
-                          {allowHistoricalOrderActions && puedeEditarOrdenes && !["sent_to_cashier", "payment_in_progress", "paid"].includes(ordenEnviada.status) && (
-                            <select value={ordenEnviada.estado} onChange={(e) => cambiarEstadoOrden(ordenEnviada.id, e.target.value)} style={inputStyle}>
-                              <option value="enviada">Enviada</option>
-                              <option value="en preparación">En preparación</option>
-                              <option value="preparada">Preparada</option>
-                              <option value="entregada">Entregada</option>
-                            </select>
-                          )}
-                        </article>
-                      )
-                    })}
-                  </div>
-                )}
-                {salesChannel === "delivery" && !showDeliveryModal && (
-                  <div style={deliveryPanelStyle}>
-                    <div style={deliveryHeaderStyle}>
-                      <div>
-                        <strong>Cliente / entrega</strong>
-                        <p style={mutedStyle}>Estado Delivery: {currentOrder?.delivery_status || "pending"}</p>
-                      </div>
-                      <button type="button" onClick={() => setShowDeliveryModal(true)} style={smallButtonStyle}>Editar</button>
-                    </div>
-                    <div style={deliverySummaryCardsStyle}>
-                      <div><small>Cliente</small><strong>{deliveryForm.cliente || selectedCustomer?.full_name || "-"}</strong></div>
-                      <div><small>Telefono</small><strong>{deliveryForm.telefono || deliveryForm.whatsapp || selectedCustomer?.phone || "-"}</strong></div>
-                      <div><small>Direccion</small><strong>{deliveryForm.direccion1 || selectedCustomerAddress?.address || "-"}</strong></div>
-                      <div><small>Pago</small><strong>{deliveryForm.formaPago || "-"}</strong></div>
-                    </div>
-                    {deliveryForm.referencias && <p style={mutedStyle}>Referencia: {deliveryForm.referencias}</p>}
-                    {deliveryForm.notasEntrega && <p style={mutedStyle}>Notas: {deliveryForm.notasEntrega}</p>}
-                  </div>
-                )}
-                {esCanalCliente && salesChannel !== "delivery" && (
-                  <div style={deliveryPanelStyle}>
-                    <div style={deliveryHeaderStyle}>
-                      <div>
-                        <strong>{deliveryForm.tipoOrden === "Domicilio" ? "Datos de delivery" : "Datos para llevar"}</strong>
-                        <p style={mutedStyle}>{deliveryForm.tipoOrden === "Domicilio" ? "Contacto, direccion y ubicacion del cliente." : "Contacto del cliente para retiro."}</p>
-                      </div>
-                      <div style={buttonRowStyle}>
-                        <button type="button" onClick={() => copyDeliveryText("all")} style={smallButtonStyle}>Copiar datos</button>
-                        {deliveryForm.tipoOrden === "Domicilio" && <button type="button" onClick={() => copyDeliveryText("address")} style={smallButtonStyle}>Copiar direccion</button>}
-                        <button type="button" onClick={pasteDeliveryFromClipboard} style={smallButtonStyle}>Pegar rapido</button>
-                        {deliveryForm.mapsLink && <button type="button" onClick={() => window.open(deliveryForm.mapsLink, "_blank", "noopener,noreferrer")} style={smallButtonStyle}>Abrir Maps</button>}
-                        <button type="button" disabled={savingCustomer} onClick={guardarClientePOS} style={savingCustomer ? disabledButtonStyle : smallButtonStyle}>{savingCustomer ? "Guardando..." : "Guardar cliente"}</button>
-                      </div>
-                    </div>
-                    {Object.keys(deliveryErrors).length > 0 && (
-                      <div style={errorBoxStyle}>Faltan campos requeridos: {Object.values(deliveryErrors).join(", ")}.</div>
-                    )}
-                    <div style={deliverySearchStyle}>
-                      <input placeholder="Buscar cliente por nombre o telefono" value={customerSearch} onChange={(e) => setCustomerSearch(e.target.value)} style={inputStyle} />
-                      <button type="button" onClick={() => buscarClientePOS()} style={secondaryButtonStyle}>Buscar cliente</button>
-                    </div>
-                    {customerMessage && <div style={successInlineStyle}>{customerMessage}</div>}
-                    {customerResults.length > 0 && (
-                      <div style={customerResultsStyle}>
-                        {customerResults.map((customer) => (
-                          <article key={customer.id} style={customerResultStyle}>
-                            <button type="button" onClick={() => seleccionarClientePOS(customer)} style={secondaryButtonStyle}>
-                              {customer.full_name} {customer.phone ? `- ${customer.phone}` : ""}
-                            </button>
-                            {(customer.addresses || []).map((address) => (
-                              <button key={address.id} type="button" onClick={() => seleccionarClientePOS(customer, address)} style={smallButtonStyle}>
-                                {address.label || "Direccion"}: {address.address}
-                              </button>
-                            ))}
-                          </article>
-                        ))}
-                      </div>
-                    )}
-                    <div style={deliveryGridStyle}>
-                      <label style={fieldStackStyle}><span style={fieldTitleStyle}>Tipo</span><select value={deliveryForm.tipoOrden} onChange={(e) => actualizarDelivery("tipoOrden", e.target.value)} style={inputStyle}>
-                        <option value="Domicilio">Domicilio</option>
-                        <option value="Para llevar">Para llevar</option>
-                      </select></label>
-                      <label style={fieldStackStyle}><span style={fieldTitleStyle}>Nombre</span><input placeholder="Nombre del cliente" value={deliveryForm.cliente} onChange={(e) => actualizarDelivery("cliente", e.target.value)} style={deliveryErrors.cliente ? inputErrorStyle : inputStyle} /></label>
-                      <label style={fieldStackStyle}><span style={fieldTitleStyle}>Correo</span><input type="email" placeholder="correo@cliente.com" value={deliveryForm.correo} onChange={(e) => actualizarDelivery("correo", e.target.value)} style={inputStyle} /></label>
-                      <label style={fieldStackStyle}><span style={fieldTitleStyle}>Telefono</span><input placeholder="Telefono" value={deliveryForm.telefono} onChange={(e) => actualizarDelivery("telefono", e.target.value)} style={deliveryErrors.telefono ? inputErrorStyle : inputStyle} /></label>
-                      <label style={fieldStackStyle}><span style={fieldTitleStyle}>WhatsApp</span><input placeholder="WhatsApp" value={deliveryForm.whatsapp} onChange={(e) => actualizarDelivery("whatsapp", e.target.value)} style={deliveryErrors.telefono ? inputErrorStyle : inputStyle} /></label>
-                      <label style={fieldStackStyle}><span style={fieldTitleStyle}>NIT</span><input placeholder="NIT / CF" value={deliveryForm.nit} onChange={(e) => actualizarDelivery("nit", e.target.value)} style={inputStyle} /></label>
-                    </div>
-                    {deliveryForm.tipoOrden === "Domicilio" && (
-                      <div style={deliveryGridStyle}>
-                        <label style={{ ...fieldStackStyle, gridColumn: "1 / -1" }}><span style={fieldTitleStyle}>Direccion</span><input placeholder="Direccion de entrega" value={deliveryForm.direccion1} onChange={(e) => actualizarDelivery("direccion1", e.target.value)} style={deliveryErrors.direccion1 ? inputErrorStyle : inputStyle} /></label>
-                        <label style={{ ...fieldStackStyle, gridColumn: "1 / -1" }}><span style={fieldTitleStyle}>Direccion adicional</span><input placeholder="Apartamento, zona, colonia, nivel..." value={deliveryForm.direccion2} onChange={(e) => actualizarDelivery("direccion2", e.target.value)} style={inputStyle} /></label>
-                        <label style={{ ...fieldStackStyle, gridColumn: "1 / -1" }}><span style={fieldTitleStyle}>Referencias</span><textarea placeholder="Color de casa, punto de referencia, instrucciones al repartidor..." value={deliveryForm.referencias} onChange={(e) => actualizarDelivery("referencias", e.target.value)} style={textAreaStyle} /></label>
-                        <label style={{ ...fieldStackStyle, gridColumn: "1 / -1" }}><span style={fieldTitleStyle}>Link Google Maps</span><input placeholder="https://maps.google.com/..." value={deliveryForm.mapsLink} onChange={(e) => actualizarDelivery("mapsLink", e.target.value)} style={inputStyle} /></label>
-                        <label style={fieldStackStyle}><span style={fieldTitleStyle}>Repartidor</span><input placeholder="Opcional" value={deliveryForm.repartidor} onChange={(e) => actualizarDelivery("repartidor", e.target.value)} style={inputStyle} /></label>
-                        <label style={{ ...fieldStackStyle, gridColumn: "1 / -1" }}><span style={fieldTitleStyle}>Notas de entrega</span><textarea placeholder="Indicaciones internas para entrega" value={deliveryForm.notasEntrega} onChange={(e) => actualizarDelivery("notasEntrega", e.target.value)} style={textAreaStyle} /></label>
-                      </div>
-                    )}
-                    <div style={deliveryGridStyle}>
-                      <label style={fieldStackStyle}><span style={fieldTitleStyle}>Forma de pago</span><select value={deliveryForm.formaPago} onChange={(e) => actualizarDelivery("formaPago", e.target.value)} style={deliveryErrors.formaPago ? inputErrorStyle : inputStyle}>
-                        <option value="">Forma de pago</option>
-                        <option value="Efectivo">Efectivo</option>
-                        <option value="POS">POS</option>
-                        <option value="Link">Link</option>
-                        <option value="Transferencia">Transferencia</option>
-                      </select></label>
-                      <label style={fieldStackStyle}><span style={fieldTitleStyle}>Fecha programada</span><input type="date" value={deliveryForm.fechaProgramada} onChange={(e) => actualizarDelivery("fechaProgramada", e.target.value)} style={inputStyle} /></label>
-                      <label style={fieldStackStyle}><span style={fieldTitleStyle}>Hora programada</span><input type="time" value={deliveryForm.horaProgramada} onChange={(e) => actualizarDelivery("horaProgramada", e.target.value)} style={inputStyle} /></label>
-                    </div>
-                    <div style={deliverySummaryStyle}>
-                      {esOrdenProgramada
-                        ? `Orden programada para: ${deliveryForm.fechaProgramada || "sin fecha"} ${deliveryForm.horaProgramada || "sin hora"}`
-                        : "Orden inmediata"}
-                    </div>
-                    {buildDeliveryInfoText().trim() && <pre style={deliveryPreviewStyle}>{buildDeliveryInfoText()}</pre>}
-                  </div>
-                )}
-                {(!currentOrder || orden.length === 0) && <div className="pos-friendly-empty">No hay platillos en esta orden.</div>}
-                {orderAssignmentGroups.length > 0 && (
-                  <section className="pos-person-subtotals">
-                    <strong>Consumo por persona</strong>
-                    {orderAssignmentGroups.map((group) => (
-                      <div key={group.name}>
-                        <span>{group.name} <small>{group.items} producto(s)</small></span>
-                        <strong>Q{group.subtotal.toFixed(2)}</strong>
-                      </div>
-                    ))}
-                  </section>
-                )}
-                {orderSections.filter((sectionItem) => sectionItem.items.length > 0).map((sectionItem) => (
-                  <section className={`pos-order-section section-${sectionItem.id}`} key={sectionItem.id} style={orderSectionStyle}>
-                    <div style={historyHeaderStyle}>
-                      <strong>{sectionItem.title} ({sectionItem.items.length})</strong>
-                      {sectionItem.collapsible && (
-                        <button
-                          type="button"
-                          onClick={() => setCollapsedOrderSections((current) => ({ ...current, [sectionItem.id]: !current[sectionItem.id] }))}
-                          style={smallButtonStyle}
-                        >
-                          {collapsedOrderSections[sectionItem.id] ? "Mostrar" : "Ocultar"}
-                        </button>
-                      )}
-                    </div>
-                    {!collapsedOrderSections[sectionItem.id] && sectionItem.items.map((item) => {
-                      const area = productionAreas.find((entry) => entry.id === item.productionAreaId)
-                      const recipe = finalRecipes.find((entry) => String(entry.id) === String(item.recipeId))
-                      const editable = item.status === "draft"
-                      const inProduction = ["sent_to_production", "in_production"].includes(item.status)
-                      return (
-                        <div className="pos-current-order-item" key={item.lineId} style={orderItemStyle}>
-                          <div style={historyHeaderStyle}>
-                            <strong>{getOrderItemDisplayName(item)}</strong>
-                            <span style={{ ...orderItemBadgeStyle, ...getOrderItemStatusStyle(item.status) }}>{getOrderItemStatusLabel(item.status)}</span>
-                          </div>
-                          {isTestProduct(item) && <span className="pos-test-badge">🧪 PRUEBA · sin consumo</span>}
-                          <span className="pos-assignment-badge">Para: {getOrderItemAssignment(item.modificaciones)}</span>
-                          <span>{item.cantidad} x Q{item.precio.toFixed(2)} = Q{(item.precio * item.cantidad).toFixed(2)}</span>
-                          <small style={mutedStyle}>Area: {area?.name || item.productionAreaId || "Sin area"} | Receta: {recipe?.name || "Sin receta"}</small>
-                          {inProduction && <small style={timerStyle}>Enviado hace {minutosTranscurridos(item.updated_at || item.created_at)} min</small>}
-                          {getOrderItemModifierLines(item).length > 0 && <small style={modifierTextStyle}>Modificadores: {getOrderItemModifierLines(item).join(", ")}</small>}
-                          {getOrderItemInstructions(item.modificaciones) && <small style={modifierTextStyle}>Modificaciones: {getOrderItemInstructions(item.modificaciones)}</small>}
-                          {editable && editandoModificacionLineId === item.lineId ? (
-                            <div style={editSentModifierStyle}>
-                              <textarea value={modificacionActualTexto} onChange={(e) => setModificacionActualTexto(e.target.value)} style={textAreaStyle} />
-                              <div style={buttonRowStyle}>
-                                <button type="button" onClick={() => guardarModificacionActual(item.lineId)} style={primaryButtonStyle}>Guardar modificaciones</button>
-                                <button type="button" onClick={() => setEditandoModificacionLineId(null)} style={secondaryButtonStyle}>Cancelar</button>
-                              </div>
-                            </div>
-                          ) : editable && (
-                            <div style={qtyRowStyle}>
-                              <button type="button" onClick={() => cambiarCantidad(item.lineId, -1)} style={smallButtonStyle}>-</button>
-                              <span>{item.cantidad}</span>
-                              <button type="button" onClick={() => cambiarCantidad(item.lineId, 1)} style={smallButtonStyle}>+</button>
-                              <button type="button" onClick={() => { setEditandoModificacionLineId(item.lineId); setModificacionActualTexto(item.modificaciones || "") }} style={secondaryButtonStyle}>Notas</button>
-                              <button type="button" onClick={() => eliminarItemActual(item.lineId)} style={dangerButtonStyle}>Eliminar</button>
-                            </div>
-                          )}
-                          {item.status === "ready" && (
-                            <button type="button" onClick={() => handleMarkServed(item)} style={servedButtonStyle}>Marcar servido</button>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </section>
-                ))}
-                <div className="pos-order-footer" style={orderFooterStyle}>
-                  <div style={totalsBreakdownStyle}>
-                    <span>Subtotal <strong>Q{totalOrden.toFixed(2)}</strong></span>
-                    <span>Descuentos <strong>Q0.00</strong></span>
-                    <div style={totalStyle}>Total: Q{totalOrden.toFixed(2)}</div>
-                  </div>
-                  <div style={buttonRowStyle}>
-                    {draftItems.length > 0 && <button className="pos-order-cancel" type="button" disabled={sendingOrder} onClick={handleClearDraftItems} style={sendingOrder ? disabledButtonStyle : secondaryButtonStyle}>Cancelar orden</button>}
-                    {draftItems.length > 0 ? (
-                      <button className="pos-order-send" type="button" disabled={sendingOrder} onClick={handleSendOrderToProduction} style={sendingOrder ? disabledButtonStyle : primaryButtonStyle}>{sendingOrder ? "Enviando..." : "Enviar cocina"}</button>
-                    ) : (
-                      <div className="pos-friendly-empty">Agrega productos para iniciar la orden.</div>
-                    )}
-                  </div>
-                  {posStep === 4 && <button className="pos-next-step-button" type="button" disabled={!sentItems.length} onClick={() => setPosStep(5)}>Continuar a cobro</button>}
-                  {posStep === 5 && (
-                    <div className="pos-payment-prep">
-                      <strong>Forma de cobro</strong>
-                      <span>Prepara la solicitud para Caja. La mesa queda pendiente de cobro.</span>
-                      <div>
-                        {canRequestCashier && <button type="button" onClick={() => enviarCuentaACaja(currentOrder)}>Cobrar mesa completa</button>}
-                        <button type="button" onClick={prepararCobroPorPersona}>Cobrar por persona</button>
-                        <button type="button" onClick={dividirCuentaIgual}>Dividir partes iguales</button>
-                        <button type="button" onClick={() => imprimirPrecuenta(currentOrder)}>Imprimir precuenta</button>
-                      </div>
-                    </div>
-                  )}
-                  {!draftItems.length && currentOrder?.status === "open" && sentItems.length > 0 && (
-                    <div style={quickActionsStyle}>
-                      {canRequestCashier && <button className="pos-order-charge" type="button" onClick={() => solicitarCuenta(currentOrder)} style={secondaryButtonStyle}>Solicitar cobro</button>}
-                      <button type="button" onClick={() => imprimirPrecuenta(currentOrder)} style={secondaryButtonStyle}>Imprimir precuenta</button>
-                      {canRequestCashier && <button type="button" onClick={() => enviarCuentaACaja(currentOrder)} style={primaryButtonStyle}>Enviar a caja</button>}
-                    </div>
-                  )}
-                  {currentOrder?.status === "awaiting_bill" && (
-                    <div style={quickActionsStyle}>
-                      <button type="button" onClick={() => imprimirPrecuenta(currentOrder)} style={secondaryButtonStyle}>Imprimir precuenta</button>
-                      <button className="pos-order-charge" type="button" onClick={() => enviarCuentaACaja(currentOrder)} style={primaryButtonStyle}>Enviar a caja</button>
-                      <button type="button" onClick={dividirCuentaIgual} style={secondaryButtonStyle}>Dividir cuenta</button>
-                    </div>
-                  )}
-                  {currentOrder?.status === "sent_to_cashier" && <div style={cashierStatusStyle}>En Caja · esperando cobro final</div>}
-                  {sentItems.length > 0 && draftItems.length > 0 && (
-                    <small style={mutedStyle}>Los productos enviados no se eliminan directamente; una cancelación requiere autorización.</small>
-                  )}
-                </div>
-              </aside>
-            </div>
+          <PosClassicOperation
+            POS_DEBUG={POS_DEBUG}
+            puedeVerAuditoria={puedeVerAuditoria}
+            successInlineStyle={successInlineStyle}
+            realtimeNotice={realtimeNotice}
+            liveNoticeStyle={liveNoticeStyle}
+            itemsLoading={itemsLoading}
+            invalidActiveProducts={invalidActiveProducts}
+            warningBoxStyle={warningBoxStyle}
+            classicCategories={classicCategories}
+            categoriaActiva={categoriaActiva}
+            setCategoriaActiva={setCategoriaActiva}
+            setShowProductCatalog={setShowProductCatalog}
+            showProductCatalog={showProductCatalog}
+            showPosSearch={showPosSearch}
+            setShowPosSearch={setShowPosSearch}
+            productSearch={productSearch}
+            setProductSearch={setProductSearch}
+            productSearchRef={productSearchRef}
+            salesChannel={salesChannel}
+            SALES_CHANNELS={SALES_CHANNELS}
+            seleccionarCanalVenta={seleccionarCanalVenta}
+            activeFloorAreas={activeFloorAreas}
+            areaActivaId={areaActivaId}
+            seleccionarAreaPlano={seleccionarAreaPlano}
+            areaActiva={areaActiva}
+            floorPlanStyle={floorPlanStyle}
+            areaActivaHeight={areaActiva?.height}
+            TableWithChairs={TableWithChairs}
+            normalizeLayoutTable={normalizeLayoutTable}
+            minutosTranscurridos={minutosTranscurridos}
+            ordenMesa={ordenMesa}
+            seleccionarMesaOperacion={seleccionarMesaOperacion}
+            itemsCategoria={itemsCategoria}
+            posCategories={posCategories}
+            productCategoryId={productCategoryId}
+            isTestProduct={isTestProduct}
+            getProductBasePrice={getProductBasePrice}
+            productProductionAreaId={productProductionAreaId}
+            productionAreas={productionAreas}
+            mesaBloqueadaPorCobro={mesaBloqueadaPorCobro}
+            agregarAOrden={agregarAOrden}
+            productInitials={productInitials}
+            esCanalCliente={esCanalCliente}
+            deliveryPanelStyle={deliveryPanelStyle}
+            mutedStyle={mutedStyle}
+            setShowDeliveryModal={setShowDeliveryModal}
+            primaryButtonStyle={primaryButtonStyle}
+            mesaCargando={mesaCargando}
+            currentOrder={currentOrder}
+            selectedAssignment={selectedAssignment}
+            seatNames={seatNames}
+            personasOrden={personasOrden}
+            actualizarCantidadPersonas={actualizarCantidadPersonas}
+            setSelectedAssignment={setSelectedAssignment}
+            totalOrden={totalOrden}
+            activeMinutes={activeMinutes}
+            formatTableDuration={formatTableDuration}
+            estadoMesaPorOrden={estadoMesaPorOrden}
+            etiquetaEstadoMesa={etiquetaEstadoMesa}
+            tableStatusStyles={tableStatusStyles}
+            orden={orden}
+            draftItems={draftItems}
+            sentItems={sentItems}
+            ordenError={ordenError}
+            ordenMessage={ordenMessage}
+            sendingOrder={sendingOrder}
+            canRequestCashier={canRequestCashier}
+            getOrderItemDisplayName={getOrderItemDisplayName}
+            getOrderItemStatusLabel={getOrderItemStatusLabel}
+            getOrderItemStatusStyle={getOrderItemStatusStyle}
+            orderItemBadgeStyle={orderItemBadgeStyle}
+            refreshSelectedTableLive={refreshSelectedTableLive}
+            handleSendOrderToProduction={handleSendOrderToProduction}
+            handleClearDraftItems={handleClearDraftItems}
+            solicitarCuenta={solicitarCuenta}
+            imprimirPrecuenta={imprimirPrecuenta}
+            enviarCuentaACaja={enviarCuentaACaja}
+            dividirCuentaIgual={dividirCuentaIgual}
+            salirOrdenActual={salirOrdenActual}
+            collapsedOrderSections={collapsedOrderSections}
+            setCollapsedOrderSections={setCollapsedOrderSections}
+            readyItemsCount={readyItemsCount}
+            nextServiceAction={nextServiceAction}
+            user={user}
+            posSession={posSession}
+            serviceEvents={serviceEvents}
+            historyPanelStyle={historyPanelStyle}
+            eventRowStyle={eventRowStyle}
+            productionErrors={productionErrors}
+            productionErrorPanelStyle={productionErrorPanelStyle}
+            productionErrorItemStyle={productionErrorItemStyle}
+            posSessionName={posSession?.name || posSession?.username}
+            etiquetaRolPos={etiquetaRolPos}
+            posRealtimeActive={posRealtimeActive}
+            posFooterTime={posFooterTime}
+            openDiagnostic={openDiagnostic}
+            limpiarOrdenesLocalesAntiguas={limpiarOrdenesLocalesAntiguas}
+            orderEvents={orderEvents}
+          />
           {orderDetail && (
             <div style={modalOverlayStyle}>
               <div style={modifierModalStyle}>
@@ -4282,27 +4002,6 @@ function POS() {
   )
 }
 
-function ProductionBadges({ state }) {
-  if (state.testItem) {
-    return (
-      <div style={readinessBadgesStyle}>
-        <span className="pos-test-badge">🧪 PRUEBA</span>
-        <span style={state.area ? readyBadgeStyle : invalidBadgeStyle}>{state.area ? "✓ Destino KDS configurado" : "✗ Sin destino KDS"}</span>
-        <span style={state.productionReady ? readyBadgeStyle : invalidBadgeStyle}>{state.productionReady ? "✓ Envío KDS sin consumo" : "✗ No enviará a KDS"}</span>
-      </div>
-    )
-  }
-  return (
-    <div style={readinessBadgesStyle}>
-      <span style={state.productType === "pizza" ? (state.variants?.length ? readyBadgeStyle : invalidBadgeStyle) : (state.recipe ? readyBadgeStyle : invalidBadgeStyle)}>
-        {state.productType === "pizza" ? (state.variants?.length ? `✓ ${state.variants.length} tamaños activos` : "✗ Sin tamaños activos") : (state.recipe ? "✓ Receta conectada" : "✗ Sin receta")}
-      </span>
-      <span style={state.area ? readyBadgeStyle : invalidBadgeStyle}>{state.area ? "✓ Área producción configurada" : "✗ Sin área"}</span>
-      <span style={state.productionReady ? readyBadgeStyle : invalidBadgeStyle}>{state.productionReady ? "✓ Listo para producción" : "✗ No enviará a KDS"}</span>
-    </div>
-  )
-}
-
 const pageStyle = { display: "grid", gap: "18px", color: "var(--erp-text-primary)" }
 const headerStyle = { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap" }
 const formCardStyle = { padding: "18px", borderRadius: "12px", border: "1px solid var(--erp-border)", background: "var(--erp-surface)", display: "grid", gap: "12px" }
@@ -4346,7 +4045,7 @@ const warningBoxStyle = { padding: "12px", borderRadius: "10px", border: "1px so
 const readinessPanelStyle = { display: "grid", gap: "7px", padding: "12px", borderRadius: "10px", border: "1px solid var(--erp-border)", background: "var(--erp-surface-2)" }
 const readinessBadgesStyle = { display: "flex", gap: "7px", flexWrap: "wrap", marginTop: "7px" }
 const readyBadgeStyle = { padding: "5px 8px", borderRadius: "999px", background: "var(--erp-success-soft)", color: "var(--erp-success)", fontSize: ".76rem", fontWeight: 800 }
-const invalidBadgeStyle = { ...readyBadgeStyle, background: "var(--erp-danger)", color: "var(--erp-danger)" }
+const invalidBadgeStyle = { padding: "5px 8px", borderRadius: "999px", background: "color-mix(in srgb, var(--erp-danger) 18%, #1a0f12)", color: "#fecaca", border: "1px solid color-mix(in srgb, var(--erp-danger) 55%, #334155)", fontSize: ".76rem", fontWeight: 800 }
 const productionErrorPanelStyle = { display: "grid", gap: "10px", padding: "12px", borderRadius: "10px", border: "1px solid #f97316", background: "#431407", color: "#ffedd5", marginBottom: "12px" }
 const productionErrorItemStyle = { display: "grid", gap: "8px", padding: "10px", borderRadius: "8px", background: "#29140c" }
 const cashierStatusStyle = { padding: "9px 11px", borderRadius: "8px", border: "1px solid #0284c7", background: "#082f49", color: "#bae6fd", fontWeight: 700 }

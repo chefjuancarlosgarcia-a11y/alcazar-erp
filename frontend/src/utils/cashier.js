@@ -293,6 +293,18 @@ export function printPreBill(preBillId, user) {
   return changed
 }
 
+export function savePreBillBillingCustomer(preBillId, billingCustomer) {
+  if (!preBillId || !billingCustomer) return { ok: false }
+  let changed = null
+  saveArray(PRE_BILLS_KEY, loadPreBills().map((preBill) => {
+    if (String(preBill.id) !== String(preBillId)) return preBill
+    changed = { ...preBill, billingCustomer }
+    return changed
+  }))
+  if (changed) emit()
+  return { ok: Boolean(changed), preBill: changed }
+}
+
 export function sendPreBillToCashier(preBillId, user) {
   let changed
   const bills = loadPreBills().map((preBill) => {
@@ -711,7 +723,8 @@ export function confirmPayment(data, user) {
     discountAmount: discount,
     splitId: splitPart?.id || "",
     status: "completed",
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    billingCustomer: data.billingCustomer || preBill.billingCustomer || null
   }
   saveArray(PAYMENTS_KEY, [payment, ...loadPayments()])
   if (approvedRequest) {

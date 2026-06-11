@@ -1,4 +1,5 @@
 import { DEFAULT_TICKET_SETTINGS, defaultTicketTemplate, normalizeTicketTemplate } from "./ticketTemplatesService"
+import { normalizeBillingCustomer } from "../utils/billingCustomer"
 
 const SAMPLE_ORDER = {
   id: "prebill-1780787058136-63518",
@@ -98,6 +99,7 @@ export function renderTicketHtml(orderInput = SAMPLE_ORDER, templateInput = defa
   const paid = Number(payment.totalAmount ?? order.total ?? subtotal - discounts + tax)
   const channel = order.salesChannel || order.sales_channel || (ticketType === "delivery" ? "delivery" : "dine_in")
   const delivery = order.delivery || {}
+  const billing = normalizeBillingCustomer(payment.billingCustomer || order.billingCustomer || {})
   const paymentMethod = delivery.paymentMethod || order.paymentMethod || payment.method || (payment.methods || []).map((method) => method.method).join(", ")
   const business = settings.business
   const blocks = settings.blocks || {}
@@ -153,13 +155,21 @@ export function renderTicketHtml(orderInput = SAMPLE_ORDER, templateInput = defa
       </section>`
     : ""
 
-  const customerBlock = blocks.showCustomer && (channel === "delivery" || ticketType === "delivery")
+  const customerBlock = blocks.showCustomer && (
+    channel === "delivery"
+    || ticketType === "delivery"
+    || billing.name
+    || billing.nit
+    || delivery.customerName
+  )
     ? `<section class="ticket-block">
-      <h3>Cliente / delivery</h3>
+      <h3>Cliente</h3>
       ${[
-        line("Cliente", delivery.customerName, settings.orderInfo.showCustomerName),
-        line("Telefono", delivery.phone || delivery.whatsapp, settings.orderInfo.showCustomerPhone),
-        line("Direccion", delivery.address, settings.orderInfo.showDeliveryAddress),
+        line("NIT", billing.nit, Boolean(billing.nit)),
+        line("Cliente", billing.name || delivery.customerName, settings.orderInfo.showCustomerName),
+        line("Telefono", billing.phone || delivery.phone || delivery.whatsapp, settings.orderInfo.showCustomerPhone),
+        line("Email", billing.email, Boolean(billing.email)),
+        line("Direccion", billing.address || delivery.address, settings.orderInfo.showDeliveryAddress),
         line("Referencia", delivery.reference, settings.orderInfo.showDeliveryReference),
         line("Maps", delivery.mapsLink, settings.orderInfo.showMapsLink),
         textLine(settings.orderInfo.showDeliveryNotes ? delivery.deliveryNotes : "", "ticket-note")
