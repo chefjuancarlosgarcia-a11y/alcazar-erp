@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
+import useSupabaseRealtime from "../hooks/useSupabaseRealtime"
 import { getActiveAreas } from "../services/areasService"
 import { getProfilesTaskUnavailability, getTaskAssignableProfiles } from "../services/tasksService"
 import { createNotification } from "../services/notificationsService"
@@ -1362,8 +1363,8 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
     ...(canViewChecklistLibrary ? [["incidents", "Incidencias"], ["approvals", "Aprobaciones de plantillas"], ["reports", "Reportes"]] : [])
   ]
 
-  async function refresh() {
-    setLoading(true)
+  const refresh = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true)
     if (isLibraryAdmin) await generateDueChecklistRuns(TODAY)
     if (canManageManagementAlerts) await notifyOverdueChecklistRuns()
     const requests = [
@@ -1378,7 +1379,9 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
     const results = await Promise.all(requests)
     const [templateResult, runResult, incidentResult, requestResult, suggestionResult, profileResult, alertResult] = results
     if (templateResult.error || runResult.error || incidentResult.error || requestResult.error || suggestionResult.error || alertResult?.error) {
-      setMessage(templateResult.error?.message || runResult.error?.message || incidentResult.error?.message || requestResult.error?.message || suggestionResult.error?.message || alertResult?.error?.message || "No se pudieron cargar checklists.")
+      if (!silent) {
+        setMessage(templateResult.error?.message || runResult.error?.message || incidentResult.error?.message || requestResult.error?.message || suggestionResult.error?.message || alertResult?.error?.message || "No se pudieron cargar checklists.")
+      }
     } else {
       setTemplates(templateResult.data || [])
       setRuns(markOverdueRuns(runResult.data || []))
@@ -1388,12 +1391,36 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       if (alertResult) setManagementAlerts(alertResult.data || [])
     }
     if (!profileResult.error) setProfiles(profileResult.data || [])
-    setLoading(false)
-  }
+    if (!silent) setLoading(false)
+  }, [canManageManagementAlerts, isLibraryAdmin])
+
+  const refreshRef = useRef(refresh)
+  refreshRef.current = refresh
+  const realtimeRefreshTimerRef = useRef(null)
 
   useEffect(() => {
     refresh()
+  }, [refresh])
+
+  const scheduleRealtimeRefresh = useCallback(() => {
+    window.clearTimeout(realtimeRefreshTimerRef.current)
+    realtimeRefreshTimerRef.current = window.setTimeout(() => {
+      refreshRef.current({ silent: true })
+    }, 450)
   }, [])
+
+  useSupabaseRealtime({
+    table: "checklist_runs",
+    event: "*",
+    enabled: true,
+    onChange: scheduleRealtimeRefresh
+  })
+  useSupabaseRealtime({
+    table: "checklist_run_items",
+    event: "*",
+    enabled: true,
+    onChange: scheduleRealtimeRefresh
+  })
 
   useEffect(() => {
     if (!initialRunId || ["incidents", "alerts"].includes(initialChecklistView)) return
@@ -1790,7 +1817,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
           currentUserId={user?.id}
         />
       )}
-      {section === "reports" && canViewChecklistLibrary && <ChecklistReports runs={runs} templates={templates} profiles={profiles} />}
+      {section === "reports" && canViewChecklistLibrary && <ChecklistReports runs={visibleRuns} templates={templates} profiles={profiles} />}
     </div>
   )
 }
@@ -1801,7 +1828,6 @@ function ChecklistToday({ runs, profiles, selectedRun, onSelect, onStart, onUpda
   const inProgress = todayRuns.filter((run) => run.status === "in_progress")
   const completed = todayRuns.filter((run) => run.status === "completed")
   const overdue = todayRuns.filter((run) => run.status === "overdue")
-  const completion = todayRuns.length ? Math.round((completed.length / todayRuns.length) * 100) : 0
   const cards = [
     ["Pendientes hoy", pending.length, "pending"],
     ["En progreso", inProgress.length, "in_progress"],
@@ -1810,12 +1836,22 @@ function ChecklistToday({ runs, profiles, selectedRun, onSelect, onStart, onUpda
   ]
   return (
     <div className="checklists-today">
-      <div className="checklists-kpis">
-        {cards.map(([label, value, tone]) => <article className={`checklists-kpi ${tone}`} key={label}><span>{label}</span><strong>{value}</strong></article>)}
-      </div>
+      {!selectedRun && (
+        <div className="checklists-kpis">
+          {cards.map(([label, value, tone]) => <article className={`checklists-kpi ${tone}`} key={label}><span>{label}</span><strong>{value}</strong></article>)}
+        </div>
+      )}
 
       {selectedRun ? (
-        <ChecklistGuidedRun run={selectedRun} profiles={profiles} onClose={() => onSelect("")} onUpdateItem={onUpdateItem} onComplete={onComplete} />
+        <>
+          <div className="checklist-today-toolbar">
+            <button type="button" className="checklist-back-button" onClick={() => onSelect("")}>
+              ← Volver a checklists de hoy
+            </button>
+            <span className="tasks-muted">{todayRuns.length} checklist{todayRuns.length === 1 ? "" : "s"} asignada{todayRuns.length === 1 ? "" : "s"} hoy</span>
+          </div>
+          <ChecklistGuidedRun run={selectedRun} profiles={profiles} onClose={() => onSelect("")} onUpdateItem={onUpdateItem} onComplete={onComplete} />
+        </>
       ) : (
         <div className="checklists-card-grid">
           {todayRuns.map((run) => <ChecklistTodayCard key={run.id} run={run} profiles={profiles} onOpen={() => ["pending", "rejected"].includes(run.status) ? onStart(run.id) : onSelect(run.id)} />)}
@@ -1863,23 +1899,29 @@ function ChecklistTemplatesView({ templates, changeRequests = [], profiles, curr
   const [assigning, setAssigning] = useState(null)
   const [suggesting, setSuggesting] = useState(null)
   const pendingCreates = getVisiblePendingCreateRequests(changeRequests, currentUser?.id, isLibraryAdmin, isSupervisorOnly)
+  const supervisorArea = currentUser?.area_name || ""
   const filtered = templates.filter((template) => {
     const pendingRequest = getTemplatePendingRequest(template, changeRequests)
-    const libraryStatus = templateLibraryBadge(template, pendingRequest).label.toLowerCase()
     const statusMatch = filters.status === "all"
       || (filters.status === "active" && template.status === "active" && pendingRequest?.status !== "pending_review")
       || (filters.status === "inactive" && template.status === "inactive")
       || (filters.status === "pending" && pendingRequest?.status === "pending_review")
       || (filters.status === "draft" && pendingRequest?.status === "draft")
       || (filters.status === "rejected" && pendingRequest?.status === "rejected")
+    const supervisorAreaMatch = !isSupervisorOnly
+      || template.created_by === currentUser?.id
+      || !template.area
+      || checklistAreasMatch(template.area, supervisorArea)
     return (!filters.area || template.area === filters.area) &&
       (!filters.frequency || template.frequency === filters.frequency) &&
       statusMatch &&
-      (!isSupervisorOnly || template.status === "active" || template.created_by === currentUser?.id)
+      (!isSupervisorOnly || template.status === "active" || template.created_by === currentUser?.id) &&
+      supervisorAreaMatch
   })
   const filteredPendingCreates = pendingCreates.filter((request) => {
     if (filters.area && request.area !== filters.area) return false
     if (filters.frequency && request.frequency !== filters.frequency) return false
+    if (isSupervisorOnly && request.area && supervisorArea && !checklistAreasMatch(request.area, supervisorArea)) return false
     if (filters.status === "active" || filters.status === "inactive") return false
     if (filters.status === "pending") return request.status === "pending_review"
     if (filters.status === "draft") return request.status === "draft"
@@ -2013,22 +2055,31 @@ function ChecklistTemplatesView({ templates, changeRequests = [], profiles, curr
         {filteredPendingCreates.map(renderPendingCreateCard)}
         {!filtered.length && !filteredPendingCreates.length && <FriendlyEmpty title="Crea tu primera plantilla de apertura." text={isSupervisorOnly ? "Usa Crear checklist para enviar una nueva plantilla a aprobacion." : "Usa Crear checklist para definir pasos simples por area."} />}
       </div>
-      {assigning && <ChecklistAssignPanel template={assigning} profiles={profiles} onClose={() => setAssigning(null)} onAssign={(payload) => { onAssign(payload); setAssigning(null) }} />}
+      {assigning && <ChecklistAssignPanel template={assigning} profiles={profiles} currentUser={currentUser} userRole={userRole} onClose={() => setAssigning(null)} onAssign={(payload) => { onAssign(payload); setAssigning(null) }} />}
       {suggesting && <ChecklistSuggestionPanel template={suggesting} currentUser={currentUser} onClose={() => setSuggesting(null)} onSubmit={(payload) => { onSuggest(payload); setSuggesting(null) }} />}
     </div>
   )
 }
 
-function ChecklistAssignPanel({ template, profiles, onClose, onAssign }) {
+function ChecklistAssignPanel({ template, profiles, currentUser, userRole, onClose, onAssign }) {
+  const isSupervisorOnly = normalizeRole(userRole) === "supervisor"
+  const supervisorArea = currentUser?.area_name || ""
   const [form, setForm] = useState({
     template_id: template.id,
     run_date: TODAY,
     due_time: template.due_time || "",
-    area: template.area || "",
+    area: template.area || (isSupervisorOnly ? supervisorArea : ""),
     assigned_profile_id: template.assigned_profile_id || "",
     assigned_role: template.assigned_role || "",
     notes: ""
   })
+  const assignableProfiles = useMemo(
+    () => getChecklistAssignableProfiles(currentUser, profiles, { templateArea: form.area || template.area || "" }),
+    [currentUser, profiles, form.area, template.area]
+  )
+  const areaOptions = isSupervisorOnly && supervisorArea
+    ? CHECKLIST_AREAS.filter((area) => checklistAreasMatch(area, supervisorArea))
+    : CHECKLIST_AREAS
   function update(field, value) {
     setForm((current) => ({ ...current, [field]: value }))
   }
@@ -2038,9 +2089,9 @@ function ChecklistAssignPanel({ template, profiles, onClose, onAssign }) {
       <div className="tasks-form-grid">
         <Field label="Fecha"><input type="date" value={form.run_date} onChange={(event) => update("run_date", event.target.value)} /></Field>
         <Field label="Hora limite"><input type="time" value={form.due_time} onChange={(event) => update("due_time", event.target.value)} /></Field>
-        <Field label="Area"><select value={form.area} onChange={(event) => update("area", event.target.value)}>{CHECKLIST_AREAS.map((area) => <option key={area} value={area}>{checklistAreaLabel(area)}</option>)}</select></Field>
+        <Field label="Area"><select value={form.area} onChange={(event) => update("area", event.target.value)} disabled={isSupervisorOnly && areaOptions.length === 1}>{areaOptions.map((area) => <option key={area} value={area}>{checklistAreaLabel(area)}</option>)}</select></Field>
         <Field label="Rol/Puesto"><select value={form.assigned_role} onChange={(event) => update("assigned_role", event.target.value)}><option value="">Rol libre</option>{CHECKLIST_ROLES.map((role) => <option key={role}>{role}</option>)}</select></Field>
-        <Field label="Colaborador"><select value={form.assigned_profile_id} onChange={(event) => update("assigned_profile_id", event.target.value)}><option value="">Sin colaborador especifico</option>{profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.full_name || profile.username}</option>)}</select></Field>
+        <Field label="Colaborador" hint={isSupervisorOnly ? "Solo colaboradores a tu cargo en tu area." : undefined}><select value={form.assigned_profile_id} onChange={(event) => update("assigned_profile_id", event.target.value)}><option value="">Sin colaborador especifico</option>{assignableProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.full_name || profile.username}</option>)}</select></Field>
       </div>
       <Field label="Observacion"><textarea value={form.notes} onChange={(event) => update("notes", event.target.value)} /></Field>
       <button type="button" className="tasks-primary" onClick={() => onAssign(form)}>Asignar</button>
@@ -2419,7 +2470,7 @@ function ChecklistGuidedRun({ run, profiles, onClose, onUpdateItem, onComplete }
   return (
     <article className="checklist-guided">
       <div className="checklist-guided-header">
-        <button type="button" className="tasks-link" onClick={onClose}>Volver</button>
+        <button type="button" className="checklist-back-button compact" onClick={onClose}>← Volver</button>
         <div><h2>{run.checklist_templates?.title || "Checklist"}</h2><p>{run.area || "Sin area"} · {responsibleLabel(run, profiles)}</p></div>
         <Badge type="status" value={run.status} />
       </div>
@@ -2448,13 +2499,37 @@ function ChecklistGuidedRun({ run, profiles, onClose, onUpdateItem, onComplete }
   )
 }
 
+function checklistRunItemDraft(item) {
+  return {
+    checked: item.checked,
+    response_text: item.response_text || "",
+    response_number: item.response_number ?? "",
+    response_date: item.response_date || "",
+    response_time: item.response_time || "",
+    response_json: item.response_json || {},
+    photo_url: item.photo_url || "",
+    comment: item.comment || ""
+  }
+}
+
 function ChecklistRunItem({ item, index = 0, disabled, onSave }) {
-  const [draft, setDraft] = useState(() => ({ checked: item.checked, response_text: item.response_text || "", response_number: item.response_number ?? "", response_date: item.response_date || "", response_time: item.response_time || "", response_json: item.response_json || {}, photo_url: item.photo_url || "", comment: item.comment || "" }))
+  const [draft, setDraft] = useState(() => checklistRunItemDraft(item))
   const [saveStatus, setSaveStatus] = useState("")
   const saveTimerRef = useRef(null)
   const latestDraftRef = useRef(draft)
 
   useEffect(() => () => window.clearTimeout(saveTimerRef.current), [])
+
+  useEffect(() => {
+    if (saveStatus === "pending" || saveStatus === "saving") return
+    const external = checklistRunItemDraft(item)
+    const externalKey = JSON.stringify(external)
+    const draftKey = JSON.stringify(latestDraftRef.current)
+    if (externalKey !== draftKey) {
+      setDraft(external)
+      latestDraftRef.current = external
+    }
+  }, [item.checked, item.response_text, item.response_number, item.response_date, item.response_time, item.photo_url, item.comment, item.completed_at, item.response_json, saveStatus])
 
   async function save(next = latestDraftRef.current) {
     window.clearTimeout(saveTimerRef.current)
@@ -3052,15 +3127,48 @@ function alertPriorityLabel(value) {
   return CHECKLIST_ALERT_PRIORITIES.find(([id]) => id === value)?.[1] || value
 }
 
+function isChecklistRestaurantWideRole(role) {
+  return ["admin", "gerente_general", "gerente", "recursos_humanos", "rrhh"].includes(normalizeRole(role))
+}
+
+function normalizeChecklistAreaKey(value) {
+  if (!value) return ""
+  const trimmed = String(value).trim().toLowerCase()
+  const direct = CHECKLIST_AREAS.find((area) => area.toLowerCase() === trimmed)
+  if (direct) return direct
+  const fromLabel = Object.entries(CHECKLIST_AREA_LABELS).find(([, label]) => String(label).trim().toLowerCase() === trimmed)
+  return fromLabel?.[0] || String(value).trim()
+}
+
+function checklistAreasMatch(left, right) {
+  if (!left || !right) return false
+  return normalizeChecklistAreaKey(left) === normalizeChecklistAreaKey(right)
+}
+
+function getChecklistAssignableProfiles(user, profiles, { templateArea = "" } = {}) {
+  const role = normalizeRole(user?.role)
+  const actorId = String(user?.id || "")
+
+  return (profiles || []).filter((profile) => {
+    if (["inactive", "suspended"].includes(String(profile.status || "").toLowerCase())) return false
+    if (isChecklistRestaurantWideRole(role)) return true
+    if (role !== "supervisor") return false
+    if (String(profile.supervisor_profile_id || "") !== actorId) return false
+    if (templateArea && profile.area_name && !checklistAreasMatch(templateArea, profile.area_name)) return false
+    return true
+  })
+}
+
 function canSeeChecklistRun(run, user, profiles) {
   const role = normalizeRole(user?.role)
-  if (["admin", "gerente_general", "recursos_humanos", "rrhh"].includes(role)) return true
+  if (isChecklistRestaurantWideRole(role)) return true
   if (run.assigned_profile_id === user?.id) return true
   if (role === "supervisor") {
     if (run.supervisor_profile_id === user?.id) return true
-    if (run.assigned_role && normalizeRole(run.assigned_role) === role) return true
+    if (user?.area_name && run.area && checklistAreasMatch(run.area, user.area_name)) return true
     const assigned = profiles.find((profile) => profile.id === run.assigned_profile_id)
-    return Boolean(user?.area_name && assigned?.area_name === user.area_name)
+    if (assigned && String(assigned.supervisor_profile_id || "") === String(user?.id || "")) return true
+    return Boolean(user?.area_name && assigned?.area_name && checklistAreasMatch(assigned.area_name, user.area_name))
   }
   return false
 }

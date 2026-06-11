@@ -599,7 +599,7 @@ export async function getChecklistDashboardStats() {
 export async function getChecklistProfiles() {
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, full_name, username, role, area_name, status")
+    .select("id, full_name, username, role, area_name, status, supervisor_profile_id")
     .eq("status", "active")
     .order("full_name", { ascending: true })
   return { data: data || [], error }
