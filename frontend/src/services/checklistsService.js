@@ -421,7 +421,13 @@ export async function notifyOverdueChecklistRuns() {
   return result
 }
 
-export async function deleteChecklistTemplate(id) {
+export async function deleteChecklistTemplate(id, { force = false } = {}) {
+  if (force) {
+    const result = await supabase.rpc("force_delete_checklist_template", { p_template_id: id })
+    if (result.error) return { data: null, error: result.error, mode: "error" }
+    return { data: result.data || { id }, error: null, mode: "deleted" }
+  }
+
   const { count, error: countError } = await supabase
     .from("checklist_runs")
     .select("id", { count: "exact", head: true })
@@ -431,6 +437,11 @@ export async function deleteChecklistTemplate(id) {
   if (Number(count || 0) > 0) {
     const { data, error } = await deactivateChecklistTemplate(id)
     return { data: orderTemplate(data), error, mode: "archived" }
+  }
+
+  const forceResult = await supabase.rpc("force_delete_checklist_template", { p_template_id: id })
+  if (!forceResult.error) {
+    return { data: forceResult.data || { id }, error: null, mode: "deleted" }
   }
 
   const { error } = await supabase

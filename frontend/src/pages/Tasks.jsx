@@ -1615,22 +1615,22 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   async function removeTemplateWithArchiveUX(template) {
     const hasHistory = runs.some((run) => run.template_id === template.id)
     const confirmationMessage = hasHistory
-      ? "Esta checklist ya tiene historial. No se borrará definitivamente, se archivará para conservar reportes. ¿Deseas continuar?"
-      : "¿Seguro que deseas eliminar esta checklist? Esta acción no se puede deshacer."
+      ? "¿Estás seguro de eliminar esta checklist?\n\nSe perderán los datos por completo: plantilla, historial, ejecuciones en Hoy, incidencias y reportes asociados.\n\nEsta acción no se puede deshacer."
+      : "¿Estás seguro de eliminar esta checklist?\n\nSe perderán los datos por completo. Esta acción no se puede deshacer."
     const confirmed = window.confirm(confirmationMessage)
     if (!confirmed) return
 
-    const result = await deleteChecklistTemplate(template.id)
-    if (result.error) return setMessage(result.error.message || "No se pudo eliminar la checklist.")
-
-    if (result.mode === "archived") {
-      setTemplates((current) => current.map((item) => item.id === template.id ? { ...item, status: "inactive" } : item))
-      setMessage("Checklist archivada. Se conserva el historial para reportes.")
-      return
+    const result = await deleteChecklistTemplate(template.id, { force: true })
+    if (result.error) {
+      return setMessage(result.error.message || "No se pudo eliminar la checklist. Verifica que la migración 069 esté aplicada en Supabase.")
     }
 
     setTemplates((current) => current.filter((item) => item.id !== template.id))
-    setMessage("Checklist eliminada.")
+    setRuns((current) => current.filter((run) => run.template_id !== template.id))
+    setMessage(hasHistory
+      ? "Checklist eliminada definitivamente junto con su historial."
+      : "Checklist eliminada.")
+    refresh()
   }
 
   async function updateRunItem(itemId, payload) {
