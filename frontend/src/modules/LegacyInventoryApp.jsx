@@ -22,8 +22,12 @@ import {
   updateSupplier
 } from "../services/suppliersService"
 import {
+  getAttendanceDailyLateArrivals,
+  getAttendanceLateArrivalsSetupStatus,
+  getAttendanceLateGraceMinutes,
   getAttendanceMarks,
-  getAttendanceTerminalProfiles
+  getAttendanceTerminalProfiles,
+  probeAttendanceLateArrival
 } from "../services/attendanceService"
 import {
   extractUserObservation,
@@ -830,7 +834,7 @@ function generateTemporaryPassword() {
 
 
 function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrderView = "", initialPurchaseOrderId = "", hideLegacyNavigation = false, focusEmployeeId = "", editFocusedEmployee = false }) {
-  const { user: authenticatedUser } = useAuth()
+  const { user: authenticatedUser, profile: authProfile } = useAuth()
   const navigate = useNavigate()
   const [busqueda, setBusqueda] = useState("")
   const [mostrarSugerenciasIngredientes, setMostrarSugerenciasIngredientes] = useState(false)
@@ -1223,6 +1227,8 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
   const [asistenciaRecoveryMessage, setAsistenciaRecoveryMessage] = useState("")
   const [asistenciaPerfiles, setAsistenciaPerfiles] = useState([])
   const [asistenciaCargando, setAsistenciaCargando] = useState(false)
+  const [asistenciaLlegadasTarde, setAsistenciaLlegadasTarde] = useState([])
+  const [asistenciaGraceMinutes, setAsistenciaGraceMinutes] = useState(5)
   const [asistenciaFotoAmpliada, setAsistenciaFotoAmpliada] = useState("")
   const [asistenciaDetalleMarcaje, setAsistenciaDetalleMarcaje] = useState(null)
   const [asistenciaMovimientos, setAsistenciaMovimientos] = useState(() => {
@@ -1292,6 +1298,124 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
     if (seccionActiva !== "reportesAsistencia") return
     cargarAsistenciaSupabase()
   }, [seccionActiva])
+
+  useEffect(() => {
+    if (seccionActiva !== "reportesAsistencia") return
+    cargarLlegadasTarde()
+  }, [seccionActiva, asistenciaFechaFiltro, asistenciaReporteColaboradorId])
+
+  useEffect(() => {
+    if (seccionActiva !== "reportesAsistencia") return
+    const filteredCount = asistenciaLlegadasTarde.filter((row) => {
+      const texto = asistenciaBusqueda.toLowerCase()
+      return !texto || String(row.colaboradorNombre || "").toLowerCase().includes(texto) || String(row.area || "").toLowerCase().includes(texto)
+    }).length
+    console.log("[asistencia/tardanza] render state", {
+      stateCount: asistenciaLlegadasTarde.length,
+      filteredCount,
+      busqueda: asistenciaBusqueda,
+      cardCount: filteredCount,
+      tableVisible: filteredCount > 0,
+      rows: asistenciaLlegadasTarde
+    })
+    if (asistenciaLlegadasTarde.length > 0 && filteredCount === 0) {
+      console.warn("[asistencia/tardanza] datos en state pero filtro de búsqueda los oculta", {
+        busqueda: asistenciaBusqueda
+      })
+    }
+  }, [seccionActiva, asistenciaLlegadasTarde, asistenciaBusqueda])
+
+  async function cargarLlegadasTarde() {
+    console.log("[asistencia/tardanza] current user", authenticatedUser?.id)
+    console.log("[asistencia/tardanza] current role", authProfile?.role)
+
+    const employeeId = asistenciaReporteColaboradorId || null
+    console.log("[asistencia/tardanza] filtered employee/date", {
+      date: asistenciaFechaFiltro,
+      employeeId: employeeId || "todos"
+    })
+
+    const { data: setupStatus, error: setupError } = await getAttendanceLateArrivalsSetupStatus()
+    if (setupError) {
+      console.error("[asistencia/tardanza] setup status error", setupError)
+      if (setupError.code === "PGRST202" || String(setupError.message || "").includes("attendance_late_arrivals_setup_status")) {
+        console.error("[asistencia/tardanza] FALTA MIGRACION: ejecutar 071_fix_late_attendance.sql y 072_late_attendance_diagnostics.sql en Supabase")
+      }
+    } else {
+      console.log("[asistencia/tardanza] migration/setup", setupStatus)
+      if (setupStatus && setupStatus.migration_071_applied === false) {
+        console.error("[asistencia/tardanza] FALTA MIGRACION 071: get_attendance_daily_late_arrivals no existe en Supabase")
+      }
+      if (setupStatus && setupStatus.viewer_can_view_reports === false) {
+        console.error("[asistencia/tardanza] PERMISO RPC: el usuario autenticado no pasa can_view_attendance_reports (requiere admin/gerente_general/recursos_humanos en profiles.role)")
+      }
+    }
+
+    const [{ data: graceData, error: graceError }, { data: lateRows, error: lateError }] = await Promise.all([
+      getAttendanceLateGraceMinutes(),
+      getAttendanceDailyLateArrivals(asistenciaFechaFiltro, employeeId)
+    ])
+
+    if (graceError) {
+      console.error("[asistencia/tardanza] grace_minutes error", graceError)
+    }
+    const graceMinutes = Number(graceData ?? setupStatus?.grace_minutes ?? 5)
+    setAsistenciaGraceMinutes(Number.isFinite(graceMinutes) ? graceMinutes : 5)
+    console.log("[asistencia/tardanza] grace_minutes", Number.isFinite(graceMinutes) ? graceMinutes : 5)
+
+    if (lateError) {
+      console.error("[asistencia/tardanza] RPC get_attendance_daily_late_arrivals falló:", lateError.message || lateError)
+      if (lateError.code === "PGRST202" || String(lateError.message || "").includes("get_attendance_daily_late_arrivals")) {
+        console.error("[asistencia/tardanza] FALTA MIGRACION: aplicar supabase/schema/071_fix_late_attendance.sql")
+      }
+      if (String(lateError.message || "").includes("PERMISSION_DENIED")) {
+        console.error("[asistencia/tardanza] PERMISO RPC: usuario sin rol admin/gerente_general/recursos_humanos en Supabase")
+      }
+      setAsistenciaLlegadasTarde([])
+      return
+    }
+
+    const rows = (lateRows || []).map((row) => ({
+      id: `${row.employee_id}-${row.shift_date}-${row.scheduled_start}`,
+      colaboradorId: row.employee_id,
+      colaboradorNombre: row.employee_name,
+      fecha: row.shift_date,
+      area: row.area || "",
+      horaProgramada: row.scheduled_start?.slice?.(0, 5) || String(row.scheduled_start || "").slice(0, 5),
+      horaEntrada: row.check_in_local?.slice?.(0, 5) || String(row.check_in_local || "").slice(0, 5),
+      minutosTarde: row.late_minutes,
+      toleranciaMinutos: row.grace_minutes,
+      horarioEstado: row.schedule_status === "draft" ? "Borrador" : "Publicado",
+      sinSalida: !row.has_checkout
+    }))
+    rows.forEach((row) => {
+      console.log("[asistencia/tardanza] mapped row", {
+        colaborador: row.colaboradorNombre,
+        fecha: row.fecha,
+        schedule_start: row.horaProgramada,
+        check_in: row.horaEntrada,
+        grace_minutes: row.toleranciaMinutos,
+        is_late: true,
+        late_minutes: row.minutosTarde
+      })
+    })
+
+    if (rows.length === 0) {
+      const probeName = asistenciaBusqueda.trim() || "Kimberly"
+      const { data: probeRows, error: probeError } = await probeAttendanceLateArrival(asistenciaFechaFiltro, probeName)
+      if (probeError) {
+        console.warn("[asistencia/tardanza] probe error (aplicar 072 para habilitar)", probeError.message || probeError)
+      } else {
+        console.log("[asistencia/tardanza] probe steps", probeRows)
+        probeRows?.forEach((step) => {
+          console.log(`[asistencia/tardanza] probe ${step.step}: ${step.ok ? "OK" : "FAIL"} — ${step.detail}`)
+        })
+      }
+    }
+
+    console.log("[asistencia/tardanza] setState asistenciaLlegadasTarde", { count: rows.length, rows })
+    setAsistenciaLlegadasTarde(rows)
+  }
 
   async function cargarAsistenciaSupabase() {
     setAsistenciaCargando(true)
@@ -3427,11 +3551,9 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
   const salidasDelDia = movimientosReportes.filter((movimiento) => movimiento.tipo === "salida")
   const banosDelDia = movimientosReportes.filter((movimiento) => movimiento.tipo === "bano_inicio")
   const regresosBanoDelDia = movimientosReportes.filter((movimiento) => movimiento.tipo === "bano_regreso")
-  const llegadasTarde = entradasDelDia.filter((movimiento) => {
-    const colaborador = asistenciaPerfiles.find((usuario) => usuario.id === movimiento.colaboradorId)
-    const entradaTurno = obtenerMinutosDesdeHora(obtenerHora24DesdeTurno(obtenerTurnosColaborador(colaborador)[0], "start"))
-    const entradaReal = obtenerMinutosDesdeHora(movimiento.hora)
-    return entradaTurno !== null && entradaReal !== null && entradaReal > entradaTurno + 5
+  const llegadasTarde = asistenciaLlegadasTarde.filter((row) => {
+    const texto = asistenciaBusqueda.toLowerCase()
+    return !texto || String(row.colaboradorNombre || "").toLowerCase().includes(texto) || String(row.area || "").toLowerCase().includes(texto)
   })
   const salidasTempranas = salidasDelDia.filter((movimiento) => {
     const colaborador = asistenciaPerfiles.find((usuario) => usuario.id === movimiento.colaboradorId)
@@ -7635,7 +7757,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
 
               <div style={reportGridStyle}>
                 <div style={profileCardStyle}><h3>Asistencia diaria</h3><p>{entradasDelDia.length} entradas · {salidasDelDia.length} salidas</p></div>
-                <div style={profileCardStyle}><h3>Llegadas tarde</h3><p>{llegadasTarde.length} registros</p></div>
+                <div style={profileCardStyle}><h3>Llegadas tarde</h3><p>{llegadasTarde.length} registros</p>{asistenciaGraceMinutes > 0 ? <p style={{ color: "#94a3b8", fontSize: "0.85rem", margin: "6px 0 0" }}>Tolerancia: {asistenciaGraceMinutes} min</p> : null}</div>
                 <div style={profileCardStyle}><h3>Salidas tempranas</h3><p>{salidasTempranas.length} registros</p></div>
                 <div style={profileCardStyle}><h3>Faltas</h3><p>{faltasDelDia.length} colaboradores sin entrada</p></div>
                 <div style={profileCardStyle}><h3>Horas trabajadas</h3>{horasTrabajadas.length ? horasTrabajadas.map((item) => <p key={item.usuario.id}>{item.usuario.nombre}: {(item.totalMinutos / 60).toFixed(2)} h</p>) : <p>Sin horas cerradas.</p>}</div>
@@ -7646,6 +7768,40 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
                 <div style={profileCardStyle}><h3>Resumen semanal</h3><p>{resumenSemanal.length} movimientos en 7 días</p></div>
                 <div style={profileCardStyle}><h3>Resumen mensual</h3><p>{resumenMensual.length} movimientos del mes</p></div>
               </div>
+
+              {llegadasTarde.length > 0 && (
+                <div style={profileCardStyle}>
+                  <h3>Detalle de llegadas tarde</h3>
+                  <div style={attendanceTableWrapperStyle}>
+                    <table style={attendanceTableStyle}>
+                      <thead>
+                        <tr>
+                          <th style={attendanceThStyle}>Colaborador</th>
+                          <th style={attendanceThStyle}>Área</th>
+                          <th style={attendanceThStyle}>Hora programada</th>
+                          <th style={attendanceThStyle}>Entrada</th>
+                          <th style={attendanceThStyle}>Minutos tarde</th>
+                          <th style={attendanceThStyle}>Horario</th>
+                          <th style={attendanceThStyle}>Estado</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {llegadasTarde.map((row) => (
+                          <tr key={row.id}>
+                            <td style={attendanceTdStyle}>{row.colaboradorNombre}</td>
+                            <td style={attendanceTdStyle}>{row.area || "-"}</td>
+                            <td style={attendanceTdStyle}>{row.horaProgramada}</td>
+                            <td style={attendanceTdStyle}>{row.horaEntrada}</td>
+                            <td style={attendanceTdStyle}>{row.minutosTarde}</td>
+                            <td style={attendanceTdStyle}>{row.horarioEstado}</td>
+                            <td style={attendanceTdStyle}>{row.sinSalida ? "Sin salida" : "En turno cerrado"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
 
               <div style={profileCardStyle}>
                 <h3>Historial por colaborador</h3>

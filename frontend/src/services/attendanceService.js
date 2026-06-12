@@ -111,6 +111,40 @@ export function updateAttendanceSecuritySettings(value) {
   })
 }
 
+export function getAttendanceLateArrivalsSetupStatus() {
+  return supabase.rpc("attendance_late_arrivals_setup_status")
+}
+
+export function probeAttendanceLateArrival(date, employeeName = null) {
+  return supabase.rpc("probe_attendance_late_arrival", {
+    p_date: date,
+    p_employee_name: employeeName || null
+  })
+}
+
+export function getAttendanceLateGraceMinutes() {
+  return supabase.rpc("get_attendance_late_grace_minutes")
+}
+
+export async function getAttendanceDailyLateArrivals(date, employeeId = null) {
+  const request = {
+    date,
+    employeeId: employeeId || null
+  }
+  console.log("[asistencia/tardanza] rpc request", request)
+  const { data, error } = await supabase.rpc("get_attendance_daily_late_arrivals", {
+    p_date: date,
+    p_employee_id: employeeId || null
+  })
+  console.log("[asistencia/tardanza] rpc response", data)
+  console.log("[asistencia/tardanza] rpc error", error)
+  console.log("[asistencia/tardanza] lateArrivals count", data?.length)
+  if (!error && Array.isArray(data) && data.length === 0) {
+    console.warn("[asistencia/tardanza] empty result")
+  }
+  return { data, error }
+}
+
 export async function getAttendanceMarks(includeEvidence = false) {
   if (!includeEvidence) {
     const { data, error } = await supabase.rpc("get_attendance_terminal_marks")
