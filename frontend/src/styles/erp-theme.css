@@ -358,10 +358,10 @@
 
 .erp-card {
   display: grid;
-  gap: 12px;
-  padding: 18px;
+  gap: var(--erp-space-16, 16px);
+  padding: var(--erp-space-16, 16px);
   border: 1px solid color-mix(in srgb, var(--erp-primary, #14b8a6) 16%, #24344a);
-  border-radius: var(--erp-border-radius, 14px);
+  border-radius: var(--erp-radius-card, 12px);
   background: var(--erp-surface, #0f172a);
   color: var(--erp-text-primary, #f8fafc);
 }
@@ -372,10 +372,10 @@
 }
 
 .erp-btn-primary {
-  min-height: 42px;
-  padding: 10px 14px;
+  min-height: var(--erp-btn-height, 44px);
+  padding: 0 var(--erp-space-16, 16px);
   border: 1px solid var(--erp-primary, #0f766e);
-  border-radius: var(--erp-border-radius-sm, 10px);
+  border-radius: var(--erp-radius-badge, 8px);
   background: var(--erp-primary, #0f766e);
   color: #ecfeff;
   font-weight: 800;
@@ -451,7 +451,7 @@
 
 .dashboard-page {
   display: grid;
-  gap: 18px;
+  gap: var(--erp-section-gap, 32px);
 }
 
 .dashboard-page-header {

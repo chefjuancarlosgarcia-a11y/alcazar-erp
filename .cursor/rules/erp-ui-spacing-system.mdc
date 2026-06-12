@@ -1,0 +1,58 @@
+---
+description: Design system obligatorio ERP El Gran Alcázar — spacing, layout, cards, forms, responsive
+alwaysApply: true
+---
+
+# ERP UI Spacing System v1.0 (obligatorio)
+
+Spec completa: `docs/erp-ui-spacing-system.md`  
+Tokens CSS: `frontend/src/styles/erp-ui-spacing.css`
+
+**No es sugerencia.** Todo cambio de UI/UX (layout, forms, cards, tablas, dashboards, POS, RRHH, inventario, reportes, config) debe cumplir esto.
+
+## Spacing — solo múltiplos de 8
+
+Usar: **4, 8, 16, 24, 32, 48, 64px** (`var(--erp-space-*)`).  
+Nunca: 3, 5, 7, 11, 13, 17, 19, 27px → redondear al token más cercano.
+
+## Breakpoints
+
+- Desktop **1440px+**: sidebar 240px, content max 1600px, padding 24px, secciones 32px, componentes 16px
+- Tablet **768–1024px**: padding 16px, grid máx 2 cols, inputs/botones **48px**
+- Mobile **320–767px**: padding 16px, **1 columna** en forms y entity lists, inputs/botones **52px**
+
+## Patrones obligatorios
+
+- **Entidades** (proveedores, colaboradores, recetas, checklists, tareas, mesas, productos, áreas, órdenes) → **grid de cards**, no listas verticales infinitas
+- **Dashboards** → Header → KPIs → Filtros → Contenido
+- **Tablas** → solo auditoría/historial/movimientos densos; en mobile → cards por fila
+- **Cards** → padding 16px (24px form/report), radius 12px, badges para estados, acciones visibles
+- **Forms** → secciones claras; desktop máx 3 cols, tablet 2, mobile 1
+- **POS** → táctil ≥48px, velocidad operativa
+- **Tema oscuro** actual; teal/verde acciones, amarillo advertencia, rojo riesgo; sin sombras/gradientes exagerados
+
+## Clases / tokens preferidos
+
+```css
+var(--erp-space-4|8|16|24|32|48|64)
+var(--erp-input-height)   /* 44/48/52 responsive */
+var(--erp-btn-height)
+var(--erp-radius-card)    /* 12px */
+.erp-page-shell .erp-section-stack .erp-card-grid .erp-kpi-grid .erp-form-grid .erp-filters-row
+.erp-card .erp-card--form .erp-card--kpi .erp-badge
+```
+
+## Checklist antes de entregar UI
+
+1. Múltiplos de 8  
+2. Responsive desktop/tablet/mobile  
+3. Cards vs listas infinitas  
+4. Formularios agrupados  
+5. Botones táctiles  
+6. Escaneo rápido  
+7. Mobile sin tablas completas  
+8. KPIs arriba cuando aplique  
+9. Filtros antes del contenido  
+10. Sensación ERP SaaS operativo  
+
+Si un módulo se ve apretado, con scroll infinito, formularios gigantes o botones pequeños → rediseñar con esta guía antes de cerrar la tarea.
