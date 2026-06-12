@@ -32,13 +32,13 @@ Seguimiento de la migración incremental desde `frontend/src/modules/LegacyInven
 
 | Métrica | Valor |
 |---------|-------|
-| Líneas actuales (LegacyInventoryApp) | **10,851** |
+| Líneas actuales (LegacyInventoryApp) | **10,357** |
 | Líneas iniciales (referencia) | **11,539** |
-| Líneas eliminadas (acumulado) | **~688** |
-| Módulos extraídos | **1** |
-| Reducción acumulada | **~6.0%** |
+| Líneas eliminadas (acumulado) | **~1,182** |
+| Módulos extraídos y limpiados | **2** |
+| Reducción acumulada | **~10.2%** |
 
-**Próximo candidato:** Usuarios / ProfileManagement
+**Próximo candidato:** Asistencia / RRHH (reportes + terminal)
 
 ---
 
@@ -47,6 +47,7 @@ Seguimiento de la migración incremental desde `frontend/src/modules/LegacyInven
 | Fecha | Módulo | Líneas antes | Líneas después | Eliminadas | Reducción % | Localhost | Build | Producción |
 |-------|--------|--------------|----------------|------------|-------------|-----------|-------|------------|
 | 2026-06-12 | Proveedores | 11,539 | 10,851 | ~688 | ~6.0% | OK | OK | OK |
+| 2026-06-12 | Usuarios / RRHH | 10,911 | 10,357 | ~554 | ~4.8% | OK | OK | Pendiente |
 
 ---
 
@@ -87,15 +88,55 @@ Seguimiento de la migración incremental desde `frontend/src/modules/LegacyInven
 
 ---
 
+### 2026-06-12 — Usuarios / RRHH
+
+| Campo | Valor |
+|-------|-------|
+| Líneas antes (pre-limpieza) | 10,911 |
+| Líneas después | 10,357 |
+| Eliminadas (esta limpieza) | ~554 |
+| Reducción % (vs. referencia) | ~4.8% acumulado en esta extracción |
+| Localhost | OK — cards, búsqueda, filtros, ver perfil, navegación |
+| Build | OK — `npm run build` |
+| Producción | Pendiente |
+| **Próximo candidato** | Asistencia / RRHH |
+
+**Destino:**
+- `frontend/src/modules/users/UsersModule.jsx`
+- `frontend/src/modules/users/Users.css`
+- `frontend/src/modules/users/usersHelpers.js`
+
+**Funcionalidad migrada:**
+- Shell RRHH: acciones, formulario crear/editar colaborador (design system)
+- Tab Colaboradores: KPIs, buscador, filtros, grid de cards responsive
+- Tabs Dashboard / Alertas / Gestión usuarios (UI contenedora; render delegado)
+
+**Eliminado en limpieza legacy:**
+- Flag `USE_LEGACY_USERS_UI` y bloque JSX inline (~486 líneas)
+- Computed `colaboradoresFiltrados` (movido a `usersHelpers.filtrarColaboradores`)
+- Estilos solo legacy: `hrActionBarStyle`, `secondaryPanelButtonStyle`, `hrEmployeeGridStyle`, `hrEmployeeCardStyle`, `hrEmployeeHeaderStyle`, `hrEmployeeActionsStyle`
+- Bloque muerto `mostrarPerfilColaborador && false`
+
+**Conservado en Legacy (compartido):**
+- State `users`, `userForm`, `hrFilters`, `hrEmployees`, permisos RRHH
+- Lógica: guardar/editar colaborador, toggle activo, crop foto, hash password
+- Renderers delegados: `renderHRDashboard`, `renderHRProfile`, `renderUserManagementView`, turnos
+- **Reportes de asistencia** (`reportesAsistencia`) y navegación a terminal HR
+- Estilos HR usados por perfil/dashboard: `profileShellStyle`, `hrTabBarStyle`, `hrFilterGridStyle`, etc.
+
+**Design system:** ERP UI Spacing System v1.0 en formulario, KPIs, cards y filtros.
+
+---
+
 ## Cola de próximos candidatos
 
 | Prioridad | Módulo | Notas |
 |-----------|--------|-------|
-| **1 (siguiente)** | Usuarios / ProfileManagement | Listado colaboradores, permisos, formularios extensos |
-| 2 | Asistencia / RRHH | Terminal, reportes, tablas → cards en mobile |
-| 3 | Inventario | `InventoryBase`, formulario monolítico, catálogo en cards |
-| 4 | Órdenes de compra | Vistas automático / manual / historial |
-| 5 | Reportes | `ReportsDashboard`, KPIs y tablas responsive |
+| **1 (siguiente)** | Asistencia / RRHH | `reportesAsistencia` en Legacy, `AttendanceTerminal`, tablas → cards mobile |
+| 2 | Inventario | `inventario` + `InventoryBase`, formulario monolítico, catálogo en cards |
+| 3 | Órdenes de compra | Vistas automático / manual / historial |
+| 4 | Recetas | Formulario extenso en Legacy |
+| 5 | Reportes ejecutivos | `ReportsDashboard` (ya módulo parcial) |
 
 ---
 
@@ -135,12 +176,12 @@ Seguimiento de la migración incremental desde `frontend/src/modules/LegacyInven
 
 ### Checklist post-extracción
 
-- [ ] Contar líneas: `(Get-Content LegacyInventoryApp.jsx).Count` o `wc -l`
-- [ ] Actualizar **Resumen actual**
-- [ ] Añadir fila en **Historial de reducción**
-- [ ] Añadir ficha en **Extracciones completadas**
-- [ ] Actualizar **Próximo candidato** en resumen y en ficha
-- [ ] Reordenar **Cola de próximos candidatos** si aplica
+- [x] Contar líneas: `(Get-Content LegacyInventoryApp.jsx).Count`
+- [x] Actualizar **Resumen actual**
+- [x] Añadir fila en **Historial de reducción**
+- [x] Añadir ficha en **Extracciones completadas**
+- [x] Actualizar **Próximo candidato** en resumen y en ficha
+- [x] Reordenar **Cola de próximos candidatos** si aplica
 
 ---
 
