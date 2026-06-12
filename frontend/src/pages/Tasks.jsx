@@ -1524,9 +1524,15 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       await refresh()
       let successMessage = templateId ? "Checklist actualizado correctamente." : "Checklist creado correctamente."
       if (templateId) {
-        const { hasRuns } = await checkTemplateHasRuns(templateId)
-        if (hasRuns) {
-          successMessage = "Checklist actualizado correctamente. El historial anterior se conserva."
+        if (result.syncWarning) {
+          successMessage = result.syncWarning
+        } else if (Number(result.syncedRuns || 0) > 0) {
+          successMessage = `Checklist actualizada. ${result.syncedRuns} asignacion(es) activa(s) en Hoy tambien se actualizaron.`
+        } else {
+          const { hasRuns } = await checkTemplateHasRuns(templateId)
+          if (hasRuns) {
+            successMessage = "Checklist actualizada correctamente. El historial completado se conserva."
+          }
         }
       }
       setMessage(successMessage)
@@ -1781,7 +1787,11 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
           onApprove={async (request, notes) => {
             const result = await approveChecklistChangeRequest(request.id, notes)
             if (result.error) return setMessage(result.error.message || "No se pudo aprobar la solicitud.")
-            setMessage("Checklist aprobada. El supervisor ya puede asignarla y utilizarla.")
+            setMessage(
+              request.request_type === "update"
+                ? "Cambios aprobados. La plantilla y las checklists activas en Hoy ya estan actualizadas."
+                : "Checklist aprobada. El supervisor ya puede asignarla y utilizarla."
+            )
             refresh()
           }}
           onReject={async (request, notes) => {

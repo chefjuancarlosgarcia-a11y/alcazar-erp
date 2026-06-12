@@ -321,6 +321,11 @@ export async function checkTemplateHasRuns(templateId) {
   return { hasRuns: Number(count || 0) > 0, error }
 }
 
+export async function syncChecklistRunsFromTemplate(templateId) {
+  if (!templateId) return { data: { synced_runs: 0 }, error: null }
+  return supabase.rpc("sync_checklist_runs_from_template", { p_template_id: templateId })
+}
+
 export async function updateChecklistTemplate(id, payload, items) {
   const { error } = await supabase
     .from("checklist_templates")
@@ -369,7 +374,23 @@ export async function updateChecklistTemplate(id, payload, items) {
     }
   }
 
-  return getChecklistTemplateById(id)
+  const templateResult = await getChecklistTemplateById(id)
+  if (templateResult.error) return templateResult
+
+  const syncResult = await syncChecklistRunsFromTemplate(id)
+  if (syncResult.error) {
+    return {
+      data: templateResult.data,
+      error: null,
+      syncWarning: "La plantilla se guardo, pero no se pudieron actualizar las checklists activas en Hoy."
+    }
+  }
+
+  return {
+    data: templateResult.data,
+    error: null,
+    syncedRuns: Number(syncResult.data?.synced_runs || 0)
+  }
 }
 
 export function deactivateChecklistTemplate(id) {
