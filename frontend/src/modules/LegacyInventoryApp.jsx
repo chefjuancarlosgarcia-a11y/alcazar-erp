@@ -3,6 +3,10 @@ import { useNavigate } from "react-router-dom"
 import Cropper from "react-easy-crop"
 import "react-easy-crop/react-easy-crop.css"
 import SuppliersModule from "./suppliers/SuppliersModule"
+import UsersModule from "./users/UsersModule"
+
+/** Rollback: cambiar a true para restaurar UI inline legacy de Usuarios/RRHH. */
+const USE_LEGACY_USERS_UI = false
 import { BrowserMultiFormatReader } from "@zxing/browser"
 import * as XLSX from "xlsx"
 import jsPDF from "jspdf"
@@ -5692,7 +5696,64 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
         />
       )}
 
-      {seccionActiva === "usuarios" && (
+      {seccionActiva === "usuarios" && !USE_LEGACY_USERS_UI && (
+        <UsersModule
+          usuarioActual={usuarioActual}
+          puedeVerModuloRRHH={puedeVerModuloRRHH}
+          puedeGestionarUsuarios={puedeGestionarUsuarios}
+          puedeVerReportesRRHH={puedeVerReportesRRHH}
+          navigate={navigate}
+          setSeccionActiva={setSeccionActiva}
+          mostrarFormularioColaborador={mostrarFormularioColaborador}
+          setMostrarFormularioColaborador={setMostrarFormularioColaborador}
+          setMostrarPerfilColaborador={setMostrarPerfilColaborador}
+          setPerfilColaboradorEditando={setPerfilColaboradorEditando}
+          setMensajePerfilColaborador={setMensajePerfilColaborador}
+          setErroresColaborador={setErroresColaborador}
+          setSelectedEmployee={setSelectedEmployee}
+          editUserId={editUserId}
+          userForm={userForm}
+          setUserForm={setUserForm}
+          erroresColaborador={erroresColaborador}
+          documentoTemp={documentoTemp}
+          setDocumentoTemp={setDocumentoTemp}
+          mostrarPerfilColaborador={mostrarPerfilColaborador}
+          currentHRView={currentHRView}
+          setCurrentHRView={setCurrentHRView}
+          hrEmployees={hrEmployees}
+          userSearch={userSearch}
+          setUserSearch={setUserSearch}
+          hrFilters={hrFilters}
+          setHrFilters={setHrFilters}
+          hrOpenAlerts={hrOpenAlerts}
+          selectedEmployeeProfile={selectedEmployeeProfile}
+          perfilColaboradorEditando={perfilColaboradorEditando}
+          mensajePerfilColaborador={mensajePerfilColaborador}
+          departamentosDisponibles={departamentosDisponibles}
+          rolesDisponibles={rolesDisponibles}
+          guardarColaboradorValidado={guardarColaboradorValidado}
+          limpiarFormularioUsuario={limpiarFormularioUsuario}
+          setEditUserId={setEditUserId}
+          actualizarCampoColaborador={actualizarCampoColaborador}
+          subirFotoColaborador={subirFotoColaborador}
+          subirDocumentoColaborador={subirDocumentoColaborador}
+          openEmployeeProfile={openEmployeeProfile}
+          editarUsuario={editarUsuario}
+          toggleUsuarioActivo={toggleUsuarioActivo}
+          obtenerTurnosColaborador={obtenerTurnosColaborador}
+          renderControlesTurno={renderControlesTurno}
+          renderTurnosColaborador={renderTurnosColaborador}
+          renderHRDashboard={renderHRDashboard}
+          renderHRAlerts={renderHRAlerts}
+          renderHRProfile={renderHRProfile}
+          renderUserManagementView={renderUserManagementView}
+          renderStatusBadge={renderStatusBadge}
+          getHRBreadcrumb={getHRBreadcrumb}
+          getHRViewTitle={getHRViewTitle}
+        />
+      )}
+
+      {seccionActiva === "usuarios" && USE_LEGACY_USERS_UI && (
         <div style={cardStyle}>
           <h2>Gestión de Usuarios</h2>
           {!usuarioActual ? (
