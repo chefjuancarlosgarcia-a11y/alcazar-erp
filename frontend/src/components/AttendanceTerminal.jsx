@@ -10,7 +10,8 @@ import {
   getAttendanceTerminalProfiles,
   getOrRegisterAttendanceDevice,
   registerAttendanceMark,
-  uploadAttendanceEvidence
+  uploadAttendanceEvidence,
+  validateEmployeeScheduleForMarking
 } from "../services/attendanceService"
 import {
   buildAttendanceDevicePayload,
@@ -55,6 +56,8 @@ function AttendanceTerminal({ kiosk = false }) {
   const [photoPhase, setPhotoPhase] = useState("live")
   const [capturedBlob, setCapturedBlob] = useState(null)
   const [previewUrl, setPreviewUrl] = useState("")
+  const [scheduleAllowed, setScheduleAllowed] = useState(null)
+  const [scheduleValidation, setScheduleValidation] = useState(null)
 
   const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : ""
   const suggestedDeviceName = resolveAttendanceDeviceName(userAgent)
@@ -193,11 +196,40 @@ function AttendanceTerminal({ kiosk = false }) {
     if (photoPhase === "preview") clearPreview()
   }
 
+  async function handleSelectEmployee(profile) {
+    setSelected(profile)
+    setError("")
+    setMessage("")
+    setScheduleAllowed(null)
+    setScheduleValidation(null)
+    setPendingMarkType("")
+    resetPhotoCapture()
+    const validation = await validateEmployeeScheduleForMarking(profile.id)
+    setScheduleValidation(validation)
+    setScheduleAllowed(validation?.allowed === true)
+    if (!validation?.allowed) {
+      setError(validation?.reason || "Horario no asignado. Comunícate con Recursos Humanos antes de registrar tu asistencia.")
+    }
+  }
+
+  async function ensureScheduleAllowed() {
+    if (!selected?.id) return false
+    const validation = await validateEmployeeScheduleForMarking(selected.id)
+    setScheduleValidation(validation)
+    setScheduleAllowed(validation?.allowed === true)
+    if (!validation?.allowed) {
+      setError(validation?.reason || "Horario no asignado. Comunícate con Recursos Humanos antes de registrar tu asistencia.")
+      return false
+    }
+    return true
+  }
+
   async function takePhoto() {
     if (!canMark) {
       setError(securityStatus?.message || "Este dispositivo no esta autorizado para marcaje.")
       return
     }
+    if (!await ensureScheduleAllowed()) return
     if (!pendingMarkType) {
       setError("Selecciona primero el tipo de marcaje.")
       return
@@ -233,6 +265,7 @@ function AttendanceTerminal({ kiosk = false }) {
       setError(securityStatus?.message || "Este dispositivo no esta autorizado para marcaje.")
       return
     }
+    if (!await ensureScheduleAllowed()) return
     if (!selected || !pendingMarkType || !capturedBlob) {
       setError("Debes tomar y confirmar una foto antes de marcar.")
       return
@@ -288,6 +321,8 @@ function AttendanceTerminal({ kiosk = false }) {
     setObservation("")
     setError("")
     setMessage("")
+    setScheduleAllowed(null)
+    setScheduleValidation(null)
   }
 
   function renderSecurityGate() {
@@ -345,7 +380,7 @@ function AttendanceTerminal({ kiosk = false }) {
             {loading ? <p className="attendance-empty">Cargando colaboradores...</p> : (
               <div className="attendance-employee-grid">
                 {profiles.map((profile) => (
-                  <button type="button" key={profile.id} className="attendance-employee" onClick={() => { setSelected(profile); setError(""); setMessage("") }}>
+                  <button type="button" key={profile.id} className="attendance-employee" onClick={() => handleSelectEmployee(profile)}>
                     {profile.avatarUrl ? <img src={profile.avatarUrl} alt="" /> : <span>{initials(profile.fullName)}</span>}
                     <strong>{profile.fullName}</strong>
                     <small>{profile.areaName || "Sin área"}</small>
@@ -373,11 +408,17 @@ function AttendanceTerminal({ kiosk = false }) {
             </label>
 
             <div className="attendance-actions attendance-actions-select">
-              <button type="button" className={`entry ${pendingMarkType === "entrada" ? "selected" : ""}`} disabled={saving || isCheckedIn} onClick={() => selectMarkType("entrada")}>Entrada</button>
-              <button type="button" className={`meal ${pendingMarkType === "salida_comida" ? "selected" : ""}`} disabled={saving || !isCheckedIn || Boolean(activeMeal)} onClick={() => selectMarkType("salida_comida")}>Salida a comida</button>
-              <button type="button" className={`meal ${pendingMarkType === "regreso_comida" ? "selected" : ""}`} disabled={saving || !isCheckedIn || !activeMeal} onClick={() => selectMarkType("regreso_comida")}>Regreso de comida</button>
-              <button type="button" className={`exit ${pendingMarkType === "salida_final" ? "selected" : ""}`} disabled={saving || !isCheckedIn || Boolean(activeMeal)} onClick={() => selectMarkType("salida_final")}>Salida final</button>
+              <button type="button" className={`entry ${pendingMarkType === "entrada" ? "selected" : ""}`} disabled={saving || isCheckedIn || scheduleAllowed === false} onClick={() => selectMarkType("entrada")}>Entrada</button>
+              <button type="button" className={`meal ${pendingMarkType === "salida_comida" ? "selected" : ""}`} disabled={saving || !isCheckedIn || Boolean(activeMeal) || scheduleAllowed === false} onClick={() => selectMarkType("salida_comida")}>Salida a comida</button>
+              <button type="button" className={`meal ${pendingMarkType === "regreso_comida" ? "selected" : ""}`} disabled={saving || !isCheckedIn || !activeMeal || scheduleAllowed === false} onClick={() => selectMarkType("regreso_comida")}>Regreso de comida</button>
+              <button type="button" className={`exit ${pendingMarkType === "salida_final" ? "selected" : ""}`} disabled={saving || !isCheckedIn || Boolean(activeMeal) || scheduleAllowed === false} onClick={() => selectMarkType("salida_final")}>Salida final</button>
             </div>
+
+            {scheduleValidation?.allowed && scheduleValidation?.schedule_status && (
+              <p className="attendance-pending-mark">
+                Horario del día: <strong>{scheduleValidation.schedule_status === "draft" ? "Borrador" : "Publicado"}</strong>
+              </p>
+            )}
 
             {pendingMarkType && (
               <p className="attendance-pending-mark">

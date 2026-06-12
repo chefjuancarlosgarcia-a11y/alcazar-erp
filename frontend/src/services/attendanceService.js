@@ -43,6 +43,48 @@ export async function uploadAttendanceEvidence(blob, employeeId) {
   return { data: error ? null : { path }, error }
 }
 
+export function canEmployeeMarkAttendance(employeeId, date = null) {
+  const markDate = date || new Date().toLocaleDateString("en-CA", { timeZone: "America/Guatemala" })
+  return supabase.rpc("can_employee_mark_attendance", {
+    p_employee_id: employeeId,
+    p_date: markDate
+  })
+}
+
+export async function validateEmployeeScheduleForMarking(employeeId, date = null) {
+  const markDate = date || new Date().toLocaleDateString("en-CA", { timeZone: "America/Guatemala" })
+  const { data, error } = await canEmployeeMarkAttendance(employeeId, markDate)
+  console.log("[asistencia/marcaje] schedule validation", { employeeId, date: markDate, data, error })
+  if (error) {
+    return {
+      allowed: false,
+      reason: error.message || "No se pudo validar el horario asignado.",
+      reason_code: "validation_error",
+      schedule_id: null,
+      schedule_status: null,
+      is_work_day: false
+    }
+  }
+  const allowed = data?.allowed === true
+  if (!allowed) {
+    if (data?.reason_code === "rest_day") {
+      console.log("[asistencia/marcaje] denied rest day", data)
+    } else {
+      console.log("[asistencia/marcaje] denied no schedule", data)
+    }
+  } else {
+    console.log("[asistencia/marcaje] allowed schedule found", data)
+  }
+  return data || {
+    allowed: false,
+    reason: "Horario no asignado. Comunícate con Recursos Humanos antes de registrar tu asistencia.",
+    reason_code: "no_schedule",
+    schedule_id: null,
+    schedule_status: null,
+    is_work_day: false
+  }
+}
+
 export function registerAttendanceMark({ employeeId, pin, markType, photoPath, deviceId, deviceName, observation = "", clientIp = null }) {
   return supabase.rpc("register_attendance_mark", {
     p_employee_id: employeeId,
