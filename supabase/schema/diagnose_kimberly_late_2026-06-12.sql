@@ -81,6 +81,8 @@ where s.shift_date = date '2026-06-12'
   and s.status in ('published', 'draft')
   and s.is_work_day;
 
--- 6) Resultado del RPC (requiere sesión autenticada como admin/RRHH en el cliente;
---    en SQL Editor auth.uid() suele ser null y fallará el permiso en 072+)
+-- 6) Probe debug sin auth (aplicar 073 primero)
+-- select * from public.debug_probe_attendance_late_arrival_sql_editor(date '2026-06-12', 'Kimberly');
+
+-- 7) RPC real (requiere sesión autenticada admin/RRHH; en SQL Editor auth.uid() es null)
 -- select * from public.get_attendance_daily_late_arrivals(date '2026-06-12', null);
