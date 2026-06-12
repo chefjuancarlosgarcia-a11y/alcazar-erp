@@ -1,0 +1,39 @@
+---
+description: Tras extraer un módulo de LegacyInventoryApp, actualizar docs/legacy-extraction-progress.md
+alwaysApply: false
+---
+
+# Legacy extraction — registro obligatorio
+
+Cuando una extracción desde `frontend/src/modules/LegacyInventoryApp.jsx` esté **validada** (localhost + build + producción según aplique), actualizar:
+
+`docs/legacy-extraction-progress.md`
+
+## Qué registrar
+
+1. **Historial de reducción** — nueva fila con:
+   - fecha
+   - módulo
+   - líneas antes / después / eliminadas
+   - reducción % vs. referencia **11,539**
+   - localhost · build · producción (OK / Pendiente)
+
+2. **Resumen actual** — líneas actuales, acumulado eliminado, % total, módulos extraídos.
+
+3. **Extracciones completadas** — ficha del módulo (destino, qué migró, qué quedó compartido en Legacy).
+
+4. **Próximo candidato** — en resumen y en la ficha del módulo recién extraído.
+
+## Contar líneas
+
+```powershell
+(Get-Content "frontend/src/modules/LegacyInventoryApp.jsx").Count
+```
+
+## No registrar hasta que
+
+- El usuario confirme localhost **o** se haya probado explícitamente en la sesión.
+- `npm run build` pase (obligatorio antes de cerrar la tarea).
+- Producción: marcar OK solo si el usuario lo confirma o ya está desplegado.
+
+Usar la plantilla al final de `docs/legacy-extraction-progress.md`.
