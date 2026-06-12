@@ -379,17 +379,19 @@ export async function updateChecklistTemplate(id, payload, items) {
 
   const syncResult = await syncChecklistRunsFromTemplate(id)
   if (syncResult.error) {
+    console.error("sync_checklist_runs_from_template", syncResult.error)
     return {
       data: templateResult.data,
       error: null,
-      syncWarning: "La plantilla se guardo, pero no se pudieron actualizar las checklists activas en Hoy."
+      syncWarning: `La plantilla se guardo, pero no se pudieron actualizar las checklists en Hoy: ${syncResult.error.message || "error de sincronizacion"}. Verifica que la migracion 068 este aplicada en Supabase.`
     }
   }
 
   return {
     data: templateResult.data,
     error: null,
-    syncedRuns: Number(syncResult.data?.synced_runs || 0)
+    syncedRuns: Number(syncResult.data?.synced_runs || 0),
+    reopenedRuns: Number(syncResult.data?.reopened_runs || 0)
   }
 }
 

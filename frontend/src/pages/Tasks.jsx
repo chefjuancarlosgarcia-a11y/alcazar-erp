@@ -1526,6 +1526,8 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       if (templateId) {
         if (result.syncWarning) {
           successMessage = result.syncWarning
+        } else if (Number(result.reopenedRuns || 0) > 0) {
+          successMessage = `Checklist actualizada. ${result.reopenedRuns} asignacion(es) en Hoy se reabrieron porque tienen items nuevos por completar.`
         } else if (Number(result.syncedRuns || 0) > 0) {
           successMessage = `Checklist actualizada. ${result.syncedRuns} asignacion(es) activa(s) en Hoy tambien se actualizaron.`
         } else {
