@@ -2,6 +2,7 @@
 import { useNavigate } from "react-router-dom"
 import Cropper from "react-easy-crop"
 import "react-easy-crop/react-easy-crop.css"
+import "./Suppliers.css"
 import { BrowserMultiFormatReader } from "@zxing/browser"
 import * as XLSX from "xlsx"
 import jsPDF from "jspdf"
@@ -904,6 +905,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
   const [proveedoresError, setProveedoresError] = useState("")
   const [proveedoresMigracion, setProveedoresMigracion] = useState("")
   const [proveedorBusqueda, setProveedorBusqueda] = useState("")
+  const [proveedorListaBusqueda, setProveedorListaBusqueda] = useState("")
   const [proveedorSeleccionadoId, setProveedorSeleccionadoId] = useState(null)
   const [editandoProveedorId, setEditandoProveedorId] = useState(null)
   const [proveedorNombreComercial, setProveedorNombreComercial] = useState("")
@@ -3666,6 +3668,31 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
     )
   })
 
+  const proveedoresListaFiltrados = proveedores.filter((proveedor) => {
+    const texto = proveedorListaBusqueda.trim().toLowerCase()
+    if (!texto) return true
+    const telefonos = obtenerTelefonosProveedor(proveedor).join(" ").toLowerCase()
+    return (
+      String(proveedor.nombreComercial || "").toLowerCase().includes(texto) ||
+      String(proveedor.razonSocial || "").toLowerCase().includes(texto) ||
+      String(proveedor.codigo || "").toLowerCase().includes(texto) ||
+      String(proveedor.tipo || "").toLowerCase().includes(texto) ||
+      String(proveedor.encargado || "").toLowerCase().includes(texto) ||
+      String(proveedor.correo || "").toLowerCase().includes(texto) ||
+      String(proveedor.whatsapp || "").toLowerCase().includes(texto) ||
+      telefonos.includes(texto)
+    )
+  })
+
+  const proveedoresActivosCount = proveedores.filter((proveedor) => (proveedor.status || "active") === "active").length
+  const proveedoresTiposResumen = Object.entries(
+    proveedores.reduce((acc, proveedor) => {
+      const tipo = String(proveedor.tipo || "Sin tipo").trim() || "Sin tipo"
+      acc[tipo] = (acc[tipo] || 0) + 1
+      return acc
+    }, {})
+  ).sort((a, b) => b[1] - a[1]).slice(0, 3)
+
   const productosProveedorSeleccionado = proveedorSeleccionadoPrincipal
     ? ingredientes.filter((ingrediente) => ingrediente.proveedorId === proveedorSeleccionadoPrincipal.id)
     : []
@@ -4125,6 +4152,40 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
     return [...telefonos, proveedor?.telefono, proveedor?.telefono2, proveedor?.telefono3]
       .map((telefono) => String(telefono || "").trim())
       .filter((telefono, index, lista) => telefono && lista.indexOf(telefono) === index)
+  }
+
+  function formatearMetodosPagoProveedor(metodosPago) {
+    const labels = {
+      efectivo: "Efectivo",
+      transferencia: "Transferencia",
+      tarjeta: "Tarjeta",
+      cheque: "Cheque"
+    }
+    return Object.entries(metodosPago || {})
+      .filter(([, enabled]) => enabled)
+      .map(([metodo]) => labels[metodo] || metodo)
+  }
+
+  function formatearDiasEntregaProveedor(diasEntrega) {
+    return Object.entries(diasEntrega || {})
+      .filter(([, enabled]) => enabled)
+      .map(([dia]) => `${dia.charAt(0).toUpperCase()}${dia.slice(1, 3)}`)
+  }
+
+  function renderEstrellasProveedor(estrellas) {
+    const total = Math.max(0, Math.min(5, Number(estrellas) || 0))
+    return `${"★".repeat(total)}${"☆".repeat(5 - total)}`
+  }
+
+  function obtenerContactoPrincipalProveedor(proveedor) {
+    return proveedor?.encargado || proveedor?.correo || "Sin contacto"
+  }
+
+  function obtenerTelefonoWhatsAppProveedor(proveedor) {
+    const telefonos = obtenerTelefonosProveedor(proveedor)
+    if (proveedor?.whatsapp) return `WhatsApp: ${proveedor.whatsapp}`
+    if (telefonos.length) return telefonos[0]
+    return ""
   }
 
   function normalizarUrlProveedor(url) {
@@ -8128,11 +8189,47 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
                 </div>
               </div>
 
-              <div style={cardStyle}>
-                <h2>Lista de proveedores</h2>
+              <div style={cardStyle} className="suppliers-board">
+                <div>
+                  <h2 style={{ marginTop: 0 }}>Directorio de proveedores</h2>
+                  <p style={{ color: "#94a3b8", marginBottom: 0 }}>Consulta, filtra y abre el perfil de cada proveedor desde el tablero.</p>
+                </div>
+
+                <div className="suppliers-summary">
+                  <div className="suppliers-kpi">
+                    <span>Total proveedores</span>
+                    <strong>{proveedores.length}</strong>
+                  </div>
+                  <div className="suppliers-kpi">
+                    <span>Proveedores activos</span>
+                    <strong>{proveedoresActivosCount}</strong>
+                  </div>
+                  <div className="suppliers-kpi suppliers-kpi-types">
+                    <span>Tipos más usados</span>
+                    <strong>
+                      {proveedoresTiposResumen.length
+                        ? proveedoresTiposResumen.map(([tipo, count]) => `${tipo} (${count})`).join(" · ")
+                        : "Sin datos"}
+                    </strong>
+                  </div>
+                </div>
+
+                <div className="suppliers-toolbar">
+                  <input
+                    type="search"
+                    className="suppliers-search"
+                    placeholder="Buscar por nombre, razón social, código, tipo o contacto..."
+                    value={proveedorListaBusqueda}
+                    onChange={(e) => setProveedorListaBusqueda(e.target.value)}
+                  />
+                  <span className="suppliers-count-label">
+                    {proveedoresListaFiltrados.length} de {proveedores.length} proveedores
+                  </span>
+                </div>
+
                 {proveedorSeleccionadoPrincipal && (
-                  <div style={{ ...orderBoxStyle, marginBottom: "16px" }}>
-                    <h3>Perfil de {proveedorSeleccionadoPrincipal.nombreComercial}</h3>
+                  <div className="suppliers-profile-panel">
+                    <h3 style={{ marginTop: 0 }}>Perfil de {proveedorSeleccionadoPrincipal.nombreComercial}</h3>
                     <p><strong>Código:</strong> {proveedorSeleccionadoPrincipal.codigo}</p>
                     <p><strong>Razón social:</strong> {proveedorSeleccionadoPrincipal.razonSocial || "No definido"}</p>
                     <p><strong>NIT:</strong> {proveedorSeleccionadoPrincipal.nit || "No definido"}</p>
@@ -8146,29 +8243,74 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
                     <button type="button" onClick={() => setProveedorSeleccionadoPrincipalId(null)} style={cancelButtonStyle}>Cerrar perfil</button>
                   </div>
                 )}
+
                 {proveedores.length === 0 ? (
-                  <p>No hay proveedores registrados.</p>
+                  <div className="suppliers-empty">
+                    <strong>No hay proveedores registrados</strong>
+                    <span>Usa el formulario de arriba para crear el primero.</span>
+                  </div>
+                ) : proveedoresListaFiltrados.length === 0 ? (
+                  <div className="suppliers-empty">
+                    <strong>Sin resultados</strong>
+                    <span>No encontramos proveedores que coincidan con tu búsqueda.</span>
+                  </div>
                 ) : (
-                  proveedores.map((proveedor) => (
-                    <div key={proveedor.id} style={orderItemStyle}>
-                      <p><strong>{proveedor.nombreComercial}</strong> ({proveedor.codigo})</p>
-                      <p><strong>Tipo:</strong> {proveedor.tipo}</p>
-                      <p><strong>Contacto:</strong> {obtenerTelefonosProveedor(proveedor).join(" / ") || proveedor.correo || "Sin contacto"}</p>
-                      <p><strong>Estrellas:</strong> {proveedor.estrellas} / 5</p>
-                      <div style={buttonRowStyle}>
-                        <button onClick={() => setProveedorSeleccionadoPrincipalId(proveedor.id)} style={editButtonStyle}>
-                          Ver proveedor
-                        </button>
-                        <button onClick={() => editarProveedor(proveedor)} style={buttonStyle}>
-                          Editar
-                        </button>
-                      </div>
-                    </div>
-                  ))
+                  <div className="suppliers-card-grid">
+                    {proveedoresListaFiltrados.map((proveedor) => {
+                      const metodosPago = formatearMetodosPagoProveedor(proveedor.metodosPago)
+                      const diasEntrega = formatearDiasEntregaProveedor(proveedor.diasEntrega)
+                      const telefonoWhatsApp = obtenerTelefonoWhatsAppProveedor(proveedor)
+                      return (
+                        <article key={proveedor.id} className="supplier-card">
+                          <div className="supplier-card-header">
+                            <div className="supplier-card-heading">
+                              <h3>{proveedor.nombreComercial}</h3>
+                              <p>{proveedor.codigo || "Sin código"}</p>
+                            </div>
+                            <span className="supplier-card-rating" title={`${proveedor.estrellas || 0} de 5`}>
+                              {renderEstrellasProveedor(proveedor.estrellas)}
+                            </span>
+                          </div>
+
+                          <div className="supplier-card-body">
+                            <p><strong>Contacto:</strong> {obtenerContactoPrincipalProveedor(proveedor)}</p>
+                            {telefonoWhatsApp ? <p><strong>Teléfono:</strong> {telefonoWhatsApp}</p> : null}
+                          </div>
+
+                          <div className="supplier-card-tags">
+                            {proveedor.tipo ? <span className="supplier-card-tag type">{proveedor.tipo}</span> : null}
+                            {metodosPago.map((metodo) => (
+                              <span key={`${proveedor.id}-${metodo}`} className="supplier-card-tag payment">{metodo}</span>
+                            ))}
+                            {diasEntrega.map((dia) => (
+                              <span key={`${proveedor.id}-${dia}`} className="supplier-card-tag delivery">{dia}</span>
+                            ))}
+                          </div>
+
+                          <div className="supplier-card-footer">
+                            <button
+                              type="button"
+                              className="supplier-card-btn-view"
+                              onClick={() => setProveedorSeleccionadoPrincipalId(proveedor.id)}
+                            >
+                              Ver proveedor
+                            </button>
+                            <button
+                              type="button"
+                              className="supplier-card-btn-edit"
+                              onClick={() => editarProveedor(proveedor)}
+                            >
+                              Editar
+                            </button>
+                          </div>
+                        </article>
+                      )
+                    })}
+                  </div>
                 )}
 
                 {proveedorSeleccionadoPrincipal && (
-                  <div style={{ ...orderBoxStyle, marginTop: "20px" }}>
+                  <div style={{ ...orderBoxStyle, marginTop: "8px" }}>
                     <h3>Detalles de {proveedorSeleccionadoPrincipal.nombreComercial}</h3>
                     <p><strong>Código:</strong> {proveedorSeleccionadoPrincipal.codigo}</p>
                     <p><strong>Razón social:</strong> {proveedorSeleccionadoPrincipal.razonSocial}</p>
