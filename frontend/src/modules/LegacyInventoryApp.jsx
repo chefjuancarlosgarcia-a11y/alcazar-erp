@@ -2,7 +2,10 @@
 import { useNavigate } from "react-router-dom"
 import Cropper from "react-easy-crop"
 import "react-easy-crop/react-easy-crop.css"
-import "./Suppliers.css"
+import SuppliersModule from "./suppliers/SuppliersModule"
+
+/** Rollback: cambiar a true para restaurar UI inline legacy de Proveedores. */
+const USE_LEGACY_SUPPLIERS_UI = false
 import { BrowserMultiFormatReader } from "@zxing/browser"
 import * as XLSX from "xlsx"
 import jsPDF from "jspdf"
@@ -7971,7 +7974,19 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
             </div>
           )}
 
-          {seccionActiva === "proveedores" && (
+          {seccionActiva === "proveedores" && !USE_LEGACY_SUPPLIERS_UI && (
+            <SuppliersModule
+              ingredientes={ingredientes}
+              proveedores={proveedores}
+              proveedoresLoading={proveedoresLoading}
+              proveedoresError={proveedoresError}
+              proveedoresMigracion={proveedoresMigracion}
+              onReloadProveedores={cargarProveedoresSupabase}
+              onNotify={agregarNotificacion}
+            />
+          )}
+
+          {seccionActiva === "proveedores" && USE_LEGACY_SUPPLIERS_UI && (
             <>
               <div style={cardStyle}>
                 <h2>{editandoProveedorId ? "Editar proveedor" : "Crear proveedor"}</h2>
