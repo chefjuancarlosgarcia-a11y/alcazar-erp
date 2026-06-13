@@ -142,7 +142,7 @@ Auditoría estática del frontend. Fecha: 2026-06-09.
 | **Proveedores** (`SuppliersModule` + state) | En producción |
 | **Áreas operativas** | En producción; botones ya redirigen a Supabase |
 | **Reportes asistencia** (`AttendanceReportsModule`) | En producción vía `/hr?section=reportesAsistencia` |
-| **Usuarios** legacy en Legacy | Interceptado por `ProfileManagement` en HR; bloque legacy probablemente muerto pero fuera del alcance de esta auditoría |
+| **Usuarios** legacy en Legacy | **Eliminado** 2026-06-09 — ver `docs/legacy-dead-code-audit-usuarios.md` |
 
 ### Requiere validación manual
 
@@ -204,7 +204,7 @@ Auditoría estática del frontend. Fecha: 2026-06-09.
 - `frontend/src/components/Sidebar.jsx` — navegación producción
 - `frontend/src/components/NotificationsBell.jsx` — deep links notificaciones
 - `frontend/src/components/PosDishCatalog.jsx` — link a recetas
-- `frontend/src/modules/LegacyInventoryApp.jsx` — **5,845 líneas post-limpieza**
+- `frontend/src/modules/LegacyInventoryApp.jsx` — **2,494 líneas post-limpieza usuarios**
 - `frontend/src/modules/LegacySidebar.jsx` — navegación legacy (oculta en prod)
 
 *Auditoría inicial: 2026-06-09. Limpieza aplicada: 2026-06-09.*

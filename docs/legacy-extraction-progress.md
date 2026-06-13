@@ -32,14 +32,14 @@ Seguimiento de la migración incremental desde `frontend/src/modules/LegacyInven
 
 | Métrica | Valor |
 |---------|-------|
-| Líneas actuales (LegacyInventoryApp) | **5,845** |
+| Líneas actuales (LegacyInventoryApp) | **2,494** |
 | Líneas iniciales (referencia) | **11,539** |
-| Líneas eliminadas (acumulado) | **~5,694** |
+| Líneas eliminadas (acumulado) | **~9,045** |
 | Módulos extraídos y limpiados | **4** |
-| Fases de limpieza dead code | **1** (inventario/recetas/requisición) |
-| Reducción acumulada | **~49.3%** |
+| Fases de limpieza dead code | **2** (inventario/recetas/requisición; usuarios/RRHH) |
+| Reducción acumulada | **~78.4%** |
 
-**Próximo candidato:** Renderers HR (perfil, dashboard) — completar fase 2 UsersModule
+**Próximo candidato:** Áreas operativas — extraer a módulo independiente o deprecar bloques `inventarioAreas`/`movimientosInventario` legacy
 
 ---
 
@@ -51,6 +51,7 @@ Seguimiento de la migración incremental desde `frontend/src/modules/LegacyInven
 | 2026-06-12 | Usuarios / RRHH | 10,911 | 10,357 | ~554 | ~4.8% | OK | OK | Pendiente |
 | 2026-06-13 | Reportes de asistencia | 10,405 | 10,064 | ~341 | ~3.0% | OK | OK | Pendiente |
 | 2026-06-09 | Órdenes de compra | 10,140 | 9,356 | ~784 | ~6.8% | OK | OK | Pendiente |
+| 2026-06-09 | Limpieza dead code usuarios/RRHH | 5,845 | 2,494 | ~3,351 | ~29.0% | Pendiente | OK | Pendiente |
 | 2026-06-09 | Limpieza dead code inventario/recetas/requisición | 9,356 | 5,845 | ~3,511 | ~30.4% | OK | OK | Pendiente |
 
 ---
@@ -222,6 +223,28 @@ Seguimiento de la migración incremental desde `frontend/src/modules/LegacyInven
 
 ---
 
+### 2026-06-09 — Limpieza dead code: usuarios / RRHH
+
+| Campo | Valor |
+|-------|-------|
+| Líneas antes | 5,845 |
+| Líneas después | **2,494** |
+| Eliminadas (monolito) | **3,351** |
+| Eliminadas (`modules/users/`) | **1,038** |
+| Reducción % (vs. referencia 11,539) | ~29.0% en esta fase; **~78.4% acumulado** |
+| Localhost | Pendiente smoke test |
+| Build | OK — `npm run build`; chunk Legacy ~121 kB (antes ~209 kB) |
+| Producción | Pendiente |
+| **Próximo candidato** | Áreas operativas |
+
+**Eliminado:** `UsersModule`, renderers HR, `MOCK_HR_EMPLOYEES`, formulario colaborador, turnos-form, modales crop/reset, estilos profile/hr/schedule (formulario), import `react-easy-crop` en Legacy.
+
+**Conservado:** login legacy, órdenes, proveedores, áreas, reportes asistencia, `ProfileManagement` en prod.
+
+**Docs:** [legacy-dead-code-audit-usuarios.md](./legacy-dead-code-audit-usuarios.md), [legacy-users-dead-code-audit.md](./legacy-users-dead-code-audit.md)
+
+---
+
 ### 2026-06-09 — Limpieza dead code: inventario / recetas / requisición
 
 | Campo | Valor |
@@ -233,7 +256,7 @@ Seguimiento de la migración incremental desde `frontend/src/modules/LegacyInven
 | Localhost | OK — redirects `/hr?section=…`, sidebar inventario, áreas → requisición |
 | Build | OK — `npm run build`; chunk Legacy ~209 kB (antes ~759 kB) |
 | Producción | Pendiente |
-| **Próximo candidato** | Renderers HR (perfil, dashboard) |
+| **Próximo candidato** | ~~Renderers HR~~ → usuarios/RRHH eliminado (2026-06-09) |
 
 **Pre-requisito aplicado:** redirects en `HR.jsx` para `/hr?section=inventario|recetas|requisicion` → `/inventory?section=…` con warning `[legacy] redirected deprecated section`.
 
