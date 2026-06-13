@@ -254,7 +254,7 @@ function CashierDashboard({ session, summary, requests, payments, onOpenCharge, 
   ]
   return (
     <div className="cashier-dashboard">
-      <div className="cashier-metrics">{cards.map(([label, value]) => <article key={label}><span>{label}</span><strong>{value}</strong></article>)}</div>
+      <div className="cashier-metrics erp-kpi-grid">{cards.map(([label, value]) => <article className="erp-kpi-card" key={label}><span>{label}</span><strong>{value}</strong></article>)}</div>
       <article className="cashier-panel">
         <div className="cashier-panel-title"><h2>Pagos pendientes</h2><span>{requests.length} solicitudes</span></div>
         {requests.slice(0, 5).map((bill) => <RequestRow bill={bill} key={bill.id} isNew={highlightedIds?.has(String(bill.id))} onCharge={() => onOpenCharge(bill)} />)}
@@ -575,10 +575,10 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
                   const lineDiscount = Number(item.descuento || item.discount || 0)
                   return (
                     <tr key={item.lineId || item.id}>
-                      <td><span className="cashier-item-qty">{item.cantidad}×</span> {item.nombre}</td>
-                      <td>Q{Number(item.precio).toFixed(2)}</td>
-                      <td>{lineDiscount > 0 ? `-Q${lineDiscount.toFixed(2)}` : "—"}</td>
-                      <td><strong>Q{lineTotal.toFixed(2)}</strong></td>
+                      <td data-label="Producto"><span className="cashier-item-qty">{item.cantidad}×</span> {item.nombre}</td>
+                      <td data-label="Precio">Q{Number(item.precio).toFixed(2)}</td>
+                      <td data-label="Desc.">{lineDiscount > 0 ? `-Q${lineDiscount.toFixed(2)}` : "—"}</td>
+                      <td data-label="Total"><strong>Q{lineTotal.toFixed(2)}</strong></td>
                     </tr>
                   )
                 })}

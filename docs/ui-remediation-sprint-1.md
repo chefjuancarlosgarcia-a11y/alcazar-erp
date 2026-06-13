@@ -2,7 +2,7 @@
 
 **Backlog oficial:** [ui-audit.md](./ui-audit.md)  
 **Spec:** [erp-ui-spacing-system.md](./erp-ui-spacing-system.md) · `frontend/src/styles/erp-ui-spacing.css`  
-**Fecha plan:** 2026-06-09 · **Legacy áreas implementado:** 2026-06-09  
+**Fecha plan:** 2026-06-09 · **Sprint UX #1 completado (código):** 2026-06-09  
 **Alcance del sprint:** 3 módulos P1 — sin tocar lógica, Supabase ni SQL.
 
 ---
@@ -195,67 +195,65 @@ Referencias rotas (`hrFilterGridStyle`, `inputStyle`, `passwordOptionStyle`, `at
 
 ---
 
-## Módulo 3 — Caja (`Cashier`)
+## Módulo 3 — Caja (`Cashier`) ✅ Implementado
 
 **Rutas:** `/cash`, `/cashier`  
 **Archivos:** `frontend/src/pages/Cashier.jsx`, `frontend/src/pages/Cashier.css`  
-**Estado audit:** spacing **No** · grid **No** · mobile **No** · prioridad **P1**
+**Estado post-sprint:** spacing **Sí** · grid **Parcial** · mobile **Sí** · prioridad **P1** cerrada en este módulo
 
 ### Checklist — Spacing
 
-- [ ] `@import "../styles/erp-ui-spacing.css"`
-- [ ] `.cashier-page`: `gap: var(--erp-section-gap)` (reemplazar 18px)
-- [ ] Paneles `.cashier-panel`, `.cashier-open-card`: padding `16px` estándar / `24px` form; radius `12px` (eliminar 14px)
-- [ ] Tabs `.cashier-tabs`: gap `8px`, padding contenedor `8px`, radius contenedor `12px` (eliminar 7px, 13px)
-- [ ] Feedback chips: padding `12px 16px` (eliminar 11px 13px)
-- [ ] Recorrer ~27 prohibidos + ~119 no estándar del audit
+- [x] `@import "../styles/erp-ui-spacing.css"`
+- [x] `.cashier-page`: gap/padding tokens ERP
+- [x] Paneles: padding 16px, radius 12px
+- [x] Tabs: gap/padding 8px, radius 12px
+- [x] Feedback: padding 16px
+- [x] Valores prohibidos corregidos en todo el archivo
 
 ### Checklist — Grid / Cards
 
-- [ ] Dashboard caja `.cashier-metrics`: `.erp-kpi-grid` (2 cols tablet/mobile, 4–6 desktop)
-- [ ] Solicitudes `.cashier-request-grid`: `.erp-card-grid` o grid 2 cols tablet
-- [ ] Paneles “Pendientes” / “Últimos cobros”: `.erp-section-stack` gap 16px
-- [ ] Terminal cobro `.cashier-charge-terminal`: mantener jerarquía hero → orden → pago (spec POS/caja: velocidad first)
+- [x] Dashboard `.cashier-metrics`: `.erp-kpi-grid` + `.erp-kpi-card`
+- [x] Solicitudes: grid tokenizado; 1 col mobile
+- [x] Terminal cobro: jerarquía hero → orden → pago conservada
 
-### Checklist — Tablas mobile (prioridad alta)
+### Checklist — Tablas mobile
 
-- [ ] `.cashier-items-table` (mesa en cobro): **desktop** mantiene tabla con header 52px, fila 48px, celda `8px 16px`
-- [ ] **≤767px:** ocultar tabla; renderizar `.cashier-items-mobile-list` (nuevo) — card por ítem: producto, cantidad, precio, subtotal, acciones
-- [ ] Implementar toggle CSS + markup en `Cashier.jsx` **sin cambiar cálculos** (misma data, distinto layout)
-- [ ] Totales/edición propina: stack vertical mobile, gap 16px
+- [x] Desktop: tabla con header/fila tokenizados (52px / 48px, padding 8px 16px)
+- [x] ≤767px: tabla → cards vía CSS + `data-label` en `<td>` (sin dual DOM)
+- [x] Totales/propina: stack vertical mobile en filas editables
 
 ### Checklist — Inputs
 
-- [ ] Campos arqueo, denominaciones, facturación: `min-height: var(--erp-input-height)`
-- [ ] `.cashier-billing-fields`, `.cashier-denomination-grid`: `.erp-form-grid`
-- [ ] Modo pago `.cashier-payment-mode button`: min-height token (eliminar `padding: 11px 12px`)
+- [x] Inputs/select/textarea: `--erp-input-height`
+- [x] Denominaciones arqueo: altura token
+- [x] Modo pago: min-height token
 
 ### Checklist — Botones
 
-- [ ] Tabs principales: min-height 44/48/52 según breakpoint
-- [ ] Acciones cobro (aprobar, rechazar, recibo): `.erp-btn` variants
-- [ ] Badge contador en tab (`padding: 0 7px` → `0 8px`)
+- [x] Tabs, acciones, confirmar pago: `--erp-btn-height` (confirm ≥56px desktop)
+- [x] Badge contador tab: padding `0 8px`
+- [x] Mobile: acciones cobro full-width
 
 ### Checklist — Responsive
 
-- [ ] Reemplazar `@media (max-width: 980px)` → **`1024px`**
-- [ ] Añadir bloque **`@media (max-width: 767px)`** específico (hoy casi todo colapsa solo en 980px)
-- [ ] `.cashier-charge-hero-meta`: 1 col mobile, 2 cols tablet
-- [ ] `.cashier-columns`, `.cashier-charge-main`: stack vertical mobile
-- [ ] Split payment / arqueo: verificar usable en 375px
+- [x] `980px` → `1024px`
+- [x] Bloque `@media (max-width: 767px)` con cards ítems
+- [x] Hero meta: 2 cols tablet, 1 col mobile
+- [x] KPI 5 cols en ≥1440px
 
 ### Checklist — Sin lógica
 
-- [ ] No alterar sesión caja, flujos split, integración POS, `showReceipt`
-- [ ] No cambiar permisos ni tabs funcionales
+- [x] Handlers, cálculos, split, POS, sesión intactos
+- [x] CashManagement no tocado
 
-### Smoke test — Caja
+### Smoke test — Caja (manual pendiente)
 
 - [ ] Abrir caja → dashboard métricas
 - [ ] Tab solicitudes: aprobar/rechazar
 - [ ] Cobrar mesa: tabla desktop OK; mobile cards legibles
+- [ ] Efectivo / tarjeta / pago mixto
 - [ ] Arqueo / denominaciones si rol lo permite
-- [ ] 375px y 768px sin overflow horizontal
+- [ ] 375px sin overflow horizontal
 
 ---
 
@@ -265,7 +263,7 @@ Referencias rotas (`hrFilterGridStyle`, `inputStyle`, `passwordOptionStyle`, `at
 |--------|---------------------------|----------------------|------------------|--------|
 | Legacy áreas | `modules/areas/AreasModule.jsx`, `Areas.css` | `LegacyInventoryApp.jsx` | Medio — permisos admin | ✅ Entregado |
 | InventoryBase | — | `InventoryBase.css`, `InventoryBase.jsx` | Alto — InternalProduction | ✅ Entregado |
-| Caja | clases mobile list en CSS | `Cashier.css`, `Cashier.jsx` (dual layout tabla/cards) | Alto — flujo cobro |
+| Caja | — | `Cashier.css`, `Cashier.jsx` | Alto — flujo cobro | ✅ Entregado |
 
 ---
 
@@ -292,7 +290,7 @@ POS → Control de caja → Recetas/Requisiciones → Perfiles RRHH (según [ui-
 | Legacy áreas — CSS + componente | | ✅ Implementado | Bug estilos huérfanos corregido; build OK |
 | InventoryBase — tokens + breakpoints | | ✅ Implementado | Build OK |
 | InventoryBase — mobile productos/movimientos cards | | ✅ Implementado | `data-label` en celdas |
-| Caja — tokens + KPI grid | | ☐ Pendiente | |
-| Caja — items table → mobile cards | | ☐ Pendiente | |
-| Build + smoke | | ◐ Parcial | `npm run build` OK; smoke áreas manual pendiente |
+| Caja — tokens + KPI grid | | ✅ Implementado | `.erp-kpi-grid` dashboard |
+| Caja — items table → mobile cards | | ✅ Implementado | CSS + `data-label` |
+| Build + smoke | | ◐ Parcial | `npm run build` OK ×3 módulos; smoke manual pendiente |
 | Actualizar ui-audit.md | | ☐ Pendiente | Al cierre sprint completo |
