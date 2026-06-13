@@ -32,13 +32,14 @@ Seguimiento de la migración incremental desde `frontend/src/modules/LegacyInven
 
 | Métrica | Valor |
 |---------|-------|
-| Líneas actuales (LegacyInventoryApp) | **9,356** |
+| Líneas actuales (LegacyInventoryApp) | **5,845** |
 | Líneas iniciales (referencia) | **11,539** |
-| Líneas eliminadas (acumulado) | **~2,183** |
+| Líneas eliminadas (acumulado) | **~5,694** |
 | Módulos extraídos y limpiados | **4** |
-| Reducción acumulada | **~18.9%** |
+| Fases de limpieza dead code | **1** (inventario/recetas/requisición) |
+| Reducción acumulada | **~49.3%** |
 
-**Próximo candidato:** Deprecación UI legacy — inventario / recetas / requisición (código muerto en rutas actuales)
+**Próximo candidato:** Renderers HR (perfil, dashboard) — completar fase 2 UsersModule
 
 ---
 
@@ -50,6 +51,7 @@ Seguimiento de la migración incremental desde `frontend/src/modules/LegacyInven
 | 2026-06-12 | Usuarios / RRHH | 10,911 | 10,357 | ~554 | ~4.8% | OK | OK | Pendiente |
 | 2026-06-13 | Reportes de asistencia | 10,405 | 10,064 | ~341 | ~3.0% | OK | OK | Pendiente |
 | 2026-06-09 | Órdenes de compra | 10,140 | 9,356 | ~784 | ~6.8% | OK | OK | Pendiente |
+| 2026-06-09 | Limpieza dead code inventario/recetas/requisición | 9,356 | 5,845 | ~3,511 | ~30.4% | OK | OK | Pendiente |
 
 ---
 
@@ -220,14 +222,46 @@ Seguimiento de la migración incremental desde `frontend/src/modules/LegacyInven
 
 ---
 
+### 2026-06-09 — Limpieza dead code: inventario / recetas / requisición
+
+| Campo | Valor |
+|-------|-------|
+| Líneas antes | 9,356 |
+| Líneas después | 5,845 |
+| Eliminadas | ~3,511 |
+| Reducción % (vs. referencia 11,539) | ~30.4% en esta fase; **~49.3% acumulado** |
+| Localhost | OK — redirects `/hr?section=…`, sidebar inventario, áreas → requisición |
+| Build | OK — `npm run build`; chunk Legacy ~209 kB (antes ~759 kB) |
+| Producción | Pendiente |
+| **Próximo candidato** | Renderers HR (perfil, dashboard) |
+
+**Pre-requisito aplicado:** redirects en `HR.jsx` para `/hr?section=inventario|recetas|requisicion` → `/inventory?section=…` con warning `[legacy] redirected deprecated section`.
+
+**Eliminado:**
+- JSX: `seccionActiva === "recetas"`, rama `requisicion`, bloque `inventario` (~1,494 líneas)
+- Handlers exclusivos: recetas (~270), requisición UI (~360), inventario UI (~260), barcode/búsqueda (~110)
+- State/effects: recetas, formulario requisición, formulario ingrediente, barcode, `historialCambios`, `requisiciones` localStorage
+- Helpers módulo: `getInventoryStatus*`, `normalizeRequisition`, `getRequisitionItems`
+- Estilos huérfanos (~500 líneas): búsqueda, barcode, requisición, cards inventario, historial
+- Nav legacy: entradas `inventario`, `recetas`, `requisicion` en `modulosDisponibles` / `moduleContext`
+- Import: `@zxing/browser`, `xlsx` (solo usados por UI eliminada)
+
+**Conservado (compartido):**
+- `ingredientes`, `inventoryMovements`, persistencia local, `evaluarAlertasStock`
+- `PurchaseOrdersModule`, `SuppliersModule`, secciones `areas`, `inventarioAreas`, `movimientosInventario`
+- `crearRequisicionParaArea` → redirige a `/inventory?section=requisicion&area=…`
+- Handlers órdenes, áreas, proveedores, RRHH, asistencia
+
+---
+
 ## Cola de próximos candidatos
 
 | Prioridad | Módulo | Notas |
 |-----------|--------|-------|
-| **1 (siguiente)** | Deprecación inventario legacy | UI muerta — ruta usa `InventoryBase` |
-| 2 | Deprecación recetas / requisición legacy | UI muerta — rutas Supabase |
-| 3 | Renderers HR (perfil, dashboard) | Completar fase 2 UsersModule |
-| 4 | Áreas operativas | Admin de áreas |
+| **1 (siguiente)** | Renderers HR (perfil, dashboard) | Completar fase 2 UsersModule |
+| 2 | Áreas operativas | Extraer a módulo independiente |
+| 3 | Deprecación `inventarioAreas` / `movimientosInventario` legacy | Rutas ya usan `InventoryBase` |
+| 4 | Auth local + LegacySidebar | Cuando no queden secciones legacy |
 
 ---
 
@@ -276,4 +310,4 @@ Seguimiento de la migración incremental desde `frontend/src/modules/LegacyInven
 
 ---
 
-*Última actualización: 2026-06-09*
+*Última actualización: 2026-06-09 (post-limpieza inventario/recetas/requisición)*

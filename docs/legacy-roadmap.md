@@ -2,22 +2,23 @@
 
 Mapa de módulos restantes en `frontend/src/modules/LegacyInventoryApp.jsx` para guiar la migración incremental hacia módulos independientes.
 
-**Estado del monolito (2026-06-09, post-limpieza órdenes):**
+**Estado del monolito (2026-06-09, post-limpieza inventario/recetas/requisición):**
 
 | Métrica | Valor |
 |---------|-------|
-| Líneas totales | **9,356** |
+| Líneas totales | **5,845** |
 | Línea base referencia | 11,539 |
-| Reducción acumulada | ~18.9% (~2,183 líneas) |
+| Reducción acumulada | ~49.3% (~5,694 líneas) |
 | Extracciones UI completadas | 4 (Proveedores, Usuarios shell, Reportes asistencia, Órdenes de compra) |
+| Limpieza dead code | 1 (inventario / recetas / requisición UI eliminada) |
 
 **Estructura interna aproximada:**
 
 | Bloque | Líneas | % |
 |--------|--------|---|
-| Helpers de módulo (fuera del componente) | ~730 | 7.8% |
-| Cuerpo del componente (state, effects, handlers, JSX) | ~6,550 | 70.0% |
-| Constantes de estilo inline (`*Style`) | ~1,975 | 21.1% |
+| Helpers de módulo (fuera del componente) | ~680 | 11.6% |
+| Cuerpo del componente (state, effects, handlers, JSX) | ~3,900 | 66.7% |
+| Constantes de estilo inline (`*Style`) | ~1,260 | 21.6% |
 | Export | 1 | — |
 
 ---
@@ -32,7 +33,7 @@ El legacy **no es la única entrada** al producto. Varias secciones siguen en el
 | `/hr?section=…` | Fallback (p. ej. `reportesAsistencia`) | `usuarios` → ProfileManagement, `asistencia` → AttendanceTerminal, `horarios`, `dispositivosMarcaje` |
 | `/dashboard`, `/reports`, `/pos` | — | Dashboard, ReportsDashboard, POS modernos |
 
-**Implicación:** gran parte del JSX legacy (~2,500+ líneas) es **código muerto en rutas actuales**. La prioridad operativa no es re-extraer inventario/recetas/requisición, sino **extraer lo que sigue activo** u **eliminar lo obsoleto** tras validación.
+**Implicación:** el JSX legacy de inventario/recetas/requisición **fue eliminado** (2026-06-09). Siguen en legacy solo las secciones activas (órdenes, proveedores, áreas) y bloques HR/asistencia. `inventarioAreas` / `movimientosInventario` legacy aún existen en el archivo pero no tienen ruta prod. vía `/inventory`.
 
 ---
 
@@ -361,7 +362,7 @@ flowchart TB
     LD[LegacyDashboard]
   end
 
-  subgraph muerto [Legacy sin ruta prod.]
+  subgraph muerto [Eliminado 2026-06-09]
     INV[Inventario UI]
     REC[Recetas UI]
     REQ[Requisición UI]
@@ -395,22 +396,15 @@ flowchart TB
 
 ## Recomendación: siguiente módulo
 
-### **Deprecación UI legacy — inventario / recetas / requisición**
+### **Renderers HR (perfil, dashboard)**
 
 **Por qué:**
 
-1. **~2,850 líneas** de JSX y handlers sin ruta de producción (`InventoryBase`, `RecipesSupabase`, `RequisitionsSupabase` ya las sirven).
-2. Órdenes de compra ya está extraído y limpio — reduce riesgo de romper dependencias cruzadas.
-3. Mayor impacto inmediato en tamaño del monolito (~30% adicional).
+1. Limpieza inventario/recetas/requisición completada (−3,511 líneas; monolito en **5,845**).
+2. `UsersModule` shell ya existe; falta extraer `renderHRProfile`, `renderHRDashboard`, etc.
+3. `/hr?section=usuarios` ya usa `ProfileManagement` — el bloque legacy `usuarios` es candidato a deprecación posterior.
 
-**Alcance sugerido (fase deprecación, no re-extracción):**
-
-1. Validar que no exista entry point oculto a secciones `inventario`, `recetas`, `requisicion` en Legacy.
-2. Eliminar JSX + handlers exclusivos de esas secciones.
-3. Eliminar estilos huérfanos asociados.
-4. Conservar helpers compartidos con órdenes (`normalizeInventoryItem`, `mapPurchaseInventoryItem`, etc.).
-
-**Validación:** `/inventory?section=inventario|recetas|requisicion` sigue operativo vía módulos Supabase; `npm run build`.
+**Validación:** `/inventory?section=ordenes|proveedores|areas`; `/hr?section=reportesAsistencia`; `npm run build`.
 
 ---
 
@@ -418,13 +412,13 @@ flowchart TB
 
 | Sprint | Objetivo | Reducción est. |
 |--------|----------|----------------|
-| 1 | Deprecar UI legacy inventario/recetas/requisición | ~2,400 |
+| ~~1~~ | ~~Deprecar UI legacy inventario/recetas/requisición~~ | ~~−3,511~~ **Hecho** |
 | 2 | Extraer **renderers HR** a `users/` o ProfileManagement | ~900 |
-| 3 | Extraer **áreas** + modales transversales | ~500 |
+| 3 | Extraer **áreas** + deprecar `inventarioAreas`/`movimientosInventario` legacy | ~500 |
 | 4 | Migrar effects asistencia + limpiar estilos huérfanos | ~800 |
 | 5 | Retirar auth local y helpers inventario; eliminar LegacyInventoryApp | ~1,500+ |
 
-**Meta:** pasar de **9,356** a **< 4,000** líneas (o retirar el archivo) con riesgo controlado.
+**Meta:** pasar de **5,845** a **< 3,000** líneas (o retirar el archivo) con riesgo controlado.
 
 ---
 
