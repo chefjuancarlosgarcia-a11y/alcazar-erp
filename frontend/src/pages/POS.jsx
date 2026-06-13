@@ -755,6 +755,10 @@ function POS() {
   const [collapsedOrderSections, setCollapsedOrderSections] = useState({ served: true, closed: true, activity: true, previous: true, audit: true })
   const realtimeNoticeTimerRef = useRef(null)
   const productSearchRef = useRef(null)
+  const activeOrderIdRef = useRef("")
+  const ordenMesaRef = useRef(null)
+  const draftItemsRef = useRef([])
+  const sendingToKitchenRef = useRef(false)
 
   const activeCategories = useMemo(() => posCategories.filter((category) => category.active !== false).sort((a, b) => Number(a.sortOrder) - Number(b.sortOrder)), [posCategories])
   const classicCategories = useMemo(
@@ -786,6 +790,9 @@ function POS() {
   const totalOrden = Number(currentOrder?.total ?? orden.reduce((total, item) => total + item.precio * item.cantidad, 0))
   const draftItems = orden.filter((item) => (item.status || "draft") === "draft")
   const sentItems = orden.filter((item) => !["draft", "cancelled"].includes(item.status || "draft"))
+  activeOrderIdRef.current = activeOrderId
+  ordenMesaRef.current = ordenMesa
+  draftItemsRef.current = draftItems
   const mesaEnServicioActivo = ordenActivaEnMesa(currentOrder)
   const allowHistoricalOrderActions = false
   const orderSections = [
@@ -883,9 +890,9 @@ function POS() {
   }
 
   async function refreshSelectedTableLive() {
-    if (!ordenMesa) return
+    if (!ordenMesaRef.current || sendingToKitchenRef.current) return
     try {
-      await cargarMesaDesdeSupabase(ordenMesa)
+      await cargarMesaDesdeSupabase(ordenMesaRef.current, activeOrderIdRef.current || "")
     } catch (realtimeError) {
       console.error("POS realtime refresh error:", realtimeError)
       setOrdenError(`No se pudo actualizar la mesa en vivo: ${realtimeError.message}`)
@@ -2579,23 +2586,39 @@ function POS() {
     setModificacionActualTexto("")
   }
 
+  function logPosKdsDraftLines(label, items) {
+    console.log(label, (items || []).map((item) => ({
+      lineId: item.lineId,
+      name: getOrderItemDisplayName(item),
+      status: item.status || "draft",
+      qty: item.cantidad,
+      productionAreaId: item.productionAreaId || item.production_area_id || ""
+    })))
+  }
+
   async function handleSendOrderToProduction() {
-    console.log("🔥 CLICK Enviar/preparar orden", {
-      selectedTable: ordenMesa,
-      currentOrder,
-      orderItems: orden
+    const tableContext = ordenMesaRef.current || ordenMesa
+    const orderId = activeOrderIdRef.current || activeOrderId
+    const draftsToSend = draftItemsRef.current.length ? draftItemsRef.current : draftItems
+
+    console.log("[POS/KDS] send kitchen clicked")
+    console.log("[POS/KDS] order id", orderId)
+    logPosKdsDraftLines("[POS/KDS] draft lines before send", draftsToSend)
+    console.log("[POS/KDS] payload", {
+      p_order_id: orderId,
+      tableId: tableContext?.mesaId || currentOrder?.table_id || currentOrder?.tableId || "",
+      areaId: tableContext?.areaId || currentOrder?.area_id || currentOrder?.areaId || ""
     })
-    if (sendingOrder) return
+
+    if (sendingOrder || sendingToKitchenRef.current) return
+    sendingToKitchenRef.current = true
     setSendingOrder(true)
     setOrdenMessage("Procesando envío a producción...")
     setOrdenError("")
     setProductionErrors([])
     try {
-      console.log("START send order")
-      console.log("STEP 1 selectedTable", ordenMesa)
-      console.log("STEP 2 currentOrder", currentOrder)
-      if (!ordenMesa) throw new Error("Selecciona una mesa antes de enviar la orden.")
-      if (!draftItems.length) throw new Error("No hay productos nuevos para enviar.")
+      if (!tableContext) throw new Error("Selecciona una mesa antes de enviar la orden.")
+      if (!draftsToSend.length) throw new Error("No hay productos nuevos para enviar.")
       if (mesaBloqueadaPorCobro) throw new Error("Esta mesa está en proceso de cobro y no admite nuevas comandas.")
 
       const erroresDelivery = validarDelivery()
@@ -2604,10 +2627,10 @@ function POS() {
         throw new Error(`Faltan campos requeridos: ${Object.values(erroresDelivery).join(", ")}.`)
       }
 
-      if (!activeOrderId) throw new Error("No existe una orden abierta en Supabase para esta mesa.")
+      if (!orderId) throw new Error("No existe una orden abierta en Supabase para esta mesa.")
       if (salesChannel !== "dine_in") {
         const customerData = await ensureCustomerForSalesChannel()
-        const notesResult = await updateOrderSalesChannel(activeOrderId, {
+        const notesResult = await updateOrderSalesChannel(orderId, {
           salesChannel,
           customerId: customerData.customer?.id,
           customerAddressId: customerData.address?.id,
@@ -2618,20 +2641,29 @@ function POS() {
         if (notesResult.error) throw new Error(notesResult.message || notesResult.error.message)
         setCurrentOrder(notesResult.data)
       }
-      console.log("STEP 3 draftItems", draftItems)
-      console.log("STEP 4 calling transactional RPC", activeOrderId)
-      const result = await sendOrderToProduction(activeOrderId)
-      if (result.error) throw new Error(result.message || result.error.message)
-      console.log("STEP 5 RPC completed", result.data)
+
+      const result = await sendOrderToProduction(orderId)
+      if (result.error) {
+        console.error("[POS/KDS] rpc error", result.error, result.message)
+        throw new Error(result.message || result.error.message)
+      }
+      console.log("[POS/KDS] rpc result", result.data)
+
+      const ticketIds = Array.isArray(result.data?.ticket_ids)
+        ? result.data.ticket_ids
+        : (result.data?.ticket_ids ? [].concat(result.data.ticket_ids) : [])
+      if (!ticketIds.length && draftsToSend.some((item) => !item.isTestItem && !item.is_test_item)) {
+        throw new Error("La orden se procesó pero no se crearon tickets de cocina. Revisa área de producción y receta del producto.")
+      }
+
       setProductionErrors([])
       setDeliveryErrors({})
 
-      // Show success toast
       showToast("Orden enviada correctamente a cocina.", "success", 1500)
 
-      let finalMessage = `Orden enviada a producción. Inventario descontado. Tickets creados: ${(result.data.ticket_ids || []).length}.`
+      let finalMessage = `Orden enviada a producción. Inventario descontado. Tickets creados: ${ticketIds.length}.`
       if (salesChannel === "delivery") {
-        const refreshedDelivery = await getOrderWithItems(activeOrderId)
+        const refreshedDelivery = await getOrderWithItems(orderId)
         if (refreshedDelivery.error) throw new Error(refreshedDelivery.message || refreshedDelivery.error.message)
         await enviarCuentaACajaInterno(refreshedDelivery.data, { skipDraftCheck: true })
         finalMessage = `${finalMessage} Solicitud de cobro delivery enviada automáticamente a caja.`
@@ -2641,21 +2673,25 @@ function POS() {
       if (esCanalCliente) setDeliveryForm(emptyDeliveryForm)
       setOrdenMessage(finalMessage)
       setOrdenError("")
-      window.dispatchEvent(new Event("production-tickets-updated"))
-      window.dispatchEvent(new Event("inventory-updated"))
+
+      let refreshedOrder = null
       try {
-        await cargarMesaDesdeSupabase(ordenMesa, activeOrderId)
+        refreshedOrder = await cargarMesaDesdeSupabase(tableContext, orderId)
+        logPosKdsDraftLines("[POS/KDS] lines after send", refreshedOrder?.items || [])
       } catch (refreshError) {
-        console.error("POS order sent but history refresh failed:", refreshError)
+        console.error("[POS/KDS] refresh after send failed", refreshError)
         setOrdenMessage(`Orden enviada a producción. Inventario descontado. No se pudo refrescar el historial: ${refreshError.message}`)
       }
+
+      window.dispatchEvent(new Event("production-tickets-updated"))
+      window.dispatchEvent(new Event("inventory-updated"))
     } catch (error) {
-      console.error("SEND ORDER ERROR", error)
+      console.error("[POS/KDS] send failed", error)
       setOrdenMessage("")
       setOrdenError(error?.message || "Error desconocido enviando orden.")
       showToast(error?.message || "Error al enviar orden", "error", 3000)
     } finally {
-      console.log("END send order")
+      sendingToKitchenRef.current = false
       setSendingOrder(false)
     }
   }

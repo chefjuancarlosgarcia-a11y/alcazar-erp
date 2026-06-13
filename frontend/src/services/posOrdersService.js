@@ -300,15 +300,22 @@ export async function getOrderItems(orderId) {
 }
 
 export async function sendOrderToProduction(orderId) {
+  const payload = { p_order_id: orderId }
+  console.log("[POS/KDS] payload", payload)
   try {
     const { data, error } = await withTimeout(
-      supabase.rpc("send_pos_order_to_production", { p_order_id: orderId }),
+      supabase.rpc("send_pos_order_to_production", payload),
       10000,
       "enviar orden y consumir inventario"
     )
-    if (error) return { data: null, error, message: formatSupabaseError(error) }
+    if (error) {
+      console.error("[POS/KDS] rpc error", error, formatSupabaseError(error))
+      return { data: null, error, message: formatSupabaseError(error) }
+    }
+    console.log("[POS/KDS] rpc result", data)
     return { data, error: null, message: "" }
   } catch (error) {
+    console.error("[POS/KDS] rpc error", error)
     return { data: null, error, message: error.message }
   }
 }

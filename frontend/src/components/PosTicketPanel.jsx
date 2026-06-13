@@ -239,7 +239,10 @@ export function PosTicketPanel({
           <button
             type="button"
             className="pos-action-btn send"
-            onClick={onSendKitchen}
+            onClick={() => {
+              console.log("[POS/KDS] send kitchen clicked (draft CTA)")
+              onSendKitchen?.()
+            }}
             disabled={sendingOrder || mesaBloqueadaPorCobro}
           >
             {sendingOrder ? "Enviando a cocina..." : "Enviar a cocina"}
@@ -252,7 +255,10 @@ export function PosTicketPanel({
           <button
             type="button"
             className="pos-action-btn send pos-action-kitchen"
-            onClick={onSendKitchen}
+            onClick={() => {
+              console.log("[POS/KDS] send kitchen clicked (primary)")
+              onSendKitchen?.()
+            }}
             disabled={!draftCount || sendingOrder || mesaBloqueadaPorCobro}
             title="Envía los productos nuevos a cocina / KDS"
           >
