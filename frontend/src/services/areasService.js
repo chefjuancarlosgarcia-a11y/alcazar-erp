@@ -61,6 +61,43 @@ export async function createArea(area) {
   return { data: normalizeArea(data), error }
 }
 
+export function slugifyAreaId(name) {
+  return String(name || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
+}
+
+export async function createOperationalArea(payload = {}) {
+  const name = String(payload.name || "").trim()
+  if (!name) throw new Error("El nombre del área es obligatorio")
+
+  const id = String(payload.id || slugifyAreaId(name)).trim()
+  if (!id) throw new Error("No se pudo generar una clave válida para el área")
+
+  const allowedTypes = new Set(["principal", "operativa", "produccion", "servicio", "administrativa", "limpieza"])
+  const type = allowedTypes.has(payload.type) ? payload.type : "operativa"
+
+  const { data: existingAreas, error: loadError } = await getAreas()
+  if (loadError) throw new Error(loadError.message || "No se pudieron validar las áreas existentes.")
+  if ((existingAreas || []).some((area) => area.id === id)) {
+    throw new Error(`Ya existe un área con la clave "${id}".`)
+  }
+
+  const result = await createArea({
+    id,
+    name,
+    type,
+    description: String(payload.description || "").trim(),
+    active: payload.active !== false,
+    canRequestInventory: payload.canRequestInventory !== false,
+    isProductionArea: payload.isProductionArea === true,
+    sortOrder: Number(payload.sortOrder || 0)
+  })
+
+  if (result.error) {
+    throw new Error(result.error.message || "No se pudo crear el área.")
+  }
+  return result.data
+}
+
 export async function updateArea(id, updates) {
   const { data, error } = await supabase
     .from("areas")

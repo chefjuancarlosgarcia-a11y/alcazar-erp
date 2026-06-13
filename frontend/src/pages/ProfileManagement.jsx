@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { supabase } from "../lib/supabase"
 import { useAuth } from "../context/AuthContext"
-import { getActiveAreas } from "../services/areasService"
+import { createOperationalArea, getActiveAreas } from "../services/areasService"
 import {
   getAttendanceTerminalProfiles,
   setAttendanceDevice,
@@ -25,6 +25,7 @@ import {
   canManageAttendancePinForUser,
   canManageUsers,
   canManageRoleCatalog,
+  canManageAreaCatalog,
   getAllowedAssignableRoles,
   loadDynamicRoles,
   getRoleDisplayName
@@ -33,6 +34,7 @@ import * as userRolesService from "../services/userRolesService"
 import "./ProfileManagement.css"
 
 const ROLE_CATALOG_DENIED_MESSAGE = "Solo Administración puede crear roles personalizados."
+const AREA_CATALOG_DENIED_MESSAGE = "Solo Administración puede crear áreas operativas."
 
 const EMPTY_FORM = {
   full_name: "",
@@ -144,6 +146,14 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
   const [newRoleError, setNewRoleError] = useState("")
   const [newRoleCreating, setNewRoleCreating] = useState(false)
   const [createdRoleKey, setCreatedRoleKey] = useState("")
+  const [showNewAreaModal, setShowNewAreaModal] = useState(false)
+  const [newAreaForm, setNewAreaForm] = useState({
+    name: "",
+    type: "operativa",
+    description: ""
+  })
+  const [newAreaError, setNewAreaError] = useState("")
+  const [newAreaCreating, setNewAreaCreating] = useState(false)
 
   const canManage = canManageUsers(user)
   const canManageSpecialSchedules = SHIFT_MANAGER_ROLES.includes(user?.role)
@@ -317,6 +327,67 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
     setShowNewRoleModal(false)
     setNewRoleForm({ role_name: "", category: "Personalizado", description: "" })
     setNewRoleError("")
+  }
+
+  function applyCreatedAreaToForms(area) {
+    if (!area?.id) return
+    if (showCreate) {
+      setCreateForm((current) => ({ ...current, area_id: area.id, area_name: area.name }))
+    } else if (editingProfile) {
+      setForm((current) => ({ ...current, area_id: area.id, area_name: area.name }))
+    }
+  }
+
+  async function createNewArea() {
+    if (!canManageAreaCatalog(user)) {
+      setNewAreaError(AREA_CATALOG_DENIED_MESSAGE)
+      return
+    }
+    try {
+      setNewAreaError("")
+      if (!newAreaForm.name.trim()) {
+        setNewAreaError("El nombre del área es obligatorio")
+        return
+      }
+
+      setNewAreaCreating(true)
+      const area = await createOperationalArea({
+        name: newAreaForm.name.trim(),
+        type: newAreaForm.type || "operativa",
+        description: newAreaForm.description || ""
+      })
+
+      await loadAreas()
+      applyCreatedAreaToForms(area)
+      setNewAreaForm({ name: "", type: "operativa", description: "" })
+      setModalMessage(`Área "${area.name}" creada exitosamente. Ya está disponible para asignar.`)
+
+      setTimeout(() => {
+        setShowNewAreaModal(false)
+        setModalMessage("")
+      }, 2000)
+    } catch (err) {
+      console.error("Error creating area:", err)
+      setNewAreaError(err.message || "Error al crear el área")
+    } finally {
+      setNewAreaCreating(false)
+    }
+  }
+
+  function openNewAreaModal() {
+    if (!canManageAreaCatalog(user)) {
+      setNewAreaError(AREA_CATALOG_DENIED_MESSAGE)
+      return
+    }
+    setNewAreaForm({ name: "", type: "operativa", description: "" })
+    setNewAreaError("")
+    setShowNewAreaModal(true)
+  }
+
+  function closeNewAreaModal() {
+    setShowNewAreaModal(false)
+    setNewAreaForm({ name: "", type: "operativa", description: "" })
+    setNewAreaError("")
   }
 
   function openEdit(profile) {
@@ -935,10 +1006,23 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
               <FormSection title="Horarios / informacion laboral">
                 <div className="profiles-form-grid">
                   <Field label="Area">
-                    <select value={form.area_id} onChange={(event) => updateArea(event.target.value)} disabled={currentIsReadOnly || saving}>
-                      <option value="">Sin area asignada</option>
-                      {areaOptions.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}
-                    </select>
+                    <div className="profiles-role-select-container">
+                      <select value={form.area_id} onChange={(event) => updateArea(event.target.value)} disabled={currentIsReadOnly || saving}>
+                        <option value="">Sin area asignada</option>
+                        {areaOptions.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}
+                      </select>
+                      {canManageAreaCatalog(user) && (
+                        <button
+                          type="button"
+                          className="profiles-add-role-btn"
+                          onClick={openNewAreaModal}
+                          disabled={currentIsReadOnly || saving}
+                          title="Crear un área operativa nueva"
+                        >
+                          + Crear área
+                        </button>
+                      )}
+                    </div>
                   </Field>
                   <Field label="Employee ID"><input value={form.employee_id} onChange={(event) => updateField("employee_id", event.target.value)} disabled={currentIsReadOnly || saving} /></Field>
                   <Field label="Salario por hora (Q)"><input type="number" min="0" step="0.01" value={form.hourly_rate} onChange={(event) => updateField("hourly_rate", event.target.value)} placeholder="Opcional" disabled={currentIsReadOnly || saving} /></Field>
@@ -1141,6 +1225,77 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
         </div>
       )}
 
+      {showNewAreaModal && (
+        <div className="profiles-modal-overlay">
+          <div className="profiles-modal new-role-modal">
+            <header className="profiles-modal-header">
+              <div>
+                <p className="profiles-eyebrow">Nueva área</p>
+                <h2>Crear área operativa</h2>
+              </div>
+              <button type="button" onClick={closeNewAreaModal} disabled={newAreaCreating}>Cerrar</button>
+            </header>
+
+            <div className="profiles-modal-body">
+              <FormSection title="Información del área">
+                <div className="profiles-form-grid">
+                  <Field label="Nombre del área *">
+                    <input
+                      type="text"
+                      value={newAreaForm.name}
+                      onChange={(event) => setNewAreaForm({ ...newAreaForm, name: event.target.value })}
+                      placeholder="Ej: Terraza, Eventos"
+                      disabled={newAreaCreating}
+                      required
+                    />
+                  </Field>
+                  <Field label="Tipo">
+                    <select
+                      value={newAreaForm.type}
+                      onChange={(event) => setNewAreaForm({ ...newAreaForm, type: event.target.value })}
+                      disabled={newAreaCreating}
+                    >
+                      <option value="operativa">Operativa</option>
+                      <option value="produccion">Producción</option>
+                      <option value="servicio">Servicio</option>
+                      <option value="administrativa">Administrativa</option>
+                      <option value="limpieza">Limpieza</option>
+                    </select>
+                  </Field>
+                  <Field label="Descripción">
+                    <textarea
+                      value={newAreaForm.description}
+                      onChange={(event) => setNewAreaForm({ ...newAreaForm, description: event.target.value })}
+                      placeholder="Descripción opcional del área"
+                      disabled={newAreaCreating}
+                      rows="3"
+                    />
+                  </Field>
+                </div>
+              </FormSection>
+
+              <div className="profiles-modal-feedback">
+                {newAreaError && <span className="profiles-error" role="alert">{newAreaError}</span>}
+              </div>
+            </div>
+
+            <footer className="profiles-modal-actions">
+              <button type="button" className="profiles-secondary" onClick={closeNewAreaModal} disabled={newAreaCreating}>
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="profiles-primary"
+                onClick={createNewArea}
+                disabled={newAreaCreating || !newAreaForm.name.trim()}
+              >
+                {newAreaCreating ? "Creando..." : "Crear área"}
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
+
       {showCreate && (
         <div className="profiles-modal-overlay">
           <form className="profiles-modal create" onSubmit={createUser}>
@@ -1189,10 +1344,23 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
               <FormSection title="Horarios / informacion laboral">
                 <div className="profiles-form-grid">
                   <Field label="Area">
-                    <select value={createForm.area_id} onChange={(event) => updateArea(event.target.value, setCreateForm)} disabled={creating}>
-                      <option value="">Sin area asignada</option>
-                      {areaOptions.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}
-                    </select>
+                    <div className="profiles-role-select-container">
+                      <select value={createForm.area_id} onChange={(event) => updateArea(event.target.value, setCreateForm)} disabled={creating}>
+                        <option value="">Sin area asignada</option>
+                        {areaOptions.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}
+                      </select>
+                      {canManageAreaCatalog(user) && (
+                        <button
+                          type="button"
+                          className="profiles-add-role-btn"
+                          onClick={openNewAreaModal}
+                          disabled={creating}
+                          title="Crear un área operativa nueva"
+                        >
+                          + Crear área
+                        </button>
+                      )}
+                    </div>
                   </Field>
                   <Field label="Employee ID"><input value={createForm.employee_id} onChange={(event) => updateCreateField("employee_id", event.target.value)} disabled={creating} /></Field>
                   <Field label="Telefono"><input value={createForm.phone} onChange={(event) => updateCreateField("phone", event.target.value)} disabled={creating} /></Field>

@@ -268,6 +268,10 @@ export function canManageRoleCatalog(currentUser) {
   return ROLE_CATALOG_MANAGERS.has(normalizeRole(currentUser?.role))
 }
 
+export function canManageAreaCatalog(currentUser) {
+  return canManageRoleCatalog(currentUser)
+}
+
 export function canManageAttendancePin(currentUser) {
   return canAccessUserManagement(currentUser)
 }
