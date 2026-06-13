@@ -4,6 +4,9 @@ import Cropper from "react-easy-crop"
 import "react-easy-crop/react-easy-crop.css"
 import SuppliersModule from "./suppliers/SuppliersModule"
 import UsersModule from "./users/UsersModule"
+import AttendanceReportsModule from "./attendance/AttendanceReportsModule"
+
+const USE_LEGACY_ATTENDANCE_REPORTS_UI = false
 import { BrowserMultiFormatReader } from "@zxing/browser"
 import * as XLSX from "xlsx"
 import jsPDF from "jspdf"
@@ -947,6 +950,22 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
     setSeccionActiva(initialSeccion)
   }, [initialSeccion])
 
+  useEffect(() => {
+    const raw = localStorage.getItem("usuarioActual")
+    if (!raw) return
+    try {
+      const parsed = JSON.parse(raw)
+      if (!parsed?.nombre) return
+      setUsuarioActual((current) => {
+        if (!current) return parsed
+        if (current.id !== parsed.id || current.rol !== parsed.rol || current.username !== parsed.username) return parsed
+        return current
+      })
+    } catch (error) {
+      console.warn("[legacy] usuarioActual inválido en localStorage", error)
+    }
+  }, [authProfile?.id, authenticatedUser?.id])
+
   const cargarProveedoresSupabase = useCallback(async () => {
     setProveedoresLoading(true)
     setProveedoresError("")
@@ -1258,8 +1277,13 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
     estado: "Activo"
   })
   useEffect(() => {
-    localStorage.setItem("asistenciaMovimientos", JSON.stringify(asistenciaMovimientos))
-  }, [asistenciaMovimientos])
+    if (seccionActiva === "reportesAsistencia") return
+    try {
+      localStorage.setItem("asistenciaMovimientos", JSON.stringify(asistenciaMovimientos))
+    } catch (error) {
+      console.warn("[asistencia] No se pudieron guardar movimientos en localStorage", error)
+    }
+  }, [asistenciaMovimientos, seccionActiva])
 
   useEffect(() => {
     if (seccionActiva !== "reportesAsistencia") return
@@ -3097,6 +3121,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
   const puedeAdministrarAccesos = canManageUsers(usuarioActual)
   const puedeVerModuloRRHH = hasRole(["Administrador", "Gerente General", "Recursos Humanos", "Supervisor", "FOH", "BOH", "Cocina", "Servicio", "Barra", "Cafeteria", "Panaderia", "Reposteria"])
   const puedeVerReportesRRHH = hasRole(["Administrador", "Gerente General", "Recursos Humanos"])
+    || ["admin", "gerente_general", "recursos_humanos", "rrhh"].includes(normalizeRole(authenticatedUser?.role))
 
   const puedeGestionarRecetas = hasRole(["Administrador", "Gerente General"])
   const puedeAdministrarAreas = hasRole(["Administrador", "Gerente General"]) || ["admin", "gerente"].includes(authenticatedUser?.role)
@@ -3135,12 +3160,13 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
   const [moduleTitle, moduleSubtitle] = moduleContext[seccionActiva] || ["Operaciones", BRANDING.tagline]
 
   useEffect(() => {
+    if (seccionActiva === "reportesAsistencia" && puedeVerReportesRRHH) return
     if (!usuarioActual) return
     const seccionValida = modulosDisponibles.some((modulo) => modulo.key === seccionActiva && hasRole(modulo.roles))
     if (!seccionValida) {
       setSeccionActiva("dashboard")
     }
-  }, [usuarioActual, seccionActiva])
+  }, [usuarioActual, seccionActiva, puedeVerReportesRRHH])
 
   const recetasSubseccionVisible = puedeGestionarRecetas ? recetasSubseccion : "biblioteca"
 
@@ -3524,13 +3550,15 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
     return { usuario, totalMinutos }
   }).filter((item) => item.totalMinutos > 0)
   const resumenSemanal = asistenciaMovimientos.filter((movimiento) => {
+    if (!movimiento?.fecha || !asistenciaFechaFiltro) return false
     const fechaMovimiento = new Date(`${movimiento.fecha}T00:00:00`)
     const fechaFiltro = new Date(`${asistenciaFechaFiltro}T00:00:00`)
+    if (Number.isNaN(fechaMovimiento.getTime()) || Number.isNaN(fechaFiltro.getTime())) return false
     const diferenciaDias = Math.floor((fechaFiltro - fechaMovimiento) / 86400000)
     return diferenciaDias >= 0 && diferenciaDias < 7
   })
   const resumenMensual = asistenciaMovimientos.filter((movimiento) =>
-    movimiento.fecha.slice(0, 7) === asistenciaFechaFiltro.slice(0, 7)
+    String(movimiento?.fecha || "").slice(0, 7) === String(asistenciaFechaFiltro || "").slice(0, 7)
   )
 
   const ordenManualSeleccionada = ordenesCompraManual.find(
@@ -5726,6 +5754,26 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
         />
       )}
 
+      {seccionActiva === "reportesAsistencia" && puedeVerReportesRRHH && !USE_LEGACY_ATTENDANCE_REPORTS_UI && (
+        <AttendanceReportsModule
+          asistenciaBusqueda={asistenciaBusqueda}
+          setAsistenciaBusqueda={setAsistenciaBusqueda}
+          asistenciaFechaFiltro={asistenciaFechaFiltro}
+          setAsistenciaFechaFiltro={setAsistenciaFechaFiltro}
+          asistenciaReporteColaboradorId={asistenciaReporteColaboradorId}
+          setAsistenciaReporteColaboradorId={setAsistenciaReporteColaboradorId}
+          asistenciaPerfiles={asistenciaPerfiles}
+          asistenciaMovimientos={asistenciaMovimientos}
+          asistenciaLlegadasTarde={asistenciaLlegadasTarde}
+          asistenciaGraceMinutes={asistenciaGraceMinutes}
+          asistenciaCargando={asistenciaCargando}
+          asistenciaDetalleMarcaje={asistenciaDetalleMarcaje}
+          setAsistenciaDetalleMarcaje={setAsistenciaDetalleMarcaje}
+          asistenciaFotoAmpliada={asistenciaFotoAmpliada}
+          setAsistenciaFotoAmpliada={setAsistenciaFotoAmpliada}
+        />
+      )}
+
 
       {seccionActiva === "recetas" && (
         <div style={cardStyle}>
@@ -7071,7 +7119,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
             </div>
           )}
 
-          {seccionActiva === "reportesAsistencia" && puedeVerReportesRRHH && (
+          {seccionActiva === "reportesAsistencia" && puedeVerReportesRRHH && USE_LEGACY_ATTENDANCE_REPORTS_UI && (
             <div style={cardStyle}>
               <h2>Reportes de asistencia</h2>
               <div style={attendanceToolbarStyle}>

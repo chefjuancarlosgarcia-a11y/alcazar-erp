@@ -1,0 +1,302 @@
+/* Reportes de asistencia — ERP UI Spacing System v1.0 */
+
+.attendance-reports-module {
+  display: grid;
+  gap: var(--erp-section-gap, 32px);
+  padding: var(--erp-space-24);
+  max-width: var(--erp-content-max-width, 1600px);
+}
+
+.attendance-reports-header h2 {
+  margin: 0 0 var(--erp-space-8);
+  color: var(--erp-text-primary, #f8fafc);
+}
+
+.attendance-reports-header p {
+  margin: 0;
+  color: var(--erp-text-secondary, #94a3b8);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.attendance-reports-filters {
+  display: grid;
+  gap: var(--erp-space-16);
+}
+
+@media (min-width: 768px) {
+  .attendance-reports-filters {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.attendance-reports-filters .erp-search-input,
+.attendance-reports-filters select {
+  width: 100%;
+  min-height: var(--erp-input-height, 44px);
+}
+
+.attendance-reports-status {
+  margin: 0;
+  font-size: 14px;
+}
+
+.attendance-reports-status--loading {
+  color: #cbd5e1;
+}
+
+.attendance-reports-kpi--success strong {
+  color: #86efac;
+}
+
+.attendance-reports-kpi--warning strong {
+  color: #fcd34d;
+}
+
+.attendance-reports-kpi--danger strong {
+  color: #fca5a5;
+}
+
+.attendance-reports-kpi-note {
+  margin: var(--erp-space-8) 0 0;
+  color: var(--erp-text-secondary, #94a3b8);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.attendance-reports-kpi-detail {
+  display: grid;
+  gap: var(--erp-space-4);
+  margin-top: var(--erp-space-8);
+}
+
+.attendance-reports-kpi-detail p {
+  margin: 0;
+  color: var(--erp-text-secondary, #94a3b8);
+  font-size: 13px;
+}
+
+.attendance-reports-section-card {
+  display: grid;
+  gap: var(--erp-space-16);
+  padding: var(--erp-space-16);
+  border: 1px solid var(--erp-border, #334155);
+  border-radius: var(--erp-radius-card, 12px);
+  background: var(--erp-surface, #111827);
+}
+
+.attendance-reports-section-card h3 {
+  margin: 0;
+  color: var(--erp-text-primary, #f8fafc);
+  font-size: 16px;
+}
+
+.attendance-reports-badge {
+  white-space: nowrap;
+}
+
+.attendance-reports-table-wrap {
+  overflow-x: auto;
+}
+
+.attendance-reports-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 760px;
+}
+
+.attendance-reports-table th {
+  text-align: left;
+  padding: var(--erp-space-8) var(--erp-space-16);
+  border-bottom: 1px solid var(--erp-border, #334155);
+  color: var(--erp-text-secondary, #cbd5e1);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.attendance-reports-table td {
+  padding: var(--erp-space-8) var(--erp-space-16);
+  border-bottom: 1px solid #1f2937;
+  color: var(--erp-text-primary, #e5e7eb);
+  font-size: 14px;
+  vertical-align: middle;
+}
+
+.attendance-reports-late-minutes {
+  font-weight: 700;
+  color: #fcd34d;
+}
+
+.attendance-reports-photo-btn {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.attendance-reports-photo-thumb {
+  width: 72px;
+  height: 54px;
+  border-radius: var(--erp-radius-badge, 8px);
+  object-fit: cover;
+  border: 1px solid var(--erp-border, #334155);
+}
+
+.attendance-reports-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  padding: var(--erp-space-16);
+  background: rgba(2, 6, 23, 0.72);
+}
+
+.attendance-reports-detail-modal {
+  display: grid;
+  gap: var(--erp-space-16);
+  width: min(760px, calc(100vw - 32px));
+  max-height: 90vh;
+  overflow: auto;
+  padding: var(--erp-space-24);
+  border-radius: var(--erp-radius-card, 12px);
+  border: 1px solid var(--erp-border, #334155);
+  background: var(--erp-surface-2, #0f172a);
+  color: var(--erp-text-primary, #e2e8f0);
+}
+
+.attendance-reports-detail-modal h3 {
+  margin: 0;
+}
+
+.attendance-reports-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--erp-space-16);
+}
+
+@media (min-width: 768px) {
+  .attendance-reports-detail-grid {
+    grid-template-columns: repeat(2, minmax(180px, 1fr));
+  }
+}
+
+.attendance-reports-detail-grid > div {
+  display: grid;
+  gap: var(--erp-space-4);
+}
+
+.attendance-reports-detail-grid strong {
+  color: var(--erp-text-secondary, #94a3b8);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.attendance-reports-detail-grid span {
+  color: var(--erp-text-primary, #e2e8f0);
+  font-size: 14px;
+}
+
+.attendance-reports-detail-grid .attendance-reports-detail-span-full {
+  grid-column: 1 / -1;
+}
+
+.attendance-reports-user-agent {
+  display: block;
+  margin-top: var(--erp-space-8);
+  padding: var(--erp-space-8);
+  border-radius: var(--erp-radius-badge, 8px);
+  background: #111827;
+  color: var(--erp-text-secondary, #94a3b8);
+  font-size: 12px;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.attendance-reports-detail-photo {
+  width: 100%;
+  max-height: 320px;
+  object-fit: contain;
+  border-radius: var(--erp-radius-badge, 8px);
+  border: 1px solid var(--erp-border, #334155);
+}
+
+.attendance-reports-photo-preview {
+  display: grid;
+  gap: var(--erp-space-16);
+  width: min(720px, calc(100vw - 32px));
+  padding: var(--erp-space-16);
+  border-radius: var(--erp-radius-card, 12px);
+  border: 1px solid var(--erp-border, #334155);
+  background: var(--erp-surface-2, #0f172a);
+}
+
+.attendance-reports-photo-preview img {
+  width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+  border-radius: var(--erp-radius-badge, 8px);
+}
+
+.attendance-reports-empty {
+  margin: 0;
+  color: var(--erp-text-secondary, #94a3b8);
+  font-size: 14px;
+}
+
+/* Mobile: filas como cards (solo una vista activa — evita doble DOM/fotos) */
+.attendance-reports-mobile-list {
+  display: none;
+  gap: var(--erp-space-16);
+}
+
+.attendance-reports-mobile-list--visible {
+  display: grid;
+}
+
+.attendance-reports-table-wrap--visible {
+  overflow-x: auto;
+}
+
+.attendance-reports-mobile-card {
+  display: grid;
+  gap: var(--erp-space-8);
+  padding: var(--erp-space-16);
+  border: 1px solid var(--erp-border, #334155);
+  border-radius: var(--erp-radius-card, 12px);
+  background: var(--erp-surface-2, #0f172a);
+}
+
+.attendance-reports-mobile-card__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--erp-space-16);
+}
+
+.attendance-reports-mobile-card__label {
+  color: var(--erp-text-secondary, #94a3b8);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.attendance-reports-mobile-card__value {
+  color: var(--erp-text-primary, #e2e8f0);
+  font-size: 14px;
+  text-align: right;
+}
+
+.attendance-reports-mobile-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--erp-space-8);
+  margin-top: var(--erp-space-8);
+}
+
+@media (max-width: 767px) {
+  .attendance-reports-module {
+    padding: var(--erp-space-16);
+  }
+}
