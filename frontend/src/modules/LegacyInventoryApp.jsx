@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom"
 import SuppliersModule from "./suppliers/SuppliersModule"
 import AttendanceReportsModule from "./attendance/AttendanceReportsModule"
 import PurchaseOrdersModule from "./purchase-orders/PurchaseOrdersModule"
+import AreasModule from "./areas/AreasModule"
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
 import Sidebar from "./LegacySidebar"
@@ -2077,64 +2078,32 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
           )}
 
           {seccionActiva === "areas" && puedeAdministrarAreas && (
-            <>
-              <div style={cardStyle}>
-                <h2>Áreas operativas</h2>
-                <p style={{ margin: "0 0 16px", color: "#94a3b8", lineHeight: 1.5 }}>
-                  Estas áreas se usan para inventario, producción, requisiciones y colaboradores. No son zonas físicas del restaurante.
-                </p>
-                {areasError && <p style={attendanceWarningStyle}>{areasError}</p>}
-                <div style={hrFilterGridStyle}>
-                  <input value={areaForm.name} onChange={(e) => setAreaForm((actual) => ({ ...actual, name: e.target.value }))} placeholder="Nombre del área" style={inputStyle} />
-                  <select value={areaForm.type} onChange={(e) => setAreaForm((actual) => ({ ...actual, type: e.target.value }))} style={inputStyle}>
-                    <option value="principal">Principal</option>
-                    <option value="operativa">Operativa</option>
-                    <option value="produccion">Producción</option>
-                    <option value="servicio">Servicio</option>
-                    <option value="administrativa">Administrativa</option>
-                    <option value="limpieza">Limpieza</option>
-                  </select>
-                  <select value={areaForm.responsibleUserId} onChange={(e) => setAreaForm((actual) => ({ ...actual, responsibleUserId: e.target.value }))} style={inputStyle}>
-                    <option value="">Sin responsable asignado</option>
-                    {areaProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.full_name || profile.username}</option>)}
-                  </select>
-                  <input value={areaForm.description} onChange={(e) => setAreaForm((actual) => ({ ...actual, description: e.target.value }))} placeholder="Descripción" style={inputStyle} />
-                </div>
-                <div style={areaOptionRowStyle}>
-                  <label style={passwordOptionStyle}><input type="checkbox" checked={areaForm.canRequestInventory} onChange={(e) => setAreaForm((actual) => ({ ...actual, canRequestInventory: e.target.checked }))} /> Puede hacer requisiciones</label>
-                  <label style={passwordOptionStyle}><input type="checkbox" checked={areaForm.isProductionArea} onChange={(e) => setAreaForm((actual) => ({ ...actual, isProductionArea: e.target.checked }))} /> Área de producción</label>
-                  <label style={passwordOptionStyle}><input type="checkbox" checked={areaForm.active} onChange={(e) => setAreaForm((actual) => ({ ...actual, active: e.target.checked }))} /> Área activa</label>
-                </div>
-                <div style={buttonRowStyle}>
-                  <button type="button" onClick={guardarArea} style={buttonStyle}>{editingAreaId ? "Guardar área" : "Crear área"}</button>
-                  <button type="button" onClick={cargarAreasSupabase} style={cancelButtonStyle}>Actualizar lista</button>
-                  {editingAreaId && <button type="button" onClick={() => { setEditingAreaId(""); setAreaForm({ id: "", name: "", type: "operativa", description: "", responsibleUserId: "", canRequestInventory: true, isProductionArea: false, active: true }) }} style={cancelButtonStyle}>Cancelar</button>}
-                </div>
-              </div>
-              <div style={cardStyle}>
-                <h2>Áreas operativas registradas</h2>
-                {areasLoading && <p>Cargando áreas desde Supabase...</p>}
-                <div style={registeredAreasGridStyle}>
-                  {areas.map((area) => (
-                    <div key={area.id} style={registeredAreaCardStyle}>
-                      <div style={registeredAreaContentStyle}>
-                        <h3 style={registeredAreaTitleStyle}>{area.name}</h3>
-                        <p><strong>Tipo:</strong> {area.type}</p>
-                        <p><strong>Estado:</strong> {area.active ? "Activa" : "Inactiva"}</p>
-                        <p><strong>Requisiciones:</strong> {area.canRequestInventory ? "Permitidas" : "No permitidas"}</p>
-                        <p><strong>Producción:</strong> {area.isProductionArea ? "Sí" : "No"}</p>
-                        <p><strong>Responsable:</strong> {areaProfiles.find((profile) => profile.id === area.responsibleUserId)?.full_name || "Sin asignar"}</p>
-                      </div>
-                      <div style={registeredAreaActionsStyle}>
-                        <button type="button" onClick={() => editarArea(area)} style={registeredAreaEditButtonStyle}>Editar</button>
-                        <button type="button" onClick={() => window.location.assign(`/inventory?section=inventarioAreas&area=${encodeURIComponent(area.id)}`)} style={registeredAreaInventoryButtonStyle}>Ver inventario</button>
-                        {area.id !== "almacen" && area.active && <button type="button" onClick={() => desactivarArea(area)} style={registeredAreaDeactivateButtonStyle}>Desactivar</button>}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </>
+            <AreasModule
+              areas={areas}
+              areaForm={areaForm}
+              setAreaForm={setAreaForm}
+              areasError={areasError}
+              areasLoading={areasLoading}
+              areaProfiles={areaProfiles}
+              editingAreaId={editingAreaId}
+              onGuardarArea={guardarArea}
+              onEditarArea={editarArea}
+              onDesactivarArea={desactivarArea}
+              onReloadAreas={cargarAreasSupabase}
+              onCancelEdit={() => {
+                setEditingAreaId("")
+                setAreaForm({
+                  id: "",
+                  name: "",
+                  type: "operativa",
+                  description: "",
+                  responsibleUserId: "",
+                  canRequestInventory: true,
+                  isProductionArea: false,
+                  active: true
+                })
+              }}
+            />
           )}
 
           {seccionActiva === "movimientosInventario" && (
@@ -2298,75 +2267,6 @@ const areaDashboardCardStyle = {
   backgroundColor: "#0f172a"
 }
 
-const registeredAreasGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(290px, 1fr))",
-  gap: "14px",
-  marginTop: "16px"
-}
-
-const registeredAreaCardStyle = {
-  display: "flex",
-  flexDirection: "column",
-  minHeight: "292px",
-  padding: "18px",
-  borderRadius: "12px",
-  border: "1px solid #334155",
-  backgroundColor: "#0f172a",
-  boxShadow: "0 5px 14px rgba(2, 6, 23, 0.2)"
-}
-
-const registeredAreaContentStyle = {
-  display: "grid",
-  gap: "8px",
-  flex: 1
-}
-
-const registeredAreaTitleStyle = {
-  margin: "0 0 6px",
-  fontSize: "18px",
-  color: "#f8fafc"
-}
-
-const registeredAreaActionsStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-  gap: "8px",
-  paddingTop: "16px",
-  marginTop: "12px",
-  borderTop: "1px solid #1e293b"
-}
-
-const registeredAreaButtonBaseStyle = {
-  minHeight: "44px",
-  padding: "10px 12px",
-  border: "1px solid transparent",
-  borderRadius: "9px",
-  color: "#ffffff",
-  fontWeight: 700,
-  cursor: "pointer",
-  lineHeight: 1.25
-}
-
-const registeredAreaEditButtonStyle = {
-  ...registeredAreaButtonBaseStyle,
-  backgroundColor: "#b45309",
-  borderColor: "#d97706"
-}
-
-const registeredAreaInventoryButtonStyle = {
-  ...registeredAreaButtonBaseStyle,
-  backgroundColor: "#0f766e",
-  borderColor: "#14b8a6"
-}
-
-const registeredAreaDeactivateButtonStyle = {
-  ...registeredAreaButtonBaseStyle,
-  gridColumn: "1 / -1",
-  backgroundColor: "#991b1b",
-  borderColor: "#dc2626"
-}
-
 const areaDashboardHeaderStyle = {
   display: "flex",
   justifyContent: "space-between",
@@ -2388,14 +2288,6 @@ const areaInactiveBadgeStyle = {
   backgroundColor: "#374151",
   color: "#cbd5e1"
 }
-
-const areaOptionRowStyle = {
-  display: "flex",
-  gap: "18px",
-  flexWrap: "wrap",
-  margin: "14px 0"
-}
-
 
 const cardHeaderStyle = {
   display: "flex",

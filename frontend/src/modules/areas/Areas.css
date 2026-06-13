@@ -1,0 +1,140 @@
+/* Áreas operativas — ERP UI Spacing System v1.0 */
+
+@import "../../styles/erp-ui-spacing.css";
+
+.areas-module {
+  display: grid;
+  gap: var(--erp-section-gap);
+}
+
+.areas-form-card {
+  display: grid;
+  gap: var(--erp-section-gap);
+}
+
+.areas-form-block {
+  display: grid;
+  gap: var(--erp-component-gap);
+}
+
+.areas-form-block h3 {
+  margin: 0;
+  font-size: 16px;
+  color: var(--erp-text-primary, #f8fafc);
+}
+
+.areas-field--full {
+  grid-column: 1 / -1;
+}
+
+.areas-status {
+  margin: 0;
+  font-size: 14px;
+}
+
+.areas-status--error {
+  padding: var(--erp-space-16);
+  border: 1px solid #5c2626;
+  border-radius: var(--erp-radius-card);
+  background: #3f1d1d;
+  color: #fecaca;
+}
+
+.areas-status--loading {
+  margin: 0;
+  color: var(--erp-text-secondary, #94a3b8);
+  font-size: 14px;
+}
+
+.areas-checkbox-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--erp-space-16);
+}
+
+.areas-checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--erp-space-8);
+  min-height: var(--erp-touch-min);
+  color: var(--erp-text-primary, #e2e8f0);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.areas-checkbox-label input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--erp-primary, #0f766e);
+}
+
+.areas-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--erp-space-8);
+}
+
+.areas-list-section h2 {
+  margin: 0;
+}
+
+.areas-card__title {
+  margin: 0;
+  font-size: 18px;
+  color: var(--erp-text-primary, #f8fafc);
+}
+
+.areas-card__meta {
+  margin: 0;
+  color: var(--erp-text-secondary, #cbd5e1);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.areas-card__meta strong {
+  color: var(--erp-text-primary, #e2e8f0);
+}
+
+.areas-card__footer {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--erp-space-8);
+}
+
+.areas-card__footer .erp-btn {
+  width: 100%;
+}
+
+.areas-btn--edit {
+  border: 1px solid #d97706;
+  background: #b45309;
+  color: #ffffff;
+}
+
+.areas-btn--inventory {
+  border: none;
+  background: var(--erp-primary, #0f766e);
+  color: #f8fafc;
+}
+
+.areas-btn--deactivate {
+  grid-column: 1 / -1;
+  border: 1px solid #dc2626;
+  background: #991b1b;
+  color: #ffffff;
+}
+
+@media (max-width: 767px) {
+  .areas-form-actions .erp-btn {
+    flex: 1 1 100%;
+  }
+
+  .areas-card__footer {
+    grid-template-columns: 1fr;
+  }
+
+  .areas-btn--deactivate {
+    grid-column: auto;
+  }
+}

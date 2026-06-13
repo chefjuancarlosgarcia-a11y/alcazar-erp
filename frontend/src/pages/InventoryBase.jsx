@@ -583,13 +583,13 @@ function InventoryCatalog({ loading, items, areas, query, setQuery, areaFilter, 
   return (
     <>
       <div className="inventory-base-filters">
-        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar producto, SKU o categoría..." />
+        <input className="erp-search-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar producto, SKU o categoría..." />
         <select value={areaFilter} onChange={(event) => setAreaFilter(event.target.value)}>
           <option value="todos">Todas las áreas</option>
           {areas.map((area) => <option value={area.id} key={area.id}>{area.name}</option>)}
         </select>
       </div>
-      <div className="inventory-investment-summary">
+      <div className="inventory-investment-summary erp-kpi-card">
         <span>Valor total invertido en inventario</span>
         <strong>{quetzales(totalInvestment)}</strong>
       </div>
@@ -605,12 +605,14 @@ function InventoryCatalog({ loading, items, areas, query, setQuery, areaFilter, 
                 <ProductImage item={item} />
                 <span><strong>{item.name}</strong><small>{item.category || "Sin categoría"} · {item.sku || "Sin SKU"}</small></span>
               </div>
-              <span>{unitForForm(item.base_unit)}</span>
-              <strong>{areaStock}</strong>
-              <strong>{item.totalQuantity}</strong>
-              <strong>{quetzales(investment)}</strong>
-              <span>{minimum}</span>
-              <StockBadge quantity={areaStock} minimum={minimum} active={item.active} />
+              <span className="inventory-row__cell" data-label="Unidad">{unitForForm(item.base_unit)}</span>
+              <strong className="inventory-row__cell" data-label="Stock área">{areaStock}</strong>
+              <strong className="inventory-row__cell" data-label="Stock total">{item.totalQuantity}</strong>
+              <strong className="inventory-row__cell" data-label="Valor">{quetzales(investment)}</strong>
+              <span className="inventory-row__cell" data-label="Mínimo">{minimum}</span>
+              <div className="inventory-row__cell inventory-row__cell--badge" data-label="Estado">
+                <StockBadge quantity={areaStock} minimum={minimum} active={item.active} />
+              </div>
               <div className="inventory-row-actions">
                 {canManage && <button type="button" onClick={() => onAdjust(item)}>Ajustar stock</button>}
                 {canManage && <button type="button" onClick={() => onEdit(item)}>Editar</button>}
@@ -734,13 +736,16 @@ function MovementsTable({ movements, items, areas, loading }) {
   const pagedMovements = pageItems(movements, page)
   return <div className="inventory-movements">
     {loading ? <p className="inventory-empty">Cargando movimientos...</p> : pagedMovements.map((movement) => (
-      <article key={movement.id}>
-        <div><strong>{items[movement.item_id]?.name || "Producto"}</strong><small>{movement.movement_type}</small></div>
-        <span>{areas[movement.from_area_id] || "-"} → {areas[movement.to_area_id] || "-"}</span>
-        <span>{movement.quantity} {movement.unit}</span>
-        <span>{movement.previous_quantity ?? "-"} → {movement.new_quantity ?? "-"}</span>
-        <small>{new Date(movement.created_at).toLocaleString("es-GT")}</small>
-        <small>{movement.notes || "Sin notas"}</small>
+      <article className="inventory-movement-row" key={movement.id}>
+        <div className="inventory-movement-row__product">
+          <strong>{items[movement.item_id]?.name || "Producto"}</strong>
+          <small>{movement.movement_type}</small>
+        </div>
+        <span className="inventory-movement-row__cell" data-label="Ruta">{areas[movement.from_area_id] || "-"} → {areas[movement.to_area_id] || "-"}</span>
+        <span className="inventory-movement-row__cell" data-label="Cantidad">{movement.quantity} {movement.unit}</span>
+        <span className="inventory-movement-row__cell" data-label="Stock">{movement.previous_quantity ?? "-"} → {movement.new_quantity ?? "-"}</span>
+        <small className="inventory-movement-row__cell" data-label="Fecha">{new Date(movement.created_at).toLocaleString("es-GT")}</small>
+        <small className="inventory-movement-row__cell" data-label="Notas">{movement.notes || "Sin notas"}</small>
       </article>
     ))}
     {!loading && !movements.length && <p className="inventory-empty">No hay movimientos registrados.</p>}
