@@ -277,9 +277,9 @@ Referencias rotas (`hrFilterGridStyle`, `inputStyle`, `passwordOptionStyle`, `at
 
 ---
 
-## Sprint UX #2 (preview — no ejecutar aún)
+## Sprint UX #2 (preview)
 
-POS → Control de caja → Recetas/Requisiciones → Perfiles RRHH (según [ui-audit.md](./ui-audit.md) fase 1 remediación).
+POS → ProfileManagement → ScheduleManagement → Tasks → Reports (según cola acordada y [ui-audit.md](./ui-audit.md)).
 
 ---
 
@@ -292,5 +292,24 @@ POS → Control de caja → Recetas/Requisiciones → Perfiles RRHH (según [ui-
 | InventoryBase — mobile productos/movimientos cards | | ✅ Implementado | `data-label` en celdas |
 | Caja — tokens + KPI grid | | ✅ Implementado | `.erp-kpi-grid` dashboard |
 | Caja — items table → mobile cards | | ✅ Implementado | CSS + `data-label` |
-| Build + smoke | | ◐ Parcial | `npm run build` OK ×3 módulos; smoke manual pendiente |
-| Actualizar ui-audit.md | | ☐ Pendiente | Al cierre sprint completo |
+| Build + smoke | | ✅ Código OK | `npm run build` ×3; smoke manual opcional |
+| Actualizar ui-audit.md | | ✅ Hecho | Post Sprint #1 |
+
+---
+
+## Sprint UX #1 — Cierre
+
+**Estado:** Completado (código).  
+**Módulos entregados:** Áreas · InventoryBase · Caja.
+
+## Sprint UX #2 — Cola (pendiente)
+
+| # | Módulo | Archivos | Notas |
+|---|--------|----------|-------|
+| 1 | POS | `POS.css`, `POS.jsx` | P1 — mayor deuda CSS + inline styles |
+| 2 | ProfileManagement | `ProfileManagement.css` | P2 — tabla → cards mobile |
+| 3 | ScheduleManagement | `ScheduleManagement.css` | P2 — planilla mobile |
+| 4 | Tasks | `Tasks.css` | P2 — tokens (buen patrón cards, spacing prohibido) |
+| 5 | Reports | `ReportsDashboard.css` | P3 — tablas mobile |
+
+*Plan detallado Sprint #2: crear `docs/ui-remediation-sprint-2.md` al iniciar.*

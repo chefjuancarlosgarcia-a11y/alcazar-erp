@@ -4,16 +4,23 @@
  * - /kiosk → AttendanceTerminal.jsx (modo kiosco)
  * - /hr?section=dispositivosMarcaje → AttendanceDevicesManagement.jsx
  * Reportes: /hr?section=reportesAsistencia → LegacyInventoryApp (solo lectura).
+ * Deprecados (redirigen a /inventory): inventario, recetas, requisicion.
  */
 import { lazy, Suspense } from "react"
 import ProfileManagement from "./ProfileManagement"
 import ScheduleManagement from "./ScheduleManagement"
 import AttendanceDevicesManagement from "./AttendanceDevicesManagement"
 import AttendanceTerminal from "../components/AttendanceTerminal"
-import { useLocation } from "react-router-dom"
+import { Navigate, useLocation } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
 
 const LegacyInventoryApp = lazy(() => import("../modules/LegacyInventoryApp"))
+
+const DEPRECATED_INVENTORY_SECTIONS = {
+  inventario: "/inventory?section=inventario",
+  recetas: "/inventory?section=recetas",
+  requisicion: "/inventory?section=requisicion"
+}
 
 function HR() {
   const location = useLocation()
@@ -41,7 +48,13 @@ function HR() {
     return <AttendanceDevicesManagement />
   }
 
-  return <Suspense fallback={<p>Cargando módulo...</p>}><LegacyInventoryApp initialSeccion={selectedSection} hideLegacyNavigation focusEmployeeId={profileId} editFocusedEmployee={editProfile} /></Suspense>
+  const deprecatedInventoryRoute = DEPRECATED_INVENTORY_SECTIONS[selectedSection]
+  if (deprecatedInventoryRoute) {
+    console.warn("[legacy] redirected deprecated section", selectedSection)
+    return <Navigate to={deprecatedInventoryRoute} replace />
+  }
+
+  return <Suspense fallback={<p>Cargando módulo...</p>}><LegacyInventoryApp initialSeccion={selectedSection} hideLegacyNavigation /></Suspense>
 }
 
 export default HR

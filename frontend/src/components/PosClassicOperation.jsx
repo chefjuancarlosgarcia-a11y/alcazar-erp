@@ -69,7 +69,17 @@ export default function PosClassicOperation({
   ordenMessage,
   sendingOrder,
   canRequestCashier,
+  cashierBlockedByDrafts,
   getOrderItemDisplayName,
+  getOrderItemInstructions,
+  handleChangeQuantity,
+  editandoModificacionLineId,
+  modificacionActualTexto,
+  iniciarEdicionNota,
+  setModificacionActualTexto,
+  guardarModificacionActual,
+  cancelarEdicionNota,
+  handleMarkServed,
   getOrderItemStatusLabel,
   getOrderItemStatusStyle,
   orderItemBadgeStyle,
@@ -239,10 +249,20 @@ export default function PosClassicOperation({
               ordenMessage={ordenMessage}
               sendingOrder={sendingOrder}
               canRequestCashier={canRequestCashier}
+              cashierBlockedByDrafts={cashierBlockedByDrafts}
               mesaBloqueadaPorCobro={mesaBloqueadaPorCobro}
               getOrderItemDisplayName={getOrderItemDisplayName}
+              getOrderItemInstructions={getOrderItemInstructions}
               getOrderItemStatusLabel={getOrderItemStatusLabel}
               getOrderItemStatusStyle={getOrderItemStatusStyle}
+              onChangeQuantity={handleChangeQuantity}
+              editingNoteLineId={editandoModificacionLineId}
+              editingNoteText={modificacionActualTexto}
+              onStartEditNote={iniciarEdicionNota}
+              onEditNoteTextChange={setModificacionActualTexto}
+              onSaveNote={guardarModificacionActual}
+              onCancelEditNote={cancelarEdicionNota}
+              onMarkServed={handleMarkServed}
               onRefresh={refreshSelectedTableLive}
               onSendKitchen={handleSendOrderToProduction}
               onClearDraft={handleClearDraftItems}

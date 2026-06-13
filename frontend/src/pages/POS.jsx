@@ -859,6 +859,7 @@ function POS() {
   const deliveryDataReady = salesChannel !== "delivery"
     || Boolean(deliveryForm.cliente.trim() && (deliveryForm.telefono.trim() || deliveryForm.whatsapp.trim()) && deliveryForm.direccion1.trim() && deliveryForm.formaPago)
   const canRequestCashier = Boolean(currentOrder && sentItems.length > 0 && draftItems.length === 0 && ordenMesa && deliveryDataReady)
+  const cashierBlockedByDrafts = Boolean(currentOrder && sentItems.length > 0 && draftItems.length > 0 && ordenMesa && deliveryDataReady)
   const activeMinutes = currentOrder ? minutosTranscurridos(currentOrder.created_at) : null
   const readyItemsCount = orden.filter((item) => item.status === "ready").length
   const serviceEventTypes = ["item_added", "sent_to_production", "production_ready", "production_served", "bill_requested", "sent_to_cashier", "order_paid"]
@@ -2508,6 +2509,28 @@ function POS() {
     })
   }
 
+  async function handleChangeQuantity(lineId, delta) {
+    const item = orden.find((entry) => entry.lineId === lineId)
+    if (!item || item.status !== "draft") return
+    if (item.cantidad + delta <= 0) {
+      const confirmed = window.confirm(`¿Eliminar "${getOrderItemDisplayName(item)}" de la orden?`)
+      if (!confirmed) return
+    }
+    await cambiarCantidad(lineId, delta)
+  }
+
+  function iniciarEdicionNota(lineId) {
+    const item = orden.find((entry) => entry.lineId === lineId)
+    if (!item || item.status !== "draft") return
+    setEditandoModificacionLineId(lineId)
+    setModificacionActualTexto(getOrderItemInstructions(item.modificaciones))
+  }
+
+  function cancelarEdicionNota() {
+    setEditandoModificacionLineId(null)
+    setModificacionActualTexto("")
+  }
+
   async function cambiarCantidad(lineId, delta) {
     const item = orden.find((entry) => entry.lineId === lineId)
     if (!item) return
@@ -2540,7 +2563,13 @@ function POS() {
   }
 
   async function guardarModificacionActual(lineId) {
-    const result = await updateOrderItemNotes(lineId, modificacionActualTexto.trim())
+    const item = orden.find((entry) => entry.lineId === lineId)
+    const assignment = getOrderItemAssignment(item?.modificaciones || "")
+    let notes = modificacionActualTexto.trim()
+    if (assignment !== "Mesa completa") {
+      notes = notes ? `[Para: ${assignment}] ${notes}` : `[Para: ${assignment}]`
+    }
+    const result = await updateOrderItemNotes(lineId, notes)
     if (result.error) {
       setOrdenError(`No se pudo guardar la modificacion: ${result.message || result.error.message}`)
       return
@@ -2620,24 +2649,6 @@ function POS() {
         console.error("POS order sent but history refresh failed:", refreshError)
         setOrdenMessage(`Orden enviada a producción. Inventario descontado. No se pudo refrescar el historial: ${refreshError.message}`)
       }
-
-      // Auto-return to step 1 after 1.5 seconds
-      setTimeout(() => {
-        setPosStep(1)
-        setOrdenMesa(null)
-        setCurrentOrder(null)
-        setActiveOrderId("")
-        setOrden([])
-        setOrderEvents([])
-        setPersonasOrden("1")
-        setSeatNames(["Persona 1"])
-        setSelectedAssignment("Mesa completa")
-        setDeliveryForm(emptyDeliveryForm)
-        setSelectedCustomer(null)
-        setSelectedCustomerAddress(null)
-        setCustomerResults([])
-        setCustomerMessage("")
-      }, 1500)
     } catch (error) {
       console.error("SEND ORDER ERROR", error)
       setOrdenMessage("")
@@ -2671,10 +2682,13 @@ function POS() {
       const result = await markOrderItemServed(item.lineId)
       if (result.error) throw new Error(result.message || result.error.message)
       await cargarMesaDesdeSupabase(ordenMesa, currentOrder.id)
-      setOrdenMessage(`${item.nombre} marcado como servido.`)
+      const label = getOrderItemDisplayName(item)
+      setOrdenMessage(`${label} marcado como servido.`)
       setOrdenError("")
+      showToast(`${label} marcado como servido.`, "success", 1500)
     } catch (error) {
       setOrdenError(`No se pudo marcar servido: ${error.message}`)
+      showToast(`No se pudo marcar servido: ${error.message}`, "error", 3000)
     }
   }
 
@@ -3755,7 +3769,17 @@ function POS() {
             ordenMessage={ordenMessage}
             sendingOrder={sendingOrder}
             canRequestCashier={canRequestCashier}
+            cashierBlockedByDrafts={cashierBlockedByDrafts}
             getOrderItemDisplayName={getOrderItemDisplayName}
+            getOrderItemInstructions={getOrderItemInstructions}
+            handleChangeQuantity={handleChangeQuantity}
+            editandoModificacionLineId={editandoModificacionLineId}
+            modificacionActualTexto={modificacionActualTexto}
+            iniciarEdicionNota={iniciarEdicionNota}
+            setModificacionActualTexto={setModificacionActualTexto}
+            guardarModificacionActual={guardarModificacionActual}
+            cancelarEdicionNota={cancelarEdicionNota}
+            handleMarkServed={handleMarkServed}
             getOrderItemStatusLabel={getOrderItemStatusLabel}
             getOrderItemStatusStyle={getOrderItemStatusStyle}
             orderItemBadgeStyle={orderItemBadgeStyle}

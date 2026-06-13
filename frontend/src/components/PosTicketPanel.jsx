@@ -22,10 +22,20 @@ export function PosTicketPanel({
   ordenMessage,
   sendingOrder,
   canRequestCashier,
+  cashierBlockedByDrafts,
   mesaBloqueadaPorCobro,
   getOrderItemDisplayName,
+  getOrderItemInstructions,
   getOrderItemStatusLabel,
   getOrderItemStatusStyle,
+  onChangeQuantity,
+  editingNoteLineId,
+  editingNoteText,
+  onStartEditNote,
+  onEditNoteTextChange,
+  onSaveNote,
+  onCancelEditNote,
+  onMarkServed,
   onRefresh,
   onSendKitchen,
   onClearDraft,
@@ -129,21 +139,113 @@ export function PosTicketPanel({
         {ordenMesa && orden.filter((item) => item.status !== "cancelled").length === 0 && (
           <div className="pos-friendly-empty">Sin platillos. Elige categoría arriba para agregar productos.</div>
         )}
-        {orden.filter((item) => item.status !== "cancelled").map((item) => (
-          <div className={`pos-ticket-line status-${item.status || "draft"}`} key={item.lineId}>
-            <div className="pos-ticket-line-main">
-              <strong>{item.cantidad} × {getOrderItemDisplayName(item)}</strong>
-              <span>Q{(item.precio * item.cantidad).toFixed(2)}</span>
+        {orden.filter((item) => item.status !== "cancelled").map((item) => {
+          const isDraft = (item.status || "draft") === "draft"
+          const isReady = item.status === "ready"
+          const noteText = getOrderItemInstructions(item.modificaciones)
+          const isEditingNote = editingNoteLineId === item.lineId
+
+          return (
+            <div className={`pos-ticket-line status-${item.status || "draft"}`} key={item.lineId}>
+              <div className="pos-ticket-line-main">
+                {isDraft ? (
+                  <div className="pos-ticket-line-qty">
+                    <button
+                      type="button"
+                      className="pos-ticket-qty-btn"
+                      onClick={() => onChangeQuantity(item.lineId, -1)}
+                      disabled={mesaBloqueadaPorCobro}
+                      aria-label="Reducir cantidad"
+                    >
+                      −
+                    </button>
+                    <span className="pos-ticket-qty-value">{item.cantidad}</span>
+                    <button
+                      type="button"
+                      className="pos-ticket-qty-btn"
+                      onClick={() => onChangeQuantity(item.lineId, 1)}
+                      disabled={mesaBloqueadaPorCobro}
+                      aria-label="Aumentar cantidad"
+                    >
+                      +
+                    </button>
+                    <strong className="pos-ticket-line-name">{getOrderItemDisplayName(item)}</strong>
+                  </div>
+                ) : (
+                  <strong>{item.cantidad} × {getOrderItemDisplayName(item)}</strong>
+                )}
+                <span>Q{(item.precio * item.cantidad).toFixed(2)}</span>
+              </div>
+
+              {noteText && !isEditingNote && (
+                <span className="pos-ticket-line-note">{noteText}</span>
+              )}
+
+              {isDraft && !isEditingNote && (
+                <button
+                  type="button"
+                  className="pos-ticket-line-action"
+                  onClick={() => onStartEditNote(item.lineId)}
+                  disabled={mesaBloqueadaPorCobro}
+                >
+                  {noteText ? "Editar nota" : "Agregar nota"}
+                </button>
+              )}
+
+              {isDraft && isEditingNote && (
+                <div className="pos-ticket-line-note-editor">
+                  <textarea
+                    value={editingNoteText}
+                    onChange={(event) => onEditNoteTextChange(event.target.value)}
+                    rows={2}
+                    placeholder="Notas para cocina..."
+                  />
+                  <div className="pos-ticket-line-note-editor-actions">
+                    <button type="button" className="pos-ticket-line-action primary" onClick={() => onSaveNote(item.lineId)}>
+                      Guardar
+                    </button>
+                    <button type="button" className="pos-ticket-line-action" onClick={onCancelEditNote}>
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div className="pos-ticket-line-footer">
+                <span className="pos-ticket-line-badge" style={getOrderItemStatusStyle(item.status)}>
+                  {getOrderItemStatusLabel(item.status)}
+                </span>
+                {isReady && (
+                  <button
+                    type="button"
+                    className="pos-ticket-line-action served"
+                    onClick={() => onMarkServed(item)}
+                  >
+                    Marcar servido
+                  </button>
+                )}
+              </div>
             </div>
-            <span className="pos-ticket-line-badge" style={getOrderItemStatusStyle(item.status)}>
-              {getOrderItemStatusLabel(item.status)}
-            </span>
-          </div>
-        ))}
+          )
+        })}
       </div>
 
       {ordenError && <div className="pos-ticket-alert error">{ordenError}</div>}
       {ordenMessage && <div className="pos-ticket-alert success">{ordenMessage}</div>}
+
+      {cashierBlockedByDrafts && (
+        <div className="pos-ticket-pending-kitchen-cta">
+          <p>Tienes productos pendientes de enviar a cocina.</p>
+          <button
+            type="button"
+            className="pos-action-btn send"
+            onClick={onSendKitchen}
+            disabled={sendingOrder || mesaBloqueadaPorCobro}
+          >
+            {sendingOrder ? "Enviando a cocina..." : "Enviar a cocina"}
+          </button>
+        </div>
+      )}
 
       <div className="pos-ticket-actions-sticky">
         <div className="pos-ticket-actions-primary">
@@ -164,9 +266,9 @@ export function PosTicketPanel({
             className="pos-action-btn pay pos-action-cobrar"
             onClick={onSendCashier}
             disabled={!canRequestCashier}
-            title="Enviar cuenta a caja para cobro"
+            title="Envía la cuenta a Caja para procesar el pago."
           >
-            <span className="pos-action-label">Cobrar</span>
+            <span className="pos-action-label">Enviar a caja</span>
             <span className="pos-action-meta">Q{totalOrden.toFixed(2)}</span>
           </button>
         </div>
