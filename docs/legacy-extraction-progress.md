@@ -32,13 +32,13 @@ Seguimiento de la migración incremental desde `frontend/src/modules/LegacyInven
 
 | Métrica | Valor |
 |---------|-------|
-| Líneas actuales (LegacyInventoryApp) | **10,064** |
+| Líneas actuales (LegacyInventoryApp) | **9,356** |
 | Líneas iniciales (referencia) | **11,539** |
-| Líneas eliminadas (acumulado) | **~1,475** |
-| Módulos extraídos y limpiados | **3** |
-| Reducción acumulada | **~12.8%** |
+| Líneas eliminadas (acumulado) | **~2,183** |
+| Módulos extraídos y limpiados | **4** |
+| Reducción acumulada | **~18.9%** |
 
-**Próximo candidato:** Inventario (`inventario` + catálogo en cards)
+**Próximo candidato:** Deprecación UI legacy — inventario / recetas / requisición (código muerto en rutas actuales)
 
 ---
 
@@ -49,6 +49,7 @@ Seguimiento de la migración incremental desde `frontend/src/modules/LegacyInven
 | 2026-06-12 | Proveedores | 11,539 | 10,851 | ~688 | ~6.0% | OK | OK | OK |
 | 2026-06-12 | Usuarios / RRHH | 10,911 | 10,357 | ~554 | ~4.8% | OK | OK | Pendiente |
 | 2026-06-13 | Reportes de asistencia | 10,405 | 10,064 | ~341 | ~3.0% | OK | OK | Pendiente |
+| 2026-06-09 | Órdenes de compra | 10,140 | 9,356 | ~784 | ~6.8% | OK | OK | Pendiente |
 
 ---
 
@@ -175,14 +176,58 @@ Seguimiento de la migración incremental desde `frontend/src/modules/LegacyInven
 
 ---
 
+### 2026-06-09 — Órdenes de compra
+
+| Campo | Valor |
+|-------|-------|
+| Líneas antes (pre-limpieza, post-integración) | 10,140 |
+| Líneas después | 9,356 |
+| Eliminadas (esta limpieza) | ~784 |
+| Reducción % (vs. referencia) | ~6.8% en esta limpieza; **~18.9% acumulado** |
+| Localhost | OK — automáticas, manuales, historial, recepción, PDF, proveedores, notificaciones, responsive |
+| Build | OK — `npm run build` |
+| Producción | Pendiente |
+| **Próximo candidato** | Deprecación inventario / recetas / requisición legacy |
+
+**Destino:**
+- `frontend/src/modules/purchase-orders/PurchaseOrdersModule.jsx`
+- `frontend/src/modules/purchase-orders/PurchaseOrders.css`
+- `frontend/src/modules/purchase-orders/purchaseOrdersHelpers.js`
+
+**Funcionalidad migrada:**
+- Órdenes automáticas (propuesta por mínimos, PDF)
+- Órdenes manuales (buscador ingredientes, proveedor, crear)
+- Historial con filtros (tabla desktop / cards mobile)
+- Recepción (tab dedicado)
+- KPIs operativos
+- Badges de estado ERP
+
+**Eliminado en limpieza legacy:**
+- Flag `USE_LEGACY_PURCHASE_ORDERS_UI` y bloque JSX inline (~481 líneas)
+- Computed huérfanos (~25 líneas): `manualSearchText`, `manualProductoCompra`, `manualSubtotal`, `manualCantidadBaseTotal`, `manualIngredientesSugeridos`
+- Helpers solo UI: `getPurchaseSearchScore`, `getProductInitials`
+- Estilos solo legacy (~235 líneas): `purchaseOrders*`, `manualSelectedProduct*`, `manualProductMetric*`, `purchaseQuantity*`, `purchaseCalculated*`, `manualSupplier*`, `purchaseOrderData*`
+
+**Conservado en Legacy (compartido):**
+- State: `ordenCompra`, `purchaseOrderView`, `ordenesCompraManual`, `manual*` (formulario/recepción), `manualInventoryItems`
+- Handlers: `generarOrdenCompra`, `crearOrdenCompraManual`, `aprobarOrdenManual`, `recibirOrdenManual`, `descargarOrdenPDF`, notificaciones
+- Effects: carga `getPurchaseOrders`, deep links `initialPurchaseOrderView/Id`, `purchase-order-action`
+- Helpers compartidos: `getPurchaseProductDetails`, `mapPurchaseInventoryItem`, `getPurchaseOrderStatusLabel`, `manualInventorySource`, `manualIngredienteSeleccionado`
+- Permisos: `puedeCrearOrdenCompra`, `puedeAprobarOrdenCompra`, `puedeRecibirOrdenCompra`
+- Estilos reutilizados: `purchaseButtonStyle`, `orderBoxStyle`, `orderItemStyle`
+
+**Design system:** ERP UI Spacing System v1.0 en header, KPIs, tabs, cards, filtros y badges.
+
+---
+
 ## Cola de próximos candidatos
 
 | Prioridad | Módulo | Notas |
 |-----------|--------|-------|
-| **1 (siguiente)** | Inventario | `inventario` + `InventoryBase`, formulario monolítico, catálogo en cards |
-| 2 | Órdenes de compra | Vistas automático / manual / historial |
-| 3 | Recetas | Formulario extenso en Legacy |
-| 4 | Reportes ejecutivos | `ReportsDashboard` (ya módulo parcial) |
+| **1 (siguiente)** | Deprecación inventario legacy | UI muerta — ruta usa `InventoryBase` |
+| 2 | Deprecación recetas / requisición legacy | UI muerta — rutas Supabase |
+| 3 | Renderers HR (perfil, dashboard) | Completar fase 2 UsersModule |
+| 4 | Áreas operativas | Admin de áreas |
 
 ---
 
@@ -231,4 +276,4 @@ Seguimiento de la migración incremental desde `frontend/src/modules/LegacyInven
 
 ---
 
-*Última actualización: 2026-06-13*
+*Última actualización: 2026-06-09*

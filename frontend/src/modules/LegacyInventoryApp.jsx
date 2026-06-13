@@ -5,6 +5,7 @@ import "react-easy-crop/react-easy-crop.css"
 import SuppliersModule from "./suppliers/SuppliersModule"
 import UsersModule from "./users/UsersModule"
 import AttendanceReportsModule from "./attendance/AttendanceReportsModule"
+import PurchaseOrdersModule from "./purchase-orders/PurchaseOrdersModule"
 import { BrowserMultiFormatReader } from "@zxing/browser"
 import * as XLSX from "xlsx"
 import jsPDF from "jspdf"
@@ -336,46 +337,6 @@ function mapPurchaseInventoryItem(item) {
     stockActual: totalStock,
     totalUnidades: totalStock
   }
-}
-
-function getPurchaseSearchScore(item, searchText) {
-  const text = String(searchText || "").trim().toLowerCase()
-  if (text.length < 2) return 0
-
-  const fields = {
-    name: String(item?.nombre || item?.name || "").toLowerCase(),
-    code: String(item?.codigo || item?.sku || item?.codigoBarras || "").toLowerCase(),
-    category: String(item?.categoria || item?.category || "").toLowerCase(),
-    supplier: String(item?.proveedorNombre || item?.supplier || "").toLowerCase()
-  }
-  let score = 0
-
-  if (fields.name.startsWith(text)) score += 24
-  if (fields.code.startsWith(text)) score += 20
-  if (fields.category.startsWith(text)) score += 10
-  if (fields.name.includes(text)) score += 14
-  if (fields.code.includes(text)) score += 12
-  if (fields.category.includes(text)) score += 6
-  if (fields.supplier.includes(text)) score += 4
-
-  text.split(" ").filter(Boolean).forEach((word) => {
-    if (fields.name.includes(word)) score += 4
-    if (fields.code.includes(word)) score += 3
-    if (fields.category.includes(word)) score += 2
-    if (fields.supplier.includes(word)) score += 1
-  })
-
-  return score
-}
-
-function getProductInitials(item) {
-  const name = String(item?.nombre || item?.name || "?").trim()
-  return name
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join("")
-    .toUpperCase() || "?"
 }
 
 function getLocationStock(item, location) {
@@ -3520,20 +3481,9 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
   const manualInventorySource = manualInventoryItems.length > 0
     ? manualInventoryItems
     : ingredientes.map(mapPurchaseInventoryItem)
-  const manualSearchText = String(manualBusqueda || "").trim()
   const manualIngredienteSeleccionado = manualInventorySource.find(
     (ingrediente) => ingrediente.id === manualIngredienteSeleccionadoId
   )
-  const manualProductoCompra = manualIngredienteSeleccionado
-    ? getPurchaseProductDetails(manualIngredienteSeleccionado)
-    : null
-  const manualCantidadCompraNumero = Number(manualCantidadComprar || 0)
-  const manualSubtotal = manualProductoCompra
-    ? manualCantidadCompraNumero * manualProductoCompra.precioCompra
-    : 0
-  const manualCantidadBaseTotal = manualProductoCompra
-    ? manualCantidadCompraNumero * manualProductoCompra.factorConversion
-    : 0
 
   const nuevasNotificacionesCount = notificaciones.filter((item) => !item.leida).length
 
@@ -3558,18 +3508,6 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
 
           return { ingrediente, score }
         })
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 5)
-        .map((item) => item.ingrediente)
-    : []
-
-  const manualIngredientesSugeridos = manualSearchText.length >= 2
-    ? manualInventorySource
-        .map((ingrediente) => ({
-          ingrediente,
-          score: getPurchaseSearchScore(ingrediente, manualSearchText)
-        }))
-        .filter((item) => item.score > 0)
         .sort((a, b) => b.score - a.score)
         .slice(0, 5)
         .map((item) => item.ingrediente)
@@ -6529,486 +6467,76 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
       ) : (
         <>
           {seccionActiva === "ordenes" && (
-            <>
-              <div style={purchaseOrdersNavigationStyle}>
-                <div style={purchaseOrdersIntroStyle}>
-                  <div>
-                    <h2 style={{ margin: "0 0 6px" }}>Órdenes de compra</h2>
-                    <p style={{ margin: 0, color: "#cbd5e1" }}>Genera propuestas por mínimos o registra compras directas a proveedor.</p>
-                  </div>
-                  <div style={purchaseOrdersPrimaryActionsStyle}>
-                    {puedeCrearOrdenCompra && (
-                      <>
-                        <button type="button" onClick={() => { generarOrdenCompra(); setPurchaseOrderView("automatic") }} style={purchaseOrderAutomaticButtonStyle}>
-                          Generar orden automática
-                        </button>
-                        <button type="button" onClick={() => setPurchaseOrderView("manual")} style={purchaseOrderManualButtonStyle}>
-                          Crear orden manual
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-                <nav style={purchaseOrdersTabsStyle} aria-label="Vistas de órdenes de compra">
-                  <button type="button" onClick={() => setPurchaseOrderView("automatic")} style={purchaseOrderView === "automatic" ? purchaseOrdersActiveTabStyle : purchaseOrdersTabStyle}>Automática</button>
-                  {puedeCrearOrdenCompra && <button type="button" onClick={() => setPurchaseOrderView("manual")} style={purchaseOrderView === "manual" ? purchaseOrdersActiveTabStyle : purchaseOrdersTabStyle}>Orden manual</button>}
-                  <button type="button" onClick={() => setPurchaseOrderView("history")} style={purchaseOrderView === "history" ? purchaseOrdersActiveTabStyle : purchaseOrdersTabStyle}>Historial y recepción</button>
-                </nav>
-              </div>
-
-              {purchaseOrderView === "automatic" && <div style={purchaseOrderPanelStyle}>
-                <h2>Orden de compra automática</h2>
-
-                <p>
-                  El sistema revisa ingredientes en punto de orden y calcula cuánto comprar
-                  para llegar al punto máximo.
-                </p>
-
-                <div style={purchaseOrderToolbarStyle}>
-                  <button type="button" onClick={generarOrdenCompra} style={{ ...purchaseButtonStyle, marginRight: 0 }}>
-                    Actualizar propuesta
-                  </button>
-                  <button type="button" onClick={descargarOrdenPDF} style={{ ...pdfButtonStyle, marginRight: 0 }}>
-                    Descargar PDF
-                  </button>
-                  <button type="button" onClick={limpiarOrdenCompra} style={{ ...cancelButtonStyle, marginRight: 0 }}>
-                    Cancelar propuesta
-                  </button>
-                </div>
-
-                {ordenCompra.length > 0 && (
-                  <div style={orderBoxStyle}>
-                    <h3>Orden generada</h3>
-
-                    {ordenCompra.map((item) => (
-                      <div key={item.id} style={orderItemStyle}>
-                        <strong>{item.nombre}</strong>
-                        <p>Código: {item.codigo}</p>
-                        <p>Stock actual: {item.stockActual}</p>
-                        <p>Punto máximo: {item.puntoMaximo}</p>
-                        <p>
-                          Comprar: <strong>{item.cantidadAComprar} {item.unidadCompra}</strong>
-                        </p>
-                        <p>Costo estimado: Q{item.costoEstimado.toFixed(2)}</p>
-                      </div>
-                    ))}
-
-                    <h3>Total estimado: Q{totalOrdenCompra.toFixed(2)}</h3>
-                  </div>
-                )}
-              </div>}
-
-              {purchaseOrderView === "manual" && puedeCrearOrdenCompra && <div style={purchaseOrderPanelStyle}>
-                <h2>Orden de compra manual</h2>
-                <p>Completa los datos de la orden y selecciona ingredientes con el buscador.</p>
-
-                <p><strong>Número de orden:</strong> {generarNumeroOrdenManual(ordenesCompraManual.length)}</p>
-
-                <label style={fieldLabelStyle}>Buscar ingrediente</label>
-                <input
-                  type="text"
-                  placeholder={manualProductoCompra ? "Buscar otro ingrediente..." : "Escribe nombre o código..."}
-                  value={manualBusqueda}
-                  onChange={(e) => {
-                    setManualBusqueda(e.target.value)
-                    setManualIngredienteSeleccionadoId(null)
-                    setManualCantidadComprar("")
-                  }}
-                  style={inputStyle}
-                />
-                {manualBusqueda && (
-                  <div style={suggestionsBoxStyle}>
-                    {manualSearchText.length < 2 ? (
-                      <p style={{ color: "#d1d5db", margin: 0 }}>Escribe al menos 2 caracteres para buscar en inventario.</p>
-                    ) : manualInventoryLoading ? (
-                      <p style={{ color: "#d1d5db", margin: 0 }}>Cargando inventario...</p>
-                    ) : manualInventoryError ? (
-                      <p style={{ color: "#fca5a5", margin: 0 }}>{manualInventoryError}</p>
-                    ) : manualIngredientesSugeridos.length > 0 ? (
-                      manualIngredientesSugeridos.map((ingrediente) => (
-                        <button
-                          key={ingrediente.id}
-                          type="button"
-                          onClick={() => seleccionarIngredienteOrdenManual(ingrediente)}
-                          onMouseEnter={(event) => {
-                            event.currentTarget.style.backgroundColor = "#1f2937"
-                            event.currentTarget.style.borderColor = "#64748b"
-                          }}
-                          onMouseLeave={(event) => {
-                            event.currentTarget.style.backgroundColor = suggestionItemStyle.backgroundColor
-                            event.currentTarget.style.border = suggestionItemStyle.border
-                          }}
-                          style={suggestionItemStyle}
-                        >
-                          {ingrediente.imagen || ingrediente.image_url ? (
-                            <img
-                              src={ingrediente.imagen || ingrediente.image_url}
-                              alt={ingrediente.nombre || ingrediente.name}
-                              style={suggestionThumbnailStyle}
-                            />
-                          ) : (
-                            <div style={suggestionPlaceholderThumbStyle}>
-                              {getProductInitials(ingrediente)}
-                            </div>
-                          )}
-                          <div style={suggestionContentStyle}>
-                            <div style={suggestionTitleRowStyle}>
-                              <span style={{ fontWeight: 700 }}>{ingrediente.nombre || ingrediente.name}</span>
-                              <span style={suggestionBadgeStyle}>
-                                {ingrediente.codigo || ingrediente.sku || ingrediente.codigoBarras || "Sin SKU"}
-                              </span>
-                            </div>
-                            <div style={suggestionMetaStyle}>
-                              <span>{ingrediente.unidadCompra || ingrediente.purchase_unit || ingrediente.unidadBase || ingrediente.base_unit || "Sin unidad"}</span>
-                              <span>Stock: {Number(ingrediente.totalUnidades ?? ingrediente.stockActual ?? 0).toLocaleString("es-GT")}</span>
-                              <span>{ingrediente.proveedorNombre || ingrediente.supplier || "Sin proveedor"}</span>
-                            </div>
-                            <div style={suggestionSubtleMetaStyle}>
-                              {ingrediente.categoria || ingrediente.category || "Sin categoria"}
-                            </div>
-                          </div>
-                        </button>
-                      ))
-                    ) : (
-                      <p style={{ color: "#d1d5db", margin: 0 }}>No se encontró ningún ingrediente en inventario.</p>
-                    )}
-                  </div>
-                )}
-
-                {manualProductoCompra && (
-                  <div style={manualSelectedProductStyle}>
-                    <div style={manualSelectedProductHeaderStyle}>
-                      <div>
-                        <p style={manualSelectedProductLabelStyle}>Producto seleccionado</p>
-                        <h3 style={manualSelectedProductTitleStyle}>{manualProductoCompra.nombre}</h3>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setManualIngredienteSeleccionadoId(null)
-                          setManualCantidadComprar("")
-                          setManualBusqueda("")
-                        }}
-                        style={purchaseOrderSecondaryActionStyle}
-                      >
-                        Cambiar producto
-                      </button>
-                    </div>
-                    <div style={manualProductDetailsGridStyle}>
-                      <div style={manualProductMetricStyle}><span>Código / SKU</span><strong>{manualProductoCompra.sku || "Sin código"}</strong></div>
-                      <div style={manualProductMetricStyle}><span>Categoría</span><strong>{manualProductoCompra.categoria}</strong></div>
-                      <div style={manualProductMetricStyle}><span>Unidad de compra</span><strong>{manualProductoCompra.unidadCompra}</strong></div>
-                      <div style={manualProductMetricStyle}><span>Unidad base</span><strong>{manualProductoCompra.unidadBase}</strong></div>
-                      <div style={manualProductMetricStyle}><span>Factor conversión</span><strong>{manualProductoCompra.factorConversion}</strong></div>
-                      <div style={manualProductMetricStyle}><span>Precio de compra</span><strong>Q{manualProductoCompra.precioCompra.toFixed(2)}</strong></div>
-                      <div style={manualProductMetricStyle}><span>Proveedor sugerido</span><strong>{manualProductoCompra.proveedor || manualProveedorNombre || "Sin proveedor asignado"}</strong></div>
-                      <div style={manualProductMetricStyle}><span>Disponible</span><strong>{Number(manualIngredienteSeleccionado.totalUnidades || 0).toLocaleString("es-GT")} {manualProductoCompra.unidadCompra}</strong></div>
-                    </div>
-                    {manualIngredienteSeleccionado.imagen || manualIngredienteSeleccionado.image_url ? (
-                      <img src={manualIngredienteSeleccionado.imagen || manualIngredienteSeleccionado.image_url} alt="Ingrediente" style={previewImageStyle} />
-                    ) : null}
-
-                    <label style={fieldLabelStyle}>Cantidad a comprar</label>
-                    <div style={purchaseQuantityRowStyle}>
-                      <input
-                        type="number"
-                        min="0.01"
-                        step="any"
-                        placeholder="0"
-                        value={manualCantidadComprar}
-                        onChange={(e) => setManualCantidadComprar(e.target.value)}
-                        style={{ ...inputStyle, margin: 0, flex: "1 1 190px" }}
-                      />
-                      <span style={purchaseQuantityUnitStyle}>{manualProductoCompra.unidadCompra}</span>
-                    </div>
-                    <div style={purchaseCalculatedSummaryStyle}>
-                      <div style={purchaseCalculatedMetricStyle}>
-                        <span>Subtotal</span>
-                        <strong>Q{manualSubtotal.toFixed(2)}</strong>
-                      </div>
-                      <div style={purchaseCalculatedMetricStyle}>
-                        <span>Unidades base adquiridas</span>
-                        <strong>{manualCantidadBaseTotal.toLocaleString("es-GT")} {manualProductoCompra.unidadBase}</strong>
-                      </div>
-                    </div>
-                    <button onClick={agregarIngredienteOrdenManual} style={{ ...purchaseButtonStyle, marginTop: "16px" }}>
-                      Agregar producto a la orden
-                    </button>
-                  </div>
-                )}
-
-                {manualOrdenItems.length > 0 && (
-                  <div style={orderBoxStyle}>
-                    <h3>Productos de la orden</h3>
-                    {manualOrdenItems.map((item) => (
-                      <div key={item.id} style={orderItemStyle}>
-                        <p><strong>{item.nombre}</strong> ({item.sku || item.codigo || "Sin código"})</p>
-                        <p>Cantidad: {item.cantidad_compra ?? item.cantidadComprar} {item.unidad_compra || item.unidadCompra}</p>
-                        <p>Subtotal: <strong>Q{Number(item.subtotal ?? Number(item.costoUnitario || 0) * Number(item.cantidadComprar || 0)).toFixed(2)}</strong></p>
-                        <p>Base adquirida: {Number(item.cantidad_base_total ?? item.cantidadComprar ?? 0).toLocaleString("es-GT")} {item.unidad_base || item.unidadCompra}</p>
-                        <button
-                          onClick={() => setManualOrdenItems(manualOrdenItems.filter((ordenItem) => ordenItem.id !== item.id))}
-                          style={deleteButtonStyle}
-                        >
-                          Eliminar ingrediente
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {(manualProductoCompra || manualOrdenItems.length > 0) && (
-                  <div style={manualSupplierSectionStyle}>
-                    <div>
-                      <h3 style={{ margin: "0 0 5px" }}>Proveedor</h3>
-                      <p style={manualSupplierHelpStyle}>Información cargada desde el ingrediente seleccionado. Puedes completarla o corregirla antes de crear la orden.</p>
-                    </div>
-                    <div style={manualSupplierFieldsGridStyle}>
-                      <input
-                        type="text"
-                        placeholder="Nombre del proveedor"
-                        value={manualProveedorNombre}
-                        onChange={(e) => setManualProveedorNombre(e.target.value)}
-                        style={{ ...inputStyle, margin: 0 }}
-                      />
-                      <input
-                        type="text"
-                        placeholder="Número de contacto"
-                        value={manualProveedorContacto}
-                        onChange={(e) => setManualProveedorContacto(e.target.value)}
-                        style={{ ...inputStyle, margin: 0 }}
-                      />
-                      <input
-                        type="email"
-                        placeholder="Correo electrónico"
-                        value={manualProveedorCorreo}
-                        onChange={(e) => setManualProveedorCorreo(e.target.value)}
-                        style={{ ...inputStyle, margin: 0 }}
-                      />
-                      <input
-                        type="text"
-                        placeholder="WhatsApp"
-                        value={manualProveedorWhatsApp}
-                        onChange={(e) => setManualProveedorWhatsApp(e.target.value)}
-                        style={{ ...inputStyle, margin: 0 }}
-                      />
-                      <input
-                        type="text"
-                        placeholder="Nombre del encargado"
-                        value={manualProveedorEncargado}
-                        onChange={(e) => setManualProveedorEncargado(e.target.value)}
-                        style={{ ...inputStyle, margin: 0 }}
-                      />
-                      <select
-                        aria-label="Método de compra"
-                        value={manualMetodoCompra}
-                        onChange={(e) => setManualMetodoCompra(e.target.value)}
-                        style={{ ...inputStyle, margin: 0 }}
-                      >
-                        <option value="banco">Método: Banco</option>
-                        <option value="transferencia">Método: Transferencia</option>
-                        <option value="tarjeta">Método: Tarjeta</option>
-                        <option value="efectivo">Método: Efectivo</option>
-                      </select>
-                    </div>
-                  </div>
-                )}
-
-                <h3 style={purchaseOrderDataTitleStyle}>Datos de la orden</h3>
-                <div style={purchaseOrderDataGridStyle}>
-                  <div>
-                    <label style={fieldLabelStyle}>Fecha de emisión</label>
-                    <input
-                      type="date"
-                      value={manualIssueDate}
-                      onChange={(e) => setManualIssueDate(e.target.value)}
-                      style={inputStyle}
-                    />
-                  </div>
-                  <div>
-                    <label style={fieldLabelStyle}>Fecha esperada de entrega</label>
-                    <input
-                      type="date"
-                      value={manualExpectedDate}
-                      onChange={(e) => setManualExpectedDate(e.target.value)}
-                      style={inputStyle}
-                    />
-                  </div>
-                  <div>
-                    <label style={fieldLabelStyle}>Estado de la orden</label>
-                    <select
-                      value={manualStatus}
-                      onChange={(e) => setManualStatus(e.target.value)}
-                      style={inputStyle}
-                      disabled={requiereAprobacionOrdenCompra}
-                    >
-                      <option value="borrador">Borrador</option>
-                      <option value="pendiente_aprobacion">Pendiente de aprobación</option>
-                      <option value="aprobada">Aprobada</option>
-                    </select>
-                    {requiereAprobacionOrdenCompra && <p style={manualSupplierHelpStyle}>Tu orden será enviada a aprobación de Admin o Gerente General.</p>}
-                  </div>
-                </div>
-
-                <label style={fieldLabelStyle}>Solicitante</label>
-                <input
-                  type="text"
-                  placeholder="Nombre de quien solicita"
-                  value={manualRequester}
-                  onChange={(e) => setManualRequester(e.target.value)}
-                  style={inputStyle}
-                />
-
-                <label style={fieldLabelStyle}>Aprobado por</label>
-                <input
-                  type="text"
-                  placeholder="Nombre de quien aprueba"
-                  value={manualApprover}
-                  onChange={(e) => setManualApprover(e.target.value)}
-                  style={inputStyle}
-                />
-
-                <label style={fieldLabelStyle}>Prioridad</label>
-                <select
-                  value={manualPriority}
-                  onChange={(e) => setManualPriority(e.target.value)}
-                  style={inputStyle}
-                >
-                  <option value="normal">Normal</option>
-                  <option value="urgente">Urgente</option>
-                </select>
-
-                <label style={fieldLabelStyle}>Lugar de entrega</label>
-                <input
-                  type="text"
-                  value={manualLocation}
-                  readOnly
-                  style={{ ...inputStyle, backgroundColor: "#111827" }}
-                />
-
-                <div style={purchaseOrderFooterActionsStyle}>
-                  <button type="button" onClick={crearOrdenCompraManual} style={{ ...purchaseButtonStyle, marginRight: 0 }}>
-                    Crear orden
-                  </button>
-                  <button type="button" onClick={() => { limpiarFormularioOrdenManual(); setPurchaseOrderView("automatic") }} style={cancelButtonStyle}>
-                    Cancelar
-                  </button>
-                </div>
-              </div>}
-
-              {purchaseOrderView === "history" && <div style={purchaseOrderPanelStyle}>
-                <h2>Órdenes de compra manual registradas</h2>
-                <div style={purchaseOrderToolbarStyle}>
-                  {puedeCrearOrdenCompra && <button type="button" onClick={() => setPurchaseOrderView("manual")} style={purchaseOrderManualButtonStyle}>Nueva orden manual</button>}
-                </div>
-                {ordenesCompraManual.length === 0 ? (
-                  <p>No hay órdenes manuales registradas.</p>
-                ) : (
-                  ordenesCompraManual.map((orden) => (
-                    <div key={orden.id} style={orderItemStyle}>
-                      <p><strong>{orden.numeroOrden}</strong></p>
-                      <p><strong>Proveedor:</strong> {orden.proveedor.nombre}</p>
-                      <p><strong>Estado:</strong> {getPurchaseOrderStatusLabel(orden.status)}</p>
-                      <p><strong>Fecha emisión:</strong> {orden.fechaEmision}</p>
-                      <p><strong>Fecha esperada:</strong> {orden.fechaEsperadaEntrega}</p>
-                      <div style={purchaseOrderHistoryActionsStyle}>
-                        {orden.status !== "cancelada" && (
-                          <button type="button" onClick={() => seleccionarOrdenManual(orden.id)} style={registeredAreaInventoryButtonStyle}>
-                            Ver / recibir
-                          </button>
-                        )}
-                        {puedeAprobarOrdenCompra && ["pendiente", "pendiente_aprobacion", "borrador"].includes(orden.status) && (
-                          <>
-                            <button type="button" onClick={() => aprobarOrdenManual(orden.id)} style={registeredAreaInventoryButtonStyle}>Aprobar</button>
-                            <button type="button" onClick={() => rechazarOrdenManual(orden.id)} style={registeredAreaDeactivateButtonStyle}>Rechazar</button>
-                          </>
-                        )}
-                        {puedeCrearOrdenCompra && orden.status === "aprobada" && (
-                          <button type="button" onClick={() => enviarOrdenProveedor(orden.id)} style={registeredAreaInventoryButtonStyle}>Enviar a proveedor</button>
-                        )}
-                        {!["cancelada", "rechazada", "recibida", "recibida_completa"].includes(orden.status) && (
-                          <button type="button" onClick={() => cancelarOrdenManual(orden.id)} style={registeredAreaDeactivateButtonStyle}>
-                            Cancelar orden
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ))
-                )}
-
-                {ordenManualSeleccionada && (
-                  <div style={{ ...orderBoxStyle, marginTop: "20px" }}>
-                    <h3>Recepción de orden</h3>
-                    <p><strong>Orden:</strong> {ordenManualSeleccionada.numeroOrden}</p>
-                    <p><strong>Lugar:</strong> {ordenManualSeleccionada.lugar}</p>
-                    <p><strong>Solicitante:</strong> {ordenManualSeleccionada.requester}</p>
-                    <p><strong>Aprobador:</strong> {ordenManualSeleccionada.approver}</p>
-                    <p><strong>Prioridad:</strong> {ordenManualSeleccionada.prioridad}</p>
-                    <p><strong>Método:</strong> {ordenManualSeleccionada.metodoCompra}</p>
-                    <p><strong>Proveedor:</strong> {ordenManualSeleccionada.proveedor.nombre}</p>
-
-                    <h4>Ingredientes pedidos</h4>
-                    {ordenManualSeleccionada.items.map((item) => (
-                      <div key={item.id} style={{ marginBottom: "10px" }}>
-                        <p><strong>{item.nombre}</strong> ({item.sku || item.codigo || "Sin código"})</p>
-                        <p>Cantidad pedida: {item.cantidad_compra ?? item.cantidadComprar} {item.unidad_compra || item.unidadCompra}</p>
-                        {item.subtotal != null && <p>Subtotal: Q{Number(item.subtotal).toFixed(2)}</p>}
-                      </div>
-                    ))}
-
-                    <label style={fieldLabelStyle}>Cantidad recibida real</label>
-                    <input
-                      type="number"
-                      placeholder="Cantidad recibida"
-                      value={manualRecepcionCantidad}
-                      onChange={(e) => setManualRecepcionCantidad(e.target.value)}
-                      style={inputStyle}
-                    />
-
-                    <label style={fieldLabelStyle}>Estado del producto</label>
-                    <select
-                      value={manualRecepcionEstado}
-                      onChange={(e) => setManualRecepcionEstado(e.target.value)}
-                      style={inputStyle}
-                    >
-                      <option value="bueno">Bueno</option>
-                      <option value="dañado">Dañado</option>
-                      <option value="vencido">Vencido</option>
-                      <option value="malo">Malo</option>
-                    </select>
-
-                    <label style={fieldLabelStyle}>Nombre de quien recibe</label>
-                    <input
-                      type="text"
-                      placeholder="Nombre del receptor"
-                      value={manualRecepcionNombre}
-                      onChange={(e) => setManualRecepcionNombre(e.target.value)}
-                      style={inputStyle}
-                    />
-
-                    <label style={fieldLabelStyle}>Imagen de recepción / factura</label>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={cargarImagenRecepcion}
-                      style={inputStyle}
-                    />
-
-                    {manualRecepcionImagen && (
-                      <div style={imagePreviewBox}>
-                        <img src={manualRecepcionImagen} alt="Recepción" style={previewImageStyle} />
-                      </div>
-                    )}
-
-                    {puedeRecibirOrdenCompra && ["aprobada", "enviada_proveedor"].includes(ordenManualSeleccionada.status) && (
-                      <button onClick={recibirOrdenManual} style={purchaseButtonStyle}>
-                        Registrar recepción
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>}
-            </>
+            <PurchaseOrdersModule
+              purchaseOrderView={purchaseOrderView}
+              setPurchaseOrderView={setPurchaseOrderView}
+              puedeCrearOrdenCompra={puedeCrearOrdenCompra}
+              puedeAprobarOrdenCompra={puedeAprobarOrdenCompra}
+              puedeRecibirOrdenCompra={puedeRecibirOrdenCompra}
+              requiereAprobacionOrdenCompra={requiereAprobacionOrdenCompra}
+              ordenCompra={ordenCompra}
+              totalOrdenCompra={totalOrdenCompra}
+              ordenesCompraManual={ordenesCompraManual}
+              ordenManualSeleccionada={ordenManualSeleccionada}
+              proximoNumeroOrden={generarNumeroOrdenManual(ordenesCompraManual.length)}
+              manualBusqueda={manualBusqueda}
+              setManualBusqueda={setManualBusqueda}
+              manualIngredienteSeleccionadoId={manualIngredienteSeleccionadoId}
+              setManualIngredienteSeleccionadoId={setManualIngredienteSeleccionadoId}
+              manualCantidadComprar={manualCantidadComprar}
+              setManualCantidadComprar={setManualCantidadComprar}
+              manualOrdenItems={manualOrdenItems}
+              setManualOrdenItems={setManualOrdenItems}
+              manualInventoryLoading={manualInventoryLoading}
+              manualInventoryError={manualInventoryError}
+              manualInventorySource={manualInventorySource}
+              manualIssueDate={manualIssueDate}
+              setManualIssueDate={setManualIssueDate}
+              manualExpectedDate={manualExpectedDate}
+              setManualExpectedDate={setManualExpectedDate}
+              manualStatus={manualStatus}
+              setManualStatus={setManualStatus}
+              manualProveedorNombre={manualProveedorNombre}
+              setManualProveedorNombre={setManualProveedorNombre}
+              manualProveedorContacto={manualProveedorContacto}
+              setManualProveedorContacto={setManualProveedorContacto}
+              manualProveedorCorreo={manualProveedorCorreo}
+              setManualProveedorCorreo={setManualProveedorCorreo}
+              manualProveedorWhatsApp={manualProveedorWhatsApp}
+              setManualProveedorWhatsApp={setManualProveedorWhatsApp}
+              manualProveedorEncargado={manualProveedorEncargado}
+              setManualProveedorEncargado={setManualProveedorEncargado}
+              manualMetodoCompra={manualMetodoCompra}
+              setManualMetodoCompra={setManualMetodoCompra}
+              manualRequester={manualRequester}
+              setManualRequester={setManualRequester}
+              manualApprover={manualApprover}
+              setManualApprover={setManualApprover}
+              manualPriority={manualPriority}
+              setManualPriority={setManualPriority}
+              manualLocation={manualLocation}
+              manualRecepcionCantidad={manualRecepcionCantidad}
+              setManualRecepcionCantidad={setManualRecepcionCantidad}
+              manualRecepcionEstado={manualRecepcionEstado}
+              setManualRecepcionEstado={setManualRecepcionEstado}
+              manualRecepcionNombre={manualRecepcionNombre}
+              setManualRecepcionNombre={setManualRecepcionNombre}
+              manualRecepcionImagen={manualRecepcionImagen}
+              generarOrdenCompra={generarOrdenCompra}
+              limpiarOrdenCompra={limpiarOrdenCompra}
+              descargarOrdenPDF={descargarOrdenPDF}
+              seleccionarIngredienteOrdenManual={seleccionarIngredienteOrdenManual}
+              agregarIngredienteOrdenManual={agregarIngredienteOrdenManual}
+              limpiarFormularioOrdenManual={limpiarFormularioOrdenManual}
+              crearOrdenCompraManual={crearOrdenCompraManual}
+              seleccionarOrdenManual={seleccionarOrdenManual}
+              cancelarOrdenManual={cancelarOrdenManual}
+              aprobarOrdenManual={aprobarOrdenManual}
+              rechazarOrdenManual={rechazarOrdenManual}
+              enviarOrdenProveedor={enviarOrdenProveedor}
+              recibirOrdenManual={recibirOrdenManual}
+              cargarImagenRecepcion={cargarImagenRecepcion}
+            />
           )}
 
           {seccionActiva === "asistencia" && (
@@ -7864,242 +7392,6 @@ const cardStyle = {
   marginTop: "20px",
   width: "100%",
   boxSizing: "border-box"
-}
-
-const purchaseOrdersNavigationStyle = {
-  ...cardStyle,
-  display: "grid",
-  gap: "18px",
-  border: "1px solid #334155",
-  backgroundColor: "#111b2c"
-}
-
-const purchaseOrdersIntroStyle = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  flexWrap: "wrap",
-  gap: "18px"
-}
-
-const purchaseOrdersPrimaryActionsStyle = {
-  display: "flex",
-  alignItems: "center",
-  flexWrap: "wrap",
-  gap: "10px"
-}
-
-const purchaseOrderActionBaseStyle = {
-  minHeight: "46px",
-  padding: "12px 18px",
-  border: "1px solid transparent",
-  borderRadius: "10px",
-  color: "#ffffff",
-  cursor: "pointer",
-  fontWeight: 700,
-  fontSize: "14px"
-}
-
-const purchaseOrderAutomaticButtonStyle = {
-  ...purchaseOrderActionBaseStyle,
-  backgroundColor: "#15803d",
-  borderColor: "#22c55e"
-}
-
-const purchaseOrderManualButtonStyle = {
-  ...purchaseOrderActionBaseStyle,
-  backgroundColor: "#0f766e",
-  borderColor: "#14b8a6"
-}
-
-const purchaseOrdersTabsStyle = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: "8px",
-  paddingTop: "4px",
-  borderTop: "1px solid #273449"
-}
-
-const purchaseOrdersTabStyle = {
-  minHeight: "43px",
-  padding: "10px 16px",
-  border: "1px solid #334155",
-  borderRadius: "9px",
-  backgroundColor: "#0f172a",
-  color: "#cbd5e1",
-  cursor: "pointer",
-  fontWeight: 700
-}
-
-const purchaseOrdersActiveTabStyle = {
-  ...purchaseOrdersTabStyle,
-  borderColor: "#14b8a6",
-  backgroundColor: "#073234",
-  color: "#99f6e4"
-}
-
-const purchaseOrderPanelStyle = {
-  ...cardStyle,
-  maxWidth: "1180px",
-  border: "1px solid #293548",
-  backgroundColor: "#182334"
-}
-
-const purchaseOrderToolbarStyle = {
-  display: "flex",
-  flexWrap: "wrap",
-  alignItems: "center",
-  gap: "10px",
-  margin: "18px 0"
-}
-
-const purchaseOrderFooterActionsStyle = {
-  display: "flex",
-  flexWrap: "wrap",
-  alignItems: "center",
-  gap: "10px",
-  paddingTop: "18px",
-  marginTop: "20px",
-  borderTop: "1px solid #334155"
-}
-
-const purchaseOrderHistoryActionsStyle = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: "8px",
-  marginTop: "12px"
-}
-
-const manualSelectedProductStyle = {
-  display: "grid",
-  gap: "16px",
-  margin: "14px 0 20px",
-  padding: "18px",
-  borderRadius: "12px",
-  border: "1px solid #1f766e",
-  backgroundColor: "#0f172a"
-}
-
-const manualSelectedProductHeaderStyle = {
-  display: "flex",
-  flexWrap: "wrap",
-  alignItems: "flex-start",
-  justifyContent: "space-between",
-  gap: "12px"
-}
-
-const manualSelectedProductLabelStyle = {
-  margin: "0 0 5px",
-  color: "#5eead4",
-  fontSize: "12px",
-  fontWeight: 700,
-  letterSpacing: "0.08em",
-  textTransform: "uppercase"
-}
-
-const manualSelectedProductTitleStyle = {
-  margin: 0,
-  color: "#f8fafc",
-  fontSize: "20px"
-}
-
-const purchaseOrderSecondaryActionStyle = {
-  minHeight: "40px",
-  padding: "9px 13px",
-  border: "1px solid #475569",
-  borderRadius: "9px",
-  backgroundColor: "#1e293b",
-  color: "#e2e8f0",
-  fontWeight: 700,
-  cursor: "pointer"
-}
-
-const manualProductDetailsGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(165px, 1fr))",
-  gap: "9px"
-}
-
-const manualProductMetricStyle = {
-  display: "grid",
-  gap: "5px",
-  padding: "10px 12px",
-  border: "1px solid #263449",
-  borderRadius: "9px",
-  backgroundColor: "#111c2d",
-  color: "#94a3b8",
-  fontSize: "12px"
-}
-
-const purchaseQuantityRowStyle = {
-  display: "flex",
-  flexWrap: "wrap",
-  alignItems: "center",
-  gap: "10px"
-}
-
-const purchaseQuantityUnitStyle = {
-  minWidth: "120px",
-  minHeight: "43px",
-  display: "inline-flex",
-  alignItems: "center",
-  padding: "0 14px",
-  borderRadius: "9px",
-  border: "1px solid #334155",
-  backgroundColor: "#111c2d",
-  color: "#e2e8f0",
-  fontWeight: 700
-}
-
-const purchaseCalculatedSummaryStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
-  gap: "10px"
-}
-
-const purchaseCalculatedMetricStyle = {
-  display: "grid",
-  gap: "5px",
-  padding: "13px 14px",
-  borderRadius: "10px",
-  backgroundColor: "#082f31",
-  border: "1px solid #0f766e",
-  color: "#99f6e4",
-  fontSize: "13px"
-}
-
-const manualSupplierSectionStyle = {
-  display: "grid",
-  gap: "14px",
-  margin: "18px 0",
-  padding: "18px",
-  borderRadius: "12px",
-  border: "1px solid #334155",
-  backgroundColor: "#111c2d"
-}
-
-const manualSupplierHelpStyle = {
-  margin: 0,
-  color: "#94a3b8",
-  fontSize: "13px"
-}
-
-const manualSupplierFieldsGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-  gap: "10px"
-}
-
-const purchaseOrderDataTitleStyle = {
-  margin: "22px 0 12px",
-  paddingTop: "16px",
-  borderTop: "1px solid #334155"
-}
-
-const purchaseOrderDataGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))",
-  gap: "12px"
 }
 
 const addIngredientToggleButtonStyle = {
