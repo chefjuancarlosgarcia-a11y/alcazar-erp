@@ -5,8 +5,6 @@ import "react-easy-crop/react-easy-crop.css"
 import SuppliersModule from "./suppliers/SuppliersModule"
 import UsersModule from "./users/UsersModule"
 import AttendanceReportsModule from "./attendance/AttendanceReportsModule"
-
-const USE_LEGACY_ATTENDANCE_REPORTS_UI = false
 import { BrowserMultiFormatReader } from "@zxing/browser"
 import * as XLSX from "xlsx"
 import jsPDF from "jspdf"
@@ -783,18 +781,6 @@ function getPurchaseOrderStatusLabel(status) {
     cancelada: "Cancelada"
   }
   return labels[status] || status
-}
-
-function getAttendanceMarkLabel(type) {
-  return {
-    entrada: "Entrada",
-    salida: "Salida",
-    salida_comida: "Salida a comida",
-    regreso_comida: "Regreso de comida",
-    salida_final: "Salida final",
-    bano_inicio: "Baño / Break",
-    bano_regreso: "Regreso de baño"
-  }[type] || type
 }
 
 function generateUsernameFromName(name) {
@@ -2119,19 +2105,6 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
 
   function toggleUsuarioActivo(id) {
     setUsers(users.map((u) => (u.id === id ? { ...u, activo: !u.activo, ultimaEdicion: new Date().toLocaleString() } : u)))
-  }
-
-  function obtenerMovimientosColaboradorHoy(colaboradorId) {
-    const hoy = obtenerFechaLocal()
-    return asistenciaMovimientos
-      .filter((movimiento) => movimiento.colaboradorId === colaboradorId && movimiento.fecha === hoy)
-      .sort((a, b) => new Date(b.fechaHoraISO) - new Date(a.fechaHoraISO))
-  }
-
-  function obtenerUltimoMovimientoEntradaSalida(colaboradorId) {
-    return obtenerMovimientosColaboradorHoy(colaboradorId).find((movimiento) =>
-      ["entrada", "salida"].includes(movimiento.tipo)
-    )
   }
 
   function abrirRecuperacionAsistencia(type) {
@@ -3500,66 +3473,6 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
     { title: "Capacitaciones pendientes", value: hrEmployees.reduce((sum, employee) => sum + getTrainingStats(employee).pending, 0), icon: "▣", note: "Pendientes por completar", tone: "warning" },
     { title: "Score promedio", value: `${hrAverageScore}%`, icon: "★", note: "Promedio del equipo", tone: hrAverageScore >= 85 ? "good" : hrAverageScore >= 70 ? "warning" : "danger" }
   ]
-  const colaboradorSesion = users.find((u) => u.username === usuarioActual?.username) || null
-  const colaboradoresAsistenciaBase = puedeVerReportesRRHH ? asistenciaPerfiles : asistenciaPerfiles.filter((u) => u.id === colaboradorSesion?.id)
-  const colaboradoresAsistencia = colaboradoresAsistenciaBase.filter((u) => {
-    const texto = asistenciaBusqueda.toLowerCase()
-    return !texto || String(u.nombre || "").toLowerCase().includes(texto) || String(u.username || "").toLowerCase().includes(texto) || String(u.departamento || "").toLowerCase().includes(texto) || String(u.puesto || "").toLowerCase().includes(texto)
-  })
-  const movimientosFechaFiltro = asistenciaMovimientos.filter((movimiento) => movimiento.fecha === asistenciaFechaFiltro)
-  const movimientosReportesBase = asistenciaReporteColaboradorId
-    ? movimientosFechaFiltro.filter((movimiento) => String(movimiento.colaboradorId) === String(asistenciaReporteColaboradorId))
-    : movimientosFechaFiltro
-  const movimientosReportes = movimientosReportesBase.filter((movimiento) => {
-    const texto = asistenciaBusqueda.toLowerCase()
-    return !texto || String(movimiento.colaboradorNombre || "").toLowerCase().includes(texto) || String(movimiento.colaboradorUsername || "").toLowerCase().includes(texto)
-  })
-  const colaboradoresDentroTurno = asistenciaPerfiles.filter((usuario) => obtenerUltimoMovimientoEntradaSalida(usuario.id)?.tipo === "entrada")
-  const colaboradoresSinSalida = colaboradoresDentroTurno
-  const entradasDelDia = movimientosReportes.filter((movimiento) => movimiento.tipo === "entrada")
-  const salidasDelDia = movimientosReportes.filter((movimiento) => movimiento.tipo === "salida")
-  const banosDelDia = movimientosReportes.filter((movimiento) => movimiento.tipo === "bano_inicio")
-  const regresosBanoDelDia = movimientosReportes.filter((movimiento) => movimiento.tipo === "bano_regreso")
-  const llegadasTarde = asistenciaLlegadasTarde.filter((row) => {
-    const texto = asistenciaBusqueda.toLowerCase()
-    return !texto || String(row.colaboradorNombre || "").toLowerCase().includes(texto) || String(row.area || "").toLowerCase().includes(texto)
-  })
-  const salidasTempranas = salidasDelDia.filter((movimiento) => {
-    const colaborador = asistenciaPerfiles.find((usuario) => usuario.id === movimiento.colaboradorId)
-    const salidaTurno = obtenerMinutosDesdeHora(obtenerHora24DesdeTurno(obtenerTurnosColaborador(colaborador)[0], "end"))
-    const salidaReal = obtenerMinutosDesdeHora(movimiento.hora)
-    return salidaTurno !== null && salidaReal !== null && salidaReal < salidaTurno
-  })
-  const faltasDelDia = asistenciaPerfiles.filter((usuario) =>
-    usuario.activo !== false &&
-    !entradasDelDia.some((movimiento) => movimiento.colaboradorId === usuario.id)
-  )
-  const horasTrabajadas = asistenciaPerfiles.map((usuario) => {
-    const movimientosUsuario = movimientosFechaFiltro
-      .filter((movimiento) => movimiento.colaboradorId === usuario.id && ["entrada", "salida"].includes(movimiento.tipo))
-      .sort((a, b) => new Date(a.fechaHoraISO) - new Date(b.fechaHoraISO))
-    let totalMinutos = 0
-    let entradaAbierta = null
-    movimientosUsuario.forEach((movimiento) => {
-      if (movimiento.tipo === "entrada") entradaAbierta = movimiento
-      if (movimiento.tipo === "salida" && entradaAbierta) {
-        totalMinutos += calcularMinutosEntre(entradaAbierta.fechaHoraISO, movimiento.fechaHoraISO)
-        entradaAbierta = null
-      }
-    })
-    return { usuario, totalMinutos }
-  }).filter((item) => item.totalMinutos > 0)
-  const resumenSemanal = asistenciaMovimientos.filter((movimiento) => {
-    if (!movimiento?.fecha || !asistenciaFechaFiltro) return false
-    const fechaMovimiento = new Date(`${movimiento.fecha}T00:00:00`)
-    const fechaFiltro = new Date(`${asistenciaFechaFiltro}T00:00:00`)
-    if (Number.isNaN(fechaMovimiento.getTime()) || Number.isNaN(fechaFiltro.getTime())) return false
-    const diferenciaDias = Math.floor((fechaFiltro - fechaMovimiento) / 86400000)
-    return diferenciaDias >= 0 && diferenciaDias < 7
-  })
-  const resumenMensual = asistenciaMovimientos.filter((movimiento) =>
-    String(movimiento?.fecha || "").slice(0, 7) === String(asistenciaFechaFiltro || "").slice(0, 7)
-  )
 
   const ordenManualSeleccionada = ordenesCompraManual.find(
     (orden) => orden.id === manualPedidoSeleccionadoId
@@ -5754,7 +5667,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
         />
       )}
 
-      {seccionActiva === "reportesAsistencia" && puedeVerReportesRRHH && !USE_LEGACY_ATTENDANCE_REPORTS_UI && (
+      {seccionActiva === "reportesAsistencia" && puedeVerReportesRRHH && (
         <AttendanceReportsModule
           asistenciaBusqueda={asistenciaBusqueda}
           setAsistenciaBusqueda={setAsistenciaBusqueda}
@@ -7116,138 +7029,6 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
                   Abrir modo kiosco
                 </button>
               </div>
-            </div>
-          )}
-
-          {seccionActiva === "reportesAsistencia" && puedeVerReportesRRHH && USE_LEGACY_ATTENDANCE_REPORTS_UI && (
-            <div style={cardStyle}>
-              <h2>Reportes de asistencia</h2>
-              <div style={attendanceToolbarStyle}>
-                <input placeholder="Buscar colaborador..." value={asistenciaBusqueda} onChange={(e) => setAsistenciaBusqueda(e.target.value)} style={inputStyle} />
-                <input type="date" value={asistenciaFechaFiltro} onChange={(e) => setAsistenciaFechaFiltro(e.target.value)} style={inputStyle} />
-                <select value={asistenciaReporteColaboradorId} onChange={(e) => setAsistenciaReporteColaboradorId(e.target.value)} style={inputStyle}>
-                  <option value="">Todos los colaboradores</option>
-                  {asistenciaPerfiles.map((usuario) => <option key={usuario.id} value={usuario.id}>{usuario.nombre}</option>)}
-                </select>
-              </div>
-
-              <div style={reportGridStyle}>
-                <div style={profileCardStyle}><h3>Asistencia diaria</h3><p>{entradasDelDia.length} entradas · {salidasDelDia.length} salidas</p></div>
-                <div style={profileCardStyle}><h3>Llegadas tarde</h3><p>{llegadasTarde.length} registros</p>{asistenciaGraceMinutes > 0 ? <p style={{ color: "#94a3b8", fontSize: "0.85rem", margin: "6px 0 0" }}>Tolerancia: {asistenciaGraceMinutes} min</p> : null}</div>
-                <div style={profileCardStyle}><h3>Salidas tempranas</h3><p>{salidasTempranas.length} registros</p></div>
-                <div style={profileCardStyle}><h3>Faltas</h3><p>{faltasDelDia.length} colaboradores sin entrada</p></div>
-                <div style={profileCardStyle}><h3>Horas trabajadas</h3>{horasTrabajadas.length ? horasTrabajadas.map((item) => <p key={item.usuario.id}>{item.usuario.nombre}: {(item.totalMinutos / 60).toFixed(2)} h</p>) : <p>Sin horas cerradas.</p>}</div>
-                <div style={profileCardStyle}><h3>Uso de baño por colaborador</h3><p>{banosDelDia.length} usos registrados</p></div>
-                <div style={profileCardStyle}><h3>Excesos de baño</h3><p>{regresosBanoDelDia.filter((movimiento) => movimiento.excedido).length} excesos</p></div>
-                <div style={profileCardStyle}><h3>Actualmente dentro del turno</h3><p>{colaboradoresDentroTurno.length} colaboradores</p></div>
-                <div style={profileCardStyle}><h3>Sin marcar salida</h3><p>{colaboradoresSinSalida.length} colaboradores</p></div>
-                <div style={profileCardStyle}><h3>Resumen semanal</h3><p>{resumenSemanal.length} movimientos en 7 días</p></div>
-                <div style={profileCardStyle}><h3>Resumen mensual</h3><p>{resumenMensual.length} movimientos del mes</p></div>
-              </div>
-
-              {llegadasTarde.length > 0 && (
-                <div style={profileCardStyle}>
-                  <h3>Detalle de llegadas tarde</h3>
-                  <div style={attendanceTableWrapperStyle}>
-                    <table style={attendanceTableStyle}>
-                      <thead>
-                        <tr>
-                          <th style={attendanceThStyle}>Colaborador</th>
-                          <th style={attendanceThStyle}>Área</th>
-                          <th style={attendanceThStyle}>Hora programada</th>
-                          <th style={attendanceThStyle}>Entrada</th>
-                          <th style={attendanceThStyle}>Minutos tarde</th>
-                          <th style={attendanceThStyle}>Horario</th>
-                          <th style={attendanceThStyle}>Estado</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {llegadasTarde.map((row) => (
-                          <tr key={row.id}>
-                            <td style={attendanceTdStyle}>{row.colaboradorNombre}</td>
-                            <td style={attendanceTdStyle}>{row.area || "-"}</td>
-                            <td style={attendanceTdStyle}>{row.horaProgramada}</td>
-                            <td style={attendanceTdStyle}>{row.horaEntrada}</td>
-                            <td style={attendanceTdStyle}>{row.minutosTarde}</td>
-                            <td style={attendanceTdStyle}>{row.horarioEstado}</td>
-                            <td style={attendanceTdStyle}>{row.sinSalida ? "Sin salida" : "En turno cerrado"}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-
-              <div style={profileCardStyle}>
-                <h3>Historial por colaborador</h3>
-                <div style={attendanceTableWrapperStyle}>
-                  <table style={attendanceTableStyle}>
-                    <thead>
-                      <tr>
-                        <th style={attendanceThStyle}>Fecha</th>
-                        <th style={attendanceThStyle}>Hora</th>
-                        <th style={attendanceThStyle}>Colaborador</th>
-                        <th style={attendanceThStyle}>Movimiento</th>
-                        <th style={attendanceThStyle}>Dispositivo</th>
-                        <th style={attendanceThStyle}>Foto</th>
-                        <th style={attendanceThStyle}>Detalle</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {movimientosReportes.map((movimiento) => (
-                        <tr key={movimiento.id}>
-                          <td style={attendanceTdStyle}>{movimiento.fecha}</td>
-                          <td style={attendanceTdStyle}>{movimiento.hora}</td>
-                          <td style={attendanceTdStyle}>{movimiento.colaboradorNombre}</td>
-                          <td style={attendanceTdStyle}>{getAttendanceMarkLabel(movimiento.tipo)}</td>
-                          <td style={attendanceTdStyle}>{formatAttendanceDevice(movimiento)}</td>
-                          <td style={attendanceTdStyle}>{movimiento.fotoMarcaje ? <button type="button" onClick={() => setAsistenciaFotoAmpliada(movimiento.fotoMarcaje)} style={attendancePhotoButtonStyle} title="Ver foto ampliada"><img src={movimiento.fotoMarcaje} alt="Marcaje" style={attendancePhotoThumbStyle} /></button> : "-"}</td>
-                          <td style={attendanceTdStyle}>
-                            <button type="button" onClick={() => setAsistenciaDetalleMarcaje(movimiento)} style={attendanceDetailButtonStyle}>Ver</button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-              {asistenciaDetalleMarcaje && (
-                <div style={cropModalOverlayStyle} onClick={() => setAsistenciaDetalleMarcaje(null)}>
-                  <div style={attendanceDetailModalStyle} onClick={(event) => event.stopPropagation()}>
-                    <h3 style={{ marginTop: 0 }}>Detalle de marcaje</h3>
-                    <div style={attendanceDetailGridStyle}>
-                      <div><strong>Fecha</strong><span>{asistenciaDetalleMarcaje.fecha}</span></div>
-                      <div><strong>Hora</strong><span>{asistenciaDetalleMarcaje.hora}</span></div>
-                      <div><strong>Colaborador</strong><span>{asistenciaDetalleMarcaje.colaboradorNombre}</span></div>
-                      <div><strong>Movimiento</strong><span>{getAttendanceMarkLabel(asistenciaDetalleMarcaje.tipo)}</span></div>
-                      <div><strong>Dispositivo</strong><span>{formatAttendanceDevice(asistenciaDetalleMarcaje)}</span></div>
-                      <div><strong>Estado</strong><span>{asistenciaDetalleMarcaje.dispositivoNoAutorizado ? "Dispositivo no autorizado" : asistenciaDetalleMarcaje.estado}</span></div>
-                      {asistenciaDetalleMarcaje.notas ? <div style={{ gridColumn: "1 / -1" }}><strong>Notas</strong><span>{asistenciaDetalleMarcaje.notas}</span></div> : null}
-                      {resolveAttendanceUserAgent(asistenciaDetalleMarcaje) ? (
-                        <div style={{ gridColumn: "1 / -1" }}>
-                          <strong>User agent (auditoría)</strong>
-                          <span style={attendanceUserAgentStyle}>{resolveAttendanceUserAgent(asistenciaDetalleMarcaje)}</span>
-                        </div>
-                      ) : null}
-                    </div>
-                    {asistenciaDetalleMarcaje.fotoMarcaje ? (
-                      <button type="button" onClick={() => setAsistenciaFotoAmpliada(asistenciaDetalleMarcaje.fotoMarcaje)} style={attendancePhotoButtonStyle}>
-                        <img src={asistenciaDetalleMarcaje.fotoMarcaje} alt="Evidencia de marcaje" style={attendanceDetailPhotoStyle} />
-                      </button>
-                    ) : <p style={{ color: "#94a3b8" }}>Sin foto disponible.</p>}
-                    <button type="button" onClick={() => setAsistenciaDetalleMarcaje(null)} style={cancelButtonStyle}>Cerrar</button>
-                  </div>
-                </div>
-              )}
-              {asistenciaFotoAmpliada && (
-                <div style={cropModalOverlayStyle} onClick={() => setAsistenciaFotoAmpliada("")}>
-                  <div style={attendancePhotoPreviewStyle} onClick={(event) => event.stopPropagation()}>
-                    <img src={asistenciaFotoAmpliada} alt="Evidencia de marcaje ampliada" style={{ width: "100%", maxHeight: "70vh", objectFit: "contain", borderRadius: "10px" }} />
-                    <button type="button" onClick={() => setAsistenciaFotoAmpliada("")} style={cancelButtonStyle}>Cerrar</button>
-                  </div>
-                </div>
-              )}
             </div>
           )}
 
@@ -8652,13 +8433,6 @@ const profileCardStyle = {
   backgroundColor: "#111827"
 }
 
-const attendanceToolbarStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-  gap: "12px",
-  marginBottom: "16px"
-}
-
 const attendanceGridStyle = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
@@ -8824,91 +8598,6 @@ const attendanceAutoCaptureTextStyle = {
   alignSelf: "center"
 }
 
-const attendancePhotoThumbStyle = {
-  width: "72px",
-  height: "54px",
-  borderRadius: "8px",
-  objectFit: "cover",
-  border: "1px solid #334155"
-}
-
-const attendancePhotoButtonStyle = {
-  padding: 0,
-  border: 0,
-  background: "transparent",
-  cursor: "zoom-in"
-}
-
-const attendanceDetailButtonStyle = {
-  minHeight: "36px",
-  padding: "7px 12px",
-  border: "1px solid #334155",
-  borderRadius: "8px",
-  background: "#111827",
-  color: "#dbeafe",
-  fontWeight: 700,
-  cursor: "pointer"
-}
-
-const attendanceDetailModalStyle = {
-  display: "grid",
-  gap: "14px",
-  width: "min(760px, calc(100vw - 30px))",
-  maxHeight: "90vh",
-  overflow: "auto",
-  padding: "18px",
-  borderRadius: "15px",
-  border: "1px solid #334155",
-  backgroundColor: "#0f172a",
-  color: "#e2e8f0"
-}
-
-const attendanceDetailGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(2, minmax(180px, 1fr))",
-  gap: "12px"
-}
-
-const attendanceUserAgentStyle = {
-  display: "block",
-  marginTop: "6px",
-  padding: "10px",
-  borderRadius: "8px",
-  background: "#111827",
-  color: "#94a3b8",
-  fontSize: "12px",
-  lineHeight: 1.45,
-  wordBreak: "break-word"
-}
-
-const attendanceDetailPhotoStyle = {
-  width: "100%",
-  maxHeight: "320px",
-  objectFit: "contain",
-  borderRadius: "10px",
-  border: "1px solid #334155"
-}
-
-const attendanceDeviceAlertStyle = {
-  display: "inline-flex",
-  padding: "5px 8px",
-  borderRadius: "999px",
-  backgroundColor: "#422006",
-  color: "#fde68a",
-  fontWeight: 700,
-  fontSize: "12px"
-}
-
-const attendancePhotoPreviewStyle = {
-  display: "grid",
-  gap: "14px",
-  width: "min(720px, calc(100vw - 30px))",
-  padding: "16px",
-  borderRadius: "15px",
-  border: "1px solid #334155",
-  backgroundColor: "#0f172a"
-}
-
 const attendanceWarningStyle = {
   marginTop: "12px",
   padding: "10px 12px",
@@ -8916,36 +8605,6 @@ const attendanceWarningStyle = {
   border: "1px solid #f59e0b",
   backgroundColor: "#422006",
   color: "#fef3c7"
-}
-
-const reportGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))",
-  gap: "14px",
-  marginBottom: "16px"
-}
-
-const attendanceTableWrapperStyle = {
-  overflowX: "auto"
-}
-
-const attendanceTableStyle = {
-  width: "100%",
-  borderCollapse: "collapse",
-  minWidth: "760px"
-}
-
-const attendanceThStyle = {
-  textAlign: "left",
-  padding: "10px",
-  borderBottom: "1px solid #334155",
-  color: "#cbd5e1"
-}
-
-const attendanceTdStyle = {
-  padding: "10px",
-  borderBottom: "1px solid #1f2937",
-  color: "#e5e7eb"
 }
 
 const inputStyle = {

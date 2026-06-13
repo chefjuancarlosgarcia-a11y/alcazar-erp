@@ -32,13 +32,13 @@ Seguimiento de la migración incremental desde `frontend/src/modules/LegacyInven
 
 | Métrica | Valor |
 |---------|-------|
-| Líneas actuales (LegacyInventoryApp) | **10,357** |
+| Líneas actuales (LegacyInventoryApp) | **10,064** |
 | Líneas iniciales (referencia) | **11,539** |
-| Líneas eliminadas (acumulado) | **~1,182** |
-| Módulos extraídos y limpiados | **2** |
-| Reducción acumulada | **~10.2%** |
+| Líneas eliminadas (acumulado) | **~1,475** |
+| Módulos extraídos y limpiados | **3** |
+| Reducción acumulada | **~12.8%** |
 
-**Próximo candidato:** Asistencia / RRHH (reportes + terminal)
+**Próximo candidato:** Inventario (`inventario` + catálogo en cards)
 
 ---
 
@@ -48,6 +48,7 @@ Seguimiento de la migración incremental desde `frontend/src/modules/LegacyInven
 |-------|--------|--------------|----------------|------------|-------------|-----------|-------|------------|
 | 2026-06-12 | Proveedores | 11,539 | 10,851 | ~688 | ~6.0% | OK | OK | OK |
 | 2026-06-12 | Usuarios / RRHH | 10,911 | 10,357 | ~554 | ~4.8% | OK | OK | Pendiente |
+| 2026-06-13 | Reportes de asistencia | 10,405 | 10,064 | ~341 | ~3.0% | OK | OK | Pendiente |
 
 ---
 
@@ -121,10 +122,56 @@ Seguimiento de la migración incremental desde `frontend/src/modules/LegacyInven
 - State `users`, `userForm`, `hrFilters`, `hrEmployees`, permisos RRHH
 - Lógica: guardar/editar colaborador, toggle activo, crop foto, hash password
 - Renderers delegados: `renderHRDashboard`, `renderHRProfile`, `renderUserManagementView`, turnos
-- **Reportes de asistencia** (`reportesAsistencia`) y navegación a terminal HR
+- Navegación a terminal HR y enlace a reportes de asistencia
 - Estilos HR usados por perfil/dashboard: `profileShellStyle`, `hrTabBarStyle`, `hrFilterGridStyle`, etc.
 
 **Design system:** ERP UI Spacing System v1.0 en formulario, KPIs, cards y filtros.
+
+---
+
+### 2026-06-13 — Reportes de asistencia
+
+| Campo | Valor |
+|-------|-------|
+| Líneas antes (pre-limpieza) | 10,405 |
+| Líneas después | 10,064 |
+| Eliminadas (esta limpieza) | ~341 |
+| Reducción % (vs. referencia) | ~3.0% en esta limpieza; **~12.8% acumulado** |
+| Localhost | OK — KPIs, filtros, tardanzas, historial, modales, mobile |
+| Build | OK — `npm run build` |
+| Producción | Pendiente |
+| **Próximo candidato** | Inventario |
+
+**Destino:**
+- `frontend/src/modules/attendance/AttendanceReportsModule.jsx`
+- `frontend/src/modules/attendance/AttendanceReports.css`
+- `frontend/src/modules/attendance/attendanceReportsHelpers.js`
+
+**Funcionalidad migrada:**
+- KPIs de asistencia (11 indicadores)
+- Filtros por fecha / colaborador / búsqueda
+- Detalle de llegadas tarde
+- Historial por colaborador (tabla desktop, cards mobile, paginación)
+- Modales de detalle de marcaje y foto ampliada
+- Cálculo de métricas en `computeAttendanceReportMetrics` (helpers)
+- Error boundary y estado de carga
+
+**Eliminado en limpieza legacy:**
+- Flag `USE_LEGACY_ATTENDANCE_REPORTS_UI` y bloque JSX inline (~131 líneas)
+- Computed huérfanos de reportes (~60 líneas): `movimientosReportes`, `entradasDelDia`, `llegadasTarde`, `horasTrabajadas`, etc.
+- `colaboradoresAsistencia` / `colaboradorSesion` (sin uso)
+- `getAttendanceMarkLabel` (movido a helpers del módulo)
+- `obtenerMovimientosColaboradorHoy` / `obtenerUltimoMovimientoEntradaSalida` (solo usados por computed eliminado)
+- Estilos solo legacy: `attendanceToolbarStyle`, `reportGridStyle`, `attendanceTable*`, `attendancePhoto*`, `attendanceDetail*`, `attendanceDeviceAlertStyle`
+
+**Conservado en Legacy (compartido):**
+- State: `asistenciaBusqueda`, `asistenciaFechaFiltro`, `asistenciaReporteColaboradorId`, `asistenciaPerfiles`, `asistenciaMovimientos`, `asistenciaLlegadasTarde`, `asistenciaGraceMinutes`, `asistenciaCargando`, modales
+- Effects: `cargarAsistenciaSupabase`, `cargarLlegadasTarde`, logs `[asistencia/tardanza]`
+- Sección `asistencia` (redirect a terminal HR / kiosco)
+- Permisos `puedeVerReportesRRHH`, validación de sección, bridge auth → `usuarioActual`
+- Estilos de terminal legacy: `attendanceGridStyle`, `attendanceCardStyle`, `attendanceEmployee*`, etc.
+
+**Design system:** ERP UI Spacing System v1.0 en KPIs, filtros, cards y badges.
 
 ---
 
@@ -132,11 +179,10 @@ Seguimiento de la migración incremental desde `frontend/src/modules/LegacyInven
 
 | Prioridad | Módulo | Notas |
 |-----------|--------|-------|
-| **1 (siguiente)** | Asistencia / RRHH | `reportesAsistencia` en Legacy, `AttendanceTerminal`, tablas → cards mobile |
-| 2 | Inventario | `inventario` + `InventoryBase`, formulario monolítico, catálogo en cards |
-| 3 | Órdenes de compra | Vistas automático / manual / historial |
-| 4 | Recetas | Formulario extenso en Legacy |
-| 5 | Reportes ejecutivos | `ReportsDashboard` (ya módulo parcial) |
+| **1 (siguiente)** | Inventario | `inventario` + `InventoryBase`, formulario monolítico, catálogo en cards |
+| 2 | Órdenes de compra | Vistas automático / manual / historial |
+| 3 | Recetas | Formulario extenso en Legacy |
+| 4 | Reportes ejecutivos | `ReportsDashboard` (ya módulo parcial) |
 
 ---
 
@@ -185,4 +231,4 @@ Seguimiento de la migración incremental desde `frontend/src/modules/LegacyInven
 
 ---
 
-*Última actualización: 2026-06-12*
+*Última actualización: 2026-06-13*
