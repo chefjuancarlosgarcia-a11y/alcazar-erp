@@ -137,8 +137,8 @@ export default function PurchaseOrdersModule({
   manualPriority,
   setManualPriority,
   manualLocation,
-  manualRecepcionCantidad,
-  setManualRecepcionCantidad,
+  manualRecepcionLineas,
+  onReceptionLineChange,
   manualRecepcionEstado,
   setManualRecepcionEstado,
   manualRecepcionNombre,
@@ -158,6 +158,7 @@ export default function PurchaseOrdersModule({
   enviarOrdenProveedor,
   recibirOrdenManual,
   cargarImagenRecepcion,
+  onClearReceptionImage,
   puedeCrearPruebaFlujo = false,
   testFlowFilter = "real",
   setTestFlowFilter = () => {},
@@ -862,14 +863,15 @@ export default function PurchaseOrdersModule({
           puedeCrearOrdenCompra={puedeCrearOrdenCompra}
           puedeAprobarOrdenCompra={puedeAprobarOrdenCompra}
           puedeRecibirOrdenCompra={puedeRecibirOrdenCompra}
-          manualRecepcionCantidad={manualRecepcionCantidad}
-          setManualRecepcionCantidad={setManualRecepcionCantidad}
+          manualRecepcionLineas={manualRecepcionLineas}
+          onReceptionLineChange={onReceptionLineChange}
           manualRecepcionEstado={manualRecepcionEstado}
           setManualRecepcionEstado={setManualRecepcionEstado}
           manualRecepcionNombre={manualRecepcionNombre}
           setManualRecepcionNombre={setManualRecepcionNombre}
           manualRecepcionImagen={manualRecepcionImagen}
           cargarImagenRecepcion={cargarImagenRecepcion}
+          onClearReceptionImage={onClearReceptionImage}
           onClose={closeOrderDetail}
           onApprove={aprobarOrdenManual}
           onReject={rechazarOrdenManual}

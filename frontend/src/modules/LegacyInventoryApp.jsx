@@ -3,6 +3,11 @@ import { useNavigate } from "react-router-dom"
 import SuppliersModule from "./suppliers/SuppliersModule"
 import AttendanceReportsModule from "./attendance/AttendanceReportsModule"
 import PurchaseOrdersModule from "./purchase-orders/PurchaseOrdersModule"
+import {
+  buildEmptyReceptionLines,
+  getPurchaseOrderItemKey,
+  summarizeReceptionLines
+} from "./purchase-orders/purchaseOrdersHelpers"
 import AreasModule from "./areas/AreasModule"
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
@@ -356,7 +361,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
   const [manualPriority, setManualPriority] = useState("normal")
   const [manualLocation, setManualLocation] = useState("EL Gran Alcazar Sucursal 1 zona 09")
   const [manualPedidoSeleccionadoId, setManualPedidoSeleccionadoId] = useState(null)
-  const [manualRecepcionCantidad, setManualRecepcionCantidad] = useState("")
+  const [manualRecepcionLineas, setManualRecepcionLineas] = useState({})
   const [manualRecepcionEstado, setManualRecepcionEstado] = useState("bueno")
   const [manualRecepcionNombre, setManualRecepcionNombre] = useState("")
   const [manualRecepcionImagen, setManualRecepcionImagen] = useState("")
@@ -951,6 +956,15 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
   const ordenManualSeleccionada = ordenesCompraManual.find(
     (orden) => orden.id === manualPedidoSeleccionadoId
   )
+
+  useEffect(() => {
+    if (!ordenManualSeleccionada?.items?.length) return
+    const expectedKeys = ordenManualSeleccionada.items.map(getPurchaseOrderItemKey)
+    const hasAllLines = expectedKeys.every((key) => manualRecepcionLineas[key] != null)
+    if (!hasAllLines) {
+      setManualRecepcionLineas(buildEmptyReceptionLines(ordenManualSeleccionada.items))
+    }
+  }, [ordenManualSeleccionada?.id])
   const purchaseOrderRole = authenticatedUser?.role || normalizeAccessRole(usuarioActual)
   const puedeCrearOrdenCompra = PURCHASE_ORDER_CREATOR_ROLES.includes(purchaseOrderRole)
   const puedeAprobarOrdenCompra = PURCHASE_ORDER_APPROVER_ROLES.includes(purchaseOrderRole)
@@ -1548,10 +1562,20 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
 
   function seleccionarOrdenManual(id) {
     setManualPedidoSeleccionadoId(id)
-    setManualRecepcionCantidad("")
+    const orden = id
+      ? ordenesCompraManual.find((item) => String(item.id) === String(id))
+      : null
+    setManualRecepcionLineas(buildEmptyReceptionLines(orden?.items))
     setManualRecepcionEstado("bueno")
     setManualRecepcionNombre("")
     setManualRecepcionImagen("")
+  }
+
+  function actualizarLineaRecepcion(key, line) {
+    setManualRecepcionLineas((current) => ({
+      ...current,
+      [key]: line
+    }))
   }
 
   async function cancelarOrdenManual(id) {
@@ -1674,15 +1698,23 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
     lector.readAsDataURL(archivo)
   }
 
+  function limpiarImagenRecepcion() {
+    setManualRecepcionImagen("")
+  }
+
   async function recibirOrdenManual() {
     if (!ordenManualSeleccionada) {
       alert("Selecciona una orden para recibir.")
       return
     }
 
-    const cantidadReal = Number(manualRecepcionCantidad)
-    if (!cantidadReal || cantidadReal <= 0) {
-      alert("Ingresa la cantidad recibida real.")
+    const { entries, allEntered, allMatchOrdered } = summarizeReceptionLines(
+      ordenManualSeleccionada.items,
+      manualRecepcionLineas
+    )
+
+    if (entries.length === 0) {
+      alert("Marca al menos un producto e ingresa la cantidad recibida.")
       return
     }
 
@@ -1691,18 +1723,26 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
       return
     }
 
+    const recepcionCompleta = manualRecepcionEstado === "bueno" && allEntered && allMatchOrdered
+    const nuevoStatus = recepcionCompleta ? "recibida_completa" : "recibida_parcial"
+    const recepcionItems = entries.map(({ item, cantidadPedida, cantidadRecibida }) => ({
+      itemId: getPurchaseOrderItemKey(item),
+      nombre: item.nombre || item.name || "Producto",
+      cantidadPedida,
+      cantidadRecibida,
+      unidad: item.unidadCompra || item.unidad_compra || item.unit || ""
+    }))
+    const cantidadRecibidaTotal = recepcionItems.reduce((sum, line) => sum + Number(line.cantidadRecibida || 0), 0)
+
     const ordenActualizada = ordenesCompraManual.map((orden) => {
       if (orden.id !== ordenManualSeleccionada.id) return orden
-
-      const nuevoStatus = manualRecepcionEstado === "bueno"
-        ? "recibida_completa"
-        : "recibida_parcial"
 
       return {
         ...orden,
         status: nuevoStatus,
         recepcion: {
-          cantidadRecibidaReal: cantidadReal,
+          cantidadRecibidaReal: cantidadRecibidaTotal,
+          items: recepcionItems,
           estadoProducto: manualRecepcionEstado,
           recibidoPor: manualRecepcionNombre,
           imagenRecepcion: manualRecepcionImagen,
@@ -1718,7 +1758,6 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
       return
     }
     setOrdenesCompraManual(ordenActualizada)
-    const recepcionCompleta = manualRecepcionEstado === "bueno"
     await publicarNotificacionOrden(["admin", "gerente_general"], {
       type: recepcionCompleta ? "purchase_order_received" : "purchase_order_partially_received",
       title: recepcionCompleta ? "Orden recibida completamente" : "Orden recibida parcialmente",
@@ -1736,16 +1775,20 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
     }
 
     if (manualRecepcionEstado === "bueno" && !ordenManualSeleccionada.is_test) {
+      const receivedByItemId = new Map(
+        entries.map(({ item, cantidadRecibida }) => [getPurchaseOrderItemKey(item), Number(cantidadRecibida)])
+      )
+
       const inventarioActualizado = ingredientes.map((ingrediente) => {
-        const itemOrden = ordenManualSeleccionada.items.find((item) => item.id === ingrediente.id)
-        if (!itemOrden) return ingrediente
+        const itemKey = String(ingrediente.id)
+        const cantidadRecibida = receivedByItemId.get(itemKey)
+        if (cantidadRecibida == null) return ingrediente
 
         const normalizedItem = normalizeInventoryItem(ingrediente)
         const stockAlmacen = getLocationStock(normalizedItem, "almacen")
-        const cantidad = Number(itemOrden.cantidadComprar || 0)
         const stockByLocation = {
           ...normalizedItem.stockByLocation,
-          almacen: stockAlmacen + cantidad
+          almacen: stockAlmacen + cantidadRecibida
         }
         const total = Object.values(stockByLocation).reduce((sum, value) => sum + Number(value || 0), 0)
 
@@ -1764,8 +1807,8 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
         const proveedorIndex = proveedores.findIndex((p) => p.id === ordenManualSeleccionada.proveedorId)
         if (proveedorIndex !== -1) {
           const proveedorActualizado = { ...proveedores[proveedorIndex] }
-          const totalOrden = ordenManualSeleccionada.items.reduce(
-            (sum, item) => sum + Number(item.costoUnitario || 0) * Number(item.cantidadComprar || 0),
+          const totalOrden = entries.reduce(
+            (sum, { item, cantidadRecibida }) => sum + Number(item.costoUnitario || 0) * Number(cantidadRecibida || 0),
             0
           )
           const nuevaCompra = {
@@ -1773,8 +1816,8 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
             fecha: new Date().toLocaleString(),
             numeroOrden: ordenManualSeleccionada.numeroOrden,
             total: totalOrden,
-            estado: "recibida",
-            items: ordenManualSeleccionada.items
+            estado: recepcionCompleta ? "recibida" : "recibida_parcial",
+            items: recepcionItems
           }
           proveedorActualizado.historialCompras = [
             nuevaCompra,
@@ -1799,7 +1842,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
       alert("Orden registrada como parcialmente completada. No se actualizaron cantidades a inventario porque el producto no está en buen estado.")
     }
 
-    setManualRecepcionCantidad("")
+    setManualRecepcionLineas({})
     setManualRecepcionEstado("bueno")
     setManualRecepcionNombre("")
     setManualRecepcionImagen("")
@@ -1997,8 +2040,8 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
               manualPriority={manualPriority}
               setManualPriority={setManualPriority}
               manualLocation={manualLocation}
-              manualRecepcionCantidad={manualRecepcionCantidad}
-              setManualRecepcionCantidad={setManualRecepcionCantidad}
+              manualRecepcionLineas={manualRecepcionLineas}
+              onReceptionLineChange={actualizarLineaRecepcion}
               manualRecepcionEstado={manualRecepcionEstado}
               setManualRecepcionEstado={setManualRecepcionEstado}
               manualRecepcionNombre={manualRecepcionNombre}
@@ -2018,6 +2061,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
               enviarOrdenProveedor={enviarOrdenProveedor}
               recibirOrdenManual={recibirOrdenManual}
               cargarImagenRecepcion={cargarImagenRecepcion}
+              onClearReceptionImage={limpiarImagenRecepcion}
               puedeCrearPruebaFlujo={puedeCrearPruebaFlujo}
               testFlowFilter={testFlowFilter}
               setTestFlowFilter={setTestFlowFilter}

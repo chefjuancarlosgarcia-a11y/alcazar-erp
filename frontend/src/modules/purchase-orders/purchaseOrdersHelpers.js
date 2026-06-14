@@ -220,3 +220,56 @@ export function filterHistoryOrders(orders, { search = "", status = "all", testF
 export function formatCurrency(value) {
   return `Q${Number(value || 0).toFixed(2)}`
 }
+
+export function getPurchaseOrderItemKey(item) {
+  return String(item?.producto_id ?? item?.inventory_item_id ?? item?.id ?? "")
+}
+
+export function getPurchaseOrderItemOrderedQty(item) {
+  return Number(item?.cantidadComprar ?? item?.cantidad_compra ?? 0)
+}
+
+export function getPurchaseOrderItemUnit(item) {
+  return item?.unidadCompra || item?.unidad_compra || item?.unit || "—"
+}
+
+export function buildEmptyReceptionLines(items = []) {
+  return Object.fromEntries(
+    (items || []).map((item) => [
+      getPurchaseOrderItemKey(item),
+      { entered: false, cantidadRecibida: "" }
+    ])
+  )
+}
+
+export function summarizeReceptionLines(items = [], lines = {}) {
+  const entries = (items || [])
+    .map((item) => {
+      const key = getPurchaseOrderItemKey(item)
+      const line = lines[key] || {}
+      const cantidadPedida = getPurchaseOrderItemOrderedQty(item)
+      const cantidadRecibida = Number(line.cantidadRecibida || 0)
+      return {
+        item,
+        key,
+        entered: Boolean(line.entered),
+        cantidadPedida,
+        cantidadRecibida
+      }
+    })
+    .filter((entry) => entry.entered && entry.cantidadRecibida > 0)
+
+  const allItems = items || []
+  const allEntered = allItems.length > 0 && allItems.every((item) => {
+    const key = getPurchaseOrderItemKey(item)
+    const line = lines[key] || {}
+    return line.entered && Number(line.cantidadRecibida) > 0
+  })
+  const allMatchOrdered = allItems.every((item) => {
+    const key = getPurchaseOrderItemKey(item)
+    const line = lines[key] || {}
+    return line.entered && Number(line.cantidadRecibida) === getPurchaseOrderItemOrderedQty(item)
+  })
+
+  return { entries, allEntered, allMatchOrdered }
+}

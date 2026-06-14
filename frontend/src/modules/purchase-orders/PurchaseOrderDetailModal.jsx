@@ -2,6 +2,8 @@ import { TestFlowBadge, TestFlowWarning } from "../../components/TestFlowBadge"
 import { isTestRecord } from "../../utils/testFlowMode"
 import { PO_WORKFLOW_VIEWS } from "../../utils/inventoryNotificationRoutes"
 import { formatCurrency, getPurchaseOrderStatusLabel, getPurchaseOrderStatusBadgeClass } from "./purchaseOrdersHelpers"
+import PurchaseOrderReceptionLines from "./PurchaseOrderReceptionLines"
+import ReceptionImageCapture from "./ReceptionImageCapture"
 import "./PurchaseOrders.css"
 
 function orderTotal(orden) {
@@ -26,14 +28,15 @@ export default function PurchaseOrderDetailModal({
   puedeCrearOrdenCompra,
   puedeAprobarOrdenCompra,
   puedeRecibirOrdenCompra,
-  manualRecepcionCantidad,
-  setManualRecepcionCantidad,
+  manualRecepcionLineas,
+  onReceptionLineChange,
   manualRecepcionEstado,
   setManualRecepcionEstado,
   manualRecepcionNombre,
   setManualRecepcionNombre,
   manualRecepcionImagen,
   cargarImagenRecepcion,
+  onClearReceptionImage,
   onClose,
   onApprove,
   onReject,
@@ -135,8 +138,33 @@ export default function PurchaseOrderDetailModal({
         {order.recepcion && (
           <article className="po-detail-card po-detail-card--wide">
             <h4>Recepción registrada</h4>
+            {Array.isArray(order.recepcion.items) && order.recepcion.items.length > 0 ? (
+              <div className="po-reception-lines-wrap">
+                <table className="po-reception-lines-table">
+                  <thead>
+                    <tr>
+                      <th>Ingrediente</th>
+                      <th>Pedido</th>
+                      <th>Recibido</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {order.recepcion.items.map((line) => (
+                      <tr key={line.itemId || line.nombre}>
+                        <td>{line.nombre || "Producto"}</td>
+                        <td>{line.cantidadPedida ?? "—"} {line.unidad || ""}</td>
+                        <td><strong>{line.cantidadRecibida ?? "—"}</strong> {line.unidad || ""}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <dl>
+                <div><dt>Cantidad recibida</dt><dd>{order.recepcion.cantidadRecibidaReal ?? "—"}</dd></div>
+              </dl>
+            )}
             <dl>
-              <div><dt>Cantidad recibida</dt><dd>{order.recepcion.cantidadRecibidaReal ?? "—"}</dd></div>
               <div><dt>Estado producto</dt><dd>{order.recepcion.estadoProducto || "—"}</dd></div>
               <div><dt>Recibido por</dt><dd>{order.recepcion.recibidoPor || "—"}</dd></div>
               <div><dt>Fecha</dt><dd>{order.recepcion.fechaRecepcion || "—"}</dd></div>
@@ -150,19 +178,15 @@ export default function PurchaseOrderDetailModal({
         {showReceptionForm && (
           <article className="po-detail-card po-detail-card--wide po-reception-panel">
             <h4>Registrar recepción</h4>
+            <p className="po-help">Marca cada producto que entró e ingresa la cantidad recibida.</p>
+            <PurchaseOrderReceptionLines
+              items={order.items || []}
+              lines={manualRecepcionLineas}
+              onLineChange={onReceptionLineChange}
+            />
             <div className="po-form-grid po-form-grid--2">
               <div className="po-field">
-                <label htmlFor="po-detail-reception-qty">Cantidad recibida real</label>
-                <input
-                  id="po-detail-reception-qty"
-                  type="number"
-                  className="po-input"
-                  value={manualRecepcionCantidad}
-                  onChange={(event) => setManualRecepcionCantidad(event.target.value)}
-                />
-              </div>
-              <div className="po-field">
-                <label htmlFor="po-detail-reception-state">Estado del producto</label>
+                <label htmlFor="po-detail-reception-state">Estado general del producto</label>
                 <select
                   id="po-detail-reception-state"
                   className="po-select"
@@ -187,10 +211,13 @@ export default function PurchaseOrderDetailModal({
               />
             </div>
             <div className="po-field">
-              <label htmlFor="po-detail-reception-image">Imagen de recepción / factura</label>
-              <input id="po-detail-reception-image" type="file" accept="image/*" className="po-input" onChange={cargarImagenRecepcion} />
+              <label>Imagen de recepción / factura</label>
+              <ReceptionImageCapture
+                image={manualRecepcionImagen}
+                onSelect={cargarImagenRecepcion}
+                onClear={onClearReceptionImage}
+              />
             </div>
-            {manualRecepcionImagen && <img src={manualRecepcionImagen} alt="Recepción" className="po-preview-image" />}
           </article>
         )}
 
