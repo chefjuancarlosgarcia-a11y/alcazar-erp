@@ -2,7 +2,7 @@ import { useEffect, useState } from "react"
 import { getWaiterSalesRanking } from "../services/salesGoalsService"
 import "./GoalWidgets.css"
 
-function WaiterRankingWidget() {
+function WaiterRankingWidget({ executive = false }) {
   const [state, setState] = useState({ loading: true, error: "", rows: [] })
 
   useEffect(() => {
@@ -23,20 +23,29 @@ function WaiterRankingWidget() {
   const rows = state.rows.slice(0, 5)
 
   return (
-    <article className="goal-widget">
-      <div className="goal-widget-header">
-        <span>Ranking del mes</span>
-        <strong>Top {rows.length || 0}</strong>
-      </div>
+    <article className={`goal-widget ${executive ? "goal-widget--executive" : ""}`}>
+      {!executive && (
+        <div className="goal-widget-header">
+          <span>Ranking del mes</span>
+          <strong>Top {rows.length || 0}</strong>
+        </div>
+      )}
       {!rows.length ? (
         <p>Aun no hay ventas pagadas este mes.</p>
       ) : (
-        <ol className="goal-ranking-list">
+        <ol className={`goal-ranking-list ${executive ? "goal-ranking-list--executive" : ""}`}>
           {rows.map((row) => (
             <li key={row.profile_id || row.rank_position}>
               <span>#{row.rank_position}</span>
-              <strong>{row.display_name || row.full_name || "Colaborador"}</strong>
-              <small>{Number(row.order_count || 0)} ordenes</small>
+              <div className="goal-ranking-list__body">
+                <strong>{row.display_name || row.full_name || "Colaborador"}</strong>
+                {executive && (
+                  <small className="goal-ranking-list__sales">
+                    {Number(row.total_sales || 0).toLocaleString("es-GT", { style: "currency", currency: "GTQ" })}
+                  </small>
+                )}
+              </div>
+              <small>{Number(row.order_count || 0)} órdenes</small>
             </li>
           ))}
         </ol>

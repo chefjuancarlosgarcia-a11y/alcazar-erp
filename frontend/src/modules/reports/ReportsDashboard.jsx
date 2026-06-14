@@ -31,6 +31,8 @@ import {
 import { getMonthlyGoalReport, getWaiterSalesRanking } from "../../services/salesGoalsService"
 import { getYieldDashboardMetrics } from "../../services/yieldCostingService"
 import YieldReportsSection from "./YieldReportsSection"
+import CommandCenterLayer from "../../components/commandCenter/CommandCenterLayer"
+import "./ReportsDashboard.css"
 
 const EXECUTIVE_ROLES = ["admin", "ceo", "gerente_general"]
 const FIXED_COSTS_VIEW_ROLES = ["admin", "ceo", "gerente_general", "supervisor"]
@@ -153,6 +155,8 @@ function ReportsDashboard() {
 
   return (
     <section className="reports-page executive">
+      <CommandCenterLayer showHeaderActions={false} layout="split" />
+
       <header className="reports-header hero">
         <div>
           <p className="reports-eyebrow">Direccion ejecutiva</p>
@@ -166,8 +170,12 @@ function ReportsDashboard() {
         </div>
       </header>
 
-      <nav className="reports-tabs executive-tabs">
-        {availableTabs.map(([key, label]) => <button key={key} className={tab === key ? "active" : ""} type="button" onClick={() => changeTab(key)}>{label}</button>)}
+      <nav className="reports-segmented" aria-label="Secciones del reporte ejecutivo">
+        {availableTabs.map(([key, label]) => (
+          <button key={key} className={tab === key ? "active" : ""} type="button" onClick={() => changeTab(key)}>
+            {label.replace("Dashboard ejecutivo", "Dashboard").replace("Analisis de menu", "Menú").replace("Inventario critico", "Inventario")}
+          </button>
+        ))}
       </nav>
 
       {(tab === "goals" || tab === "fixedCosts") && (
@@ -254,9 +262,29 @@ function ExecutiveContent(props) {
       />
     )
   }
+  if (props.tab === "executive" && props.data) return <ExecutiveDashboard data={props.data} />
+  if (props.tab === "goals" && props.data) {
+    return (
+      <GoalsReport
+        data={props.data}
+        onConfigure={props.onConfigureGoals}
+        canManage={props.canManageGoals}
+      />
+    )
+  }
+  if (props.tab === "sales" && props.data) return <SalesReport data={props.data} />
+  if (props.tab === "waiters" && props.data) {
+    return <WaiterSales rows={filterWaiters(props.data, props.filters)} />
+  }
+  if (props.tab === "comparison" && props.data) {
+    return <WaiterComparison rows={filterWaiters(props.data, props.filters)} />
+  }
+  if (props.tab === "purchases" && props.data) return <PurchasesReport data={props.data} />
+  if (props.tab === "payroll" && props.data) return <PayrollReport data={props.data} />
+  if (props.tab === "menu" && props.data) {
+    return <MenuReport rows={filterMenuRows(props.data, props.filters)} />
+  }
   if (!props.data) return <Empty />
-  if (props.tab === "payroll") return <PayrollReport data={props.data} />
-  if (props.tab === "menu") return <MenuReport rows={filterMenuRows(props.data, props.filters)} />
   return <Empty />
 }
 
@@ -642,7 +670,7 @@ function PieList({ rows }) {
   </div>
 }
 
-function DataTable({ headers, rows, emptyText = "Sin datos suficientes todavia." }) {
+function DataTable({ headers, rows, emptyText = "No existen datos suficientes para este período." }) {
   const safe = safeRows(rows).filter(Array.isArray)
   if (!safe.length) return <Empty text={emptyText} />
   return <div className="reports-table-scroll"><table className="reports-table"><thead><tr>{safeList(headers).map((header) => <th key={header}>{header}</th>)}</tr></thead><tbody>{safe.map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell ?? "-"}</td>)}</tr>)}</tbody></table></div>
@@ -650,7 +678,20 @@ function DataTable({ headers, rows, emptyText = "Sin datos suficientes todavia."
 
 function KPI({ title, value, tone = "" }) { return <article className={`report-kpi ${tone}`}><span>{title}</span><strong>{value}</strong></article> }
 function Panel({ title, children }) { return <article className="report-panel"><h2>{title}</h2>{children}</article> }
-function Empty({ text = "Sin datos suficientes todavia." }) { return <div className="reports-empty"><span>{text}</span></div> }
+function Empty({ text = "No existen datos suficientes para este período." }) {
+  return (
+    <div className="reports-empty reports-empty--illustrated">
+      <div className="reports-empty__icon" aria-hidden="true">
+        <svg viewBox="0 0 64 64" width="48" height="48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="8" y="12" width="48" height="40" rx="6" stroke="currentColor" strokeWidth="2" opacity=".5" />
+          <path d="M16 40 L26 28 L34 36 L42 24 L48 32" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+          <circle cx="22" cy="22" r="3" fill="currentColor" opacity=".6" />
+        </svg>
+      </div>
+      <span>{text}</span>
+    </div>
+  )
+}
 function StockState({ row }) {
   const quantity = Number(row.quantity || 0)
   const minimum = Number(row.minimum_quantity || 0)
