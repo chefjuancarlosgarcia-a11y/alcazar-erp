@@ -1,6 +1,7 @@
 export const PO_WORKFLOW_VIEWS = {
   AUTOMATIC: "automatic",
   MANUAL: "manual",
+  PENDING_APPROVAL: "pending_approval",
   TO_SEND: "to_send",
   RECEPTION: "reception",
   HISTORY: "history"
@@ -17,7 +18,7 @@ export function normalizePurchaseOrderStatus(status) {
 
 export function getPurchaseOrderWorkflowView(status) {
   const normalized = normalizePurchaseOrderStatus(status)
-  if (PENDING_APPROVAL_STATUSES.has(normalized)) return PO_WORKFLOW_VIEWS.MANUAL
+  if (PENDING_APPROVAL_STATUSES.has(normalized)) return PO_WORKFLOW_VIEWS.PENDING_APPROVAL
   if (TO_SEND_STATUSES.has(normalized)) return PO_WORKFLOW_VIEWS.TO_SEND
   if (RECEPTION_STATUSES.has(normalized)) return PO_WORKFLOW_VIEWS.RECEPTION
   if (HISTORY_STATUSES.has(normalized)) return PO_WORKFLOW_VIEWS.HISTORY
@@ -40,7 +41,7 @@ export function filterOrdersForWorkflowView(orders, view, { testFlowFilter = "re
 }
 
 export function resolvePurchaseOrderViewFromNotification({ notificationType, status } = {}) {
-  if (notificationType === "purchase_order_pending") return PO_WORKFLOW_VIEWS.MANUAL
+  if (notificationType === "purchase_order_pending") return PO_WORKFLOW_VIEWS.PENDING_APPROVAL
   if (notificationType === "purchase_order_approved") return PO_WORKFLOW_VIEWS.TO_SEND
   if (notificationType === "purchase_order_received" || notificationType === "purchase_order_partially_received") {
     return PO_WORKFLOW_VIEWS.HISTORY

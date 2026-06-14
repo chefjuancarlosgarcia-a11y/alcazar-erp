@@ -960,7 +960,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
 
   useEffect(() => {
     if (initialSeccion !== "ordenes") return
-    const allowedViews = new Set(["automatic", "manual", "to_send", "reception", "history"])
+    const allowedViews = new Set(["automatic", "manual", "pending_approval", "to_send", "reception", "history"])
     if (initialPurchaseOrderView && allowedViews.has(initialPurchaseOrderView)) {
       setPurchaseOrderView(initialPurchaseOrderView)
     }
@@ -992,7 +992,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
       if (!action?.id || !puedeAprobarOrdenCompra) return
       if (!ordenesCompraManual.some((orden) => String(orden.id) === String(action.id))) return
       window.sessionStorage.removeItem("purchase-order-notification-action")
-      setPurchaseOrderView("manual")
+      setPurchaseOrderView("pending_approval")
       setManualPedidoSeleccionadoId(Number(action.id) || action.id)
       setHighlightedOrderId(String(action.id))
       if (action.action === "approve") aprobarOrdenManual(action.id)
@@ -1512,7 +1512,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
     setOrdenesCompraManual([nuevaOrden, ...ordenesCompraManual])
     limpiarFormularioOrdenManual()
     setManualCreateTestMode(false)
-    setPurchaseOrderView(estadoInicial === "aprobada" ? "to_send" : "manual")
+    setPurchaseOrderView(estadoInicial === "aprobada" ? "to_send" : "pending_approval")
     if (estadoInicial === "pendiente_aprobacion") {
       await publicarNotificacionOrden(["admin", "gerente_general"], {
         type: "purchase_order_pending",
