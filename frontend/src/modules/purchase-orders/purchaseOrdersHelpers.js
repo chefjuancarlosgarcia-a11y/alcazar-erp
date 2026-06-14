@@ -1,4 +1,9 @@
 import { operationalOnly } from "../../utils/testFlowMode"
+import {
+  filterOrdersForWorkflowView,
+  getPurchaseOrderWorkflowView,
+  PO_WORKFLOW_VIEWS
+} from "../../utils/inventoryNotificationRoutes"
 
 export function getPurchaseOrderStatusLabel(status) {
   const labels = {
@@ -145,11 +150,15 @@ export function filterManualIngredientSuggestions(inventorySource, searchText) {
 }
 
 const PENDING_STATUSES = new Set(["pendiente", "pendiente_aprobacion", "borrador"])
+const TO_SEND_STATUSES = new Set(["aprobada"])
+const RECEPTION_STATUSES = new Set(["enviada_proveedor", "en tránsito", "recibida_parcial", "parcialcompletada"])
 const RECEIVED_STATUSES = new Set(["recibida", "recibida_completa", "recibida_parcial", "parcialCompletada"])
 
 export function computePurchaseOrderMetrics(ordenesCompraManual = [], ordenCompra = [], totalOrdenCompra = 0) {
   const operationalOrders = operationalOnly(ordenesCompraManual)
   const pendingCount = operationalOrders.filter((orden) => PENDING_STATUSES.has(orden.status)).length
+  const toSendCount = operationalOrders.filter((orden) => TO_SEND_STATUSES.has(orden.status)).length
+  const receptionCount = operationalOrders.filter((orden) => RECEPTION_STATUSES.has(String(orden.status || "").toLowerCase())).length
   const receivedCount = operationalOrders.filter((orden) => RECEIVED_STATUSES.has(orden.status)).length
   const supplierNames = new Set(
     operationalOrders
@@ -169,6 +178,8 @@ export function computePurchaseOrderMetrics(ordenesCompraManual = [], ordenCompr
 
   return {
     pendingCount,
+    toSendCount,
+    receptionCount,
     receivedCount,
     supplierCount: supplierNames.size,
     estimatedAmount,
@@ -177,15 +188,15 @@ export function computePurchaseOrderMetrics(ordenesCompraManual = [], ordenCompr
   }
 }
 
-export function filterHistoryOrders(orders, { search = "", status = "all", testFlowFilter = "real" } = {}) {
+export function filterWorkflowOrders(orders, view, options = {}) {
+  return filterOrdersForWorkflowView(orders, view, options)
+}
+
+export { getPurchaseOrderWorkflowView, PO_WORKFLOW_VIEWS }
+
+export function filterHistoryOrders(orders, { search = "", status = "all", testFlowFilter = "real", workflowView = PO_WORKFLOW_VIEWS.HISTORY } = {}) {
   const query = String(search || "").trim().toLowerCase()
-  const scopedOrders = testFlowFilter === "all"
-    ? (orders || [])
-    : (orders || []).filter((orden) => {
-      const test = Boolean(orden?.is_test ?? orden?.isTest)
-      if (testFlowFilter === "test") return test
-      return !test
-    })
+  const scopedOrders = filterOrdersForWorkflowView(orders, workflowView, { testFlowFilter })
 
   return scopedOrders.filter((orden) => {
     if (status !== "all" && orden.status !== status) return false

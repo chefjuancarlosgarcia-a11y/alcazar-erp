@@ -18,6 +18,8 @@ import {
   submitRequisition,
   updateRequisition
 } from "../services/requisitionsService"
+import { notifyRoles } from "../services/notificationsService"
+import { buildRequisitionNotificationUrl } from "../utils/inventoryNotificationRoutes"
 import "./RequisitionsSupabase.css"
 
 const TABS = [
@@ -81,7 +83,13 @@ const REQUESTER_ROLES = new Set([
   "limpieza"
 ])
 
-function RequisitionsSupabase() {
+function RequisitionsSupabase({
+  initialRequisitionId = "",
+  initialTab = "",
+  initialApproveId = "",
+  initialTestFlowFilter = TEST_FLOW_FILTER.REAL,
+  initialFocus = false
+}) {
   const { user } = useAuth()
   const [requisitions, setRequisitions] = useState([])
   const [areas, setAreas] = useState([])
@@ -98,10 +106,46 @@ function RequisitionsSupabase() {
   const [approval, setApproval] = useState(null)
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
-  const [testFlowFilter, setTestFlowFilter] = useState(TEST_FLOW_FILTER.REAL)
+  const [testFlowFilter, setTestFlowFilter] = useState(initialTestFlowFilter || TEST_FLOW_FILTER.REAL)
   const [createTestMode, setCreateTestMode] = useState(false)
+  const [focusedRequisitionId, setFocusedRequisitionId] = useState(initialFocus ? initialRequisitionId : "")
+  const deepLinkHandledRef = useRef(false)
 
   const manager = ["admin", "gerente_general"].includes(user?.role)
+
+  async function notifyRequisitionPending(requisition) {
+    if (!requisition || requisition.status !== "pending") return
+    await notifyRoles(["admin", "gerente_general"], {
+      type: "requisition_pending",
+      title: requisition.is_test ? "Prueba de requisición pendiente" : "Requisición pendiente de aprobación",
+      message: `${requisition.requisition_number} requiere revisión administrativa.`,
+      entityType: "requisition",
+      entityId: requisition.id,
+      entityStatus: requisition.status,
+      entityIsTest: requisition.is_test,
+      actionUrl: buildRequisitionNotificationUrl(requisition)
+    })
+  }
+
+  useEffect(() => {
+    if (loading || deepLinkHandledRef.current) return
+    if (!initialRequisitionId && !initialApproveId) return
+    const target = requisitions.find((request) => String(request.id) === String(initialRequisitionId || initialApproveId))
+    if (!target) return
+    deepLinkHandledRef.current = true
+    if (initialTab) setTab(initialTab)
+    if (target.is_test && testFlowFilter === TEST_FLOW_FILTER.REAL) {
+      setTestFlowFilter(TEST_FLOW_FILTER.TEST)
+    }
+    setFocusedRequisitionId(String(target.id))
+    window.setTimeout(() => setFocusedRequisitionId(""), 6000)
+    if (initialApproveId && manager) {
+      setApproval(target)
+    } else {
+      setDetail(target)
+    }
+  }, [loading, requisitions, initialRequisitionId, initialApproveId, initialTab, manager, testFlowFilter])
+
   const canCreateTest = canCreateTestFlow(user)
   const canUseStockOverrideToggle = STOCK_OVERRIDE_ROLES.has(user?.role)
   const ownResponsibleAreas = areas.filter((area) => area.responsibleUserId === user?.id)
@@ -203,9 +247,11 @@ function RequisitionsSupabase() {
         ? await updateRequisition(enrichedData.id, enrichedData, enrichedData.items)
         : await createRequisition(enrichedData, enrichedData.items, submit)
       let actionError = result.error
+      let pendingRecord = result.data
       if (!actionError && enrichedData.id && submit) {
         const submitResult = await submitRequisition(enrichedData.id)
         actionError = submitResult.error
+        if (!actionError) pendingRecord = submitResult.data
       }
       if (actionError) {
         const friendlyError = requisitionError(actionError)
@@ -214,6 +260,13 @@ function RequisitionsSupabase() {
       }
 
       const isTest = Boolean(enrichedData.isTest ?? enrichedData.is_test)
+      if (submit && pendingRecord?.status === "pending") {
+        await notifyRequisitionPending({
+          ...pendingRecord,
+          is_test: isTest
+        })
+      }
+
       const nextFilter = isTest && testFlowFilter === TEST_FLOW_FILTER.REAL
         ? TEST_FLOW_FILTER.TEST
         : testFlowFilter
@@ -315,7 +368,7 @@ function RequisitionsSupabase() {
       <div className="requisitions-list">
         {loading && <p className="requisitions-empty">Cargando requisiciones...</p>}
         {!loading && pagedRequests.map((request) => (
-          <article className={`requisition-card${request.is_test ? " requisition-card--test" : ""}`} key={request.id}>
+          <article className={`requisition-card${request.is_test ? " requisition-card--test" : ""}${focusedRequisitionId === String(request.id) ? " requisition-card--focused" : ""}`} key={request.id}>
             <div className="requisition-summary">
               <strong>{request.requisition_number}</strong>
               {request.is_test && <TestFlowBadge />}

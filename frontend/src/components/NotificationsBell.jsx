@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { getNotifications, markNotificationRead } from "../services/notificationsService"
+import {
+  buildPurchaseOrderNotificationUrl,
+  resolveNotificationTarget
+} from "../utils/inventoryNotificationRoutes"
 import "./NotificationsBell.css"
 
 const PURCHASE_ORDER_APPROVAL_ROLES = ["admin", "gerente_general"]
@@ -54,12 +58,20 @@ function NotificationsBell({ currentUser }) {
   async function viewEntity(notification) {
     await markRead(notification)
     setOpen(false)
+    const target = resolveNotificationTarget(notification)
+    if (target?.url && isInternalActionUrl(target.url)) {
+      navigate(target.url)
+      return
+    }
     if (notification.action_url && isInternalActionUrl(notification.action_url)) {
       navigate(notification.action_url)
       return
     }
     if (notification.entity_type === "purchase_order") {
-      navigate(`/inventory?section=ordenes&view=history&order=${encodeURIComponent(notification.entity_id || "")}`)
+      navigate(buildPurchaseOrderNotificationUrl({
+        entityId: notification.entity_id,
+        notificationType: notification.type
+      }))
     } else if (["employee_schedule", "schedule_week"].includes(notification.entity_type)) {
       navigate("/hr?section=horarios")
     } else if (notification.entity_type === "checklist_run") {
@@ -83,7 +95,12 @@ function NotificationsBell({ currentUser }) {
       detail: { action, id: notification.entity_id }
     }))
     setOpen(false)
-    navigate(`/inventory?section=ordenes&view=history&order=${encodeURIComponent(notification.entity_id || "")}`)
+    navigate(buildPurchaseOrderNotificationUrl({
+      entityId: notification.entity_id,
+      notificationType: notification.type,
+      status: "pendiente_aprobacion",
+      action
+    }))
   }
 
   const unreadCount = notifications.filter((notification) => !notification.is_read).length
@@ -110,6 +127,7 @@ function NotificationsBell({ currentUser }) {
                 <small>{new Date(notification.created_at).toLocaleString("es-GT")}</small>
                 <div className="notifications-actions">
                   {notification.entity_type === "purchase_order" && <button type="button" onClick={() => viewEntity(notification)}>Ver orden</button>}
+                  {notification.entity_type === "requisition" && <button type="button" onClick={() => viewEntity(notification)}>Ver requisición</button>}
                   {["employee_schedule", "schedule_week"].includes(notification.entity_type) && <button type="button" onClick={() => viewEntity(notification)}>Ver horario</button>}
                   {notification.entity_type === "checklist_run" && <button type="button" onClick={() => viewEntity(notification)}>Abrir checklist</button>}
                   {notification.entity_type === "task" && <button type="button" onClick={() => viewEntity(notification)}>Ir a tarea</button>}
@@ -127,7 +145,7 @@ function NotificationsBell({ currentUser }) {
                     <button type="button" onClick={() => viewEntity(notification)}>Ver estado</button>
                   )}
                   {notification.entity_type === "checklist_management_alert" && <button type="button" onClick={() => viewEntity(notification)}>Ver aviso</button>}
-                  {notification.action_url && !["purchase_order", "employee_schedule", "schedule_week", "checklist_run", "checklist_template_change_request", "checklist_management_alert", "task"].includes(notification.entity_type) && <button type="button" onClick={() => viewEntity(notification)}>Abrir</button>}
+                  {notification.action_url && !["purchase_order", "requisition", "employee_schedule", "schedule_week", "checklist_run", "checklist_template_change_request", "checklist_management_alert", "task"].includes(notification.entity_type) && <button type="button" onClick={() => viewEntity(notification)}>Abrir</button>}
                   {notification.entity_type === "purchase_order" && notification.type === "purchase_order_pending" && PURCHASE_ORDER_APPROVAL_ROLES.includes(currentUser?.role) && (
                     <>
                       <button type="button" className="approve" onClick={() => processOrder(notification, "approve")}>Aprobar</button>

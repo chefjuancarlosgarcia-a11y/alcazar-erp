@@ -9,17 +9,15 @@ import {
   getProductInitials,
   getPurchaseOrderStatusBadgeClass,
   getPurchaseOrderStatusLabel,
-  getPurchaseProductDetails
+  getPurchaseProductDetails,
+  PO_WORKFLOW_VIEWS
 } from "./purchaseOrdersHelpers"
 import "./PurchaseOrders.css"
 
 const HISTORY_STATUS_OPTIONS = [
   { value: "all", label: "Todos los estados" },
-  { value: "pendiente_aprobacion", label: "Pendiente de aprobación" },
-  { value: "aprobada", label: "Aprobada" },
-  { value: "enviada_proveedor", label: "Enviada a proveedor" },
   { value: "recibida_completa", label: "Recibida completa" },
-  { value: "recibida_parcial", label: "Recibida parcial" },
+  { value: "recibida", label: "Recibida" },
   { value: "cancelada", label: "Cancelada" },
   { value: "rechazada", label: "Rechazada" }
 ]
@@ -34,22 +32,34 @@ function StatusBadge({ status }) {
 
 function OrderHistoryActions({
   orden,
+  workflowView,
   puedeCrearOrdenCompra,
   puedeAprobarOrdenCompra,
+  puedeRecibirOrdenCompra,
   onSelect,
   onApprove,
   onReject,
   onSend,
   onCancel
 }) {
+  const pending = ["pendiente", "pendiente_aprobacion", "borrador"].includes(orden.status)
+  const canSend = orden.status === "aprobada"
+  const canReceive = ["enviada_proveedor", "en tránsito"].includes(orden.status)
+  const terminal = ["cancelada", "rechazada", "recibida", "recibida_completa"].includes(orden.status)
+
   return (
     <div className="po-order-card__actions">
-      {orden.status !== "cancelada" && (
+      {!terminal && (
         <button type="button" className="erp-btn erp-btn--secondary" onClick={() => onSelect(orden.id)}>
-          Ver / recibir
+          {workflowView === PO_WORKFLOW_VIEWS.RECEPTION && canReceive ? "Recibir" : "Ver detalle"}
         </button>
       )}
-      {puedeAprobarOrdenCompra && ["pendiente", "pendiente_aprobacion", "borrador"].includes(orden.status) && (
+      {terminal && (
+        <button type="button" className="erp-btn erp-btn--secondary" onClick={() => onSelect(orden.id)}>
+          Ver detalle
+        </button>
+      )}
+      {workflowView === PO_WORKFLOW_VIEWS.MANUAL && puedeAprobarOrdenCompra && pending && (
         <>
           <button type="button" className="erp-btn erp-btn--success" onClick={() => onApprove(orden.id)}>
             Aprobar
@@ -59,12 +69,17 @@ function OrderHistoryActions({
           </button>
         </>
       )}
-      {puedeCrearOrdenCompra && orden.status === "aprobada" && (
+      {workflowView === PO_WORKFLOW_VIEWS.TO_SEND && puedeCrearOrdenCompra && canSend && (
         <button type="button" className="erp-btn erp-btn--teal" onClick={() => onSend(orden.id)}>
           Enviar a proveedor
         </button>
       )}
-      {!["cancelada", "rechazada", "recibida", "recibida_completa"].includes(orden.status) && (
+      {workflowView === PO_WORKFLOW_VIEWS.RECEPTION && puedeRecibirOrdenCompra && canReceive && (
+        <button type="button" className="erp-btn erp-btn--success" onClick={() => onSelect(orden.id)}>
+          Registrar recepción
+        </button>
+      )}
+      {!terminal && (
         <button type="button" className="erp-btn erp-btn--danger" onClick={() => onCancel(orden.id)}>
           Cancelar orden
         </button>
@@ -146,10 +161,13 @@ export default function PurchaseOrdersModule({
   testFlowFilter = "real",
   setTestFlowFilter = () => {},
   manualCreateTestMode = false,
-  setManualCreateTestMode = () => {}
+  setManualCreateTestMode = () => {},
+  highlightedOrderId = null
 }) {
   const [historySearch, setHistorySearch] = useState("")
   const [historyStatus, setHistoryStatus] = useState("all")
+
+  const isHighlighted = (orderId) => highlightedOrderId != null && String(highlightedOrderId) === String(orderId)
 
   const metrics = useMemo(
     () => computePurchaseOrderMetrics(ordenesCompraManual, ordenCompra, totalOrdenCompra),
@@ -176,14 +194,102 @@ export default function PurchaseOrdersModule({
     [manualInventorySource, manualSearchText]
   )
 
+  const filteredManualQueue = useMemo(
+    () => filterHistoryOrders(ordenesCompraManual, { search: historySearch, status: historyStatus, testFlowFilter, workflowView: PO_WORKFLOW_VIEWS.MANUAL }),
+    [ordenesCompraManual, historySearch, historyStatus, testFlowFilter]
+  )
+  const filteredToSend = useMemo(
+    () => filterHistoryOrders(ordenesCompraManual, { search: historySearch, status: "all", testFlowFilter, workflowView: PO_WORKFLOW_VIEWS.TO_SEND }),
+    [ordenesCompraManual, historySearch, testFlowFilter]
+  )
+  const filteredReceptionQueue = useMemo(
+    () => filterHistoryOrders(ordenesCompraManual, { search: historySearch, status: "all", testFlowFilter, workflowView: PO_WORKFLOW_VIEWS.RECEPTION }),
+    [ordenesCompraManual, historySearch, testFlowFilter]
+  )
   const filteredHistory = useMemo(
-    () => filterHistoryOrders(ordenesCompraManual, { search: historySearch, status: historyStatus, testFlowFilter }),
+    () => filterHistoryOrders(ordenesCompraManual, { search: historySearch, status: historyStatus, testFlowFilter, workflowView: PO_WORKFLOW_VIEWS.HISTORY }),
     [ordenesCompraManual, historySearch, historyStatus, testFlowFilter]
   )
 
-  const openReception = (id) => {
+  const openOrderInView = (id, view) => {
     seleccionarOrdenManual(id)
-    setPurchaseOrderView("reception")
+    setPurchaseOrderView(view)
+  }
+
+  const openReception = (id) => openOrderInView(id, PO_WORKFLOW_VIEWS.RECEPTION)
+  const openToSend = (id) => openOrderInView(id, PO_WORKFLOW_VIEWS.TO_SEND)
+
+  const renderOrderRows = (orders, workflowView, { onSelect = openReception, emptyMessage = "No hay órdenes que coincidan con los filtros." } = {}) => {
+    if (!orders.length) return <p className="po-empty">{emptyMessage}</p>
+    return (
+      <>
+        <div className="po-history-table-wrap">
+          <table className="po-history-table">
+            <thead>
+              <tr>
+                <th>Orden</th>
+                <th>Proveedor</th>
+                <th>Estado</th>
+                <th>Emisión</th>
+                <th>Entrega</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {orders.map((orden) => (
+                <tr key={orden.id} className={`${isTestRecord(orden) ? "po-row--test" : ""}${isHighlighted(orden.id) ? " po-row--focused" : ""}`}>
+                  <td><strong>{orden.numeroOrden}</strong> {isTestRecord(orden) && <TestFlowBadge />}</td>
+                  <td>{orden.proveedor?.nombre}</td>
+                  <td><StatusBadge status={orden.status} /></td>
+                  <td>{orden.fechaEmision}</td>
+                  <td>{orden.fechaEsperadaEntrega}</td>
+                  <td>
+                    <OrderHistoryActions
+                      orden={orden}
+                      workflowView={workflowView}
+                      puedeCrearOrdenCompra={puedeCrearOrdenCompra}
+                      puedeAprobarOrdenCompra={puedeAprobarOrdenCompra}
+                      puedeRecibirOrdenCompra={puedeRecibirOrdenCompra}
+                      onSelect={onSelect}
+                      onApprove={aprobarOrdenManual}
+                      onReject={rechazarOrdenManual}
+                      onSend={enviarOrdenProveedor}
+                      onCancel={cancelarOrdenManual}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="po-history-cards">
+          {orders.map((orden) => (
+            <article key={orden.id} className={`po-order-card${isTestRecord(orden) ? " po-order-card--test" : ""}${isHighlighted(orden.id) ? " po-order-card--focused" : ""}`}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                <h4 className="po-order-card__title">{orden.numeroOrden}</h4>
+                {isTestRecord(orden) && <TestFlowBadge />}
+                <StatusBadge status={orden.status} />
+              </div>
+              <p><strong>Proveedor:</strong> {orden.proveedor?.nombre}</p>
+              <p><strong>Fecha emisión:</strong> {orden.fechaEmision}</p>
+              <p><strong>Fecha esperada:</strong> {orden.fechaEsperadaEntrega}</p>
+              <OrderHistoryActions
+                orden={orden}
+                workflowView={workflowView}
+                puedeCrearOrdenCompra={puedeCrearOrdenCompra}
+                puedeAprobarOrdenCompra={puedeAprobarOrdenCompra}
+                puedeRecibirOrdenCompra={puedeRecibirOrdenCompra}
+                onSelect={onSelect}
+                onApprove={aprobarOrdenManual}
+                onReject={rechazarOrdenManual}
+                onSend={enviarOrdenProveedor}
+                onCancel={cancelarOrdenManual}
+              />
+            </article>
+          ))}
+        </div>
+      </>
+    )
   }
 
   const renderAutomaticView = () => (
@@ -490,15 +596,50 @@ export default function PurchaseOrdersModule({
             Cancelar
           </button>
         </div>
+
+        <div className="po-header" style={{ marginTop: "2rem" }}>
+          <h3>Pendientes de aprobación</h3>
+          <p className="po-help">Órdenes manuales en borrador o pendientes de aprobación administrativa.</p>
+        </div>
+        {renderOrderRows(filteredManualQueue, PO_WORKFLOW_VIEWS.MANUAL, {
+          onSelect: (id) => openOrderInView(id, PO_WORKFLOW_VIEWS.MANUAL),
+          emptyMessage: "No hay órdenes manuales pendientes de aprobación."
+        })}
       </div>
     )
   }
 
+  const renderToSendView = () => (
+    <div className="po-panel">
+      <div className="po-header">
+        <h3>Por enviar al proveedor</h3>
+        <p className="po-help">Órdenes aprobadas listas para enviarse al proveedor. La recepción física ocurre después del envío.</p>
+      </div>
+      <div className="po-filters">
+        <div className="po-field">
+          <label htmlFor="po-tosend-search">Buscar</label>
+          <input
+            id="po-tosend-search"
+            type="search"
+            className="po-input"
+            placeholder="Número, proveedor, solicitante..."
+            value={historySearch}
+            onChange={(e) => setHistorySearch(e.target.value)}
+          />
+        </div>
+      </div>
+      {renderOrderRows(filteredToSend, PO_WORKFLOW_VIEWS.TO_SEND, {
+        onSelect: openToSend,
+        emptyMessage: "No hay órdenes aprobadas pendientes de envío al proveedor."
+      })}
+    </div>
+  )
+
   const renderHistoryView = () => (
     <div className="po-panel">
       <div className="po-header">
-        <h3>Historial de órdenes manuales</h3>
-        <p className="po-help">Consulta, aprueba o envía órdenes registradas.</p>
+        <h3>Historial</h3>
+        <p className="po-help">Órdenes recibidas, canceladas o rechazadas.</p>
       </div>
 
       <div className="po-filters">
@@ -523,82 +664,10 @@ export default function PurchaseOrdersModule({
         </div>
       </div>
 
-      <div className="po-toolbar">
-        {puedeCrearOrdenCompra && (
-          <button type="button" className="erp-btn erp-btn--teal" onClick={() => setPurchaseOrderView("manual")}>
-            Nueva orden manual
-          </button>
-        )}
-      </div>
-
-      {filteredHistory.length === 0 ? (
-        <p className="po-empty">No hay órdenes que coincidan con los filtros.</p>
-      ) : (
-        <>
-          <div className="po-history-table-wrap">
-            <table className="po-history-table">
-              <thead>
-                <tr>
-                  <th>Orden</th>
-                  <th>Proveedor</th>
-                  <th>Estado</th>
-                  <th>Emisión</th>
-                  <th>Entrega</th>
-                  <th>Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredHistory.map((orden) => (
-                  <tr key={orden.id} className={isTestRecord(orden) ? "po-row--test" : ""}>
-                    <td><strong>{orden.numeroOrden}</strong> {isTestRecord(orden) && <TestFlowBadge />}</td>
-                    <td>{orden.proveedor?.nombre}</td>
-                    <td><StatusBadge status={orden.status} /></td>
-                    <td>{orden.fechaEmision}</td>
-                    <td>{orden.fechaEsperadaEntrega}</td>
-                    <td>
-                      <OrderHistoryActions
-                        orden={orden}
-                        puedeCrearOrdenCompra={puedeCrearOrdenCompra}
-                        puedeAprobarOrdenCompra={puedeAprobarOrdenCompra}
-                        onSelect={openReception}
-                        onApprove={aprobarOrdenManual}
-                        onReject={rechazarOrdenManual}
-                        onSend={enviarOrdenProveedor}
-                        onCancel={cancelarOrdenManual}
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="po-history-cards">
-            {filteredHistory.map((orden) => (
-              <article key={orden.id} className={`po-order-card${isTestRecord(orden) ? " po-order-card--test" : ""}`}>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-                  <h4 className="po-order-card__title">{orden.numeroOrden}</h4>
-                  {isTestRecord(orden) && <TestFlowBadge />}
-                  <StatusBadge status={orden.status} />
-                </div>
-                <p><strong>Proveedor:</strong> {orden.proveedor?.nombre}</p>
-                <p><strong>Fecha emisión:</strong> {orden.fechaEmision}</p>
-                <p><strong>Fecha esperada:</strong> {orden.fechaEsperadaEntrega}</p>
-                <OrderHistoryActions
-                  orden={orden}
-                  puedeCrearOrdenCompra={puedeCrearOrdenCompra}
-                  puedeAprobarOrdenCompra={puedeAprobarOrdenCompra}
-                  onSelect={openReception}
-                  onApprove={aprobarOrdenManual}
-                  onReject={rechazarOrdenManual}
-                  onSend={enviarOrdenProveedor}
-                  onCancel={cancelarOrdenManual}
-                />
-              </article>
-            ))}
-          </div>
-        </>
-      )}
+      {renderOrderRows(filteredHistory, PO_WORKFLOW_VIEWS.HISTORY, {
+        onSelect: (id) => openOrderInView(id, PO_WORKFLOW_VIEWS.HISTORY),
+        emptyMessage: "No hay órdenes cerradas que coincidan con los filtros."
+      })}
     </div>
   )
 
@@ -606,17 +675,29 @@ export default function PurchaseOrdersModule({
     <div className="po-panel">
       <div className="po-header">
         <h3>Recepción de órdenes</h3>
-        <p className="po-help">Selecciona una orden del historial o continúa con la orden abierta.</p>
+        <p className="po-help">Solo órdenes enviadas al proveedor. Registra aquí la recepción física de productos.</p>
       </div>
 
-      {!ordenManualSeleccionada ? (
-        <>
-          <p className="po-empty">No hay orden seleccionada para recepción.</p>
-          <button type="button" className="erp-btn erp-btn--secondary" onClick={() => setPurchaseOrderView("history")}>
-            Ir al historial
-          </button>
-        </>
-      ) : (
+      <div className="po-filters">
+        <div className="po-field">
+          <label htmlFor="po-reception-search">Buscar</label>
+          <input
+            id="po-reception-search"
+            type="search"
+            className="po-input"
+            placeholder="Número, proveedor..."
+            value={historySearch}
+            onChange={(e) => setHistorySearch(e.target.value)}
+          />
+        </div>
+      </div>
+
+      {renderOrderRows(filteredReceptionQueue, PO_WORKFLOW_VIEWS.RECEPTION, {
+        onSelect: openReception,
+        emptyMessage: "No hay órdenes enviadas al proveedor pendientes de recepción."
+      })}
+
+      {ordenManualSeleccionada && getPurchaseOrderWorkflowView(ordenManualSeleccionada.status) === PO_WORKFLOW_VIEWS.RECEPTION && (
         <div className="po-reception-panel">
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
             <h4 style={{ margin: 0 }}>{ordenManualSeleccionada.numeroOrden}</h4>
@@ -687,13 +768,13 @@ export default function PurchaseOrdersModule({
           )}
 
           <div className="po-footer-actions">
-            {puedeRecibirOrdenCompra && ["aprobada", "enviada_proveedor"].includes(ordenManualSeleccionada.status) && (
+            {puedeRecibirOrdenCompra && ["enviada_proveedor", "en tránsito"].includes(ordenManualSeleccionada.status) && (
               <button type="button" className="erp-btn erp-btn--success" onClick={recibirOrdenManual}>
                 Registrar recepción
               </button>
             )}
-            <button type="button" className="erp-btn erp-btn--secondary" onClick={() => setPurchaseOrderView("history")}>
-              Volver al historial
+            <button type="button" className="erp-btn erp-btn--secondary" onClick={() => seleccionarOrdenManual(null)}>
+              Cerrar detalle
             </button>
           </div>
         </div>
@@ -742,19 +823,19 @@ export default function PurchaseOrdersModule({
 
         <div className="po-kpi-grid">
           <article className="po-kpi">
-            <p className="po-kpi__label">Órdenes pendientes</p>
+            <p className="po-kpi__label">Por aprobar</p>
             <p className="po-kpi__value">{metrics.pendingCount}</p>
-            <p className="po-kpi__note">Por aprobar o borrador</p>
+            <p className="po-kpi__note">Borradores o pendientes</p>
           </article>
           <article className="po-kpi">
-            <p className="po-kpi__label">Órdenes recibidas</p>
-            <p className="po-kpi__value">{metrics.receivedCount}</p>
-            <p className="po-kpi__note">Completas o parciales</p>
+            <p className="po-kpi__label">Por enviar</p>
+            <p className="po-kpi__value">{metrics.toSendCount}</p>
+            <p className="po-kpi__note">Aprobadas sin envío</p>
           </article>
           <article className="po-kpi">
-            <p className="po-kpi__label">Proveedores</p>
-            <p className="po-kpi__value">{metrics.supplierCount}</p>
-            <p className="po-kpi__note">En historial manual</p>
+            <p className="po-kpi__label">En recepción</p>
+            <p className="po-kpi__value">{metrics.receptionCount}</p>
+            <p className="po-kpi__note">Enviadas al proveedor</p>
           </article>
           <article className="po-kpi">
             <p className="po-kpi__label">Monto estimado</p>
@@ -773,7 +854,7 @@ export default function PurchaseOrdersModule({
             className={`po-tab${purchaseOrderView === "automatic" ? " po-tab--active" : ""}`}
             onClick={() => setPurchaseOrderView("automatic")}
           >
-            Automáticas
+            Guías automáticas
           </button>
           {puedeCrearOrdenCompra && (
             <button
@@ -786,10 +867,10 @@ export default function PurchaseOrdersModule({
           )}
           <button
             type="button"
-            className={`po-tab${purchaseOrderView === "history" ? " po-tab--active" : ""}`}
-            onClick={() => setPurchaseOrderView("history")}
+            className={`po-tab${purchaseOrderView === "to_send" ? " po-tab--active" : ""}`}
+            onClick={() => setPurchaseOrderView("to_send")}
           >
-            Historial
+            Por enviar
           </button>
           <button
             type="button"
@@ -798,13 +879,21 @@ export default function PurchaseOrdersModule({
           >
             Recepción
           </button>
+          <button
+            type="button"
+            className={`po-tab${purchaseOrderView === "history" ? " po-tab--active" : ""}`}
+            onClick={() => setPurchaseOrderView("history")}
+          >
+            Historial
+          </button>
         </nav>
       </section>
 
       {purchaseOrderView === "automatic" && renderAutomaticView()}
       {purchaseOrderView === "manual" && renderManualView()}
-      {purchaseOrderView === "history" && renderHistoryView()}
+      {purchaseOrderView === "to_send" && renderToSendView()}
       {purchaseOrderView === "reception" && renderReceptionView()}
+      {purchaseOrderView === "history" && renderHistoryView()}
     </div>
   )
 }

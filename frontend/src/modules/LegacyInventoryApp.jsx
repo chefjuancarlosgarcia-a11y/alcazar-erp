@@ -15,6 +15,7 @@ import { supabase } from "../lib/supabase"
 import { createNotification, notifyRoles } from "../services/notificationsService"
 import { getPurchaseOrders, savePurchaseOrder } from "../services/purchaseOrdersService"
 import { canCreateTestFlow, TEST_FLOW_FILTER } from "../utils/testFlowMode"
+import { buildPurchaseOrderNotificationUrl, getPurchaseOrderWorkflowView } from "../utils/inventoryNotificationRoutes"
 import { getInventoryItems } from "../services/inventoryService"
 import {
   getSuppliers,
@@ -324,7 +325,7 @@ function getUserAuth(user) {
 
 
 
-function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrderView = "", initialPurchaseOrderId = "", hideLegacyNavigation = false }) {
+function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrderView = "", initialPurchaseOrderId = "", initialHighlightedOrder = "", initialNotificationAction = "", initialTestFlowFilter = "", hideLegacyNavigation = false }) {
   const { user: authenticatedUser, profile: authProfile } = useAuth()
   const navigate = useNavigate()
   const [ordenCompra, setOrdenCompra] = useState([])
@@ -359,8 +360,9 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
   const [manualRecepcionEstado, setManualRecepcionEstado] = useState("bueno")
   const [manualRecepcionNombre, setManualRecepcionNombre] = useState("")
   const [manualRecepcionImagen, setManualRecepcionImagen] = useState("")
-  const [testFlowFilter, setTestFlowFilter] = useState(TEST_FLOW_FILTER.REAL)
+  const [testFlowFilter, setTestFlowFilter] = useState(() => initialTestFlowFilter || TEST_FLOW_FILTER.REAL)
   const [manualCreateTestMode, setManualCreateTestMode] = useState(false)
+  const [highlightedOrderId, setHighlightedOrderId] = useState(initialHighlightedOrder || "")
 
   const [proveedores, setProveedores] = useState([])
   const [proveedoresLoading, setProveedoresLoading] = useState(false)
@@ -958,21 +960,31 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
 
   useEffect(() => {
     if (initialSeccion !== "ordenes") return
-    if (["automatic", "manual", "history"].includes(initialPurchaseOrderView)) {
+    const allowedViews = new Set(["automatic", "manual", "to_send", "reception", "history"])
+    if (initialPurchaseOrderView && allowedViews.has(initialPurchaseOrderView)) {
       setPurchaseOrderView(initialPurchaseOrderView)
     }
+    if (initialTestFlowFilter) setTestFlowFilter(initialTestFlowFilter)
+    if (initialHighlightedOrder) setHighlightedOrderId(initialHighlightedOrder)
     if (!initialPurchaseOrderId) return
     getPurchaseOrders({ testFlowFilter: TEST_FLOW_FILTER.ALL }).then(({ data, error }) => {
       if (error) return
+      const matched = (data || []).find((orden) => String(orden.id) === String(initialPurchaseOrderId))
       setOrdenesCompraManual((localOrders) => {
         const remoteIds = new Set((data || []).map((order) => String(order.id)))
         return [...(data || []), ...localOrders.filter((order) => !remoteIds.has(String(order.id)))]
       })
-      if ((data || []).some((orden) => String(orden.id) === String(initialPurchaseOrderId))) {
-        setManualPedidoSeleccionadoId(Number(initialPurchaseOrderId) || initialPurchaseOrderId)
-      }
+      if (!matched) return
+      if (matched.is_test) setTestFlowFilter(TEST_FLOW_FILTER.ALL)
+      const resolvedView = initialPurchaseOrderView && allowedViews.has(initialPurchaseOrderView)
+        ? initialPurchaseOrderView
+        : getPurchaseOrderWorkflowView(matched.status)
+      setPurchaseOrderView(resolvedView)
+      setManualPedidoSeleccionadoId(Number(initialPurchaseOrderId) || initialPurchaseOrderId)
+      setHighlightedOrderId(String(initialPurchaseOrderId))
+      window.setTimeout(() => setHighlightedOrderId(""), 6000)
     })
-  }, [initialPurchaseOrderId, initialPurchaseOrderView, initialSeccion])
+  }, [initialPurchaseOrderId, initialPurchaseOrderView, initialSeccion, initialHighlightedOrder, initialTestFlowFilter])
 
   useEffect(() => {
     function processNotificationAction(event) {
@@ -980,15 +992,19 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
       if (!action?.id || !puedeAprobarOrdenCompra) return
       if (!ordenesCompraManual.some((orden) => String(orden.id) === String(action.id))) return
       window.sessionStorage.removeItem("purchase-order-notification-action")
-      setPurchaseOrderView("history")
+      setPurchaseOrderView("manual")
       setManualPedidoSeleccionadoId(Number(action.id) || action.id)
+      setHighlightedOrderId(String(action.id))
       if (action.action === "approve") aprobarOrdenManual(action.id)
       if (action.action === "reject") rechazarOrdenManual(action.id)
     }
     processNotificationAction()
+    if (initialNotificationAction && initialPurchaseOrderId && puedeAprobarOrdenCompra) {
+      processNotificationAction({ detail: { action: initialNotificationAction, id: initialPurchaseOrderId } })
+    }
     window.addEventListener("purchase-order-action", processNotificationAction)
     return () => window.removeEventListener("purchase-order-action", processNotificationAction)
-  }, [puedeAprobarOrdenCompra, ordenesCompraManual])
+  }, [puedeAprobarOrdenCompra, ordenesCompraManual, initialNotificationAction, initialPurchaseOrderId])
 
   const manualInventorySource = manualInventoryItems.length > 0
     ? manualInventoryItems
@@ -1395,12 +1411,23 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
     setManualRecepcionImagen("")
   }
 
-  async function publicarNotificacionOrden(destinatarios, notification) {
+  async function publicarNotificacionOrden(destinatarios, notification, orden = null) {
     try {
+      const payload = {
+        ...notification,
+        actionUrl: notification.actionUrl || (notification.entityType === "purchase_order" || orden
+          ? buildPurchaseOrderNotificationUrl({
+            id: orden?.id ?? notification.entityId,
+            status: orden?.status ?? notification.entityStatus,
+            notificationType: notification.type,
+            is_test: orden?.is_test ?? notification.entityIsTest
+          })
+          : undefined)
+      }
       if (Array.isArray(destinatarios)) {
-        await notifyRoles(destinatarios, notification)
+        await notifyRoles(destinatarios, payload)
       } else {
-        await createNotification({ ...notification, userId: destinatarios })
+        await createNotification({ ...payload, userId: destinatarios })
       }
     } catch (error) {
       console.error("No se pudo registrar la notificación de orden de compra.", error)
@@ -1408,22 +1435,19 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
   }
 
   async function notificarCreadorOrden(orden, title, message, type) {
+    const payload = {
+      type,
+      title,
+      message,
+      entityType: "purchase_order",
+      entityId: orden.id,
+      entityStatus: orden.status,
+      entityIsTest: orden.is_test
+    }
     if (orden.creadoPorId) {
-      await publicarNotificacionOrden(orden.creadoPorId, {
-        type,
-        title,
-        message,
-        entityType: "purchase_order",
-        entityId: orden.id
-      })
+      await publicarNotificacionOrden(orden.creadoPorId, payload, orden)
     } else if (orden.creadoPorRol === "gerente" || orden.creadoPorRol === "encargado_almacen") {
-      await publicarNotificacionOrden([orden.creadoPorRol], {
-        type,
-        title,
-        message,
-        entityType: "purchase_order",
-        entityId: orden.id
-      })
+      await publicarNotificacionOrden([orden.creadoPorRol], payload, orden)
     }
   }
 
@@ -1488,24 +1512,28 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
     setOrdenesCompraManual([nuevaOrden, ...ordenesCompraManual])
     limpiarFormularioOrdenManual()
     setManualCreateTestMode(false)
-    setPurchaseOrderView("history")
+    setPurchaseOrderView(estadoInicial === "aprobada" ? "to_send" : "manual")
     if (estadoInicial === "pendiente_aprobacion") {
       await publicarNotificacionOrden(["admin", "gerente_general"], {
         type: "purchase_order_pending",
         title: "Nueva orden pendiente de aprobación",
         message: `${nuevaOrden.numeroOrden} fue creada por ${authenticatedUser?.name || manualRequester} y requiere aprobación.`,
         entityType: "purchase_order",
-        entityId: nuevaOrden.id
-      })
+        entityId: nuevaOrden.id,
+        entityStatus: estadoInicial,
+        entityIsTest: nuevaOrden.is_test
+      }, nuevaOrden)
     }
     if (estadoInicial === "aprobada") {
       await publicarNotificacionOrden(["encargado_almacen"], {
         type: "purchase_order_approved",
         title: "Orden aprobada",
-        message: `${nuevaOrden.numeroOrden} fue creada aprobada y puede continuar a recepción de almacén.`,
+        message: `${nuevaOrden.numeroOrden} fue creada aprobada y puede enviarse al proveedor.`,
         entityType: "purchase_order",
-        entityId: nuevaOrden.id
-      })
+        entityId: nuevaOrden.id,
+        entityStatus: estadoInicial,
+        entityIsTest: nuevaOrden.is_test
+      }, nuevaOrden)
     }
     if (purchaseOrderRole === "gerente") {
       await notificarCreadorOrden(
@@ -1569,14 +1597,18 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
         ? ordenAprobada
         : item
     )))
+    setPurchaseOrderView("to_send")
+    setManualPedidoSeleccionadoId(Number(id) || id)
     await publicarNotificacionOrden(["encargado_almacen"], {
       type: "purchase_order_approved",
       title: "Orden aprobada",
-      message: `${orden.numeroOrden} fue aprobada y puede continuar a recepción de almacén.`,
+      message: `${orden.numeroOrden} fue aprobada y puede enviarse al proveedor.`,
       entityType: "purchase_order",
-      entityId: orden.id
-    })
-    await notificarCreadorOrden(orden, "Orden aprobada", `${orden.numeroOrden} fue aprobada y está lista para enviarse al proveedor.`, "purchase_order_approved")
+      entityId: orden.id,
+      entityStatus: "aprobada",
+      entityIsTest: orden.is_test
+    }, ordenAprobada)
+    await notificarCreadorOrden(ordenAprobada, "Orden aprobada", `${orden.numeroOrden} fue aprobada y está lista para enviarse al proveedor.`, "purchase_order_approved")
   }
 
   async function rechazarOrdenManual(id) {
@@ -1612,14 +1644,18 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
     setOrdenesCompraManual((actuales) => actuales.map((item) => (
       String(item.id) === String(id) ? ordenEnviada : item
     )))
+    setPurchaseOrderView("reception")
+    setManualPedidoSeleccionadoId(Number(id) || id)
     await publicarNotificacionOrden(["encargado_almacen"], {
       type: "purchase_order_ready_to_receive",
       title: "Orden lista para recibir",
       message: `${orden.numeroOrden} fue enviada al proveedor y está lista para recepción.`,
       entityType: "purchase_order",
-      entityId: orden.id
-    })
-    await notificarCreadorOrden(orden, "Orden lista para recibir", `${orden.numeroOrden} fue enviada al proveedor y puede recibirse en almacén.`, "purchase_order_ready_to_receive")
+      entityId: orden.id,
+      entityStatus: "enviada_proveedor",
+      entityIsTest: orden.is_test
+    }, ordenEnviada)
+    await notificarCreadorOrden(ordenEnviada, "Orden lista para recibir", `${orden.numeroOrden} fue enviada al proveedor y puede recibirse en almacén.`, "purchase_order_ready_to_receive")
   }
 
   function cargarImagenRecepcion(event) {
@@ -1987,6 +2023,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
               setTestFlowFilter={setTestFlowFilter}
               manualCreateTestMode={manualCreateTestMode}
               setManualCreateTestMode={setManualCreateTestMode}
+              highlightedOrderId={highlightedOrderId}
             />
           )}
 

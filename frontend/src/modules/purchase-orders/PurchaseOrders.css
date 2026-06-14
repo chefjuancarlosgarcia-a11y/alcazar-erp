@@ -598,3 +598,8 @@
   border-color: rgba(245, 158, 11, 0.45);
   box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.2);
 }
+
+.po-order-card--focused,
+.po-row--focused {
+  box-shadow: 0 0 0 2px rgba(45, 212, 191, 0.55);
+}
