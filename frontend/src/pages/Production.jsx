@@ -14,6 +14,8 @@ import {
   requestKDSAreaAssignment
 } from "../utils/kds"
 import { normalizeProductionArea } from "../utils/posProduction"
+import ProductionBackButton from "../components/production/ProductionBackButton"
+import { resolveUserProductionAreaIds } from "../services/productionAreasService"
 import {
   formatSupabaseError,
   getProductionTickets,
@@ -51,6 +53,7 @@ function Production() {
   const [areas, setAreas] = useState([])
   const [areasLoading, setAreasLoading] = useState(true)
   const [areasError, setAreasError] = useState("")
+  const [assignedAreaIds, setAssignedAreaIds] = useState([])
   const canSwitchArea = canSelectKDSArea(user)
   const canAuthorize = canSwitchArea
   const [tickets, setTickets] = useState([])
@@ -62,10 +65,13 @@ function Production() {
   const [showAlertSettings, setShowAlertSettings] = useState(false)
   const boardRef = useRef(null)
   const noticeTimerRef = useRef(null)
-  const defaultArea = getDefaultKDSArea(user, areas)
   const requestedArea = normalizeProductionArea(areaParam)
   const requestedAreaExists = areas.some((entry) => entry.id === requestedArea)
-  const selectedArea = canSwitchArea && requestedAreaExists ? requestedArea : defaultArea
+  const allowedAreaIds = canSwitchArea ? areas.map((entry) => entry.id) : assignedAreaIds
+  const defaultArea = getDefaultKDSArea(user, areas.filter((entry) => allowedAreaIds.includes(entry.id)))
+  const selectedArea = canSwitchArea && requestedAreaExists
+    ? requestedArea
+    : (requestedAreaExists && allowedAreaIds.includes(requestedArea) ? requestedArea : defaultArea)
 
   const refreshTickets = useCallback(async () => {
     if (!selectedArea) return
@@ -123,10 +129,13 @@ function Production() {
       }
       setAreasLoading(false)
     })
+    resolveUserProductionAreaIds(user).then((ids) => {
+      if (mounted) setAssignedAreaIds(ids)
+    })
     return () => {
       mounted = false
     }
-  }, [])
+  }, [user])
 
   useEffect(() => {
     if (!selectedArea) return undefined
@@ -155,7 +164,7 @@ function Production() {
   useEffect(() => {
     if (!canAccessKDS(user) || !selectedArea) return
     if (!areaParam || requestedArea !== selectedArea) {
-      navigate(`/production/${selectedArea}`, { replace: true })
+      navigate(`/production/kds/${selectedArea}`, { replace: true })
     }
   }, [areaParam, navigate, requestedArea, selectedArea, user])
 
@@ -213,8 +222,7 @@ function Production() {
       <section className="kds-page">
         <article className="kds-unassigned">
           <h1>Producción</h1>
-          <p>No tienes un área de producción asignada.</p>
-          <small>Solicita a administración que configure tu área.</small>
+          <p>No tienes un área de producción asignada. Contacta a un administrador.</p>
           {message && <div className="kds-feedback" role="status">{message}</div>}
           <button
             type="button"
@@ -314,6 +322,7 @@ function Production() {
 
   return (
     <section className="kds-page" ref={boardRef} data-clock={clock}>
+      <ProductionBackButton />
       <header className="kds-header">
         <div>
           <p className="kds-eyebrow">Operación en vivo</p>
@@ -338,7 +347,7 @@ function Production() {
           {canSwitchArea && (
             <label className="kds-select-label">
               Área
-              <select value={selectedArea} onChange={(event) => navigate(`/production/${event.target.value}`)}>
+              <select value={selectedArea} onChange={(event) => navigate(`/production/kds/${event.target.value}`)}>
                 {areas.map((entry) => <option value={entry.id} key={entry.id}>{entry.name}</option>)}
               </select>
             </label>

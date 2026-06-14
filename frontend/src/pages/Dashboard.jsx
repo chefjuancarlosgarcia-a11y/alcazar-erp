@@ -35,9 +35,9 @@ function Dashboard() {
         <article className="erp-card erp-card-accent dashboard-action-card">
           <div>
             <h2>Producción</h2>
-            <p className="erp-muted">KDS / Pantallas de producción por área</p>
+            <p className="erp-muted">Estaciones de producción y tableros KDS por área</p>
           </div>
-          <button type="button" className="erp-btn-primary" onClick={() => navigate("/production")}>Abrir KDS</button>
+          <button type="button" className="erp-btn-primary" onClick={() => navigate("/production")}>Abrir Producción</button>
         </article>
       )}
       {canAccess("cash") && (

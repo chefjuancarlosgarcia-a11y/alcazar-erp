@@ -12,6 +12,11 @@ import POS from "../pages/POS"
 import Cashier from "../pages/Cashier"
 import CashManagement from "../pages/CashManagement"
 import Production from "../pages/Production"
+import ProductionHub from "../pages/ProductionHub"
+import ProductionAreasManagement from "../pages/ProductionAreasManagement"
+import ProductionProductsConfig from "../pages/ProductionProductsConfig"
+import ProductionUserAssignments from "../pages/ProductionUserAssignments"
+import ProductionLegacyRedirect from "../pages/ProductionLegacyRedirect"
 import Reports from "../pages/Reports"
 import SalesGoalsSettings from "../pages/SalesGoalsSettings"
 import Settings from "../pages/Settings"
@@ -44,10 +49,14 @@ function AppRoutes() {
           <Route path="/cash" element={<ProtectedRoute module="cash"><Cashier /></ProtectedRoute>} />
           <Route path="/cashier" element={<ProtectedRoute module="cash"><Cashier /></ProtectedRoute>} />
           <Route path="/cash-control" element={<ProtectedRoute module="cash"><CashManagement /></ProtectedRoute>} />
-          <Route path="/production" element={<ProtectedRoute><Production /></ProtectedRoute>} />
-          <Route path="/production/:areaId" element={<ProtectedRoute><Production /></ProtectedRoute>} />
-          <Route path="/kds" element={<ProtectedRoute><Production /></ProtectedRoute>} />
-          <Route path="/kds/:areaId" element={<ProtectedRoute><Production /></ProtectedRoute>} />
+          <Route path="/production" element={<ProtectedRoute module="production"><ProductionHub /></ProtectedRoute>} />
+          <Route path="/production/kds/:areaId" element={<ProtectedRoute module="production"><Production /></ProtectedRoute>} />
+          <Route path="/production/areas" element={<ProtectedRoute module="production"><ProductionAreasManagement /></ProtectedRoute>} />
+          <Route path="/production/products" element={<ProtectedRoute module="production"><ProductionProductsConfig /></ProtectedRoute>} />
+          <Route path="/production/assignments" element={<ProtectedRoute module="production"><ProductionUserAssignments /></ProtectedRoute>} />
+          <Route path="/production/:areaId" element={<ProtectedRoute module="production"><ProductionLegacyRedirect /></ProtectedRoute>} />
+          <Route path="/kds" element={<ProtectedRoute module="production"><ProductionHub /></ProtectedRoute>} />
+          <Route path="/kds/:areaId" element={<ProtectedRoute module="production"><ProductionLegacyRedirect /></ProtectedRoute>} />
           <Route path="/hr" element={<ProtectedRoute module="hr"><HR /></ProtectedRoute>} />
           <Route path="/tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
           <Route path="/reports" element={<ProtectedRoute module="reports"><Reports /></ProtectedRoute>} />

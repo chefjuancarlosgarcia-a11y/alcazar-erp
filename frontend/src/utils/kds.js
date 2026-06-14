@@ -13,9 +13,10 @@ const DEFAULT_MINUTES = {
   panaderia: 12
 }
 
-export const KDS_MANAGEMENT_ROLES = ["admin", "gerente", "gerente_general", "supervisor", "gerente_operaciones"]
+export const KDS_MANAGEMENT_ROLES = ["admin", "gerente_general", "supervisor", "gerente_operaciones"]
+export const PRODUCTION_ADMIN_ROLES = ["admin", "gerente_general"]
 export const KDS_AREA_MANAGER_ROLES = ["encargado_area"]
-export const KDS_OPERATIONAL_ROLES = ["barista", "bartender", "cocinero", "cocina", "pizzero", "repostero", "panadero"]
+export const KDS_OPERATIONAL_ROLES = ["barista", "bartender", "cocinero", "cocina", "pizzero", "pizzeria", "repostero", "panadero", "cafeteria"]
 
 function parseArray(key) {
   try {
@@ -53,6 +54,10 @@ function resolveCurrentArea(user) {
 
 export function canSelectKDSArea(user) {
   return KDS_MANAGEMENT_ROLES.includes(normalizedRole(user))
+}
+
+export function canManageProductionAreas(user) {
+  return PRODUCTION_ADMIN_ROLES.includes(normalizedRole(user))
 }
 
 export function canAccessKDS(user) {
