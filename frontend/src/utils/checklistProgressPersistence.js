@@ -5,6 +5,7 @@ const LAST_ACTIVE_KEY = "checklist-last-active"
 const RETRY_QUEUE_KEY = "checklist-retry-queue"
 const LOCAL_AUDIT_KEY = "checklist-session-audit"
 const LOCAL_AUDIT_LIMIT = 120
+const PHOTO_PREFIX = "checklist-photo:"
 
 const flushCallbacks = new Set()
 
@@ -13,14 +14,15 @@ export function registerChecklistFlushCallback(callback) {
   return () => flushCallbacks.delete(callback)
 }
 
-export function flushAllChecklistPendingSaves() {
-  flushCallbacks.forEach((callback) => {
+export async function flushAllChecklistPendingSaves() {
+  const callbacks = [...flushCallbacks]
+  await Promise.all(callbacks.map(async (callback) => {
     try {
-      callback()
+      await callback()
     } catch (error) {
       console.warn("checklist flush callback failed", error)
     }
-  })
+  }))
 }
 
 function draftKey(runId, itemId) {
@@ -31,13 +33,17 @@ function metaKey(runId) {
   return `${META_PREFIX}${runId}`
 }
 
+function photoKey(runId, itemId) {
+  return `${PHOTO_PREFIX}${runId}:${itemId}`
+}
+
 function activeSessionKey(profileId) {
   return `${ACTIVE_SESSION_PREFIX}${profileId}`
 }
 
-function readJson(key, fallback) {
+function readJson(key, fallback, storage = localStorage) {
   try {
-    const raw = localStorage.getItem(key)
+    const raw = storage.getItem(key)
     if (!raw) return fallback
     return JSON.parse(raw)
   } catch {
@@ -45,17 +51,73 @@ function readJson(key, fallback) {
   }
 }
 
-function writeJson(key, value) {
-  localStorage.setItem(key, JSON.stringify(value))
+function writeJson(key, value, storage = localStorage) {
+  try {
+    storage.setItem(key, JSON.stringify(value))
+    return true
+  } catch (error) {
+    console.warn("checklist storage write failed", key, error)
+    return false
+  }
+}
+
+function writeSessionPhoto(runId, itemId, photoUrl) {
+  if (!runId || !itemId || !photoUrl) return false
+  try {
+    sessionStorage.setItem(photoKey(runId, itemId), photoUrl)
+    return true
+  } catch (error) {
+    console.warn("checklist photo session storage failed", error)
+    return false
+  }
+}
+
+function readSessionPhoto(runId, itemId) {
+  if (!runId || !itemId) return ""
+  try {
+    return sessionStorage.getItem(photoKey(runId, itemId)) || ""
+  } catch {
+    return ""
+  }
+}
+
+function clearSessionPhoto(runId, itemId) {
+  if (!runId || !itemId) return
+  try {
+    sessionStorage.removeItem(photoKey(runId, itemId))
+  } catch {
+    // ignore
+  }
+}
+
+function preparePayloadForLocalDraft(runId, itemId, payload) {
+  const copy = { ...payload }
+  if (typeof copy.photo_url === "string" && copy.photo_url.startsWith("data:")) {
+    writeSessionPhoto(runId, itemId, copy.photo_url)
+    copy.has_local_photo = true
+    delete copy.photo_url
+  }
+  return copy
+}
+
+export function hydrateDraftPayload(runId, itemId, payload = {}) {
+  const hydrated = { ...payload }
+  if (!hydrated.photo_url && hydrated.has_local_photo) {
+    const photo = readSessionPhoto(runId, itemId)
+    if (photo) hydrated.photo_url = photo
+  }
+  delete hydrated.has_local_photo
+  return hydrated
 }
 
 export function persistChecklistItemDraft({ runId, itemId, payload, profileId, meta = {} }) {
-  if (!runId || !itemId || !payload) return
+  if (!runId || !itemId || !payload) return false
   const now = new Date().toISOString()
-  writeJson(draftKey(runId, itemId), {
+  const localPayload = preparePayloadForLocalDraft(runId, itemId, payload)
+  const draftSaved = writeJson(draftKey(runId, itemId), {
     runId,
     itemId,
-    payload,
+    payload: localPayload,
     profileId: profileId || null,
     savedAt: now,
     synced: false
@@ -69,11 +131,17 @@ export function persistChecklistItemDraft({ runId, itemId, payload, profileId, m
     lastLocalSaveAt: now,
     lastSuccessfulAutosaveAt: existingMeta.lastSuccessfulAutosaveAt || null
   })
+  return draftSaved
 }
 
 export function markChecklistItemDraftSynced(runId, itemId) {
   if (!runId || !itemId) return
-  localStorage.removeItem(draftKey(runId, itemId))
+  try {
+    localStorage.removeItem(draftKey(runId, itemId))
+  } catch {
+    // ignore
+  }
+  clearSessionPhoto(runId, itemId)
 }
 
 export function recordChecklistSuccessfulAutosave(runId, profileId) {
@@ -97,24 +165,32 @@ export function listChecklistDraftsForRun(runId) {
   if (!runId) return []
   const prefix = `${DRAFT_PREFIX}${runId}:`
   const drafts = []
-  for (let index = 0; index < localStorage.length; index += 1) {
-    const key = localStorage.key(index)
-    if (!key?.startsWith(prefix)) continue
-    const draft = readJson(key, null)
-    if (draft) drafts.push(draft)
+  try {
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index)
+      if (!key?.startsWith(prefix)) continue
+      const draft = readJson(key, null)
+      if (draft) drafts.push(draft)
+    }
+  } catch (error) {
+    console.warn("checklist draft listing failed", error)
   }
   return drafts.sort((a, b) => String(a.savedAt).localeCompare(String(b.savedAt)))
 }
 
 export function listAllUnsyncedChecklistDrafts(profileId) {
   const drafts = []
-  for (let index = 0; index < localStorage.length; index += 1) {
-    const key = localStorage.key(index)
-    if (!key?.startsWith(DRAFT_PREFIX)) continue
-    const draft = readJson(key, null)
-    if (!draft || draft.synced) continue
-    if (profileId && draft.profileId && draft.profileId !== profileId) continue
-    drafts.push(draft)
+  try {
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index)
+      if (!key?.startsWith(DRAFT_PREFIX)) continue
+      const draft = readJson(key, null)
+      if (!draft || draft.synced) continue
+      if (profileId && draft.profileId && draft.profileId !== profileId) continue
+      drafts.push(draft)
+    }
+  } catch (error) {
+    console.warn("checklist unsynced draft listing failed", error)
   }
   return drafts
 }
@@ -158,7 +234,11 @@ export function clearActiveChecklistSession(profileId, runId) {
   const current = readJson(activeSessionKey(profileId), null)
   if (!current) return
   if (runId && current.runId !== runId) return
-  localStorage.removeItem(activeSessionKey(profileId))
+  try {
+    localStorage.removeItem(activeSessionKey(profileId))
+  } catch {
+    // ignore
+  }
 }
 
 export function enqueueChecklistRetry(entry) {
@@ -180,7 +260,7 @@ export function listChecklistRetryQueue(profileId) {
 
 export function removeChecklistRetry(runId, itemId) {
   const queue = readJson(RETRY_QUEUE_KEY, [])
-  writeJson(RETRY_QUEUE_KEY, queue.filter((item) => !(item.runId === runId && item.itemId === item.itemId)))
+  writeJson(RETRY_QUEUE_KEY, queue.filter((item) => !(item.runId === runId && item.itemId === itemId)))
 }
 
 export function appendLocalChecklistAudit(event) {
@@ -199,14 +279,17 @@ export function getLocalChecklistAudit(limit = 30) {
 }
 
 export function itemPayloadHasAnswer(payload = {}) {
-  const jsonValue = payload.response_json && Object.keys(payload.response_json).length > 0
+  const hydrated = payload.has_local_photo
+    ? { ...payload, photo_url: payload.photo_url || "pending" }
+    : payload
+  const jsonValue = hydrated.response_json && Object.keys(hydrated.response_json).length > 0
   return Boolean(
-    payload.checked
-    || payload.response_text
-    || payload.response_number != null && payload.response_number !== ""
-    || payload.response_date
-    || payload.response_time
-    || payload.photo_url
+    hydrated.checked
+    || hydrated.response_text
+    || hydrated.response_number != null && hydrated.response_number !== ""
+    || hydrated.response_date
+    || hydrated.response_time
+    || hydrated.photo_url
     || jsonValue
   )
 }
@@ -219,13 +302,14 @@ export function mergeRunWithLocalDrafts(run, drafts = []) {
     checklist_run_items: (run.checklist_run_items || []).map((item) => {
       const draft = draftByItem.get(item.id)
       if (!draft?.payload) return item
+      const mergedPayload = hydrateDraftPayload(run.id, item.id, draft.payload)
       const serverHasAnswer = itemHasAnswerFromRecord(item)
-      const draftHasAnswer = itemPayloadHasAnswer(draft.payload)
+      const draftHasAnswer = itemPayloadHasAnswer(mergedPayload)
       if (serverHasAnswer && !draftHasAnswer) return item
       if (serverHasAnswer && draftHasAnswer && draft.savedAt && item.completed_at) {
         if (new Date(item.completed_at) >= new Date(draft.savedAt)) return item
       }
-      return { ...item, ...draft.payload }
+      return { ...item, ...mergedPayload }
     })
   }
 }
@@ -243,11 +327,44 @@ function itemHasAnswerFromRecord(item) {
   )
 }
 
+const WIZARD_DRAFT_PREFIX = "checklist-wizard:"
+
+function wizardDraftKey(profileId, templateId = "new") {
+  return `${WIZARD_DRAFT_PREFIX}${profileId || "anon"}:${templateId || "new"}`
+}
+
+export function persistChecklistWizardDraft(profileId, templateId, payload) {
+  if (!payload) return false
+  const safePayload = {
+    step: Number(payload.step) || 1,
+    form: payload.form || {},
+    items: Array.isArray(payload.items) ? payload.items : [],
+    savedAt: new Date().toISOString()
+  }
+  return writeJson(wizardDraftKey(profileId, templateId), safePayload, sessionStorage)
+}
+
+export function getChecklistWizardDraft(profileId, templateId) {
+  return readJson(wizardDraftKey(profileId, templateId), null, sessionStorage)
+}
+
+export function clearChecklistWizardDraft(profileId, templateId) {
+  try {
+    sessionStorage.removeItem(wizardDraftKey(profileId, templateId))
+  } catch {
+    // ignore
+  }
+}
+
 export function installChecklistLifecycleGuards() {
   if (typeof window === "undefined" || window.__checklistLifecycleGuardsInstalled) return () => {}
   window.__checklistLifecycleGuardsInstalled = true
 
-  const flush = () => flushAllChecklistPendingSaves()
+  const flush = () => {
+    flushAllChecklistPendingSaves().catch((error) => {
+      console.warn("checklist lifecycle flush failed", error)
+    })
+  }
   window.addEventListener("pagehide", flush)
   window.addEventListener("beforeunload", flush)
   document.addEventListener("visibilitychange", () => {

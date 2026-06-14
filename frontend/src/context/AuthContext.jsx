@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import { supabase } from "../lib/supabase"
 
 const isSupabaseConfigured = Boolean(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY)
@@ -175,10 +175,21 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(isSupabaseConfigured)
   const [profileError, setProfileError] = useState(isSupabaseConfigured ? "" : "Supabase no está configurado. Revisa las variables de entorno.")
+  const userRef = useRef(null)
+  const profileRef = useRef(null)
+
+  useEffect(() => {
+    userRef.current = user
+  }, [user])
+
+  useEffect(() => {
+    profileRef.current = profile
+  }, [profile])
 
   const loadProfileForSession = useCallback(async (activeSession) => {
+    const sessionUserId = activeSession?.user?.id || null
     setSession(activeSession || null)
-    if (!activeSession?.user) {
+    if (!sessionUserId) {
       setProfile(null)
       setUser(null)
       setProfileError("")
@@ -189,10 +200,16 @@ export function AuthProvider({ children }) {
     const { data, error } = await supabase
       .from("profiles")
       .select("*")
-      .eq("id", activeSession.user.id)
+      .eq("id", sessionUserId)
       .maybeSingle()
 
     if (error) {
+      if (userRef.current?.id === sessionUserId && profileRef.current) {
+        console.warn("Profile reload failed; keeping current session.", error)
+        setSession(activeSession)
+        setProfileError("")
+        return { ok: true, user: userRef.current, profile: profileRef.current }
+      }
       setProfile(null)
       setUser(null)
       setProfileError("No se pudo cargar tu perfil. Contacta administración.")
@@ -253,9 +270,13 @@ export function AuthProvider({ children }) {
       if (mounted) setLoading(false)
     })
 
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, nextSession) => {
       setTimeout(async () => {
         if (!mounted) return
+        if (["TOKEN_REFRESHED", "USER_UPDATED"].includes(event) && nextSession?.user?.id && nextSession.user.id === userRef.current?.id) {
+          setSession(nextSession)
+          return
+        }
         await loadProfileForSession(nextSession)
         if (mounted) setLoading(false)
       }, 0)
