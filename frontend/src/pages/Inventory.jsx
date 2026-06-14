@@ -1,6 +1,8 @@
 import { useSearchParams } from "react-router-dom"
 import InventoryBase from "./InventoryBase"
 import InventoryItemConversions from "./InventoryItemConversions"
+import YieldProfilesCatalog from "./YieldProfilesCatalog"
+import YieldAuditCampaigns from "./YieldAuditCampaigns"
 import InternalProduction from "./InternalProduction"
 import RequisitionsSupabase from "./RequisitionsSupabase"
 import RecipesSupabase from "./RecipesSupabase"
@@ -19,7 +21,9 @@ const allowedSections = new Set([
   "proveedores",
   "recetas",
   "produccionInterna",
-  "conversiones"
+  "conversiones",
+  "rendimientos",
+  "auditoriasRendimiento"
 ])
 
 function Inventory() {
@@ -67,6 +71,14 @@ function Inventory() {
 
   if (initialSeccion === "conversiones") {
     return <InventoryItemConversions />
+  }
+
+  if (initialSeccion === "rendimientos") {
+    return <YieldProfilesCatalog />
+  }
+
+  if (initialSeccion === "auditoriasRendimiento") {
+    return <YieldAuditCampaigns />
   }
 
   return (

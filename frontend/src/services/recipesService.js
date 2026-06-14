@@ -10,7 +10,7 @@ const recipeSelect = `
   *,
   recipe_ingredients(
     *,
-    inventory_item:inventory_items(id, name, base_unit, cost_per_base_unit, image_url)
+    inventory_item:inventory_items(id, name, base_unit, cost_per_base_unit, usable_cost, weighted_average_cost, image_url)
   ),
   pos_recipe_links(*)
 `
@@ -24,7 +24,8 @@ function normalizeRecipe(recipe) {
     inventory_quantity: ingredient.inventory_quantity ?? ingredient.quantity,
     inventory_unit: ingredient.inventory_unit ?? ingredient.unit,
     conversion_factor: ingredient.conversion_factor ?? 1,
-    cost: Number(ingredient.inventory_quantity ?? ingredient.quantity ?? 0) * Number(ingredient.inventory_item?.cost_per_base_unit || 0)
+    cost: Number(ingredient.inventory_quantity ?? ingredient.quantity ?? 0)
+      * Number(ingredient.inventory_item?.usable_cost || ingredient.inventory_item?.cost_per_base_unit || 0)
   }))
   return recipe ? {
     ...recipe,

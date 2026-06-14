@@ -26,6 +26,7 @@ import { notifyRoles } from "../services/notificationsService"
 import { getSuppliers } from "../services/suppliersService"
 import { TestFlowBadge, TestFlowControls } from "../components/TestFlowBadge"
 import { TEST_FLOW_FILTER } from "../utils/testFlowMode"
+import InventoryItemYieldPanel from "../components/yield/InventoryItemYieldPanel"
 import "./InventoryBase.css"
 
 const DEFAULT_INVENTORY_UNIT = "Unidad/Pieza"
@@ -910,6 +911,9 @@ function ItemModal({ form, setForm, editingItem, providers, onSave, onDelete, on
       </div>
     ) : <p className="inventory-base-muted">Sin imagen seleccionada.</p>}
     <Field label="Notas"><textarea value={form.notes} onChange={(event) => update("notes", event.target.value)} /></Field>
+    {editing && editingItem?.id && (
+      <InventoryItemYieldPanel itemId={editingItem.id} item={editingItem} canManage={true} />
+    )}
     <div className="inventory-modal-actions">
       {editingItem?.active !== false && <button type="button" className="danger inventory-delete-action" onClick={() => onDelete(editingItem)}>Eliminar producto</button>}
       <button type="button" className="secondary" onClick={onClose}>Cancelar</button>

@@ -29,7 +29,8 @@ import {
   getSalesByWaiter
 } from "../../services/reportsService"
 import { getMonthlyGoalReport, getWaiterSalesRanking } from "../../services/salesGoalsService"
-import "./ReportsDashboard.css"
+import { getYieldDashboardMetrics } from "../../services/yieldCostingService"
+import YieldReportsSection from "./YieldReportsSection"
 
 const EXECUTIVE_ROLES = ["admin", "ceo", "gerente_general"]
 const FIXED_COSTS_VIEW_ROLES = ["admin", "ceo", "gerente_general", "supervisor"]
@@ -45,7 +46,8 @@ const TABS = [
   ["fixedCosts", "Costos fijos"],
   ["payroll", "Planilla"],
   ["menu", "Analisis de menu"],
-  ["inventory", "Inventario critico"]
+  ["inventory", "Inventario critico"],
+  ["yields", "Rendimientos"]
 ]
 function canAccessReportTab(key, role) {
   if (key === "goals") return GOAL_ROLES.includes(role)
@@ -182,7 +184,9 @@ function ReportsDashboard() {
             ? <ReportTabError tab={tab} error={error} onRetry={retryTab} />
             : tab === "inventory"
               ? <CriticalInventory data={data} />
-              : <ExecutiveContent
+              : tab === "yields"
+                ? <YieldReportsSection filters={filters} data={data} />
+                : <ExecutiveContent
                   tab={tab}
                   data={data}
                   filters={filters}
@@ -215,6 +219,7 @@ async function loadExecutiveReport(tab, filters) {
   if (tab === "payroll") return getPayrollCostReport(filters)
   if (tab === "menu") return getMenuEngineeringReport(filters)
   if (tab === "inventory") return getInventoryReport(filters)
+  if (tab === "yields") return getYieldDashboardMetrics(filters)
   return { data: null, error: "" }
 }
 
@@ -703,6 +708,25 @@ function exportRows(tab, data) {
   if (tab === "payroll") return safeRows(data.rows).map((row) => ({ Colaborador: row.employee, Departamento: row.department, Monto: row.amount }))
   if (tab === "menu") return safeRows(data).map((row) => ({ Producto: row.product, Categoria: row.category, Unidades: row.quantity, Ventas: row.revenue ?? row.sales, Utilidad: row.profit ?? row.estimatedProfit, Clasificacion: row.classification }))
   if (tab === "inventory") return [...safeRows(data.out), ...safeRows(data.low)].map((row) => ({ Producto: row.item?.name, Area: row.area?.name || row.area_id, StockActual: row.quantity, StockMinimo: row.minimum_quantity }))
+  if (tab === "yields") {
+    return [
+      ...(data?.topLossItems || []).map((row) => ({
+        Tipo: "Producto",
+        Nombre: row.itemName,
+        Auditorias: row.audits,
+        Promedio: row.avgYield,
+        ImpactoQ: row.financialLoss
+      })),
+      ...(data?.employeeScorecard || []).map((row) => ({
+        Tipo: "Colaborador",
+        Nombre: row.employeeName,
+        Auditorias: row.audits,
+        Promedio: row.avgYield,
+        Desviacion: row.avgVariance,
+        Puntaje: row.score
+      }))
+    ]
+  }
   return []
 }
 

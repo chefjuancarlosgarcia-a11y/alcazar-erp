@@ -88,7 +88,8 @@ import {
   withComputedTaskStatus
 } from "../utils/tasks"
 import { normalizeRole } from "../utils/profilePermissions"
-import InfoTooltip from "../components/InfoTooltip"
+import YieldAuditFormPanel from "../components/yield/YieldAuditFormPanel"
+import { hasYieldAuditForTask } from "../services/yieldCostingService"
 import "./Tasks.css"
 
 const TODAY = new Date().toISOString().slice(0, 10)
@@ -101,6 +102,7 @@ const ADMIN_TABS = [
   ["calendar", "Calendario operativo"],
   ["checklists", "Checklists"],
   ["mine", "Mis tareas"],
+  ["yieldForm", "Formulario rendimiento"],
   ["reports", "Reportes"]
 ]
 
@@ -472,7 +474,13 @@ function Tasks() {
   const [assignmentTemplate, setAssignmentTemplate] = useState(null)
   const [assignmentFeedback, setAssignmentFeedback] = useState(null)
   const requestedTab = params.get("tab") === "checklists" ? "checklists" : params.get("view") || (isManager ? "dashboard" : "mine")
-  const tab = requestedTab === "checklists" ? "checklists" : isManager && ADMIN_TABS.some(([id]) => id === requestedTab) ? requestedTab : "mine"
+  const tab = requestedTab === "checklists"
+    ? "checklists"
+    : requestedTab === "yieldForm"
+      ? "yieldForm"
+      : isManager && ADMIN_TABS.some(([id]) => id === requestedTab)
+        ? requestedTab
+        : "mine"
   const taskFromQuery = params.get("task") || ""
   const visibleTemplates = templates.filter((template) => mayUseTemplate(template, user, employees))
   const computedTasks = assignedTasks.map(withComputedTaskStatus)
@@ -616,7 +624,7 @@ function Tasks() {
       </header>
 
       <nav className="tasks-tabs" aria-label="Tareas">
-        {(isManager ? ADMIN_TABS : [["mine", "Mis tareas"]]).map(([id, label]) => (
+        {(isManager ? ADMIN_TABS : [["mine", "Mis tareas"], ["yieldForm", "Formulario rendimiento"]]).map(([id, label]) => (
           <button key={id} type="button" className={tab === id ? "active" : ""} onClick={() => { if (id === "create") setEditingTemplate(null); openTab(id) }}>{label}</button>
         ))}
       </nav>
@@ -649,6 +657,11 @@ function Tasks() {
       {tab === "calendar" && <OperationalCalendar tasks={computedTasks} employees={employees} areas={areas} />}
       {tab === "checklists" && <ChecklistsModule user={user} initialRunId={params.get("id") || ""} initialChecklistView={params.get("view") || ""} />}
       {tab === "mine" && <MyTasks initialTaskId={taskFromQuery} tasks={computedTasks.filter((task) => taskMatchesUser(task, user))} user={user} persistAllTasks={persistTasks} allTasks={assignedTasks} />}
+      {tab === "yieldForm" && (
+        <article className="tasks-panel">
+          <YieldAuditFormPanel />
+        </article>
+      )}
       {tab === "reports" && <TaskReports tasks={computedTasks} employees={employees} areas={areas} />}
       {assignmentTemplate && (
         <TaskAssignWizard
@@ -1271,9 +1284,22 @@ function MyTasks({ initialTaskId = "", tasks, user, allTasks, persistAllTasks })
     reader.onload = (loadEvent) => updateOwn(task.id, (current) => ({ ...current, evidenceFiles: [...(current.evidenceFiles || []), { name: file.name, data: loadEvent.target.result }] }))
     reader.readAsDataURL(file)
   }
-  function complete(task) {
+  async function complete(task) {
     if (task.checklistItems?.some((item) => !item.completed)) return window.alert("Completa todos los pasos del checklist antes de terminar.")
     if (task.evidenceRequired && !task.evidenceFiles?.length) return window.alert("Adjunta evidencia antes de completar esta tarea.")
+    const yieldIds = task.yieldRequiredItemIds || []
+    const requiresYieldChecklist = (task.checklistItems || []).some((item) => String(item.text || "").toLowerCase().includes("registrar rendimiento"))
+    if (yieldIds.length || requiresYieldChecklist) {
+      const idsToVerify = yieldIds.length ? yieldIds : []
+      for (const itemId of idsToVerify) {
+        const { data: hasAudit, error: auditError } = await hasYieldAuditForTask(task.id, itemId)
+        if (auditError) return window.alert("No se pudo verificar la auditoría de rendimiento. Intenta de nuevo.")
+        if (!hasAudit) return window.alert("Debes registrar el rendimiento antes de cerrar esta tarea.")
+      }
+      if (!idsToVerify.length && requiresYieldChecklist) {
+        return window.alert("Esta tarea requiere registrar rendimiento. Usa el formulario en Tareas → Formulario rendimiento y vincúlalo a esta tarea.")
+      }
+    }
     const completion = { ...task, status: "completed", completedAt: new Date().toISOString(), completionNotes: notes.trim() }
     updateOwn(task.id, () => completion)
     addTaskNotification(getCurrentUserTaskId(user), "task_completed", "Tarea completada", `Completaste: ${task.title}`, task.id)
@@ -1328,6 +1354,27 @@ function MyTasks({ initialTaskId = "", tasks, user, allTasks, persistAllTasks })
           {(selectedTask.checklistItems || []).map((item) => (
             <label className="tasks-check-item" key={item.id}><input type="checkbox" checked={item.completed} disabled={selectedTask.status === "completed"} onChange={() => toggleChecklist(selectedTask, item.id)} />{item.text}</label>
           ))}
+          {(selectedTask.yieldRequiredItemIds?.length || (selectedTask.checklistItems || []).some((item) => String(item.text || "").toLowerCase().includes("registrar rendimiento"))) && selectedTask.status !== "completed" && (
+            <div className="tasks-evidence">
+              <strong>Rendimiento obligatorio</strong>
+              <p className="tasks-muted">Registra la auditoría de rendimiento antes de cerrar esta tarea.</p>
+              <YieldAuditFormPanel
+                compact
+                taskId={selectedTask.id}
+                requiredItemIds={selectedTask.yieldRequiredItemIds || []}
+                onSaved={() => {
+                  updateOwn(selectedTask.id, (current) => ({
+                    ...current,
+                    checklistItems: (current.checklistItems || []).map((item) => (
+                      String(item.text || "").toLowerCase().includes("registrar rendimiento")
+                        ? { ...item, completed: true }
+                        : item
+                    ))
+                  }))
+                }}
+              />
+            </div>
+          )}
           {selectedTask.evidenceRequired && (
             <div className="tasks-evidence">
               <strong>Evidencia requerida</strong>

@@ -264,6 +264,17 @@ function difficultyRank(difficulty) {
 }
 
 function createAssignedTask(template, assignedTo, date, shift, assignedBy) {
+  const baseChecklist = (template.checklistItems || []).map((item) => ({ ...item, completed: false }))
+  const yieldIds = template.yieldInventoryItemId
+    ? [template.yieldInventoryItemId]
+    : (template.yieldRequiredItemIds || [])
+  const yieldChecklist = template.yieldInventoryItemId
+    ? [{
+      id: `yield-${template.id || "task"}-${template.yieldInventoryItemId}`,
+      text: `Registrar rendimiento${template.yieldInventoryItemName ? ` de ${template.yieldInventoryItemName}` : ""}`,
+      completed: false
+    }]
+    : []
   return {
     id: makeId("task"),
     templateId: template.id,
@@ -284,7 +295,8 @@ function createAssignedTask(template, assignedTo, date, shift, assignedBy) {
     difficulty: template.difficulty,
     requiredPeople: Number(template.requiredPeople) || 1,
     status: assignedTo.length ? "pending" : "review_required",
-    checklistItems: (template.checklistItems || []).map((item) => ({ ...item, completed: false })),
+    checklistItems: [...baseChecklist, ...yieldChecklist],
+    yieldRequiredItemIds: yieldIds,
     evidenceRequired: Boolean(template.evidenceRequired),
     evidenceFiles: [],
     completedAt: "",

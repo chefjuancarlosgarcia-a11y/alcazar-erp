@@ -33,7 +33,9 @@ const inventorySubmenu = [
   { roles: ["admin", "gerente", "gerente_general", "encargado_almacen", "recursos_humanos", "rrhh"], to: "/inventory?section=proveedores", label: "Proveedores" },
   { roles: ["admin", "gerente", "gerente_general", "supervisor"], to: "/inventory?section=recetas", label: "Recetas estandarizadas" },
   { roles: ["admin", "gerente", "gerente_general", "supervisor", "cocina", "pizzeria", "panadero", "repostero"], to: "/inventory?section=produccionInterna", label: "Producción interna" },
-  { roles: ["admin", "gerente", "gerente_general", "supervisor"], to: "/inventory?section=conversiones", label: "Conversiones" }
+  { roles: ["admin", "gerente", "gerente_general", "supervisor"], to: "/inventory?section=conversiones", label: "Conversiones" },
+  { roles: ["admin", "gerente", "gerente_general", "supervisor", "encargado_almacen"], to: "/inventory?section=rendimientos", label: "Rendimientos" },
+  { roles: ["admin", "gerente", "gerente_general"], to: "/inventory?section=auditoriasRendimiento", label: "Auditorías de rendimiento" }
 ]
 
 const hrSubmenu = [
