@@ -630,6 +630,22 @@ export async function getChecklistDashboardStats() {
   }
 }
 
+export async function logChecklistSessionAudit({
+  profileId,
+  runId = null,
+  eventType,
+  details = {}
+}) {
+  const payload = {
+    profile_id: profileId || null,
+    checklist_run_id: runId || null,
+    event_type: eventType,
+    details
+  }
+  const { error } = await supabase.from("checklist_session_audit").insert(payload)
+  return { error }
+}
+
 export async function getChecklistProfiles() {
   const { data, error } = await supabase
     .from("profiles")

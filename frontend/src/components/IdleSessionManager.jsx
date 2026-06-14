@@ -24,7 +24,7 @@ function IdleSessionManager() {
     clearTimers()
     setWarningOpen(false)
     sessionStorage.setItem("auth:autoLogoutMessage", AUTO_LOGOUT_MESSAGE)
-    await logout()
+    await logout("idle_timeout")
   }, [clearTimers, logout])
 
   const startTimers = useCallback(() => {

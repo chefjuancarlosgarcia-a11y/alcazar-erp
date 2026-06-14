@@ -34,8 +34,30 @@ import {
   updateChecklistManagementAlertStatus,
   updateChecklistChangeRequest,
   updateChecklistTemplate,
-  updateChecklistTemplateSuggestionStatus
+  updateChecklistTemplateSuggestionStatus,
+  logChecklistSessionAudit
 } from "../services/checklistsService"
+import {
+  appendLocalChecklistAudit,
+  clearActiveChecklistSession,
+  enqueueChecklistRetry,
+  flushAllChecklistPendingSaves,
+  getActiveChecklistSession,
+  getChecklistRunMeta,
+  getLastActiveChecklistSession,
+  installChecklistLifecycleGuards,
+  listAllUnsyncedChecklistDrafts,
+  listChecklistDraftsForRun,
+  listChecklistRetryQueue,
+  markChecklistItemDraftSynced,
+  mergeRunWithLocalDrafts,
+  persistActiveChecklistSession,
+  persistChecklistItemDraft,
+  recordChecklistSuccessfulAutosave,
+  registerChecklistFlushCallback,
+  removeChecklistRetry,
+  touchActiveChecklistSession
+} from "../utils/checklistProgressPersistence"
 import {
   TASK_CATEGORIES,
   TASK_DIFFICULTIES,
@@ -1355,6 +1377,93 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   const selectedRun = runs.find((run) => run.id === selectedRunId)
   const activeTemplates = templates.filter((template) => template.status === "active")
   const visibleRuns = runs.filter((run) => run.status !== "cancelled" && canSeeChecklistRun(run, user, profiles))
+  const logChecklistAudit = useCallback(async (eventType, runId, details = {}) => {
+    const meta = runId ? getChecklistRunMeta(runId) : null
+    const profileId = user?.id || getLastActiveChecklistSession()?.profileId || null
+    const localEntry = appendLocalChecklistAudit({
+      eventType,
+      runId,
+      profileId,
+      details: {
+        ...details,
+        lastSuccessfulAutosaveAt: meta?.lastSuccessfulAutosaveAt || null,
+        lastLocalSaveAt: meta?.lastLocalSaveAt || null
+      }
+    })
+    if (!profileId) return localEntry
+    logChecklistSessionAudit({
+      profileId,
+      runId,
+      eventType,
+      details: { ...details, localAuditId: localEntry.id, lastSuccessfulAutosaveAt: meta?.lastSuccessfulAutosaveAt || null }
+    }).catch(() => {})
+    return localEntry
+  }, [user?.id])
+
+  const mergeRunsWithLocalDrafts = useCallback((nextRuns = []) => (
+    nextRuns.map((run) => mergeRunWithLocalDrafts(run, listChecklistDraftsForRun(run.id)))
+  ), [])
+
+  const replayPendingChecklistDrafts = useCallback(async (nextRuns = []) => {
+    const drafts = listAllUnsyncedChecklistDrafts(user?.id)
+    const retryQueue = listChecklistRetryQueue(user?.id)
+    const pendingEntries = [
+      ...drafts,
+      ...retryQueue.map((entry) => ({
+        runId: entry.runId,
+        itemId: entry.itemId,
+        payload: entry.payload,
+        profileId: entry.profileId
+      }))
+    ]
+    if (!pendingEntries.length) return mergeRunsWithLocalDrafts(nextRuns)
+
+    let mergedRuns = mergeRunsWithLocalDrafts(nextRuns)
+    for (const draft of pendingEntries) {
+      const run = mergedRuns.find((item) => item.id === draft.runId)
+      if (!run) continue
+      const result = await updateChecklistRunItem(draft.itemId, draft.payload)
+      if (result.error) {
+        enqueueChecklistRetry({
+          runId: draft.runId,
+          itemId: draft.itemId,
+          payload: draft.payload,
+          profileId: draft.profileId || user?.id || null,
+          attempts: Number(draft.attempts || 0) + 1,
+          lastError: result.error.message || "autosave_failed"
+        })
+        await logChecklistAudit("autosave_retry_failed", draft.runId, {
+          itemId: draft.itemId,
+          error: result.error.message || "autosave_failed"
+        })
+        continue
+      }
+      markChecklistItemDraftSynced(draft.runId, draft.itemId)
+      removeChecklistRetry(draft.runId, draft.itemId)
+      recordChecklistSuccessfulAutosave(draft.runId, user?.id)
+      mergedRuns = mergedRuns.map((item) => (
+        item.id === draft.runId
+          ? {
+            ...item,
+            checklist_run_items: (item.checklist_run_items || []).map((runItem) => (
+              runItem.id === draft.itemId ? { ...runItem, ...result.data } : runItem
+            ))
+          }
+          : item
+      ))
+    }
+    return mergeRunsWithLocalDrafts(mergedRuns)
+  }, [logChecklistAudit, mergeRunsWithLocalDrafts, user?.id])
+
+  const selectRun = useCallback((runId) => {
+    setSelectedRunId(runId)
+    if (!runId || !user?.id) return
+    const run = runs.find((item) => item.id === runId)
+    persistActiveChecklistSession(user.id, runId, {
+      templateTitle: run?.checklist_templates?.title || "",
+      area: run?.area || ""
+    })
+  }, [runs, user?.id])
   const sections = [
     ["today", "Hoy"],
     ...(canViewChecklistLibrary ? [["templates", "Checklists"]] : []),
@@ -1388,7 +1497,8 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       }
     } else {
       setTemplates(templateResult.data || [])
-      setRuns(markOverdueRuns(runResult.data || []))
+      const syncedRuns = await replayPendingChecklistDrafts(markOverdueRuns(runResult.data || []))
+      setRuns(syncedRuns)
       setIncidents(incidentResult.data || [])
       setChangeRequests(requestResult.data || [])
       setSuggestions(suggestionResult.data || [])
@@ -1396,7 +1506,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
     }
     if (!profileResult.error) setProfiles(profileResult.data || [])
     if (!silent) setLoading(false)
-  }, [canManageManagementAlerts, isLibraryAdmin])
+  }, [canManageManagementAlerts, isLibraryAdmin, replayPendingChecklistDrafts])
 
   const refreshRef = useRef(refresh)
   refreshRef.current = refresh
@@ -1405,6 +1515,33 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   useEffect(() => {
     refresh()
   }, [refresh])
+
+  useEffect(() => installChecklistLifecycleGuards(), [])
+
+  useEffect(() => {
+    if (initialRunId || !user?.id) return
+    const activeSession = getActiveChecklistSession(user.id)
+    if (!activeSession?.runId) return
+    setSection("today")
+    setSelectedRunId(activeSession.runId)
+  }, [initialRunId, user?.id])
+
+  const selectedRunIdRef = useRef(selectedRunId)
+  selectedRunIdRef.current = selectedRunId
+
+  useEffect(() => {
+    function handleSessionInterrupted(event) {
+      const runId = selectedRunIdRef.current || getLastActiveChecklistSession()?.runId
+      if (!runId) return
+      flushAllChecklistPendingSaves()
+      logChecklistAudit("session_interrupted", runId, {
+        reason: event?.detail?.reason || "unknown",
+        message: event?.detail?.message || ""
+      })
+    }
+    window.addEventListener("auth:session-interrupted", handleSessionInterrupted)
+    return () => window.removeEventListener("auth:session-interrupted", handleSessionInterrupted)
+  }, [logChecklistAudit])
 
   const scheduleRealtimeRefresh = useCallback(() => {
     window.clearTimeout(realtimeRefreshTimerRef.current)
@@ -1429,8 +1566,8 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   useEffect(() => {
     if (!initialRunId || ["incidents", "alerts"].includes(initialChecklistView)) return
     setSection("today")
-    setSelectedRunId(initialRunId)
-  }, [initialRunId, initialChecklistView])
+    selectRun(initialRunId)
+  }, [initialRunId, initialChecklistView, selectRun])
 
   useEffect(() => {
     if (initialChecklistView !== "approvals") return
@@ -1608,7 +1745,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   async function startRun(runId) {
     const result = await startChecklistRun(runId)
     if (result.error) return setMessage(result.error.message || "No se pudo iniciar la checklist.")
-    setSelectedRunId(runId)
+    selectRun(runId)
     refresh()
   }
 
@@ -1634,14 +1771,52 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   }
 
   async function updateRunItem(itemId, payload) {
+    const run = runs.find((entry) => (entry.checklist_run_items || []).some((item) => item.id === itemId))
+    const runId = run?.id
+    if (runId) {
+      persistChecklistItemDraft({
+        runId,
+        itemId,
+        payload,
+        profileId: user?.id,
+        meta: {
+          templateTitle: run?.checklist_templates?.title || "",
+          area: run?.area || ""
+        }
+      })
+      touchActiveChecklistSession(user?.id, runId)
+    }
+
     const result = await updateChecklistRunItem(itemId, payload)
     if (result.error) {
+      if (runId) {
+        enqueueChecklistRetry({
+          runId,
+          itemId,
+          payload,
+          profileId: user?.id || null,
+          attempts: 1,
+          lastError: result.error.message || "autosave_failed"
+        })
+      }
+      await logChecklistAudit("autosave_failed", runId, {
+        itemId,
+        error: result.error.message || "autosave_failed"
+      })
       setMessage(result.error.message || "No se pudo guardar el progreso.")
       return result
     }
-    setRuns((current) => current.map((run) => ({
-      ...run,
-      checklist_run_items: (run.checklist_run_items || []).map((item) => item.id === itemId ? { ...item, ...result.data } : item)
+
+    if (runId) {
+      markChecklistItemDraftSynced(runId, itemId)
+      removeChecklistRetry(runId, itemId)
+      recordChecklistSuccessfulAutosave(runId, user?.id)
+      await logChecklistAudit("autosave_success", runId, { itemId })
+    }
+
+    setRuns((current) => current.map((entry) => ({
+      ...entry,
+      checklist_run_items: (entry.checklist_run_items || []).map((item) => item.id === itemId ? { ...item, ...result.data } : item)
     })))
     return result
   }
@@ -1661,8 +1836,10 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   }
 
   async function completeRun(runId) {
+    flushAllChecklistPendingSaves()
     const result = await completeChecklistRun(runId)
     if (result.error) return setMessage(result.error.message || "Completa los items obligatorios antes de finalizar.")
+    clearActiveChecklistSession(user?.id, runId)
     setMessage("Checklist completada correctamente.")
     setSelectedRunId("")
     refresh()
@@ -1692,10 +1869,11 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
           runs={visibleRuns}
           profiles={profiles}
           selectedRun={selectedRun}
-          onSelect={setSelectedRunId}
+          onSelect={selectRun}
           onStart={startRun}
           onUpdateItem={updateRunItem}
           onComplete={completeRun}
+          currentUser={user}
         />
       )}
       {section === "templates" && canViewChecklistLibrary && (
@@ -1848,7 +2026,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   )
 }
 
-function ChecklistToday({ runs, profiles, selectedRun, onSelect, onStart, onUpdateItem, onComplete }) {
+function ChecklistToday({ runs, profiles, selectedRun, onSelect, onStart, onUpdateItem, onComplete, currentUser }) {
   const todayRuns = runs.filter((run) => run.run_date === TODAY || ["overdue", "rejected"].includes(run.status))
   const pending = todayRuns.filter((run) => run.status === "pending")
   const inProgress = todayRuns.filter((run) => run.status === "in_progress")
@@ -1876,7 +2054,14 @@ function ChecklistToday({ runs, profiles, selectedRun, onSelect, onStart, onUpda
             </button>
             <span className="tasks-muted">{todayRuns.length} checklist{todayRuns.length === 1 ? "" : "s"} asignada{todayRuns.length === 1 ? "" : "s"} hoy</span>
           </div>
-          <ChecklistGuidedRun run={selectedRun} profiles={profiles} onClose={() => onSelect("")} onUpdateItem={onUpdateItem} onComplete={onComplete} />
+          <ChecklistGuidedRun
+            run={selectedRun}
+            profiles={profiles}
+            currentUser={currentUser}
+            onClose={() => onSelect("")}
+            onUpdateItem={onUpdateItem}
+            onComplete={onComplete}
+          />
         </>
       ) : (
         <div className="checklists-card-grid">
@@ -2502,11 +2687,12 @@ function ChecklistTemplatePreview({ form, items, profiles, templateId = "" }) {
   )
 }
 
-function ChecklistGuidedRun({ run, profiles, onClose, onUpdateItem, onComplete }) {
+function ChecklistGuidedRun({ run, profiles, currentUser, onClose, onUpdateItem, onComplete }) {
   const progress = checklistRunProgress(run)
   const completedCount = (run.checklist_run_items || []).filter(itemHasAnswer).length
   const canEdit = run.status !== "completed"
   const itemGroups = groupChecklistRunItems(run.checklist_run_items || [])
+  const runMeta = getChecklistRunMeta(run.id)
   return (
     <article className="checklist-guided">
       <div className="checklist-guided-header">
@@ -2514,6 +2700,11 @@ function ChecklistGuidedRun({ run, profiles, onClose, onUpdateItem, onComplete }
         <div><h2>{run.checklist_templates?.title || "Checklist"}</h2><p>{run.area || "Sin area"} · {responsibleLabel(run, profiles)}</p></div>
         <Badge type="status" value={run.status} />
       </div>
+      {runMeta?.lastSuccessfulAutosaveAt && (
+        <p className="tasks-muted checklist-autosave-meta">
+          Ultimo guardado: {new Date(runMeta.lastSuccessfulAutosaveAt).toLocaleString("es-GT")}
+        </p>
+      )}
       <div className="checklist-big-progress"><progress value={progress} max="100" /><strong>{completedCount} de {run.checklist_run_items?.length || 0} · {progress}%</strong></div>
       <div className="checklist-guided-items">
         {itemGroups.map((group, groupIndex) => {
@@ -2522,7 +2713,18 @@ function ChecklistGuidedRun({ run, profiles, onClose, onUpdateItem, onComplete }
             <details className="checklist-section" key={group.title} open={groupIndex === 0 || done < group.items.length}>
               <summary><strong>{group.title}</strong><span>{done} de {group.items.length}</span></summary>
               <div className="checklist-section-items">
-                {group.items.map(({ item, index }) => <ChecklistRunItem key={item.id} item={item} index={index} disabled={!canEdit} onSave={(payload) => onUpdateItem(item.id, payload)} />)}
+                {group.items.map(({ item, index }) => (
+                  <ChecklistRunItem
+                    key={item.id}
+                    item={item}
+                    index={index}
+                    disabled={!canEdit}
+                    runId={run.id}
+                    profileId={currentUser?.id}
+                    runMeta={{ templateTitle: run.checklist_templates?.title || "", area: run.area || "" }}
+                    onSave={(payload) => onUpdateItem(item.id, payload)}
+                  />
+                ))}
               </div>
             </details>
           )
@@ -2552,13 +2754,23 @@ function checklistRunItemDraft(item) {
   }
 }
 
-function ChecklistRunItem({ item, index = 0, disabled, onSave }) {
+function ChecklistRunItem({ item, index = 0, disabled, runId, profileId, runMeta = {}, onSave }) {
   const [draft, setDraft] = useState(() => checklistRunItemDraft(item))
   const [saveStatus, setSaveStatus] = useState("")
   const saveTimerRef = useRef(null)
   const latestDraftRef = useRef(draft)
+  const NOTE_DEBOUNCE_MS = 800
 
   useEffect(() => () => window.clearTimeout(saveTimerRef.current), [])
+
+  useEffect(() => {
+    return registerChecklistFlushCallback(() => {
+      if (!saveTimerRef.current) return
+      window.clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = null
+      save(latestDraftRef.current)
+    })
+  }, [])
 
   useEffect(() => {
     if (saveStatus === "pending" || saveStatus === "saving") return
@@ -2571,22 +2783,36 @@ function ChecklistRunItem({ item, index = 0, disabled, onSave }) {
     }
   }, [item.checked, item.response_text, item.response_number, item.response_date, item.response_time, item.photo_url, item.comment, item.completed_at, item.response_json, saveStatus])
 
+  function persistLocalDraft(next) {
+    if (!runId) return
+    persistChecklistItemDraft({
+      runId,
+      itemId: item.id,
+      payload: next,
+      profileId,
+      meta: runMeta
+    })
+    touchActiveChecklistSession(profileId, runId)
+  }
+
   async function save(next = latestDraftRef.current) {
     window.clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = null
+    persistLocalDraft(next)
     setSaveStatus("saving")
     const result = await onSave(next)
     setSaveStatus(result?.error ? "error" : "saved")
     if (!result?.error) {
-      window.clearTimeout(saveTimerRef.current)
       saveTimerRef.current = window.setTimeout(() => setSaveStatus(""), 1800)
     }
     return result
   }
 
-  function scheduleSave(next) {
+  function scheduleSave(next, delay = NOTE_DEBOUNCE_MS) {
+    persistLocalDraft(next)
     window.clearTimeout(saveTimerRef.current)
     setSaveStatus("pending")
-    saveTimerRef.current = window.setTimeout(() => save(next), 650)
+    saveTimerRef.current = window.setTimeout(() => save(next), delay)
   }
 
   function applyChange(field, value) {
@@ -2595,12 +2821,17 @@ function ChecklistRunItem({ item, index = 0, disabled, onSave }) {
     latestDraftRef.current = next
     scheduleSave(next)
   }
+
+  function saveImmediate(next) {
+    setDraft(next)
+    latestDraftRef.current = next
+    save(next)
+  }
   function toggleMulti(option) {
     const current = Array.isArray(draft.response_json?.selected) ? draft.response_json.selected : []
-    const selected = current.includes(option) ? current.filter((item) => item !== option) : [...current, option]
+    const selected = current.includes(option) ? current.filter((entry) => entry !== option) : [...current, option]
     const next = { ...draft, response_json: { selected } }
-    setDraft(next)
-    save(next)
+    saveImmediate(next)
   }
   const options = Array.isArray(item.options) ? item.options : []
   const answeredNo = String(draft.response_text || "").toLowerCase() === "no"
@@ -2611,9 +2842,11 @@ function ChecklistRunItem({ item, index = 0, disabled, onSave }) {
   function saveCritical(next) {
     if (checklistItemWouldFail(item, next) && !String(next.comment || "").trim()) {
       setDraft(next)
+      latestDraftRef.current = next
+      persistLocalDraft(next)
       return
     }
-    save(next)
+    saveImmediate(next)
   }
   return (
     <div className="checklist-run-item form-question">

@@ -197,6 +197,9 @@ export function AuthProvider({ children }) {
       setUser(null)
       setProfileError("No se pudo cargar tu perfil. Contacta administración.")
       syncLegacyUser(null)
+      window.dispatchEvent(new CustomEvent("auth:session-interrupted", {
+        detail: { reason: "profile_load_failed", message: error.message || "profile_query_error" }
+      }))
       return { ok: false, message: "No se pudo cargar tu perfil. Contacta administración." }
     }
     if (!data) {
@@ -204,12 +207,18 @@ export function AuthProvider({ children }) {
       setUser(null)
       setProfileError("Tu usuario no tiene perfil configurado. Contacta administración.")
       syncLegacyUser(null)
+      window.dispatchEvent(new CustomEvent("auth:session-interrupted", {
+        detail: { reason: "profile_missing", message: "profile_not_found" }
+      }))
       return { ok: false, message: "Tu usuario no tiene perfil configurado. Contacta administración." }
     }
     if (["inactive", "suspended"].includes(String(data.status || "").toLowerCase())) {
       setProfile(data)
       setUser(null)
       setProfileError("Tu usuario está inactivo o suspendido. Contacta administración.")
+      window.dispatchEvent(new CustomEvent("auth:session-interrupted", {
+        detail: { reason: "profile_inactive", message: data.status || "inactive" }
+      }))
       await supabase.auth.signOut({ scope: "local" })
       syncLegacyUser(null)
       return { ok: false, message: "Tu usuario está inactivo o suspendido. Contacta administración." }
@@ -234,6 +243,9 @@ export function AuthProvider({ children }) {
       if (!mounted) return
       if (error) {
         setProfileError("No fue posible recuperar la sesión.")
+        window.dispatchEvent(new CustomEvent("auth:session-interrupted", {
+          detail: { reason: "session_recovery_failed", message: error.message || "getSession_error" }
+        }))
         setLoading(false)
         return
       }
@@ -283,7 +295,10 @@ export function AuthProvider({ children }) {
     return result
   }, [loadProfileForSession])
 
-  const logout = useCallback(async () => {
+  const logout = useCallback(async (reason = "manual_logout") => {
+    window.dispatchEvent(new CustomEvent("auth:session-interrupted", {
+      detail: { reason }
+    }))
     if (supabase) await supabase.auth.signOut({ scope: "local" })
     setSession(null)
     setProfile(null)
