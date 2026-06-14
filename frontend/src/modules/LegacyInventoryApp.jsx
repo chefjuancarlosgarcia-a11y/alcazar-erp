@@ -14,6 +14,7 @@ import { useAuth } from "../context/AuthContext"
 import { supabase } from "../lib/supabase"
 import { createNotification, notifyRoles } from "../services/notificationsService"
 import { getPurchaseOrders, savePurchaseOrder } from "../services/purchaseOrdersService"
+import { canCreateTestFlow, TEST_FLOW_FILTER } from "../utils/testFlowMode"
 import { getInventoryItems } from "../services/inventoryService"
 import {
   getSuppliers,
@@ -358,6 +359,8 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
   const [manualRecepcionEstado, setManualRecepcionEstado] = useState("bueno")
   const [manualRecepcionNombre, setManualRecepcionNombre] = useState("")
   const [manualRecepcionImagen, setManualRecepcionImagen] = useState("")
+  const [testFlowFilter, setTestFlowFilter] = useState(TEST_FLOW_FILTER.REAL)
+  const [manualCreateTestMode, setManualCreateTestMode] = useState(false)
 
   const [proveedores, setProveedores] = useState([])
   const [proveedoresLoading, setProveedoresLoading] = useState(false)
@@ -520,7 +523,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
   useEffect(() => {
     if (seccionActiva !== "ordenes") return undefined
     let active = true
-    getPurchaseOrders().then(({ data, error }) => {
+    getPurchaseOrders({ testFlowFilter }).then(({ data, error }) => {
       if (!active || error || !data?.length) return
       setOrdenesCompraManual((localOrders) => {
         const remoteIds = new Set(data.map((order) => String(order.id)))
@@ -530,7 +533,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
     return () => {
       active = false
     }
-  }, [seccionActiva])
+  }, [seccionActiva, testFlowFilter])
 
   const usuariosAutorizados = [
     { username: "admin", passwordHash: "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918", nombre: "Administrador" },
@@ -951,6 +954,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
   const puedeAprobarOrdenCompra = PURCHASE_ORDER_APPROVER_ROLES.includes(purchaseOrderRole)
   const puedeRecibirOrdenCompra = ["admin", "gerente_general", "encargado_almacen"].includes(purchaseOrderRole)
   const requiereAprobacionOrdenCompra = ["gerente", "encargado_almacen"].includes(purchaseOrderRole)
+  const puedeCrearPruebaFlujo = canCreateTestFlow(authenticatedUser)
 
   useEffect(() => {
     if (initialSeccion !== "ordenes") return
@@ -958,7 +962,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
       setPurchaseOrderView(initialPurchaseOrderView)
     }
     if (!initialPurchaseOrderId) return
-    getPurchaseOrders().then(({ data, error }) => {
+    getPurchaseOrders({ testFlowFilter: TEST_FLOW_FILTER.ALL }).then(({ data, error }) => {
       if (error) return
       setOrdenesCompraManual((localOrders) => {
         const remoteIds = new Set((data || []).map((order) => String(order.id)))
@@ -1472,7 +1476,8 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
       lugar: manualLocation,
       items: manualOrdenItems,
       creado: new Date().toLocaleString(),
-      recepcion: null
+      recepcion: null,
+      is_test: manualCreateTestMode
     }
 
     const saveResult = await savePurchaseOrder(nuevaOrden)
@@ -1482,6 +1487,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
     }
     setOrdenesCompraManual([nuevaOrden, ...ordenesCompraManual])
     limpiarFormularioOrdenManual()
+    setManualCreateTestMode(false)
     setPurchaseOrderView("history")
     if (estadoInicial === "pendiente_aprobacion") {
       await publicarNotificacionOrden(["admin", "gerente_general"], {
@@ -1509,7 +1515,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
         "purchase_order_created"
       )
     }
-    alert("Orden de compra manual creada.")
+    alert(manualCreateTestMode ? "Orden de prueba creada." : "Orden de compra manual creada.")
   }
 
   function seleccionarOrdenManual(id) {
@@ -1693,7 +1699,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
       )
     }
 
-    if (manualRecepcionEstado === "bueno") {
+    if (manualRecepcionEstado === "bueno" && !ordenManualSeleccionada.is_test) {
       const inventarioActualizado = ingredientes.map((ingrediente) => {
         const itemOrden = ordenManualSeleccionada.items.find((item) => item.id === ingrediente.id)
         if (!itemOrden) return ingrediente
@@ -1751,6 +1757,8 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
       }
 
       alert("Orden recibida y cantidades sumadas al inventario.")
+    } else if (manualRecepcionEstado === "bueno" && ordenManualSeleccionada.is_test) {
+      alert("Recepción de prueba registrada. No se modificó el inventario real.")
     } else {
       alert("Orden registrada como parcialmente completada. No se actualizaron cantidades a inventario porque el producto no está en buen estado.")
     }
@@ -1974,6 +1982,11 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
               enviarOrdenProveedor={enviarOrdenProveedor}
               recibirOrdenManual={recibirOrdenManual}
               cargarImagenRecepcion={cargarImagenRecepcion}
+              puedeCrearPruebaFlujo={puedeCrearPruebaFlujo}
+              testFlowFilter={testFlowFilter}
+              setTestFlowFilter={setTestFlowFilter}
+              manualCreateTestMode={manualCreateTestMode}
+              setManualCreateTestMode={setManualCreateTestMode}
             />
           )}
 

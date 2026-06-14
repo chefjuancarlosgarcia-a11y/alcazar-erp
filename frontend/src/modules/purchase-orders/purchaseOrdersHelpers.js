@@ -1,3 +1,5 @@
+import { operationalOnly } from "../../utils/testFlowMode"
+
 export function getPurchaseOrderStatusLabel(status) {
   const labels = {
     borrador: "Borrador",
@@ -146,14 +148,15 @@ const PENDING_STATUSES = new Set(["pendiente", "pendiente_aprobacion", "borrador
 const RECEIVED_STATUSES = new Set(["recibida", "recibida_completa", "recibida_parcial", "parcialCompletada"])
 
 export function computePurchaseOrderMetrics(ordenesCompraManual = [], ordenCompra = [], totalOrdenCompra = 0) {
-  const pendingCount = ordenesCompraManual.filter((orden) => PENDING_STATUSES.has(orden.status)).length
-  const receivedCount = ordenesCompraManual.filter((orden) => RECEIVED_STATUSES.has(orden.status)).length
+  const operationalOrders = operationalOnly(ordenesCompraManual)
+  const pendingCount = operationalOrders.filter((orden) => PENDING_STATUSES.has(orden.status)).length
+  const receivedCount = operationalOrders.filter((orden) => RECEIVED_STATUSES.has(orden.status)).length
   const supplierNames = new Set(
-    ordenesCompraManual
+    operationalOrders
       .map((orden) => String(orden?.proveedor?.nombre || "").trim())
       .filter(Boolean)
   )
-  const manualEstimatedTotal = ordenesCompraManual.reduce((sum, orden) => {
+  const manualEstimatedTotal = operationalOrders.reduce((sum, orden) => {
     const items = Array.isArray(orden.items) ? orden.items : []
     const orderTotal = items.reduce(
       (itemSum, item) => itemSum + Number(item.subtotal ?? Number(item.costoUnitario || 0) * Number(item.cantidadComprar || item.cantidad_compra || 0)),
@@ -170,14 +173,21 @@ export function computePurchaseOrderMetrics(ordenesCompraManual = [], ordenCompr
     supplierCount: supplierNames.size,
     estimatedAmount,
     automaticLineCount: ordenCompra.length,
-    manualOrderCount: ordenesCompraManual.length
+    manualOrderCount: operationalOrders.length
   }
 }
 
-export function filterHistoryOrders(orders, { search = "", status = "all" } = {}) {
+export function filterHistoryOrders(orders, { search = "", status = "all", testFlowFilter = "real" } = {}) {
   const query = String(search || "").trim().toLowerCase()
+  const scopedOrders = testFlowFilter === "all"
+    ? (orders || [])
+    : (orders || []).filter((orden) => {
+      const test = Boolean(orden?.is_test ?? orden?.isTest)
+      if (testFlowFilter === "test") return test
+      return !test
+    })
 
-  return (orders || []).filter((orden) => {
+  return scopedOrders.filter((orden) => {
     if (status !== "all" && orden.status !== status) return false
     if (!query) return true
 

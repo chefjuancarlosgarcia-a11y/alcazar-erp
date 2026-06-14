@@ -24,6 +24,8 @@ import {
 } from "../services/inventoryConversionsService"
 import { notifyRoles } from "../services/notificationsService"
 import { getSuppliers } from "../services/suppliersService"
+import { TestFlowBadge, TestFlowControls } from "../components/TestFlowBadge"
+import { TEST_FLOW_FILTER } from "../utils/testFlowMode"
 import "./InventoryBase.css"
 
 const DEFAULT_INVENTORY_UNIT = "Unidad/Pieza"
@@ -128,6 +130,7 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
   const [importOpen, setImportOpen] = useState(false)
   const [legacyItems, setLegacyItems] = useState(readLegacyItems)
   const [providerOptions, setProviderOptions] = useState([])
+  const [testFlowFilter, setTestFlowFilter] = useState(TEST_FLOW_FILTER.REAL)
   const realtimeTimerRef = useRef(null)
   const realtimeRefreshRef = useRef(null)
 
@@ -168,7 +171,7 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
     const [areasResult, itemsResult, movementsResult, suppliersResult] = await Promise.all([
       getActiveAreas(),
       getInventoryItems(),
-      getInventoryMovements({ limit: 100 }),
+      getInventoryMovements({ limit: 100, testFlowFilter }),
       canEditCatalog ? getSuppliers() : Promise.resolve({ data: [], error: null })
     ])
     if (areasResult.error || itemsResult.error || movementsResult.error) {
@@ -184,10 +187,15 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
     setLoading(false)
   }
 
+  useEffect(() => {
+    if (section !== "movimientosInventario") return undefined
+    refreshOperationalData()
+  }, [testFlowFilter, section])
+
   async function refreshOperationalData() {
     const [itemsResult, movementsResult] = await Promise.all([
       getInventoryItems(),
-      getInventoryMovements({ limit: 100 })
+      getInventoryMovements({ limit: 100, testFlowFilter })
     ])
     if (itemsResult.error || movementsResult.error) {
       setError("No se pudo actualizar el inventario en vivo.")
@@ -543,6 +551,17 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
       {realtimeNotice && <div className="inventory-base-success">{realtimeNotice}</div>}
       {error && <div className="inventory-base-error">{error}</div>}
 
+      {section === "movimientosInventario" && (
+        <TestFlowControls
+          filter={testFlowFilter}
+          onFilterChange={setTestFlowFilter}
+          canCreate={false}
+          createActive={false}
+          onToggleCreate={() => {}}
+          className="inventory-test-controls"
+        />
+      )}
+
       {section === "inventario" && (
         <InventoryCatalog
           loading={loading}
@@ -736,9 +755,10 @@ function MovementsTable({ movements, items, areas, loading }) {
   const pagedMovements = pageItems(movements, page)
   return <div className="inventory-movements">
     {loading ? <p className="inventory-empty">Cargando movimientos...</p> : pagedMovements.map((movement) => (
-      <article className="inventory-movement-row" key={movement.id}>
+      <article className={`inventory-movement-row${movement.is_test ? " inventory-movement-row--test" : ""}`} key={movement.id}>
         <div className="inventory-movement-row__product">
           <strong>{items[movement.item_id]?.name || "Producto"}</strong>
+          {movement.is_test && <TestFlowBadge />}
           <small>{movement.movement_type}</small>
         </div>
         <span className="inventory-movement-row__cell" data-label="Ruta">{areas[movement.from_area_id] || "-"} → {areas[movement.to_area_id] || "-"}</span>

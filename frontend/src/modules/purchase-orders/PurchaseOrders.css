@@ -584,3 +584,17 @@
     min-height: 52px;
   }
 }
+
+.po-test-controls {
+  margin-top: var(--erp-space-16);
+}
+
+.po-test-warning {
+  margin: var(--erp-space-12) 0;
+}
+
+.po-order-card--test,
+.po-row--test {
+  border-color: rgba(245, 158, 11, 0.45);
+  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.2);
+}

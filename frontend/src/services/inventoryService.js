@@ -116,6 +116,9 @@ export async function getItemStockByArea(itemId) {
 
 export async function getInventoryMovements(filters = {}) {
   let query = supabase.from("inventory_movements").select("*").order("created_at", { ascending: false })
+  const testFilter = filters.testFlowFilter ?? (filters.includeTest ? "all" : "real")
+  if (testFilter === "real") query = query.eq("is_test", false)
+  else if (testFilter === "test") query = query.eq("is_test", true)
   if (filters.itemId) query = query.eq("item_id", filters.itemId)
   if (filters.areaId) query = query.or(`from_area_id.eq.${filters.areaId},to_area_id.eq.${filters.areaId}`)
   if (filters.movementType) query = query.eq("movement_type", filters.movementType)
@@ -136,7 +139,8 @@ export function createInventoryMovement(movement) {
     source_type: movement.sourceType || null,
     source_id: movement.sourceId || null,
     notes: movement.notes || null,
-    performed_by: movement.performedBy || null
+    performed_by: movement.performedBy || null,
+    is_test: Boolean(movement.isTest ?? movement.is_test)
   }).select("*").single()
 }
 

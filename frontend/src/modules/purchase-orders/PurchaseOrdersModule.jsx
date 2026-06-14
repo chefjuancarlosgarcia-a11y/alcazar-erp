@@ -1,4 +1,6 @@
 import { useMemo, useState } from "react"
+import { TestFlowBadge, TestFlowControls, TestFlowWarning } from "../../components/TestFlowBadge"
+import { isTestRecord } from "../../utils/testFlowMode"
 import {
   computePurchaseOrderMetrics,
   filterHistoryOrders,
@@ -139,7 +141,12 @@ export default function PurchaseOrdersModule({
   rechazarOrdenManual,
   enviarOrdenProveedor,
   recibirOrdenManual,
-  cargarImagenRecepcion
+  cargarImagenRecepcion,
+  puedeCrearPruebaFlujo = false,
+  testFlowFilter = "real",
+  setTestFlowFilter = () => {},
+  manualCreateTestMode = false,
+  setManualCreateTestMode = () => {}
 }) {
   const [historySearch, setHistorySearch] = useState("")
   const [historyStatus, setHistoryStatus] = useState("all")
@@ -170,8 +177,8 @@ export default function PurchaseOrdersModule({
   )
 
   const filteredHistory = useMemo(
-    () => filterHistoryOrders(ordenesCompraManual, { search: historySearch, status: historyStatus }),
-    [ordenesCompraManual, historySearch, historyStatus]
+    () => filterHistoryOrders(ordenesCompraManual, { search: historySearch, status: historyStatus, testFlowFilter }),
+    [ordenesCompraManual, historySearch, historyStatus, testFlowFilter]
   )
 
   const openReception = (id) => {
@@ -236,10 +243,11 @@ export default function PurchaseOrdersModule({
     return (
       <div className="po-panel">
         <div className="po-header">
-          <h3>Orden de compra manual</h3>
+          <h3>{manualCreateTestMode ? "Prueba de flujo — orden de compra" : "Orden de compra manual"}</h3>
           <p className="po-help">Completa los datos de la orden y selecciona ingredientes con el buscador.</p>
           <p><strong>Número de orden:</strong> {proximoNumeroOrden}</p>
         </div>
+        {manualCreateTestMode && <TestFlowWarning className="po-test-warning" />}
 
         <div className="po-field">
           <label htmlFor="po-manual-search">Buscar ingrediente</label>
@@ -467,8 +475,9 @@ export default function PurchaseOrdersModule({
         </div>
 
         <div className="po-footer-actions">
+          {manualCreateTestMode && <TestFlowWarning className="po-test-warning" />}
           <button type="button" className="erp-btn erp-btn--success" onClick={crearOrdenCompraManual}>
-            Crear orden
+            {manualCreateTestMode ? "Crear orden de prueba" : "Crear orden"}
           </button>
           <button
             type="button"
@@ -540,8 +549,8 @@ export default function PurchaseOrdersModule({
               </thead>
               <tbody>
                 {filteredHistory.map((orden) => (
-                  <tr key={orden.id}>
-                    <td><strong>{orden.numeroOrden}</strong></td>
+                  <tr key={orden.id} className={isTestRecord(orden) ? "po-row--test" : ""}>
+                    <td><strong>{orden.numeroOrden}</strong> {isTestRecord(orden) && <TestFlowBadge />}</td>
                     <td>{orden.proveedor?.nombre}</td>
                     <td><StatusBadge status={orden.status} /></td>
                     <td>{orden.fechaEmision}</td>
@@ -566,9 +575,10 @@ export default function PurchaseOrdersModule({
 
           <div className="po-history-cards">
             {filteredHistory.map((orden) => (
-              <article key={orden.id} className="po-order-card">
+              <article key={orden.id} className={`po-order-card${isTestRecord(orden) ? " po-order-card--test" : ""}`}>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
                   <h4 className="po-order-card__title">{orden.numeroOrden}</h4>
+                  {isTestRecord(orden) && <TestFlowBadge />}
                   <StatusBadge status={orden.status} />
                 </div>
                 <p><strong>Proveedor:</strong> {orden.proveedor?.nombre}</p>
@@ -610,8 +620,10 @@ export default function PurchaseOrdersModule({
         <div className="po-reception-panel">
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
             <h4 style={{ margin: 0 }}>{ordenManualSeleccionada.numeroOrden}</h4>
+            {isTestRecord(ordenManualSeleccionada) && <TestFlowBadge />}
             <StatusBadge status={ordenManualSeleccionada.status} />
           </div>
+          {isTestRecord(ordenManualSeleccionada) && <TestFlowWarning className="po-test-warning" />}
           <p><strong>Lugar:</strong> {ordenManualSeleccionada.lugar}</p>
           <p><strong>Solicitante:</strong> {ordenManualSeleccionada.requester}</p>
           <p><strong>Aprobador:</strong> {ordenManualSeleccionada.approver}</p>
@@ -718,6 +730,15 @@ export default function PurchaseOrdersModule({
             )}
           </div>
         </div>
+
+        <TestFlowControls
+          filter={testFlowFilter}
+          onFilterChange={setTestFlowFilter}
+          canCreate={puedeCrearPruebaFlujo}
+          createActive={manualCreateTestMode}
+          onToggleCreate={() => setManualCreateTestMode((current) => !current)}
+          className="po-test-controls"
+        />
 
         <div className="po-kpi-grid">
           <article className="po-kpi">

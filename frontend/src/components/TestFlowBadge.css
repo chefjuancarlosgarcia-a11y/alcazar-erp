@@ -1,0 +1,61 @@
+.test-flow-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #f59e0b;
+  color: #1f1300;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+.test-flow-warning {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #f59e0b;
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.12);
+  color: #fcd34d;
+  font-size: 0.88rem;
+}
+
+.test-flow-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.test-flow-filters {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.test-flow-filters button,
+.test-flow-create-btn {
+  border: 1px solid #475569;
+  border-radius: 999px;
+  background: #0f172a;
+  color: #cbd5e1;
+  padding: 7px 12px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.test-flow-filters button.active,
+.test-flow-create-btn.active {
+  border-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.18);
+  color: #fcd34d;
+}
+
+.test-flow-create-btn {
+  border-color: #f59e0b;
+  color: #fcd34d;
+}

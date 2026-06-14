@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import PaginationControls from "../components/PaginationControls"
+import { TestFlowBadge, TestFlowControls, TestFlowWarning } from "../components/TestFlowBadge"
 import { pageItems } from "../utils/pagination"
+import { canCreateTestFlow, TEST_FLOW_FILTER } from "../utils/testFlowMode"
 import { useAuth } from "../context/AuthContext"
 import { supabase } from "../lib/supabase"
 import { getActiveAreas } from "../services/areasService"
@@ -96,8 +98,11 @@ function RequisitionsSupabase() {
   const [approval, setApproval] = useState(null)
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
+  const [testFlowFilter, setTestFlowFilter] = useState(TEST_FLOW_FILTER.REAL)
+  const [createTestMode, setCreateTestMode] = useState(false)
 
   const manager = ["admin", "gerente_general"].includes(user?.role)
+  const canCreateTest = canCreateTestFlow(user)
   const canUseStockOverrideToggle = STOCK_OVERRIDE_ROLES.has(user?.role)
   const ownResponsibleAreas = areas.filter((area) => area.responsibleUserId === user?.id)
   const canCreate = manager || (user?.role === "supervisor" && Boolean(user?.areaId)) || ownResponsibleAreas.length > 0
@@ -106,10 +111,11 @@ function RequisitionsSupabase() {
     : areas.filter((area) => area.id === user?.areaId || area.responsibleUserId === user?.id)
   const hasLegacy = readLegacyRequests().length > 0
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (options = {}) => {
+    const activeTestFilter = options.testFlowFilter ?? testFlowFilter
     setLoading(true)
     const [requestsResult, areasResult, inventoryResult, requestersResult, conversionsResult] = await Promise.all([
-      getRequisitions(),
+      getRequisitions({ testFlowFilter: activeTestFilter }),
       getActiveAreas(),
       getActiveInventoryItems(),
       getAuthorizedRequesters(),
@@ -126,7 +132,7 @@ function RequisitionsSupabase() {
       setError("")
     }
     setLoading(false)
-  }, [])
+  }, [testFlowFilter])
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -156,6 +162,7 @@ function RequisitionsSupabase() {
       requestedByProfileId: defaultRequesterId(requesters, user),
       notes: "",
       allowOverStock: true,
+      isTest: createTestMode,
       items: []
     })
   }
@@ -188,25 +195,45 @@ function RequisitionsSupabase() {
     const validation = validateRequest(enrichedData, inventory, areas)
     if (validation) {
       setError(validation)
-      return
+      return { ok: false, error: validation }
     }
     setWorkingId(data.id || "new")
-    const result = enrichedData.id
-      ? await updateRequisition(enrichedData.id, enrichedData, enrichedData.items)
-      : await createRequisition(enrichedData, enrichedData.items, submit)
-    let actionError = result.error
-    if (!actionError && data.id && submit) {
-      const submitResult = await submitRequisition(data.id)
-      actionError = submitResult.error
+    try {
+      const result = enrichedData.id
+        ? await updateRequisition(enrichedData.id, enrichedData, enrichedData.items)
+        : await createRequisition(enrichedData, enrichedData.items, submit)
+      let actionError = result.error
+      if (!actionError && enrichedData.id && submit) {
+        const submitResult = await submitRequisition(enrichedData.id)
+        actionError = submitResult.error
+      }
+      if (actionError) {
+        const friendlyError = requisitionError(actionError)
+        setError(friendlyError)
+        return { ok: false, error: friendlyError }
+      }
+
+      const isTest = Boolean(enrichedData.isTest ?? enrichedData.is_test)
+      const nextFilter = isTest && testFlowFilter === TEST_FLOW_FILTER.REAL
+        ? TEST_FLOW_FILTER.TEST
+        : testFlowFilter
+      if (nextFilter !== testFlowFilter) setTestFlowFilter(nextFilter)
+      if (submit) setTab("pending")
+
+      setFormRequest(null)
+      const successMessage = submit
+        ? isTest
+          ? "Prueba de flujo enviada para aprobación."
+          : "Requisición enviada para aprobación."
+        : isTest
+          ? "Borrador de prueba guardado correctamente."
+          : "Borrador guardado correctamente."
+      setMessage(successMessage)
+      await loadData({ testFlowFilter: nextFilter })
+      return { ok: true, message: successMessage }
+    } finally {
+      setWorkingId("")
     }
-    setWorkingId("")
-    if (actionError) {
-      setError(requisitionError(actionError))
-      return
-    }
-    setFormRequest(null)
-    setMessage(submit ? "Requisición enviada para aprobación." : "Borrador guardado correctamente.")
-    await loadData()
   }
 
   async function runAction(id, action, successMessage) {
@@ -251,6 +278,15 @@ function RequisitionsSupabase() {
       {message && <div className="requisitions-success">{message}</div>}
       {error && <div className="requisitions-error">{error}</div>}
 
+      <TestFlowControls
+        filter={testFlowFilter}
+        onFilterChange={setTestFlowFilter}
+        canCreate={canCreateTest}
+        createActive={createTestMode}
+        onToggleCreate={() => setCreateTestMode((current) => !current)}
+        className="requisitions-test-controls"
+      />
+
       <nav className="requisitions-tabs" aria-label="Estados de requisición">
         {TABS.map(([value, label]) => (
           <button key={value} type="button" className={tab === value ? "active" : ""} onClick={() => setTab(value)}>
@@ -279,9 +315,10 @@ function RequisitionsSupabase() {
       <div className="requisitions-list">
         {loading && <p className="requisitions-empty">Cargando requisiciones...</p>}
         {!loading && pagedRequests.map((request) => (
-          <article className="requisition-card" key={request.id}>
+          <article className={`requisition-card${request.is_test ? " requisition-card--test" : ""}`} key={request.id}>
             <div className="requisition-summary">
               <strong>{request.requisition_number}</strong>
+              {request.is_test && <TestFlowBadge />}
               <StatusBadge status={request.status} />
               <PriorityBadge priority={request.priority} />
             </div>
@@ -300,7 +337,7 @@ function RequisitionsSupabase() {
               {request.status === "draft" && request.requested_by === user?.id && <button type="button" onClick={() => openEdit(request)}>Editar</button>}
               {request.status === "draft" && request.requested_by === user?.id && <button type="button" className="primary" disabled={workingId === request.id} onClick={() => runAction(request.id, () => submitRequisition(request.id), "Requisición enviada para aprobación.")}>Enviar</button>}
               {manager && request.status === "pending" && <button type="button" className="primary" onClick={() => setApproval(request)}>Aprobar</button>}
-              {manager && request.status === "approved" && <button type="button" className="primary" disabled={workingId === request.id} onClick={() => runAction(request.id, () => completeRequisition(request.id), "Requisición completada. Inventario actualizado.")}>Completar traslado</button>}
+              {manager && request.status === "approved" && <button type="button" className="primary" disabled={workingId === request.id} onClick={() => runAction(request.id, () => completeRequisition(request.id), request.is_test ? "Requisición de prueba completada. Traslado simulado registrado." : "Requisición completada. Inventario actualizado.")}>Completar traslado</button>}
               {manager && ["pending", "approved"].includes(request.status) && <button type="button" className="danger" onClick={() => askReason("rechazar", (reason) => runAction(request.id, () => rejectRequisition(request.id, reason), "Requisición rechazada."))}>Rechazar</button>}
               {["draft", "pending", "approved"].includes(request.status) && (manager || request.requested_by === user?.id) && <button type="button" className="danger" onClick={() => askReason("cancelar", (reason) => runAction(request.id, () => cancelRequisition(request.id, reason), "Requisición cancelada."))}>Cancelar</button>}
             </div>
@@ -337,6 +374,7 @@ function RequestForm({ request, areas, destinationAreas, inventory, requesters, 
   const [productQuery, setProductQuery] = useState("")
   const [showResults, setShowResults] = useState(false)
   const [formError, setFormError] = useState("")
+  const [formNotice, setFormNotice] = useState("")
   const pickerRef = useRef(null)
   const selectedItem = inventory.find((item) => item.id === selectedItemId)
 
@@ -364,7 +402,8 @@ function RequestForm({ request, areas, destinationAreas, inventory, requesters, 
     setForm({ ...form, items: form.items.map((item) => item.itemId === itemId ? { ...item, ...updates } : item) })
   }
 
-  function submitForm(submit) {
+  async function submitForm(submit) {
+    setFormNotice("")
     const enrichedForm = {
       ...form,
       items: enrichRequestItems(form.items, inventory, form.fromAreaId, unitConversions)
@@ -375,7 +414,12 @@ function RequestForm({ request, areas, destinationAreas, inventory, requesters, 
       return
     }
     setFormError("")
-    onSave(enrichedForm, submit)
+    const result = await onSave(enrichedForm, submit)
+    if (!result?.ok) {
+      setFormError(result?.error || "No se pudo guardar la requisición. Intenta de nuevo.")
+      return
+    }
+    setFormNotice(result.message || (submit ? "Requisición enviada." : "Borrador guardado."))
   }
 
   function selectProduct(item) {
@@ -389,9 +433,10 @@ function RequestForm({ request, areas, destinationAreas, inventory, requesters, 
     <div className="requisitions-backdrop">
       <form className="requisitions-modal request-form" onSubmit={(event) => { event.preventDefault(); submitForm(false) }}>
         <header>
-          <div><p className="requisitions-eyebrow">Traslado interno</p><h2>{form.id ? "Editar borrador" : "Nueva requisición"}</h2></div>
+          <div><p className="requisitions-eyebrow">Traslado interno</p><h2>{form.id ? "Editar borrador" : form.isTest ? "Nueva prueba de flujo" : "Nueva requisición"}</h2></div>
           <button type="button" onClick={onClose}>Cerrar</button>
         </header>
+        {form.isTest && <TestFlowWarning className="requisitions-test-warning" />}
         <div className="requisition-form-grid">
           <Field label="Origen">
             <select value={form.fromAreaId} onChange={(event) => setForm({ ...form, fromAreaId: event.target.value })}>
@@ -455,6 +500,7 @@ function RequestForm({ request, areas, destinationAreas, inventory, requesters, 
           <button type="button" className="primary" onClick={addItem}>Agregar producto</button>
         </div>
         {formError && <div className="requisitions-error">{formError}</div>}
+        {formNotice && <div className="requisitions-success">{formNotice}</div>}
         <div className="requisition-items">
           <div className="requisition-items-head"><span>Producto</span><span>Stock / disponibilidad</span><span>Cantidad</span><span>Solicitar en</span><span>Notas</span><span /></div>
           {form.items.map((line) => {
@@ -485,9 +531,19 @@ function RequestForm({ request, areas, destinationAreas, inventory, requesters, 
           {!form.items.length && <p className="requisitions-empty">Agrega al menos un producto inventariable.</p>}
         </div>
         <div className="requisitions-modal-actions">
-          <button type="button" onClick={onClose}>Cancelar</button>
-          <button type="button" disabled={saving} onClick={() => submitForm(false)}>Guardar borrador</button>
-          <button type="button" className="primary" disabled={saving} onClick={() => submitForm(true)}>Enviar requisición</button>
+          {(formError || formNotice) && (
+            <div className="requisitions-modal-feedback">
+              {formError && <div className="requisitions-error">{formError}</div>}
+              {formNotice && <div className="requisitions-success">{formNotice}</div>}
+            </div>
+          )}
+          <button type="button" onClick={onClose} disabled={saving}>Cancelar</button>
+          <button type="button" disabled={saving} onClick={() => submitForm(false)}>
+            {saving ? "Guardando..." : "Guardar borrador"}
+          </button>
+          <button type="button" className="primary" disabled={saving} onClick={() => submitForm(true)}>
+            {saving ? "Enviando..." : "Enviar requisición"}
+          </button>
         </div>
       </form>
     </div>
@@ -502,6 +558,12 @@ function RequestDetail({ request, areas, inventory, unitConversions, onClose }) 
           <div><p className="requisitions-eyebrow">{request.requisition_number}</p><h2>Detalle de requisición</h2></div>
           <button type="button" onClick={onClose}>Cerrar</button>
         </header>
+        {request.is_test && (
+          <>
+            <TestFlowBadge />
+            <TestFlowWarning className="requisitions-test-warning" />
+          </>
+        )}
         <div className="requisition-detail-meta">
           <span>Estado <StatusBadge status={request.status} /></span>
           <span>Ruta <strong>{areaName(areas, request.from_area_id)} → {areaName(areas, request.to_area_id)}</strong></span>
@@ -756,8 +818,18 @@ function initials(name) {
 }
 
 function requisitionError(error) {
-  const message = String(error?.message || "")
-  if (message.toLowerCase().includes("selecciona quien")) return "Selecciona quién está haciendo la requisición."
+  const message = String(error?.message || error || "").trim()
+  const lower = message.toLowerCase()
+  if (!message) return "No se pudo completar la requisición. Intenta de nuevo."
+  if (lower.includes("selecciona quien")) return "Selecciona quién está haciendo la requisición."
+  if (lower.includes("requested_by_profile_id")) {
+    return "Faltan columnas de requisiciones en Supabase. Ejecuta supabase/schema/076_requisition_columns_hotfix.sql (o vuelve a aplicar 075 actualizado)."
+  }
+  if (lower.includes("solo administracion puede crear pruebas")) {
+    return "Solo Administración o Gerencia General pueden crear pruebas de flujo."
+  }
+  if (lower.includes("permiso")) return message
+  if (lower.includes("jwt") || lower.includes("not authenticated")) return "Tu sesión expiró. Vuelve a iniciar sesión."
   return message
 }
 

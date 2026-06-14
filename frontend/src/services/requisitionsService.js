@@ -25,7 +25,8 @@ function serializeData(data) {
     to_area_id: data.toAreaId,
     priority: data.priority || "normal",
     notes: data.notes || "",
-    requested_by_profile_id: data.requestedByProfileId || null
+    requested_by_profile_id: data.requestedByProfileId || null,
+    is_test: Boolean(data.isTest ?? data.is_test)
   }
 }
 
@@ -63,6 +64,8 @@ export async function getRequisitions(filters = {}) {
   if (filters.priority) query = query.eq("priority", filters.priority)
   if (filters.requestedBy) query = query.eq("requested_by", filters.requestedBy)
   if (filters.date) query = query.gte("created_at", `${filters.date}T00:00:00`).lte("created_at", `${filters.date}T23:59:59.999`)
+  if (filters.testFlowFilter === "real") query = query.eq("is_test", false)
+  else if (filters.testFlowFilter === "test") query = query.eq("is_test", true)
   const { data, error } = await query
   return { data: (data || []).map(normalizeRequisition), error }
 }

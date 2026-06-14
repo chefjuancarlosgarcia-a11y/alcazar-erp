@@ -9,12 +9,37 @@
   color: #e5edf8;
 }
 
+.requisition-card--test {
+  border-color: rgba(245, 158, 11, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.25);
+}
+
+.requisitions-test-controls,
+.requisitions-test-warning {
+  width: 100%;
+}
+
+.requisitions-test-warning {
+  margin-top: -6px;
+}
+
 .requisitions-header, .requisitions-actions, .requisitions-modal header, .requisitions-modal-actions {
   display: flex;
   justify-content: space-between;
   align-items: start;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.requisitions-modal-feedback {
+  flex: 1 1 100%;
+  display: grid;
+  gap: 8px;
+}
+
+.requisitions-modal-feedback .requisitions-error,
+.requisitions-modal-feedback .requisitions-success {
+  margin: 0;
 }
 
 .requisitions-page h1 { margin: 3px 0 6px; color: #f8fafc; }

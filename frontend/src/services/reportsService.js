@@ -109,7 +109,7 @@ export async function getExecutiveKPIs(filters = {}) {
     fetchOrders(monthFilters),
     supabase.from("production_tickets").select("id,status").not("status", "in", "(served,cancelled)"),
     supabase.from("area_inventory").select("quantity,minimum_quantity"),
-    supabase.from("requisitions").select("id,status").in("status", ["draft", "pending", "approved"])
+    supabase.from("requisitions").select("id,status").eq("is_test", false).in("status", ["draft", "pending", "approved"])
   ])
   const errors = [todayOrders.error, monthOrders.error, tickets.error, stock.error, requisitions.error].filter(Boolean)
   const ordersToday = todayOrders.data || []
@@ -292,7 +292,7 @@ function matchesShift(value, shift) {
 
 export async function getPurchasesReport(filters = {}) {
   const { data, error } = await withDates(
-    supabase.from("purchase_orders").select("*"),
+    supabase.from("purchase_orders").select("*").eq("is_test", false),
     filters
   ).order("created_at", { ascending: false })
   if (error) return empty({ summary: {}, bySupplier: [], byCategory: [], rows: [] }, error)
@@ -405,7 +405,7 @@ export async function getInventoryReport(filters = {}) {
   console.info("[InventarioCritico] Consultando Supabase", { filters })
   const [stock, movements] = await Promise.all([
     supabase.from("area_inventory").select("*, item:inventory_items(id,name,category,base_unit), area:areas(id,name)"),
-    withDates(supabase.from("inventory_movements").select("*, item:inventory_items(name), from_area:areas!inventory_movements_from_area_id_fkey(name), to_area:areas!inventory_movements_to_area_id_fkey(name)"), filters)
+    withDates(supabase.from("inventory_movements").select("*, item:inventory_items(name), from_area:areas!inventory_movements_from_area_id_fkey(name), to_area:areas!inventory_movements_to_area_id_fkey(name)").eq("is_test", false), filters)
       .order("created_at", { ascending: false }).limit(100)
   ])
   if (stock.error || movements.error) {
@@ -437,7 +437,7 @@ export async function getInventoryReport(filters = {}) {
 
 export async function getRequisitionReport(filters = {}) {
   const { data, error } = await withDates(
-    supabase.from("requisitions").select("*, items:requisition_items(*), requester:profiles!requisitions_requested_by_fkey(full_name,username), target:areas!requisitions_to_area_id_fkey(name)"),
+    supabase.from("requisitions").select("*, items:requisition_items(*), requester:profiles!requisitions_requested_by_fkey(full_name,username), target:areas!requisitions_to_area_id_fkey(name)").eq("is_test", false),
     filters
   ).order("created_at", { ascending: false })
   if (error) return empty({ summary: {}, byArea: [], byRequester: [], topItems: [], rows: [] }, error)
