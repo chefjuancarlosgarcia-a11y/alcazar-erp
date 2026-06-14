@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom"
 import { useEffect, useMemo, useState } from "react"
 import { supabase } from "../lib/supabase"
 import { useAuth } from "../context/AuthContext"
@@ -878,6 +879,11 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
           <p className="profiles-muted">Administra colaboradores, roles, estado de cuenta y PIN de marcaje.</p>
         </div>
         <div className="profiles-header-actions">
+          {canManageRoleCatalog(user) && (
+            <Link to="/hr?section=catalogos" className="profiles-secondary profiles-header-link">
+              Roles y áreas
+            </Link>
+          )}
           <button type="button" className="profiles-secondary" onClick={openCreate}>Crear usuario</button>
           <button type="button" className="profiles-primary" onClick={() => loadProfiles()}>Actualizar lista</button>
         </div>

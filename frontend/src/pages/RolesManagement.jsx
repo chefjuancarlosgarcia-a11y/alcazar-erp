@@ -30,7 +30,7 @@ function formatDate(value) {
   return new Date(value).toLocaleString("es-GT", { dateStyle: "short", timeStyle: "short" })
 }
 
-function RolesManagement() {
+function RolesManagement({ embedded = false }) {
   const { user } = useAuth()
   const [roles, setRoles] = useState([])
   const [loading, setLoading] = useState(true)
@@ -229,21 +229,39 @@ function RolesManagement() {
   }
 
   return (
-    <section className="roles-management">
-      <header className="roles-header">
-        <div>
-          <p className="roles-eyebrow">Configuración</p>
-          <h1>Roles y permisos</h1>
-          <p>Administra el catálogo de roles de la empresa. Solo Administración puede crear o modificar roles.</p>
+    <section className={`roles-management${embedded ? " embedded" : ""}`}>
+      {!embedded && (
+        <header className="roles-header">
+          <div>
+            <p className="roles-eyebrow">Configuración</p>
+            <h1>Roles y permisos</h1>
+            <p>Administra el catálogo de roles de la empresa. Solo Administración puede crear o modificar roles.</p>
+          </div>
+          <button
+            className="roles-primary-btn"
+            onClick={openCreate}
+            disabled={loading || saving}
+          >
+            + Crear rol
+          </button>
+        </header>
+      )}
+
+      {embedded && (
+        <div className="hr-catalogs-panel-toolbar">
+          <p className="hr-catalogs-panel-copy">
+            Los roles definen accesos y qué puede asignar RRHH al crear o editar colaboradores.
+          </p>
+          <button
+            type="button"
+            className="roles-primary-btn"
+            onClick={openCreate}
+            disabled={loading || saving}
+          >
+            + Crear rol
+          </button>
         </div>
-        <button
-          className="roles-primary-btn"
-          onClick={openCreate}
-          disabled={loading || saving}
-        >
-          + Crear rol
-        </button>
-      </header>
+      )}
 
       {message && <div className="roles-success" role="status">{message}</div>}
       {error && !showForm && <div className="roles-error" role="alert">{error}</div>}

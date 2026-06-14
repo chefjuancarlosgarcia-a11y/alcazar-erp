@@ -1,5 +1,6 @@
 /**
  * Registro de asistencia (flujo oficial):
+ * - /hr?section=catalogos → HRCatalogsManagement.jsx (roles + áreas operativas)
  * - /hr?section=asistencia → AttendanceTerminal.jsx
  * - /kiosk → AttendanceTerminal.jsx (modo kiosco)
  * - /hr?section=dispositivosMarcaje → AttendanceDevicesManagement.jsx
@@ -10,6 +11,7 @@ import { lazy, Suspense } from "react"
 import ProfileManagement from "./ProfileManagement"
 import ScheduleManagement from "./ScheduleManagement"
 import AttendanceDevicesManagement from "./AttendanceDevicesManagement"
+import HRCatalogsManagement from "./HRCatalogsManagement"
 import AttendanceTerminal from "../components/AttendanceTerminal"
 import { Navigate, useLocation } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
@@ -34,6 +36,10 @@ function HR() {
 
   if (selectedSection === "usuarios") {
     return <ProfileManagement requestedProfileId={profileId} editRequested={editProfile} />
+  }
+
+  if (selectedSection === "catalogos") {
+    return <HRCatalogsManagement />
   }
 
   if (selectedSection === "horarios") {

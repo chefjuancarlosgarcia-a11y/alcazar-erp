@@ -1,9 +1,8 @@
-import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
+import { useState } from "react"
 import { useAuth } from "../context/AuthContext"
 import { canManageRoleCatalog } from "../utils/profilePermissions"
 import BrandingAppearanceSettings from "../components/branding/BrandingAppearanceSettings"
-import RolesManagement from "./RolesManagement"
 import "./Settings.css"
 
 function Settings() {
@@ -18,9 +17,9 @@ function Settings() {
           Apariencia y Marca
         </button>
         {canManageRoles && (
-          <button className={`settings-tab ${activeTab === "roles" ? "active" : ""}`} onClick={() => setActiveTab("roles")}>
-            Roles y permisos
-          </button>
+          <Link className="settings-tab" to="/hr?section=catalogos&tab=roles">
+            Roles y áreas (RRHH)
+          </Link>
         )}
         <Link className="settings-tab" to="/settings/tickets">
           Diseno de Tickets
@@ -29,7 +28,6 @@ function Settings() {
 
       <div className="settings-content settings-content-wide">
         {activeTab === "branding" && <BrandingAppearanceSettings />}
-        {canManageRoles && activeTab === "roles" && <RolesManagement />}
       </div>
     </section>
   )

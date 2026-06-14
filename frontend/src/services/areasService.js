@@ -112,3 +112,45 @@ export async function updateArea(id, updates) {
 export function deactivateArea(id) {
   return updateArea(id, { active: false })
 }
+
+export function activateArea(id) {
+  return updateArea(id, { active: true })
+}
+
+export async function saveOperationalArea(payload = {}, editingAreaId = "") {
+  const name = String(payload.name || "").trim()
+  if (!name) throw new Error("El nombre del área es obligatorio")
+
+  const allowedTypes = new Set(["principal", "operativa", "produccion", "servicio", "administrativa", "limpieza"])
+  const type = allowedTypes.has(payload.type) ? payload.type : "operativa"
+  const id = editingAreaId || String(payload.id || slugifyAreaId(name)).trim()
+  if (!id) throw new Error("No se pudo generar una clave válida para el área")
+
+  const areaPayload = {
+    id,
+    name,
+    type: id === "almacen" ? "principal" : type,
+    description: String(payload.description || "").trim(),
+    responsibleUserId: payload.responsibleUserId || null,
+    active: id === "almacen" ? true : payload.active !== false,
+    canRequestInventory: id === "almacen" ? false : payload.canRequestInventory !== false,
+    isProductionArea: id === "almacen" ? false : payload.isProductionArea === true,
+    sortOrder: Number(payload.sortOrder || 0)
+  }
+
+  if (editingAreaId) {
+    const result = await updateArea(editingAreaId, areaPayload)
+    if (result.error) throw new Error(result.error.message || "No se pudo actualizar el área.")
+    return result.data
+  }
+
+  const { data: existingAreas, error: loadError } = await getAreas()
+  if (loadError) throw new Error(loadError.message || "No se pudieron validar las áreas existentes.")
+  if ((existingAreas || []).some((area) => area.id === id)) {
+    throw new Error(`Ya existe un área con la clave "${id}".`)
+  }
+
+  const result = await createArea(areaPayload)
+  if (result.error) throw new Error(result.error.message || "No se pudo crear el área.")
+  return result.data
+}

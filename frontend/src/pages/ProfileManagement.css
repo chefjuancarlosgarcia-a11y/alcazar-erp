@@ -44,6 +44,12 @@
   flex-wrap: wrap;
 }
 
+.profiles-header-link {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
 .profiles-primary,
 .profiles-secondary,
 .profiles-actions button,
