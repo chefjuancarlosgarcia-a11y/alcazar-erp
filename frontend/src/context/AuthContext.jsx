@@ -13,18 +13,20 @@ const MODULES = {
   hr: "/hr",
   tasks: "/tasks",
   reports: "/reports",
+  catering: "/catering",
   settings: "/settings"
 }
 
 const ROLE_PERMISSIONS = {
-  admin: ["dashboard", "inventory", "pos", "cash", "production", "hr", "tasks", "reports", "settings"],
-  ceo: ["dashboard", "inventory", "pos", "cash", "production", "hr", "tasks", "reports", "settings"],
-  gerente_general: ["dashboard", "inventory", "pos", "cash", "production", "hr", "tasks", "reports", "settings"],
-  gerente: ["dashboard", "inventory", "hr", "tasks"],
+  admin: ["dashboard", "inventory", "pos", "cash", "production", "hr", "tasks", "reports", "catering", "settings"],
+  ceo: ["dashboard", "inventory", "pos", "cash", "production", "hr", "tasks", "reports", "catering", "settings"],
+  gerente_general: ["dashboard", "inventory", "pos", "cash", "production", "hr", "tasks", "reports", "catering", "settings"],
+  gerente: ["dashboard", "inventory", "hr", "tasks", "catering"],
+  gerente_operaciones: ["pos", "production", "hr", "catering"],
   encargado_almacen: ["inventory"],
   rrhh: ["inventory", "hr", "tasks"],
   recursos_humanos: ["inventory", "hr", "tasks"],
-  supervisor: ["dashboard", "pos", "cash", "production", "hr", "tasks", "inventory", "reports"],
+  supervisor: ["dashboard", "pos", "cash", "production", "hr", "tasks", "inventory", "reports", "catering"],
   cajero: ["pos", "cash", "hr"],
   caja: ["pos", "cash", "hr"],
   mesero: ["pos", "hr"],
@@ -51,6 +53,7 @@ const LEGACY_ROLE_NAMES = {
   ceo: "CEO",
   gerente_general: "Gerente General",
   gerente: "Gerente",
+  gerente_operaciones: "Gerente de Operaciones",
   encargado_almacen: "Encargado de Almacén",
   rrhh: "Recursos Humanos",
   recursos_humanos: "Recursos Humanos",
@@ -112,7 +115,8 @@ function normalizeRole(role) {
     cocinero: "cocina",
     cocina: "cocina",
     pizzero: "pizzeria",
-    pizzeria: "pizzeria"
+    pizzeria: "pizzeria",
+    gerente_operaciones: "gerente_operaciones"
   }
   const roleKey = aliases[normalized] || normalized
   return ROLE_PERMISSIONS[roleKey] ? roleKey : "colaborador"

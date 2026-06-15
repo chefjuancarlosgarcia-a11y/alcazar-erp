@@ -24,6 +24,7 @@ import TicketTemplateSettings from "../pages/TicketTemplateSettings"
 import Account from "../pages/Account"
 import Tasks from "../pages/Tasks"
 import Kiosk from "../pages/Kiosk"
+import CateringDashboard from "../modules/catering/CateringDashboard"
 import ProtectedRoute from "./ProtectedRoute"
 
 function DefaultRedirect() {
@@ -61,6 +62,7 @@ function AppRoutes() {
           <Route path="/tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
           <Route path="/reports" element={<ProtectedRoute module="reports"><Reports /></ProtectedRoute>} />
           <Route path="/reports/goals/settings" element={<ProtectedRoute module="reports"><SalesGoalsSettings /></ProtectedRoute>} />
+          <Route path="/catering" element={<ProtectedRoute module="catering"><CateringDashboard /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute module="settings"><Settings /></ProtectedRoute>} />
           <Route path="/settings/tickets" element={<ProtectedRoute module="settings"><TicketTemplateSettings /></ProtectedRoute>} />
           <Route path="/account" element={<ProtectedRoute><Account /></ProtectedRoute>} />

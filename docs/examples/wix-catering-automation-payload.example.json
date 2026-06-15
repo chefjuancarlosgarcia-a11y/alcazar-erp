@@ -1,0 +1,17 @@
+{
+  "formId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "formName": "Solicitud de catering",
+  "submissionId": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+  "submitterName": "Carlos Méndez",
+  "submitterEmail": "carlos.mendez@empresa.com",
+  "submitterPhone": "+502 1234 5678",
+  "fields": [
+    { "label": "Fecha del evento", "value": "20/09/2026" },
+    { "label": "Hora del evento", "value": "7:00 pm" },
+    { "label": "Lugar del evento", "value": "Zona 10, Ciudad de Guatemala" },
+    { "label": "Tipo de evento", "value": "Cena empresarial" },
+    { "label": "Número de invitados", "value": "45" },
+    { "label": "Productos o servicios", "value": "Menú ejecutivo, coctelería, personal de servicio" },
+    { "label": "Notas", "value": "Opción vegetariana para 5 invitados." }
+  ]
+}

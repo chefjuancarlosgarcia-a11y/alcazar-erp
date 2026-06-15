@@ -20,6 +20,7 @@ const navigationItems = [
   { module: "hr", to: "/hr", label: "Recursos Humanos", submenu: "hr" },
   { module: "tasks", to: "/tasks", label: "Tareas" },
   { module: "reports", to: "/reports", label: "Reportes" },
+  { module: "catering", to: "/catering", label: "Catering" },
   { module: "settings", to: "/settings", label: "Configuración", submenu: "settings" }
 ]
 
@@ -64,7 +65,17 @@ function Sidebar({ compact = false, mobile = false, onNavigate }) {
   const branding = useAppBranding()
   const location = useLocation()
   const accent = branding.primaryColor || branding.accentColor
-  const [openSubmenu, setOpenSubmenu] = useState(location.pathname === "/inventory" ? "inventory" : location.pathname === "/hr" ? "hr" : location.pathname === "/pos" ? "pos" : location.pathname.startsWith("/settings") ? "settings" : null)
+  const [openSubmenu, setOpenSubmenu] = useState(
+    location.pathname === "/inventory"
+      ? "inventory"
+      : location.pathname === "/hr"
+        ? "hr"
+        : location.pathname === "/pos"
+          ? "pos"
+          : location.pathname.startsWith("/settings")
+            ? "settings"
+            : null
+  )
   const visibleSubmenu = ["/inventory", "/hr", "/pos"].includes(location.pathname) || location.pathname.startsWith("/settings") ? openSubmenu : null
   const allowedItems = navigationItems.filter((item) => canAccess(item.module))
   const allowedInventorySubmenu = inventorySubmenu.filter((item) => submenuAllowsRole(item.roles, user?.role))

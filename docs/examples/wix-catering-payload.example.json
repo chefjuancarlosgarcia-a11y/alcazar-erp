@@ -1,0 +1,16 @@
+{
+  "customer_name": "Carlos Méndez",
+  "customer_phone": "50212345678",
+  "customer_email": "carlos.mendez@empresa.com",
+  "event_date": "2026-09-20",
+  "event_time": "7:00 pm",
+  "event_location": "Zona 10, Ciudad de Guatemala",
+  "event_type": "cena empresarial",
+  "guest_count": 45,
+  "products_requested": [
+    "Menú ejecutivo 3 tiempos",
+    "Coctelería de bienvenida",
+    "Personal de servicio"
+  ],
+  "notes": "Requiere opción vegetariana para 5 invitados."
+}
