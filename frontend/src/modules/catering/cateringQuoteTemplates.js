@@ -7,6 +7,15 @@ export const QUOTE_ITEM_TYPES = [
   { value: "other", label: "Otros" }
 ]
 
+export const QUANTITY_UNITS = [
+  { value: "personas", label: "personas" },
+  { value: "platos", label: "platos" },
+  { value: "pizzas", label: "pizzas" },
+  { value: "unidades", label: "unidades" },
+  { value: "horas", label: "horas" },
+  { value: "servicios", label: "servicios" }
+]
+
 export const QUOTE_STATUS_OPTIONS = [
   { value: "draft", label: "Borrador", tone: "gray" },
   { value: "sent", label: "Enviada", tone: "blue" },
@@ -19,61 +28,16 @@ export const QUOTE_STATUS_LABELS = Object.fromEntries(
   QUOTE_STATUS_OPTIONS.map((item) => [item.value, item.label])
 )
 
-export const CATERING_QUOTE_TEMPLATES = [
-  {
-    id: "pizza_party",
-    label: "Pizza Party",
-    items: [
-      { item_type: "food", description: "Pizza mediana surtida", quantity: 10, unit_price: 85 },
-      { item_type: "food", description: "Pizza grande premium", quantity: 5, unit_price: 120 },
-      { item_type: "beverage", description: "Refresco 2L", quantity: 8, unit_price: 18 },
-      { item_type: "equipment", description: "Servicio de mesas y sillas", quantity: 1, unit_price: 350 }
-    ]
-  },
-  {
-    id: "corporate_event",
-    label: "Evento Corporativo",
-    items: [
-      { item_type: "food", description: "Menu ejecutivo (entrada, plato fuerte, postre)", quantity: 50, unit_price: 95 },
-      { item_type: "beverage", description: "Coffee break (cafe, te, pasteles)", quantity: 50, unit_price: 35 },
-      { item_type: "staff", description: "Mesero / servicio", quantity: 4, unit_price: 250 },
-      { item_type: "equipment", description: "Montaje salon y vajilla", quantity: 1, unit_price: 800 }
-    ]
-  },
-  {
-    id: "wedding",
-    label: "Boda",
-    items: [
-      { item_type: "food", description: "Banquete nupcial por persona", quantity: 120, unit_price: 185 },
-      { item_type: "beverage", description: "Barra de bebidas por persona", quantity: 120, unit_price: 45 },
-      { item_type: "staff", description: "Brigada de servicio", quantity: 8, unit_price: 300 },
-      { item_type: "equipment", description: "Montaje y decoracion basica", quantity: 1, unit_price: 2500 },
-      { item_type: "transport", description: "Traslado de equipo", quantity: 1, unit_price: 600 }
-    ]
-  },
-  {
-    id: "birthday",
-    label: "Cumpleanos",
-    items: [
-      { item_type: "food", description: "Buffet infantil / familiar", quantity: 30, unit_price: 75 },
-      { item_type: "food", description: "Pastel personalizado", quantity: 1, unit_price: 450 },
-      { item_type: "beverage", description: "Bebidas surtidas", quantity: 30, unit_price: 15 },
-      { item_type: "equipment", description: "Decoracion tematica basica", quantity: 1, unit_price: 500 }
-    ]
-  },
-  {
-    id: "coffee_break",
-    label: "Coffee Break",
-    items: [
-      { item_type: "food", description: "Canapes y bocadillos", quantity: 25, unit_price: 28 },
-      { item_type: "beverage", description: "Cafe, te y jugos", quantity: 25, unit_price: 18 },
-      { item_type: "equipment", description: "Estacion de coffee break", quantity: 1, unit_price: 300 }
-    ]
-  }
-]
+/** TAX_RATE = 0.12 reservado para calculo interno futuro. Precios al cliente incluyen IVA. */
+export const TAX_RATE = 0.12
+export const PRICES_INCLUDE_VAT = true
 
-/** TAX_RATE = 0.12 (IVA Guatemala). Future: read from app_settings/branding. */
-export const DEFAULT_TAX_RATE = 0.12
+export const DEFAULT_QUOTE_TERMS = `- Cotización válida hasta la fecha indicada.
+- Reserva sujeta a disponibilidad de fecha y equipo.
+- Para confirmar el evento se requiere anticipo.
+- Cambios en menú, cantidad o locación están sujetos a disponibilidad y pueden ajustar el total.
+- Precios incluyen IVA.
+- Transporte fuera de Quetzaltenango (Xela) puede tener costo adicional.`
 
 export function defaultValidUntil(days = 14) {
   const date = new Date()
@@ -86,6 +50,7 @@ export function createEmptyQuoteItem(sortOrder = 1) {
     item_type: "food",
     description: "",
     quantity: 1,
+    quantity_unit: "unidades",
     unit_price: 0,
     sort_order: sortOrder
   }
@@ -99,22 +64,27 @@ export function normalizeQuoteItems(items = []) {
       item_type: item.item_type || item.itemType || "other",
       description: String(item.description || "").trim(),
       quantity,
+      quantity_unit: item.quantity_unit || item.quantityUnit || "unidades",
       unit_price: unitPrice,
       sort_order: item.sort_order ?? item.sortOrder ?? index + 1
     }
   })
 }
 
-export function calculateQuoteTotals(items = [], discountAmount = 0, taxRate = DEFAULT_TAX_RATE) {
+export function calculateQuoteTotals(items = [], discountAmount = 0) {
   const subtotal = normalizeQuoteItems(items).reduce(
     (sum, item) => sum + roundMoney(item.quantity * item.unit_price),
     0
   )
   const discount = Math.max(Number(discountAmount) || 0, 0)
-  const taxable = Math.max(subtotal - discount, 0)
-  const tax = roundMoney(taxable * (Number(taxRate) || 0))
-  const total = roundMoney(taxable + tax)
-  return { subtotal, discount_amount: discount, tax_amount: tax, total }
+  const total = roundMoney(Math.max(subtotal - discount, 0))
+  return {
+    subtotal,
+    discount_amount: discount,
+    tax_amount: 0,
+    tax_included: true,
+    total
+  }
 }
 
 function roundMoney(value) {
@@ -129,11 +99,34 @@ export function itemTypeLabel(value) {
   return QUOTE_ITEM_TYPES.find((item) => item.value === value)?.label || value || "—"
 }
 
-export function buildQuotePayload(items, discountAmount, validUntil, notes) {
+export function quantityUnitLabel(value) {
+  return QUANTITY_UNITS.find((item) => item.value === value)?.label || value || "unidades"
+}
+
+export function formatQuantityLine(item) {
+  const qty = Number(item.quantity) || 0
+  const unit = quantityUnitLabel(item.quantity_unit)
+  const price = Number(item.unit_price) || 0
+  return `${qty.toLocaleString("es-GT")} ${unit} x Q${price.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
+export function buildQuotePayload(items, discountAmount, validUntil, notes, terms) {
   return {
     items: normalizeQuoteItems(items).filter((item) => item.description),
     discountAmount: Number(discountAmount) || 0,
     validUntil: validUntil || null,
-    notes: notes || null
+    notes: notes || null,
+    terms: terms || null
   }
+}
+
+export function mapTemplateItemsToQuoteItems(items = []) {
+  return items.map((item, index) => ({
+    item_type: item.item_type,
+    description: item.description,
+    quantity: item.quantity,
+    quantity_unit: item.quantity_unit || "unidades",
+    unit_price: item.unit_price,
+    sort_order: item.sort_order ?? index + 1
+  }))
 }

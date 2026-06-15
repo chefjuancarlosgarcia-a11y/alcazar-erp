@@ -1,4 +1,10 @@
 import { supabase } from "../../lib/supabase"
+import {
+  repairCateringQuote,
+  repairCateringQuoteItems,
+  repairCateringCompanySettings,
+  repairCateringRequest
+} from "./cateringTextEncoding"
 
 function message(error) {
   return typeof error === "string" ? error : error?.message || "No fue posible completar la operacion de catering."
@@ -30,14 +36,14 @@ export async function listCateringRequests({
     p_limit: limit,
     p_offset: offset
   })
-  return result(Array.isArray(data) ? data : [], error)
+  return result(Array.isArray(data) ? data.map(repairCateringRequest) : [], error)
 }
 
 export async function getCateringRequestDetail(requestId) {
   const { data, error } = await supabase.rpc("get_catering_request_detail", {
     p_request_id: requestId
   })
-  return result(data, error)
+  return result(repairCateringRequest(data), error)
 }
 
 export async function getCateringActivityLog(requestId) {
@@ -128,7 +134,12 @@ export async function getCateringQuoteDetail(quoteId) {
   const { data, error } = await supabase.rpc("get_catering_quote_detail", {
     p_quote_id: quoteId
   })
-  return result(data, error)
+  if (error || !data) return result(data, error)
+  return result({
+    ...data,
+    quote: repairCateringQuote(data.quote),
+    items: repairCateringQuoteItems(data.items || [])
+  }, error)
 }
 
 export async function createCateringQuote(requestId, payload = {}) {
@@ -137,7 +148,8 @@ export async function createCateringQuote(requestId, payload = {}) {
     p_items: payload.items || [],
     p_discount_amount: payload.discountAmount != null ? Number(payload.discountAmount) : 0,
     p_valid_until: payload.validUntil || null,
-    p_notes: payload.notes || null
+    p_notes: payload.notes || null,
+    p_terms: payload.terms || null
   })
   return result(data, error)
 }
@@ -148,7 +160,8 @@ export async function updateCateringQuote(quoteId, payload = {}) {
     p_items: payload.items || [],
     p_discount_amount: payload.discountAmount != null ? Number(payload.discountAmount) : 0,
     p_valid_until: payload.validUntil || null,
-    p_notes: payload.notes || null
+    p_notes: payload.notes || null,
+    p_terms: payload.terms || null
   })
   return result(data, error)
 }
@@ -157,6 +170,56 @@ export async function updateCateringQuoteStatus(quoteId, status) {
   const { data, error } = await supabase.rpc("update_catering_quote_status", {
     p_quote_id: quoteId,
     p_status: status
+  })
+  return result(data, error)
+}
+
+export async function listCateringQuoteTemplates(includeInactive = false) {
+  const { data, error } = await supabase.rpc("list_catering_quote_templates", {
+    p_include_inactive: includeInactive
+  })
+  return result(data?.rows || [], error)
+}
+
+export async function getCateringQuoteTemplateDetail(templateId) {
+  const { data, error } = await supabase.rpc("catering_quote_template_detail", {
+    p_template_id: templateId
+  })
+  return result(data, error)
+}
+
+export async function upsertCateringQuoteTemplate(payload = {}) {
+  const { data, error } = await supabase.rpc("upsert_catering_quote_template", {
+    p_template_id: payload.id || null,
+    p_name: payload.name,
+    p_description: payload.description || null,
+    p_category: payload.category || "general",
+    p_is_active: payload.isActive !== false,
+    p_items: payload.items || []
+  })
+  return result(data, error)
+}
+
+export async function duplicateCateringQuoteTemplate(templateId) {
+  const { data, error } = await supabase.rpc("duplicate_catering_quote_template", {
+    p_template_id: templateId
+  })
+  return result(data, error)
+}
+
+export async function deleteCateringQuoteTemplate(templateId) {
+  const { data, error } = await supabase.rpc("delete_catering_quote_template", {
+    p_template_id: templateId
+  })
+  return result(data, error)
+}
+
+export async function saveCateringQuoteAsTemplate(quoteId, payload = {}) {
+  const { data, error } = await supabase.rpc("save_catering_quote_as_template", {
+    p_quote_id: quoteId,
+    p_name: payload.name,
+    p_description: payload.description || null,
+    p_category: payload.category || "general"
   })
   return result(data, error)
 }

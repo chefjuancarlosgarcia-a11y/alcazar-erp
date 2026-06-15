@@ -5,6 +5,7 @@ import CateringAssigneeRanking from "./CateringAssigneeRanking"
 import CateringCommercialKpis from "./CateringCommercialKpis"
 import CateringQuoteKpis from "./CateringQuoteKpis"
 import CateringPendingFollowups from "./CateringPendingFollowups"
+import CateringQuoteSettingsPanel from "./CateringQuoteSettingsPanel"
 import CateringRequestDetail from "./CateringRequestDetail"
 import CateringRequestsList from "./CateringRequestsList"
 import {
@@ -60,6 +61,7 @@ export default function CateringDashboard() {
   const [assignedTo, setAssignedTo] = useState("")
   const [eventDate, setEventDate] = useState("")
   const [search, setSearch] = useState("")
+  const [showQuoteSettings, setShowQuoteSettings] = useState(false)
 
   const profilesById = useMemo(
     () => Object.fromEntries(profiles.map((profile) => [profile.id, profile])),
@@ -165,6 +167,11 @@ export default function CateringDashboard() {
           <h1>Catering CRM</h1>
           <span>Gestion comercial de leads desde Wix con SLA, pipeline y seguimiento.</span>
         </div>
+        <div className="catering-header__actions">
+          <button type="button" className="ghost" onClick={() => setShowQuoteSettings(true)}>
+            Datos empresa / logo
+          </button>
+        </div>
       </header>
 
       <section className="catering-panel">
@@ -267,6 +274,11 @@ export default function CateringDashboard() {
           />
         ) : null}
       </div>
+
+      <CateringQuoteSettingsPanel
+        open={showQuoteSettings}
+        onClose={() => setShowQuoteSettings(false)}
+      />
     </section>
   )
 }

@@ -46,6 +46,7 @@ export default defineConfig(({ mode }) => {
       port,
       strictPort: true
     },
+    assetsInclude: ["**/*.ttf"],
     define: {
       "import.meta.env.VITE_LOCAL_IP": JSON.stringify(localIp),
       "import.meta.env.VITE_PORT": JSON.stringify(String(port))
