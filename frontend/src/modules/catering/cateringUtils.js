@@ -150,5 +150,10 @@ export const ACTIVITY_TYPE_LABELS = {
   lead_assigned: "Lead asignado",
   status_changed: "Estado cambiado",
   followup_recorded: "Seguimiento registrado",
-  contact_made: "Cliente contactado"
+  contact_made: "Cliente contactado",
+  quote_created: "Cotizacion creada",
+  quote_sent: "Cotizacion enviada",
+  quote_approved: "Cotizacion aprobada",
+  quote_rejected: "Cotizacion rechazada",
+  quote_expired: "Cotizacion vencida"
 }

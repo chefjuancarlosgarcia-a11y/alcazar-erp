@@ -465,3 +465,181 @@
   background: #0b1424;
   color: var(--erp-text-primary, #f8fafc);
 }
+
+.catering-kpi-grid--quotes {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (min-width: 900px) {
+  .catering-kpi-grid--quotes {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1200px) {
+  .catering-kpi-grid--quotes {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}
+
+.catering-quote-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--erp-space-12);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.catering-quote-summary {
+  margin-bottom: var(--erp-space-12);
+}
+
+.catering-quote-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.catering-quote-status--draft { background: rgba(148, 163, 184, 0.18); color: #cbd5e1; }
+.catering-quote-status--sent { background: rgba(59, 130, 246, 0.18); color: #93c5fd; }
+.catering-quote-status--approved { background: rgba(34, 197, 94, 0.18); color: #86efac; }
+.catering-quote-status--rejected { background: rgba(239, 68, 68, 0.18); color: #fca5a5; }
+.catering-quote-status--expired { background: rgba(249, 115, 22, 0.18); color: #fdba74; }
+
+.catering-quote-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  padding: var(--erp-space-24);
+  background: rgba(2, 6, 23, 0.72);
+}
+
+.catering-quote-modal {
+  width: min(980px, 100%);
+  max-height: min(92vh, 920px);
+  overflow: auto;
+  border: 1px solid var(--erp-border, #334155);
+  border-radius: 18px;
+  background: #0c1629;
+  box-shadow: 0 24px 64px rgba(2, 6, 23, 0.55);
+}
+
+.catering-quote-modal__header,
+.catering-quote-modal__footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--erp-space-12);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--erp-space-16) var(--erp-space-24);
+}
+
+.catering-quote-modal__header {
+  border-bottom: 1px solid var(--erp-border, #334155);
+}
+
+.catering-quote-modal__header h2,
+.catering-quote-modal__header p {
+  margin: 0;
+}
+
+.catering-quote-modal__header span {
+  color: var(--erp-text-secondary, #94a3b8);
+  font-size: 13px;
+}
+
+.catering-quote-modal__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--erp-space-8);
+  align-items: center;
+}
+
+.catering-quote-modal__body {
+  display: grid;
+  gap: var(--erp-space-16);
+  padding: var(--erp-space-24);
+}
+
+.catering-quote-modal__footer {
+  border-top: 1px solid var(--erp-border, #334155);
+}
+
+.catering-quote-toolbar {
+  display: grid;
+  gap: var(--erp-space-12);
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+}
+
+@media (min-width: 760px) {
+  .catering-quote-toolbar {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.catering-quote-toolbar label,
+.catering-quote-modal__body label {
+  display: grid;
+  gap: var(--erp-space-8);
+  font-size: 13px;
+  color: var(--erp-text-secondary, #94a3b8);
+}
+
+.catering-quote-toolbar input,
+.catering-quote-toolbar select,
+.catering-quote-editor-table input,
+.catering-quote-editor-table select,
+.catering-quote-modal__body textarea {
+  width: 100%;
+  min-height: var(--erp-input-height);
+  padding: 0 var(--erp-space-12);
+  border: 1px solid var(--erp-border, #334155);
+  border-radius: var(--erp-radius-badge);
+  background: #0b1424;
+  color: var(--erp-text-primary, #f8fafc);
+}
+
+.catering-quote-modal__body textarea {
+  padding: var(--erp-space-12);
+  min-height: 96px;
+}
+
+.catering-quote-totals {
+  display: grid;
+  gap: var(--erp-space-8);
+  margin-left: auto;
+  width: min(320px, 100%);
+  padding: var(--erp-space-16);
+  border: 1px solid rgba(20, 184, 166, 0.35);
+  border-radius: var(--erp-radius-badge);
+  background: rgba(20, 184, 166, 0.06);
+}
+
+.catering-quote-totals div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--erp-space-16);
+  font-size: 14px;
+}
+
+.catering-quote-totals .is-total {
+  padding-top: var(--erp-space-8);
+  border-top: 1px solid rgba(20, 184, 166, 0.25);
+  font-size: 16px;
+}
+
+.catering-quote-meta {
+  margin: 0;
+  color: var(--erp-text-secondary, #94a3b8);
+  font-size: 13px;
+}
+
+.catering-quote-table td:last-child,
+.catering-quote-editor-table td:last-child {
+  width: 88px;
+}

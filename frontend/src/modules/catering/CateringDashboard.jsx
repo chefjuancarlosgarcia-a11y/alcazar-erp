@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom"
 import { useAuth } from "../../context/AuthContext"
 import CateringAssigneeRanking from "./CateringAssigneeRanking"
 import CateringCommercialKpis from "./CateringCommercialKpis"
+import CateringQuoteKpis from "./CateringQuoteKpis"
 import CateringPendingFollowups from "./CateringPendingFollowups"
 import CateringRequestDetail from "./CateringRequestDetail"
 import CateringRequestsList from "./CateringRequestsList"
@@ -191,6 +192,11 @@ export default function CateringDashboard() {
       </section>
 
       <CateringCommercialKpis summary={summary} loading={loadingSummary} />
+
+      <section className="catering-panel">
+        <h2>Cotizaciones</h2>
+        <CateringQuoteKpis summary={summary} loading={loadingSummary} />
+      </section>
 
       <div className="catering-widgets-grid">
         <CateringPendingFollowups

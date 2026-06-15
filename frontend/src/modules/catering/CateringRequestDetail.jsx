@@ -3,10 +3,13 @@ import {
   assignCateringLead,
   getCateringActivityLog,
   getCateringRequestDetail,
+  getCateringRequestQuotes,
   updateCateringFollowup,
   updateCateringRequestStatus
 } from "./cateringService"
 import CateringActivityTimeline from "./CateringActivityTimeline"
+import CateringQuoteModal from "./CateringQuoteModal"
+import CateringRequestQuotes from "./CateringRequestQuotes"
 import CateringSlaBadge from "./CateringSlaBadge"
 import {
   CONVERSION_STATUS_LABELS,
@@ -53,6 +56,10 @@ export default function CateringRequestDetail({
   const [assigneeId, setAssigneeId] = useState("")
   const [followup, setFollowup] = useState(EMPTY_FOLLOWUP)
   const [showFollowup, setShowFollowup] = useState(false)
+  const [quotesSummary, setQuotesSummary] = useState({ count: 0, latest: null, quotes: [] })
+  const [loadingQuotes, setLoadingQuotes] = useState(true)
+  const [quoteModalOpen, setQuoteModalOpen] = useState(false)
+  const [activeQuoteId, setActiveQuoteId] = useState(null)
 
   useEffect(() => {
     loadDetail()
@@ -62,10 +69,12 @@ export default function CateringRequestDetail({
     if (!requestId) return
     setLoading(true)
     setLoadingActivity(true)
+    setLoadingQuotes(true)
     setError("")
-    const [detailResult, activityResult] = await Promise.all([
+    const [detailResult, activityResult, quotesResult] = await Promise.all([
       getCateringRequestDetail(requestId),
-      getCateringActivityLog(requestId)
+      getCateringActivityLog(requestId),
+      getCateringRequestQuotes(requestId)
     ])
     if (detailResult.error) {
       setError(detailResult.error)
@@ -83,8 +92,50 @@ export default function CateringRequestDetail({
       })
     }
     if (!activityResult.error) setActivities(activityResult.data || [])
+    if (!quotesResult.error) {
+      setQuotesSummary({
+        count: quotesResult.data?.count ?? 0,
+        latest: quotesResult.data?.latest ?? null,
+        quotes: quotesResult.data?.quotes ?? []
+      })
+    }
     setLoading(false)
     setLoadingActivity(false)
+    setLoadingQuotes(false)
+  }
+
+  async function reloadQuotesAndActivity() {
+    const [activityResult, quotesResult, detailResult] = await Promise.all([
+      getCateringActivityLog(requestId),
+      getCateringRequestQuotes(requestId),
+      getCateringRequestDetail(requestId)
+    ])
+    if (!activityResult.error) setActivities(activityResult.data || [])
+    if (!quotesResult.error) {
+      setQuotesSummary({
+        count: quotesResult.data?.count ?? 0,
+        latest: quotesResult.data?.latest ?? null,
+        quotes: quotesResult.data?.quotes ?? []
+      })
+    }
+    if (!detailResult.error && detailResult.data) {
+      setRequest(detailResult.data)
+      onUpdated?.(detailResult.data)
+    }
+  }
+
+  function handleOpenCreateQuote() {
+    setActiveQuoteId(null)
+    setQuoteModalOpen(true)
+  }
+
+  function handleOpenQuote(quoteId) {
+    setActiveQuoteId(quoteId)
+    setQuoteModalOpen(true)
+  }
+
+  function handleQuoteSaved() {
+    reloadQuotesAndActivity()
   }
 
   async function handleStatusUpdate() {
@@ -261,6 +312,14 @@ export default function CateringRequestDetail({
         <CateringActivityTimeline activities={activities} loading={loadingActivity} />
       </section>
 
+      <CateringRequestQuotes
+        summary={quotesSummary}
+        quotes={quotesSummary.quotes}
+        loading={loadingQuotes}
+        onCreateQuote={handleOpenCreateQuote}
+        onOpenQuote={handleOpenQuote}
+      />
+
       {message ? <p className="catering-message success">{message}</p> : null}
       {error ? <p className="catering-message error">{error}</p> : null}
 
@@ -380,6 +439,14 @@ export default function CateringRequestDetail({
           </form>
         ) : null}
       </section>
+
+      <CateringQuoteModal
+        open={quoteModalOpen}
+        request={request}
+        quoteId={activeQuoteId}
+        onClose={() => setQuoteModalOpen(false)}
+        onSaved={handleQuoteSaved}
+      />
     </aside>
   )
 }

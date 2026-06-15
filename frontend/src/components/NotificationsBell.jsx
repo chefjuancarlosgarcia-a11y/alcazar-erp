@@ -169,7 +169,9 @@ function NotificationsBell({ currentUser }) {
                         ? "Ver lead asignado"
                         : notification.type === "catering_followup_due"
                           ? "Dar seguimiento"
-                          : "Ver solicitud"}
+                          : notification.type === "catering_quote"
+                            ? "Ver cotizacion"
+                            : "Ver solicitud"}
                     </button>
                   )}
                   {notification.action_url && !["purchase_order", "requisition", "employee_schedule", "schedule_week", "checklist_run", "checklist_template_change_request", "checklist_management_alert", "task", "catering_request"].includes(notification.entity_type) && <button type="button" onClick={() => viewEntity(notification)}>Abrir</button>}

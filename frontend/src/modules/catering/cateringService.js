@@ -116,3 +116,47 @@ export async function getCateringAssignableProfiles() {
   const rows = (data || []).filter((profile) => roles.has(String(profile.role || "").toLowerCase()))
   return result(rows, null)
 }
+
+export async function getCateringRequestQuotes(requestId) {
+  const { data, error } = await supabase.rpc("get_catering_request_quotes", {
+    p_request_id: requestId
+  })
+  return result(data, error)
+}
+
+export async function getCateringQuoteDetail(quoteId) {
+  const { data, error } = await supabase.rpc("get_catering_quote_detail", {
+    p_quote_id: quoteId
+  })
+  return result(data, error)
+}
+
+export async function createCateringQuote(requestId, payload = {}) {
+  const { data, error } = await supabase.rpc("create_catering_quote", {
+    p_request_id: requestId,
+    p_items: payload.items || [],
+    p_discount_amount: payload.discountAmount != null ? Number(payload.discountAmount) : 0,
+    p_valid_until: payload.validUntil || null,
+    p_notes: payload.notes || null
+  })
+  return result(data, error)
+}
+
+export async function updateCateringQuote(quoteId, payload = {}) {
+  const { data, error } = await supabase.rpc("update_catering_quote", {
+    p_quote_id: quoteId,
+    p_items: payload.items || [],
+    p_discount_amount: payload.discountAmount != null ? Number(payload.discountAmount) : 0,
+    p_valid_until: payload.validUntil || null,
+    p_notes: payload.notes || null
+  })
+  return result(data, error)
+}
+
+export async function updateCateringQuoteStatus(quoteId, status) {
+  const { data, error } = await supabase.rpc("update_catering_quote_status", {
+    p_quote_id: quoteId,
+    p_status: status
+  })
+  return result(data, error)
+}
