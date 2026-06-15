@@ -426,6 +426,37 @@
   align-items: start;
 }
 
+.schedule-attendance-period {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr)) auto;
+  align-items: end;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #24344a;
+  border-radius: 10px;
+  background: #081425;
+}
+
+.schedule-attendance-period label {
+  display: grid;
+  gap: 6px;
+  color: #cbd5e1;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.schedule-attendance-period input,
+.schedule-attendance-period select {
+  min-height: 42px;
+  width: 100%;
+  padding: 10px 11px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #e6eef8;
+  box-sizing: border-box;
+}
+
 .schedule-payroll-table {
   overflow: auto;
 }
@@ -560,7 +591,8 @@
     grid-template-columns: repeat(3, minmax(130px, 1fr));
   }
 
-  .schedule-toolbar {
+  .schedule-toolbar,
+  .schedule-attendance-period {
     grid-template-columns: repeat(2, minmax(180px, 1fr));
   }
 }
@@ -572,6 +604,7 @@
 
   .schedule-summary,
   .schedule-toolbar,
+  .schedule-attendance-period,
   .schedule-modal-grid {
     grid-template-columns: 1fr;
   }

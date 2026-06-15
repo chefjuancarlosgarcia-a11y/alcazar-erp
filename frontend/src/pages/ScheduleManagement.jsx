@@ -1,7 +1,25 @@
-import { useCallback, useEffect, useState } from "react"
-import * as XLSX from "xlsx"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useAuth } from "../context/AuthContext"
+import AttendanceExportModal from "../components/attendance/AttendanceExportModal"
+import {
+  aggregatePayrollFromDetails,
+  listWeekStartsInRange
+} from "../modules/attendance/attendanceExportService"
+import {
+  ATTENDANCE_RECORD_STATUS_OPTIONS,
+  buildShiftTypeFilterOptions,
+  filterAttendanceDetailRows,
+  resolveAttendanceShiftTypeLabel
+} from "../modules/attendance/attendanceFilterUtils"
+import {
+  ATTENDANCE_PERIOD_OPTIONS,
+  formatAttendancePeriodLabel,
+  resolveAttendancePeriodRange,
+  validateAttendancePeriodRange
+} from "../modules/attendance/attendancePeriodUtils"
+import { mergePublishedBlocksIntoAttendanceDetails } from "../modules/attendance/attendanceRowsUtils"
 import { getAttendanceTerminalProfiles } from "../services/attendanceService"
+import { sanitizeAttendanceObservation } from "../utils/attendanceObservationUtils"
 import { getActiveAreas } from "../services/areasService"
 import {
   deleteEmployeeSchedule,
@@ -31,12 +49,12 @@ const LEGACY_SHIFT_TYPES = {
 const ATTENDANCE_STATUS = {
   completo: "Completo",
   tarde: "Tarde",
-  falta: "Falta",
+  falta: "Ausente",
   incompleto: "Incompleto",
   descanso: "Descanso",
-  asueto: "Asueto",
-  medio_turno: "Medio turno",
-  horas_extra: "Horas extra"
+  asueto: "Vacaciones",
+  horas_extra: "Horas extra",
+  pendiente: "Pendiente"
 }
 const OVERTIME_TOLERANCE_MINUTES = {
   AM: 20,
@@ -69,6 +87,12 @@ function ScheduleManagement() {
   const [shiftTypes, setShiftTypes] = useState([])
   const [payroll, setPayroll] = useState([])
   const [attendanceDetails, setAttendanceDetails] = useState([])
+  const [attendanceSummaries, setAttendanceSummaries] = useState([])
+  const [attendanceLoading, setAttendanceLoading] = useState(false)
+  const [attendancePeriodType, setAttendancePeriodType] = useState("week")
+  const [attendanceAnchor, setAttendanceAnchor] = useState(() => getMonday(new Date()))
+  const [attendanceCustomFrom, setAttendanceCustomFrom] = useState("")
+  const [attendanceCustomTo, setAttendanceCustomTo] = useState("")
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState("")
@@ -77,7 +101,10 @@ function ScheduleManagement() {
   const [employeeFilter, setEmployeeFilter] = useState("")
   const [employeeSearch, setEmployeeSearch] = useState("")
   const [statusFilter, setStatusFilter] = useState("")
-  const [attendanceStatusFilter, setAttendanceStatusFilter] = useState("")
+  const [payrollAreaFilter, setPayrollAreaFilter] = useState("")
+  const [payrollEmployeeFilter, setPayrollEmployeeFilter] = useState("")
+  const [payrollShiftTypeFilter, setPayrollShiftTypeFilter] = useState("")
+  const [payrollStatusFilter, setPayrollStatusFilter] = useState("")
   const [onlyMyTeam, setOnlyMyTeam] = useState(false)
   const [mobileDay, setMobileDay] = useState(0)
   const [view, setView] = useState("calendar")
@@ -85,10 +112,78 @@ function ScheduleManagement() {
   const [modal, setModal] = useState(null)
   const [shiftTypesOpen, setShiftTypesOpen] = useState(false)
   const [shiftTypeForm, setShiftTypeForm] = useState(null)
+  const [exportModalOpen, setExportModalOpen] = useState(false)
   const weekEnd = addDays(weekStart, 6)
   const weekDates = DAYS.map((label, index) => ({ label, date: addDays(weekStart, index) }))
   const areaChoices = [...new Set([...DEFAULT_AREAS, ...areas.map((area) => area.name).filter(Boolean)])]
   const activeShiftTypes = shiftTypes.filter((type) => type.status === "active")
+  const shiftTypeFilterOptions = buildShiftTypeFilterOptions(shiftTypes)
+  const attendanceRange = useMemo(
+    () => resolveAttendancePeriodRange(attendancePeriodType, attendanceAnchor, attendanceCustomFrom, attendanceCustomTo),
+    [attendanceAnchor, attendanceCustomFrom, attendanceCustomTo, attendancePeriodType]
+  )
+  const attendancePeriodError = validateAttendancePeriodRange(attendanceRange)
+
+  const loadAttendanceData = useCallback(async () => {
+    if (!canPublish) {
+      setPayroll([])
+      setAttendanceDetails([])
+      setAttendanceSummaries([])
+      return
+    }
+    if (validateAttendancePeriodRange(attendanceRange)) {
+      setPayroll([])
+      setAttendanceDetails([])
+      setAttendanceSummaries([])
+      return
+    }
+
+    setAttendanceLoading(true)
+    const { from, to } = attendanceRange
+    const weekStarts = listWeekStartsInRange(from, to)
+    const [detailResults, summaryResults, scheduleResults] = await Promise.all([
+      Promise.all(weekStarts.map((weekStart) => getScheduleAttendanceDetails(weekStart))),
+      Promise.all(weekStarts.map((weekStart) => getScheduleAttendanceSummary(weekStart))),
+      Promise.all(weekStarts.map((weekStart) => getEmployeeSchedules(weekStart, addDays(weekStart, 6))))
+    ])
+
+    const failedDetail = detailResults.find((result) => result.error)
+    const failedSummary = summaryResults.find((result) => result.error)
+    if (failedDetail?.error || failedSummary?.error) {
+      setError(failedDetail?.error?.message || failedSummary?.error?.message || "No se pudieron cargar los datos de asistencia.")
+      setPayroll([])
+      setAttendanceDetails([])
+      setAttendanceSummaries([])
+      setAttendanceLoading(false)
+      return
+    }
+
+    const detailsMap = new Map()
+    detailResults
+      .flatMap((result) => result.data || [])
+      .forEach((row) => {
+        if (row.shift_date >= from && row.shift_date <= to && row.schedule_id) {
+          detailsMap.set(row.schedule_id, row)
+        }
+      })
+
+    const summaries = summaryResults.flatMap((result, index) => (
+      (result.data || []).map((row) => ({ ...row, week_start: weekStarts[index] }))
+    ))
+
+    const periodSchedules = scheduleResults.flatMap((result) => result.data || [])
+    const details = mergePublishedBlocksIntoAttendanceDetails(
+      [...detailsMap.values()],
+      periodSchedules,
+      profiles
+    )
+
+    setAttendanceDetails(details)
+    setAttendanceSummaries(summaries)
+    const weekPayrollIndex = weekStarts.findIndex((weekStart) => weekStart === getMonday(from))
+    setPayroll(summaryResults[weekPayrollIndex >= 0 ? weekPayrollIndex : 0]?.data || [])
+    setAttendanceLoading(false)
+  }, [attendanceRange, canPublish, profiles])
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -120,24 +215,24 @@ function ScheduleManagement() {
     setAreas(areaResult.data || [])
     setTemplates(templateResult.data || [])
     setShiftTypes(shiftTypeResult.data || [])
-    if (canPublish) {
-      const [payrollResult, detailsResult] = await Promise.all([
-        getScheduleAttendanceSummary(weekStart),
-        getScheduleAttendanceDetails(weekStart)
-      ])
-      setPayroll(payrollResult.data || [])
-      setAttendanceDetails(detailsResult.data || [])
-    } else {
-      setPayroll([])
-      setAttendanceDetails([])
-    }
     setLoading(false)
-  }, [canEdit, canPublish, user, weekEnd, weekStart])
+  }, [canEdit, user, weekEnd, weekStart])
 
   useEffect(() => {
     const timeoutId = window.setTimeout(loadData, 0)
     return () => window.clearTimeout(timeoutId)
   }, [loadData])
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(loadAttendanceData, 0)
+    return () => window.clearTimeout(timeoutId)
+  }, [loadAttendanceData])
+
+  useEffect(() => {
+    if (attendancePeriodType === "week") {
+      setAttendanceAnchor(weekStart)
+    }
+  }, [attendancePeriodType, weekStart])
 
   const visibleSchedules = schedules.filter((schedule) => {
     const employee = profiles.find((profile) => profile.id === schedule.employee_id)
@@ -320,6 +415,7 @@ function ScheduleManagement() {
     setEditingPublished(false)
     setMessage(`Horario publicado. ${Number(data || 0)} turno(s) pasaron de borrador a publicado.`)
     await loadData()
+    await loadAttendanceData()
   }
 
   async function updatePayrollStatus(row, status) {
@@ -329,42 +425,44 @@ function ScheduleManagement() {
       return
     }
     setMessage("Resumen de planilla actualizado.")
-    await loadData()
+    await loadAttendanceData()
   }
 
-  function exportPayroll() {
-    const rows = filteredAttendanceDetails.map((row) => ({
-      Fecha: row.shift_date,
-      Colaborador: row.employee_name,
-      Rol: roleLabel(row.role),
-      Area: row.area || "",
-      "Tipo de turno": shiftTypeLabel(row.shift_type, shiftTypes),
-      "Entrada programada": row.is_work_day ? trimTime(row.scheduled_start) : "",
-      "Entrada real": formatMarkTime(row.actual_start),
-      "Minutos tarde": row.late_minutes || 0,
-      "Salida comida": formatMarkTime(row.meal_out),
-      "Regreso comida": formatMarkTime(row.meal_back),
-      "Minutos comida": row.meal_minutes || 0,
-      "Salida programada": row.is_work_day ? trimTime(row.scheduled_end) : "",
-      "Salida real": formatMarkTime(row.actual_end),
-      "Horas programadas": row.scheduled_hours || 0,
-      "Horas trabajadas": row.actual_hours || 0,
-      "Horas extra": row.overtime_hours || 0,
-      Estado: attendanceStatusLabel(row.attendance_status),
-      Observaciones: row.observations || ""
-    }))
-    const worksheet = XLSX.utils.json_to_sheet(rows)
-    const workbook = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Asistencia")
-    XLSX.writeFile(workbook, `asistencia-${weekStart}.xlsx`)
-  }
+  const filteredAttendanceDetails = filterAttendanceDetailRows(
+    attendanceDetails.filter((row) => row.shift_date >= attendanceRange.from && row.shift_date <= attendanceRange.to),
+    {
+      area: payrollAreaFilter,
+      employeeId: payrollEmployeeFilter,
+      shiftType: payrollShiftTypeFilter,
+      status: payrollStatusFilter
+    },
+    shiftTypes
+  )
 
-  const filteredAttendanceDetails = attendanceDetails.filter((row) => (
-    (!employeeFilter || row.employee_id === employeeFilter) &&
-    (!employeeSearch || textMatches(row.employee_name, employeeSearch)) &&
-    (!areaFilter || scheduleMatchesArea(row, profiles.find((profile) => profile.id === row.employee_id), areaFilter)) &&
-    (!attendanceStatusFilter || row.attendance_status === attendanceStatusFilter)
-  ))
+  const isWeeklyPayrollView = attendancePeriodType === "week" &&
+    attendanceRange.from === weekStart &&
+    attendanceRange.to === weekEnd &&
+    !attendancePeriodError
+
+  const displayPayroll = useMemo(() => {
+    if (isWeeklyPayrollView) {
+      return payroll.filter((row) => (
+        filteredAttendanceDetails.some((detail) => detail.employee_id === row.employee_id) ||
+        (!payrollEmployeeFilter && !payrollAreaFilter && !payrollShiftTypeFilter && !payrollStatusFilter)
+      ))
+    }
+    return aggregatePayrollFromDetails(filteredAttendanceDetails, attendanceSummaries)
+  }, [
+    attendancePeriodError,
+    attendanceSummaries,
+    payrollAreaFilter,
+    payrollEmployeeFilter,
+    payrollShiftTypeFilter,
+    payrollStatusFilter,
+    filteredAttendanceDetails,
+    isWeeklyPayrollView,
+    payroll
+  ])
 
   async function persistShiftType(event) {
     event.preventDefault()
@@ -397,8 +495,14 @@ function ScheduleManagement() {
     setEmployeeFilter("")
     setEmployeeSearch("")
     setStatusFilter("")
-    setAttendanceStatusFilter("")
     setOnlyMyTeam(false)
+  }
+
+  function clearPayrollFilters() {
+    setPayrollAreaFilter("")
+    setPayrollEmployeeFilter("")
+    setPayrollShiftTypeFilter("")
+    setPayrollStatusFilter("")
   }
 
   function nextBlockOrder(employeeId, date) {
@@ -446,13 +550,16 @@ function ScheduleManagement() {
 
       <div className="schedule-toolbar">
         <label>Semana<input type="date" value={weekStart} onChange={(event) => setWeekStart(getMonday(event.target.value))} /></label>
-        <label>Area<select value={areaFilter} onChange={(event) => setAreaFilter(event.target.value)}><option value="">Todas</option>{areaChoices.map((area) => <option key={area} value={area}>{area}</option>)}</select></label>
-        <label>Buscar nombre<input value={employeeSearch} onChange={(event) => setEmployeeSearch(event.target.value)} placeholder="Nombre del colaborador" /></label>
-        <label>Colaborador<select value={employeeFilter} onChange={(event) => setEmployeeFilter(event.target.value)}><option value="">Todos</option>{profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
-        <label>Estado<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="">Todos</option><option value="draft">Borrador</option><option value="published">Publicado</option></select></label>
-        {view === "payroll" && <label>Asistencia<select value={attendanceStatusFilter} onChange={(event) => setAttendanceStatusFilter(event.target.value)}><option value="">Todos</option>{Object.entries(ATTENDANCE_STATUS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}
+        {view !== "payroll" && (
+          <>
+            <label>Area<select value={areaFilter} onChange={(event) => setAreaFilter(event.target.value)}><option value="">Todas</option>{areaChoices.map((area) => <option key={area} value={area}>{area}</option>)}</select></label>
+            <label>Buscar nombre<input value={employeeSearch} onChange={(event) => setEmployeeSearch(event.target.value)} placeholder="Nombre del colaborador" /></label>
+            <label>Colaborador<select value={employeeFilter} onChange={(event) => setEmployeeFilter(event.target.value)}><option value="">Todos</option>{profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
+            <label>Estado<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="">Todos</option><option value="draft">Borrador</option><option value="published">Publicado</option></select></label>
+          </>
+        )}
         {canEdit && <label className="schedule-check"><input type="checkbox" checked={onlyMyTeam} onChange={(event) => setOnlyMyTeam(event.target.checked)} /> Solo mi equipo</label>}
-        <button className="schedule-secondary" type="button" onClick={clearFilters}>Limpiar filtros</button>
+        {view !== "payroll" && <button className="schedule-secondary" type="button" onClick={clearFilters}>Limpiar filtros</button>}
       </div>
       <p className="schedule-results">Mostrando {visibleProfiles.length} colaboradores</p>
 
@@ -510,25 +617,93 @@ function ScheduleManagement() {
       {view === "payroll" && canPublish && (
         <section className="schedule-payroll">
           <header>
-            <div><h2>Asistencia y planilla semanal</h2><p>Compara horarios publicados con los marcajes reales.</p></div>
-            <button className="schedule-secondary" type="button" onClick={exportPayroll}>Exportar Excel</button>
+            <div>
+              <h2>Asistencia y planilla</h2>
+              <p>Compara horarios publicados con los marcajes reales.</p>
+            </div>
+            <button className="schedule-secondary" type="button" onClick={() => setExportModalOpen(true)}>Exportar reporte</button>
           </header>
+
+          <div className="schedule-attendance-period">
+            <label>Tipo de periodo
+              <select value={attendancePeriodType} onChange={(event) => setAttendancePeriodType(event.target.value)}>
+                {ATTENDANCE_PERIOD_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            {attendancePeriodType !== "custom" && (
+              <label>{attendancePeriodType === "day" ? "Fecha" : attendancePeriodType === "week" ? "Semana del" : attendancePeriodType === "month" ? "Mes de" : "Ano de"}
+                <input type="date" value={attendanceAnchor} onChange={(event) => setAttendanceAnchor(event.target.value)} />
+              </label>
+            )}
+            {attendancePeriodType === "custom" && (
+              <>
+                <label>Fecha desde<input type="date" value={attendanceCustomFrom || attendanceAnchor} onChange={(event) => setAttendanceCustomFrom(event.target.value)} /></label>
+                <label>Fecha hasta<input type="date" value={attendanceCustomTo || attendanceAnchor} onChange={(event) => setAttendanceCustomTo(event.target.value)} /></label>
+              </>
+            )}
+            <label>Area
+              <select value={payrollAreaFilter} onChange={(event) => setPayrollAreaFilter(event.target.value)}>
+                <option value="">Todas</option>
+                {areaChoices.map((area) => <option key={area} value={area}>{area}</option>)}
+              </select>
+            </label>
+            <label>Colaborador
+              <select value={payrollEmployeeFilter} onChange={(event) => setPayrollEmployeeFilter(event.target.value)}>
+                <option value="">Todos</option>
+                {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
+              </select>
+            </label>
+            <label>Tipo de turno
+              <select value={payrollShiftTypeFilter} onChange={(event) => setPayrollShiftTypeFilter(event.target.value)}>
+                {shiftTypeFilterOptions.map((option) => (
+                  <option key={option.value || "all"} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label>Estado
+              <select value={payrollStatusFilter} onChange={(event) => setPayrollStatusFilter(event.target.value)}>
+                {ATTENDANCE_RECORD_STATUS_OPTIONS.map((option) => (
+                  <option key={option.value || "all"} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <button className="schedule-secondary" type="button" onClick={clearPayrollFilters}>Limpiar filtros</button>
+          </div>
+
+          <p className="schedule-results">
+            Periodo: {formatAttendancePeriodLabel(attendancePeriodType, attendanceRange)}
+            {" · "}
+            {attendanceLoading
+              ? "Cargando registros..."
+              : attendancePeriodError
+                ? attendancePeriodError
+                : `${filteredAttendanceDetails.length} registro${filteredAttendanceDetails.length === 1 ? "" : "s"}`}
+          </p>
+
           <div className="schedule-payroll-table">
             <table>
-              <thead><tr><th>Colaborador</th><th>Area</th><th>Programadas</th><th>Reales</th><th>Ordinarias</th><th>Extra</th><th>Tarde</th><th>Ausencias</th><th>Pago</th><th>Estado</th><th>Acciones</th></tr></thead>
+              <thead><tr><th>Colaborador</th><th>Area</th><th>Programadas</th><th>Reales</th><th>Ordinarias</th><th>Extra</th><th>Tarde</th><th>Ausencias</th><th>Pago</th><th>Estado</th>{isWeeklyPayrollView && <th>Acciones</th>}</tr></thead>
               <tbody>
-                {payroll.map((row) => (
+                {displayPayroll.map((row) => (
                   <tr key={row.employee_id}>
                     <td>{row.employee_name}</td><td>{row.area}</td><td>{row.scheduled_hours} h</td><td>{row.actual_hours} h</td><td>{row.regular_hours} h</td>
                     <td className={Number(row.overtime_hours) > 0 ? "warning" : ""}>{row.overtime_hours} h</td>
                     <td>{row.late_minutes} min</td><td>{row.absences}</td><td>Q{Number(row.estimated_pay).toFixed(2)}</td>
                     <td><span className={`schedule-status ${row.payroll_status}`}>{payrollLabel(row.payroll_status)}</span></td>
-                    <td><button type="button" onClick={() => updatePayrollStatus(row, "reviewed")}>Revisar</button><button type="button" onClick={() => updatePayrollStatus(row, "approved")}>Aprobar</button></td>
+                    {isWeeklyPayrollView && (
+                      <td><button type="button" onClick={() => updatePayrollStatus(row, "reviewed")}>Revisar</button><button type="button" onClick={() => updatePayrollStatus(row, "approved")}>Aprobar</button></td>
+                    )}
                   </tr>
                 ))}
               </tbody>
             </table>
-            {!payroll.length && <div className="schedule-empty">Publica horarios para generar comparacion de asistencia y planilla.</div>}
+            {!attendanceLoading && !displayPayroll.length && (
+              <div className="schedule-empty">
+                {attendancePeriodError || "No hay registros de asistencia para el periodo seleccionado."}
+              </div>
+            )}
           </div>
           <h2>Detalle de marcajes vs. horario</h2>
           <div className="schedule-payroll-table">
@@ -538,7 +713,7 @@ function ScheduleManagement() {
                 {filteredAttendanceDetails.map((row) => (
                   <tr key={row.schedule_id}>
                     <td>{row.shift_date}</td><td>{row.employee_name}</td>
-                    <td><span className={`schedule-status ${row.shift_type}`}>{shiftTypeLabel(row.shift_type, shiftTypes)}</span></td>
+                    <td><span className={`schedule-status ${row.shift_type}`}>{resolveAttendanceShiftTypeLabel(row, shiftTypes)}</span></td>
                     <td>{row.area || "-"}</td>
                     <td>{row.is_work_day ? formatTime(row.scheduled_start) : "-"}</td><td>{formatMarkTime(row.actual_start)}</td>
                     <td>{row.late_minutes || 0} min</td>
@@ -546,11 +721,16 @@ function ScheduleManagement() {
                     <td>{row.is_work_day ? formatTime(row.scheduled_end) : "-"}</td><td>{formatMarkTime(row.actual_end)}</td>
                     <td>{row.scheduled_hours || 0} h</td><td>{row.actual_hours || 0} h</td><td className={Number(row.overtime_hours) > 0 ? "warning" : ""}>{row.overtime_hours || 0} h</td>
                     <td><span className={`schedule-status ${row.attendance_status}`}>{attendanceStatusLabel(row.attendance_status)}</span></td>
-                    <td>{row.observations || "-"}</td>
+                    <td>{sanitizeAttendanceObservation(row.observations) || "-"}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            {!attendanceLoading && !filteredAttendanceDetails.length && (
+              <div className="schedule-empty">
+                {attendancePeriodError || "No hay registros de asistencia para el periodo seleccionado."}
+              </div>
+            )}
           </div>
         </section>
       )}
@@ -605,6 +785,21 @@ function ScheduleManagement() {
           </div>
         </div>
       )}
+
+      <AttendanceExportModal
+        open={exportModalOpen && canPublish}
+        onClose={() => setExportModalOpen(false)}
+        defaultDateFrom={attendanceRange.from}
+        defaultDateTo={attendanceRange.to}
+        defaultArea={payrollAreaFilter}
+        defaultEmployeeId={payrollEmployeeFilter}
+        defaultShiftType={payrollShiftTypeFilter}
+        defaultRole=""
+        defaultStatus={payrollStatusFilter}
+        areaChoices={areaChoices}
+        profiles={profiles}
+        shiftTypes={shiftTypes}
+      />
 
       {shiftTypeForm && (
         <div className="schedule-modal-overlay">
