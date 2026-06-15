@@ -3,6 +3,8 @@ import { useSearchParams } from "react-router-dom"
 import { useAuth } from "../../context/AuthContext"
 import CateringAssigneeRanking from "./CateringAssigneeRanking"
 import CateringCommercialKpis from "./CateringCommercialKpis"
+import CateringLeadsBySource from "./CateringLeadsBySource"
+import CateringManualLeadModal from "./CateringManualLeadModal"
 import CateringQuoteKpis from "./CateringQuoteKpis"
 import CateringPendingFollowups from "./CateringPendingFollowups"
 import CateringQuoteSettingsPanel from "./CateringQuoteSettingsPanel"
@@ -11,12 +13,13 @@ import CateringRequestsList from "./CateringRequestsList"
 import {
   getCateringAssignableProfiles,
   getCateringAssigneeRanking,
+  getCateringLeadsBySource,
   getCateringPendingFollowups,
   getCateringPipelineSummary,
   listCateringRequests,
   syncCateringFollowupReminders
 } from "./cateringService"
-import { CONVERSION_STATUS_OPTIONS, matchesEventDate, matchesSearch } from "./cateringUtils"
+import { CONVERSION_STATUS_OPTIONS, LEAD_SOURCE_FILTER_OPTIONS, matchesEventDate, matchesSearch } from "./cateringUtils"
 import "./Catering.css"
 
 const CATERING_ROLES = [
@@ -41,27 +44,32 @@ export default function CateringDashboard() {
   const { user } = useAuth()
   const [searchParams, setSearchParams] = useSearchParams()
   const selectedId = searchParams.get("id") || searchParams.get("requestId") || ""
+  const openQuoteOnLoad = searchParams.get("quote") === "1"
   const canAccess = CATERING_ROLES.includes(user?.role)
 
   const defaultRange = useMemo(() => currentMonthRange(), [])
   const [summaryFrom, setSummaryFrom] = useState(defaultRange.from)
   const [summaryTo, setSummaryTo] = useState(defaultRange.to)
   const [summary, setSummary] = useState(null)
+  const [leadsBySource, setLeadsBySource] = useState([])
   const [ranking, setRanking] = useState(null)
   const [pendingFollowups, setPendingFollowups] = useState([])
   const [requests, setRequests] = useState([])
   const [profiles, setProfiles] = useState([])
   const [loadingSummary, setLoadingSummary] = useState(true)
+  const [loadingLeadsBySource, setLoadingLeadsBySource] = useState(true)
   const [loadingRanking, setLoadingRanking] = useState(true)
   const [loadingFollowups, setLoadingFollowups] = useState(true)
   const [loadingRequests, setLoadingRequests] = useState(true)
   const [error, setError] = useState("")
 
   const [conversionStatus, setConversionStatus] = useState("")
+  const [leadSource, setLeadSource] = useState("")
   const [assignedTo, setAssignedTo] = useState("")
   const [eventDate, setEventDate] = useState("")
   const [search, setSearch] = useState("")
   const [showQuoteSettings, setShowQuoteSettings] = useState(false)
+  const [manualLeadMode, setManualLeadMode] = useState(null)
 
   const profilesById = useMemo(
     () => Object.fromEntries(profiles.map((profile) => [profile.id, profile])),
@@ -75,10 +83,16 @@ export default function CateringDashboard() {
 
   const loadSummary = useCallback(async () => {
     setLoadingSummary(true)
-    const result = await getCateringPipelineSummary(summaryFrom, summaryTo)
-    if (result.error) setError(result.error)
-    else setSummary(result.data)
+    setLoadingLeadsBySource(true)
+    const [summaryResult, leadsResult] = await Promise.all([
+      getCateringPipelineSummary(summaryFrom, summaryTo),
+      getCateringLeadsBySource(summaryFrom, summaryTo)
+    ])
+    if (summaryResult.error) setError(summaryResult.error)
+    else setSummary(summaryResult.data)
+    if (!leadsResult.error) setLeadsBySource(leadsResult.data || [])
     setLoadingSummary(false)
+    setLoadingLeadsBySource(false)
   }, [summaryFrom, summaryTo])
 
   const loadRanking = useCallback(async () => {
@@ -101,12 +115,13 @@ export default function CateringDashboard() {
     const result = await listCateringRequests({
       conversionStatus: conversionStatus || null,
       assignedTo: assignedTo || null,
+      leadSource: leadSource || null,
       limit: 300
     })
     if (result.error) setError(result.error)
     else setRequests(result.data)
     setLoadingRequests(false)
-  }, [conversionStatus, assignedTo])
+  }, [conversionStatus, assignedTo, leadSource])
 
   useEffect(() => {
     if (!canAccess) return
@@ -141,6 +156,20 @@ export default function CateringDashboard() {
     setSearchParams({})
   }
 
+  function handleManualLeadSaved({ request, action }) {
+    setManualLeadMode(null)
+    if (!request?.id) return
+    setRequests((current) => [request, ...current.filter((item) => item.id !== request.id)])
+    loadSummary()
+    loadRanking()
+    loadFollowups()
+    if (action === "quote") {
+      setSearchParams({ id: request.id, quote: "1" })
+      return
+    }
+    setSearchParams({ id: request.id })
+  }
+
   function handleUpdated(updatedRequest) {
     setRequests((current) => current.map((item) => (item.id === updatedRequest.id ? updatedRequest : item)))
     loadSummary()
@@ -165,9 +194,15 @@ export default function CateringDashboard() {
         <div>
           <p>Ventas</p>
           <h1>Catering CRM</h1>
-          <span>Gestion comercial de leads desde Wix con SLA, pipeline y seguimiento.</span>
+          <span>Gestion comercial de leads con SLA, pipeline y seguimiento.</span>
         </div>
         <div className="catering-header__actions">
+          <button type="button" className="primary" onClick={() => setManualLeadMode("lead")}>
+            + Nuevo Lead
+          </button>
+          <button type="button" className="ghost" onClick={() => setManualLeadMode("quickQuote")}>
+            + Cotizacion rapida
+          </button>
           <button type="button" className="ghost" onClick={() => setShowQuoteSettings(true)}>
             Datos empresa / logo
           </button>
@@ -200,6 +235,8 @@ export default function CateringDashboard() {
 
       <CateringCommercialKpis summary={summary} loading={loadingSummary} />
 
+      <CateringLeadsBySource rows={leadsBySource} loading={loadingLeadsBySource} />
+
       <section className="catering-panel">
         <h2>Cotizaciones</h2>
         <CateringQuoteKpis summary={summary} loading={loadingSummary} />
@@ -222,6 +259,15 @@ export default function CateringDashboard() {
             <select value={conversionStatus} onChange={(event) => setConversionStatus(event.target.value)}>
               <option value="">Todos</option>
               {CONVERSION_STATUS_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Origen
+            <select value={leadSource} onChange={(event) => setLeadSource(event.target.value)}>
+              <option value="">Todos</option>
+              {LEAD_SOURCE_FILTER_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
             </select>
@@ -269,6 +315,8 @@ export default function CateringDashboard() {
             requestId={selectedId}
             profiles={profiles}
             profilesById={profilesById}
+            openQuoteOnLoad={openQuoteOnLoad}
+            onQuoteOpened={() => setSearchParams({ id: selectedId })}
             onClose={handleCloseDetail}
             onUpdated={handleUpdated}
           />
@@ -278,6 +326,14 @@ export default function CateringDashboard() {
       <CateringQuoteSettingsPanel
         open={showQuoteSettings}
         onClose={() => setShowQuoteSettings(false)}
+      />
+
+      <CateringManualLeadModal
+        open={Boolean(manualLeadMode)}
+        mode={manualLeadMode || "lead"}
+        profiles={profiles}
+        onClose={() => setManualLeadMode(null)}
+        onSaved={handleManualLeadSaved}
       />
     </section>
   )

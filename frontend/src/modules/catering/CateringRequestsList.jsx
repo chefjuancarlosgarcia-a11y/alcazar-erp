@@ -6,7 +6,8 @@ import {
   formatDate,
   formatProducts,
   formatTime,
-  getFollowUpAlert
+  getFollowUpAlert,
+  leadSourceLabel
 } from "./cateringUtils"
 
 export default function CateringRequestsList({
@@ -43,6 +44,7 @@ export default function CateringRequestsList({
             <tr>
               <th>Fecha</th>
               <th>Cliente</th>
+              <th>Origen</th>
               <th>SLA</th>
               <th>Evento</th>
               <th>Fecha evento</th>
@@ -66,6 +68,7 @@ export default function CateringRequestsList({
                     <strong>{request.customer_name || "—"}</strong>
                     <small>{request.customer_phone || request.customer_email || "—"}</small>
                   </td>
+                  <td>{leadSourceLabel(request.lead_source)}</td>
                   <td><CateringSlaBadge request={request} /></td>
                   <td className="catering-products">{formatProducts(request.products_requested)}</td>
                   <td>

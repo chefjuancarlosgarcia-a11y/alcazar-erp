@@ -22,10 +22,46 @@ export async function getCateringPipelineSummary(dateFrom = null, dateTo = null)
   return result(data, error)
 }
 
+export async function getCateringLeadsBySource(dateFrom = null, dateTo = null) {
+  const { data, error } = await supabase.rpc("get_catering_leads_by_source", {
+    p_date_from: dateFrom || null,
+    p_date_to: dateTo || null
+  })
+  return result(Array.isArray(data) ? data : [], error)
+}
+
+export async function createManualCateringLead(payload = {}) {
+  const { data, error } = await supabase.rpc("create_catering_request", {
+    p_data: {
+      source: "manual",
+      customer_name: payload.customerName,
+      customer_phone: payload.customerPhone || null,
+      customer_email: payload.customerEmail || null,
+      event_date: payload.eventDate || null,
+      event_time: payload.eventTime || null,
+      event_location: payload.eventLocation || null,
+      event_type: payload.eventType || null,
+      guest_count: payload.guestCount != null && payload.guestCount !== ""
+        ? Number(payload.guestCount)
+        : null,
+      lead_source: payload.leadSource || "other",
+      products_requested: payload.productsRequested || [],
+      notes: payload.notes || null,
+      assigned_to: payload.assignedTo || null,
+      estimated_value: payload.estimatedValue != null && payload.estimatedValue !== ""
+        ? Number(payload.estimatedValue)
+        : null,
+      follow_up_date: payload.followUpDate || null
+    }
+  })
+  return result(repairCateringRequest(data), error)
+}
+
 export async function listCateringRequests({
   status = null,
   conversionStatus = null,
   assignedTo = null,
+  leadSource = null,
   limit = 200,
   offset = 0
 } = {}) {
@@ -33,6 +69,7 @@ export async function listCateringRequests({
     p_status: status || null,
     p_conversion_status: conversionStatus || null,
     p_assigned_to: assignedTo || null,
+    p_lead_source: leadSource || null,
     p_limit: limit,
     p_offset: offset
   })

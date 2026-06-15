@@ -427,6 +427,54 @@
   gap: var(--erp-space-16);
 }
 
+.catering-form-grid--two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 720px) {
+  .catering-form-grid--two {
+    grid-template-columns: 1fr;
+  }
+}
+
+.catering-manual-lead-modal {
+  width: min(760px, 100%);
+}
+
+.catering-manual-lead-section {
+  border: none;
+  margin: 0 0 var(--erp-space-16);
+  padding: 0;
+}
+
+.catering-manual-lead-section legend {
+  padding: 0;
+  margin-bottom: var(--erp-space-12);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--erp-text-primary, #f8fafc);
+}
+
+.catering-manual-lead-success {
+  display: grid;
+  gap: var(--erp-space-16);
+}
+
+.catering-table--compact {
+  min-width: 640px;
+}
+
+.catering-header__actions button.primary {
+  min-height: var(--erp-btn-height);
+  padding: 0 var(--erp-space-16);
+  border: 1px solid transparent;
+  border-radius: var(--erp-radius-badge);
+  background: #14b8a6;
+  color: #042f2e;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 .catering-message {
   margin: 0;
   font-size: 14px;

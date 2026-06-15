@@ -26,6 +26,7 @@ import {
   formatProducts,
   formatTime,
   getFollowUpAlert,
+  leadSourceLabel,
   weightedPipelineValue
 } from "./cateringUtils"
 
@@ -41,6 +42,8 @@ export default function CateringRequestDetail({
   requestId,
   profiles,
   profilesById,
+  openQuoteOnLoad = false,
+  onQuoteOpened,
   onClose,
   onUpdated
 }) {
@@ -60,10 +63,20 @@ export default function CateringRequestDetail({
   const [loadingQuotes, setLoadingQuotes] = useState(true)
   const [quoteModalOpen, setQuoteModalOpen] = useState(false)
   const [activeQuoteId, setActiveQuoteId] = useState(null)
+  const [quoteAutoOpened, setQuoteAutoOpened] = useState(false)
 
   useEffect(() => {
     loadDetail()
+    setQuoteAutoOpened(false)
   }, [requestId])
+
+  useEffect(() => {
+    if (!openQuoteOnLoad || !request || quoteAutoOpened) return
+    setActiveQuoteId(null)
+    setQuoteModalOpen(true)
+    setQuoteAutoOpened(true)
+    onQuoteOpened?.()
+  }, [openQuoteOnLoad, request, quoteAutoOpened, onQuoteOpened])
 
   async function loadDetail() {
     if (!requestId) return
@@ -252,7 +265,10 @@ export default function CateringRequestDetail({
             <div><dt>Nombre</dt><dd>{request.customer_name || "—"}</dd></div>
             <div><dt>Telefono</dt><dd>{request.customer_phone || "—"}</dd></div>
             <div><dt>Email</dt><dd>{request.customer_email || "—"}</dd></div>
-            <div><dt>Origen</dt><dd>{request.lead_source || request.source || "—"}</dd></div>
+            <div><dt>Origen</dt><dd>{leadSourceLabel(request.lead_source)}</dd></div>
+            {request.source === "manual" ? (
+              <div><dt>Captura</dt><dd>Manual (ERP)</dd></div>
+            ) : null}
           </dl>
         </section>
 

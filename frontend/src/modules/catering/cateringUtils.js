@@ -147,6 +147,7 @@ export function followUpAlertClass(level) {
 
 export const ACTIVITY_TYPE_LABELS = {
   lead_received: "Lead recibido",
+  lead_created_manual: "Lead creado manualmente",
   lead_assigned: "Lead asignado",
   status_changed: "Estado cambiado",
   followup_recorded: "Seguimiento registrado",
@@ -156,4 +157,46 @@ export const ACTIVITY_TYPE_LABELS = {
   quote_approved: "Cotizacion aprobada",
   quote_rejected: "Cotizacion rechazada",
   quote_expired: "Cotizacion vencida"
+}
+
+export const LEAD_SOURCE_OPTIONS = [
+  { value: "website", label: "Website" },
+  { value: "whatsapp", label: "WhatsApp" },
+  { value: "facebook", label: "Facebook" },
+  { value: "instagram", label: "Instagram" },
+  { value: "phone_call", label: "Llamada telefonica" },
+  { value: "in_person", label: "Presencial" },
+  { value: "referral", label: "Referido" },
+  { value: "hotel_partner", label: "Hotel aliado" },
+  { value: "past_event", label: "Evento anterior" },
+  { value: "other", label: "Otro" }
+]
+
+export const LEAD_SOURCE_LABELS = Object.fromEntries(
+  LEAD_SOURCE_OPTIONS.map((item) => [item.value, item.label])
+)
+
+export const LEAD_SOURCE_FILTER_OPTIONS = [
+  { value: "website", label: "Website" },
+  { value: "whatsapp", label: "WhatsApp" },
+  { value: "facebook", label: "Facebook" },
+  { value: "instagram", label: "Instagram" },
+  { value: "phone_call", label: "Llamada" },
+  { value: "in_person", label: "Presencial" },
+  { value: "referral", label: "Referido" },
+  { value: "hotel_partner", label: "Hotel" },
+  { value: "past_event", label: "Evento anterior" },
+  { value: "other", label: "Otro" }
+]
+
+export function leadSourceLabel(value) {
+  if (!value) return "—"
+  return LEAD_SOURCE_LABELS[value] || value
+}
+
+export function parseProductsInput(value) {
+  return String(value || "")
+    .split(/[\n,;]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
 }
