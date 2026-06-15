@@ -534,6 +534,31 @@ La Edge Function acepta nombres alternativos por compatibilidad con formularios 
 
 ---
 
+## Notificaciones internas (ERP)
+
+Al crear una solicitud via `create_catering_request` (Wix Edge Function o ERP), el sistema genera notificaciones en la tabla existente `notifications` para **cada perfil activo** con rol comercial permitido.
+
+**Migración:** `supabase/schema/084_catering_request_notifications.sql` (aplicar después de `083`).
+
+| Campo | Valor |
+|-------|-------|
+| `type` | `catering_request` |
+| `entity_type` | `catering_request` |
+| `entity_id` | UUID de la solicitud |
+| `title` | Nueva solicitud de catering |
+| `message` | `{customer_name} solicitó cotización para {guest_count} invitados.` (si no hay invitados: `… solicitó cotización de catering.`) |
+| `action_url` | `/catering?id={uuid}` |
+
+**Destinatarios (roles normalizados):** `admin`, `gerente_general`, `gerente`, `gerente_operaciones`, `supervisor`, `ventas` (si existe en `profiles`; si no hay usuarios con ese rol, no falla).
+
+**Idempotencia:** índice único `(user_id, type, entity_type, entity_id)` + `NOT EXISTS` evitan duplicados si la RPC se reintenta.
+
+**Resiliencia:** si falla el envío de notificaciones, el lead **sí se guarda**. El error se registra como `WARNING` en PostgreSQL (`notify_new_catering_request`).
+
+**Frontend:** la campanita (`NotificationsBell`) abre `/catering?id=…` con botón **Ver solicitud**.
+
+---
+
 ## Cadena hacia el módulo ERP (visión)
 
 Ver [Catering Sales Pipeline](#catering-sales-pipeline) y [catering-phase-2-architecture.md](./catering-phase-2-architecture.md).
@@ -575,7 +600,7 @@ Pendiente además: plantillas PDF, WhatsApp/correo, frontend ERP, integración `
 
 ## Seguridad — checklist
 
-- [ ] Migración `082` + `083` aplicadas
+- [ ] Migración `082` + `083` + `084` aplicadas
 - [ ] Columnas pipeline presentes (`conversion_status`, `lead_source`, …)
 - [ ] RPCs `assign_catering_lead`, `update_catering_followup`, `get_catering_pipeline_summary` disponibles
 - [ ] `WIX_CATERING_WEBHOOK_SECRET` ≥ 32 caracteres, aleatorio
@@ -594,6 +619,7 @@ Pendiente además: plantillas PDF, WhatsApp/correo, frontend ERP, integración `
 |---------|-----------|
 | `supabase/schema/082_catering_requests.sql` | Tabla base, RLS, RPCs iniciales |
 | `supabase/schema/083_catering_pipeline_phase_1_5.sql` | Pipeline comercial, RPCs CRM |
+| `supabase/schema/084_catering_request_notifications.sql` | Notificaciones al crear solicitud |
 | `docs/catering-phase-2-architecture.md` | Diseño Fase 2 (solo documentación) |
 | `supabase/functions/wix-catering-request/index.ts` | Webhook Wix |
 | `docs/examples/wix-catering-payload.example.json` | Payload de ejemplo |

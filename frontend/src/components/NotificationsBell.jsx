@@ -80,6 +80,8 @@ function NotificationsBell({ currentUser }) {
       navigate(notification.action_url || `/tasks?tab=checklists&view=alerts&id=${encodeURIComponent(notification.entity_id || "")}`)
     } else if (["checklist_template_change_request", "checklist_approval_result"].includes(notification.entity_type)) {
       navigate(notification.action_url || `/tasks?tab=checklists&view=approvals&id=${encodeURIComponent(notification.entity_id || "")}`)
+    } else if (notification.entity_type === "catering_request") {
+      navigate(notification.action_url || `/catering?id=${encodeURIComponent(notification.entity_id || "")}`)
     } else if (notification.entity_type === "task") {
       navigate("/tasks?view=mine")
     }
@@ -145,7 +147,8 @@ function NotificationsBell({ currentUser }) {
                     <button type="button" onClick={() => viewEntity(notification)}>Ver estado</button>
                   )}
                   {notification.entity_type === "checklist_management_alert" && <button type="button" onClick={() => viewEntity(notification)}>Ver aviso</button>}
-                  {notification.action_url && !["purchase_order", "requisition", "employee_schedule", "schedule_week", "checklist_run", "checklist_template_change_request", "checklist_management_alert", "task"].includes(notification.entity_type) && <button type="button" onClick={() => viewEntity(notification)}>Abrir</button>}
+                  {notification.entity_type === "catering_request" && <button type="button" onClick={() => viewEntity(notification)}>Ver solicitud</button>}
+                  {notification.action_url && !["purchase_order", "requisition", "employee_schedule", "schedule_week", "checklist_run", "checklist_template_change_request", "checklist_management_alert", "task", "catering_request"].includes(notification.entity_type) && <button type="button" onClick={() => viewEntity(notification)}>Abrir</button>}
                   {notification.entity_type === "purchase_order" && notification.type === "purchase_order_pending" && PURCHASE_ORDER_APPROVAL_ROLES.includes(currentUser?.role) && (
                     <>
                       <button type="button" className="approve" onClick={() => processOrder(notification, "approve")}>Aprobar</button>

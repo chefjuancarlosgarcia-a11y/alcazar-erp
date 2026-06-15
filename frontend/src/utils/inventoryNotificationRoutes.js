@@ -126,5 +126,12 @@ export function resolveNotificationTarget(notification) {
     return { url: notification.action_url, entityType }
   }
 
+  if (entityType === "catering_request" && entityId) {
+    return {
+      url: `/catering?id=${encodeURIComponent(entityId)}`,
+      entityType
+    }
+  }
+
   return null
 }

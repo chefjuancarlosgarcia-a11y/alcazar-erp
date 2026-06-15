@@ -25,7 +25,7 @@ function currentMonthRange() {
 export default function CateringDashboard() {
   const { user } = useAuth()
   const [searchParams, setSearchParams] = useSearchParams()
-  const selectedId = searchParams.get("id") || ""
+  const selectedId = searchParams.get("id") || searchParams.get("requestId") || ""
   const canAccess = CATERING_ROLES.includes(user?.role)
 
   const defaultRange = useMemo(() => currentMonthRange(), [])
