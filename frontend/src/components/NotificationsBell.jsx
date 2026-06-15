@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
+import { useAuth } from "../context/AuthContext"
 import useSupabaseRealtime from "../hooks/useSupabaseRealtime"
-import { getNotifications, markNotificationRead } from "../services/notificationsService"
+import { getNotifications, isNotificationUnread, markNotificationRead, normalizeIsRead } from "../services/notificationsService"
 import {
   buildPurchaseOrderNotificationUrl,
   resolveNotificationTarget
@@ -18,25 +19,32 @@ function isInternalActionUrl(url) {
 
 function NotificationsBell({ currentUser }) {
   const navigate = useNavigate()
+  const { session } = useAuth()
   const rootRef = useRef(null)
   const [open, setOpen] = useState(false)
   const [notifications, setNotifications] = useState([])
   const [error, setError] = useState("")
 
   const loadNotifications = useCallback(async () => {
+    if (!session?.user?.id) return
+
     const { data, error: queryError } = await getNotifications(100)
+
     if (queryError) {
-      setError("No se pudieron cargar las notificaciones.")
+      console.error("[NotificationsBell] queryError", queryError.message || queryError)
+      setError(queryError.message || "No se pudieron cargar las notificaciones.")
+      setNotifications([])
       return
     }
+
     setError("")
     setNotifications(data || [])
-  }, [])
+  }, [session?.user?.id])
 
   useSupabaseRealtime({
     table: "notifications",
     event: "INSERT",
-    enabled: Boolean(currentUser?.id),
+    enabled: Boolean(session?.user?.id),
     onChange: loadNotifications
   })
 
@@ -60,7 +68,7 @@ function NotificationsBell({ currentUser }) {
   }, [])
 
   async function markRead(notification) {
-    if (!notification.is_read) await markNotificationRead(notification.id)
+    if (isNotificationUnread(notification)) await markNotificationRead(notification.id)
   }
 
   async function viewEntity(notification) {
@@ -113,7 +121,7 @@ function NotificationsBell({ currentUser }) {
     }))
   }
 
-  const unreadCount = notifications.filter((notification) => !notification.is_read).length
+  const unreadCount = notifications.filter((notification) => isNotificationUnread(notification)).length
 
   return (
     <div className="notifications-bell" ref={rootRef}>
@@ -131,7 +139,7 @@ function NotificationsBell({ currentUser }) {
           {!error && notifications.length === 0 && <p className="notifications-empty">No tienes notificaciones.</p>}
           <div className="notifications-list">
             {notifications.map((notification) => (
-              <article className={notification.is_read ? "read" : ""} key={notification.id}>
+              <article className={normalizeIsRead(notification.is_read) ? "read" : ""} key={notification.id}>
                 <strong>{notification.title}</strong>
                 <p>{notification.message}</p>
                 <small>{new Date(notification.created_at).toLocaleString("es-GT")}</small>
@@ -155,7 +163,15 @@ function NotificationsBell({ currentUser }) {
                     <button type="button" onClick={() => viewEntity(notification)}>Ver estado</button>
                   )}
                   {notification.entity_type === "checklist_management_alert" && <button type="button" onClick={() => viewEntity(notification)}>Ver aviso</button>}
-                  {notification.entity_type === "catering_request" && <button type="button" onClick={() => viewEntity(notification)}>Ver solicitud</button>}
+                  {notification.entity_type === "catering_request" && (
+                    <button type="button" onClick={() => viewEntity(notification)}>
+                      {notification.type === "catering_lead_assigned"
+                        ? "Ver lead asignado"
+                        : notification.type === "catering_followup_due"
+                          ? "Dar seguimiento"
+                          : "Ver solicitud"}
+                    </button>
+                  )}
                   {notification.action_url && !["purchase_order", "requisition", "employee_schedule", "schedule_week", "checklist_run", "checklist_template_change_request", "checklist_management_alert", "task", "catering_request"].includes(notification.entity_type) && <button type="button" onClick={() => viewEntity(notification)}>Abrir</button>}
                   {notification.entity_type === "purchase_order" && notification.type === "purchase_order_pending" && PURCHASE_ORDER_APPROVAL_ROLES.includes(currentUser?.role) && (
                     <>
@@ -163,7 +179,9 @@ function NotificationsBell({ currentUser }) {
                       <button type="button" className="reject" onClick={() => processOrder(notification, "reject")}>Rechazar</button>
                     </>
                   )}
-                  {!notification.is_read && <button type="button" onClick={() => markRead(notification)}>Marcar leída</button>}
+                  {!isNotificationUnread(notification) ? null : (
+                    <button type="button" onClick={() => markRead(notification)}>Marcar leída</button>
+                  )}
                 </div>
               </article>
             ))}

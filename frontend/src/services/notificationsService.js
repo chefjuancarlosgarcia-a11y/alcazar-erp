@@ -1,6 +1,31 @@
 import { supabase } from "../lib/supabase"
 
+function normalizeNotificationRows(data) {
+  if (Array.isArray(data)) return data
+  if (data && typeof data === "object") return [data]
+  return []
+}
+
+/** PostgREST devuelve boolean; algunos proxies/serializadores pueden enviar "false"/"true" como string. */
+export function normalizeIsRead(value) {
+  if (value === true || value === 1 || value === "1" || value === "true") return true
+  if (value === false || value === 0 || value === "0" || value === "false") return false
+  if (value == null) return false
+  return Boolean(value)
+}
+
+export function isNotificationUnread(row) {
+  return !normalizeIsRead(row?.is_read)
+}
+
 export async function getNotifications(limit = 100) {
+  const { data: sessionData } = await supabase.auth.getSession()
+  const sessionUserId = sessionData?.session?.user?.id || null
+
+  if (!sessionUserId) {
+    return { data: [], error: null }
+  }
+
   const { data, error } = await supabase.rpc("get_my_notifications", {
     p_limit: limit
   })
@@ -12,10 +37,13 @@ export async function getNotifications(limit = 100) {
       .order("is_read", { ascending: true })
       .order("created_at", { ascending: false })
       .limit(limit)
-    return fallback
+    return {
+      data: normalizeNotificationRows(fallback.data),
+      error: fallback.error
+    }
   }
 
-  return { data: Array.isArray(data) ? data : [], error: null }
+  return { data: normalizeNotificationRows(data), error: null }
 }
 
 export async function markNotificationRead(id) {

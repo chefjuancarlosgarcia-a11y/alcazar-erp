@@ -181,13 +181,156 @@
   color: #e2e8f0;
 }
 
-.catering-status--lead { background: rgba(59, 130, 246, 0.18); color: #93c5fd; }
-.catering-status--contacted { background: rgba(14, 165, 233, 0.18); color: #7dd3fc; }
-.catering-status--quoted { background: rgba(168, 85, 247, 0.18); color: #d8b4fe; }
-.catering-status--negotiating { background: rgba(245, 158, 11, 0.18); color: #fcd34d; }
-.catering-status--approved { background: rgba(34, 197, 94, 0.18); color: #86efac; }
-.catering-status--lost { background: rgba(239, 68, 68, 0.18); color: #fca5a5; }
+.catering-status--lead { background: rgba(59, 130, 246, 0.22); color: #93c5fd; }
+.catering-status--contacted { background: rgba(234, 179, 8, 0.22); color: #fde047; }
+.catering-status--quoted { background: rgba(249, 115, 22, 0.22); color: #fdba74; }
+.catering-status--negotiating { background: rgba(168, 85, 247, 0.22); color: #d8b4fe; }
+.catering-status--approved { background: rgba(34, 197, 94, 0.22); color: #86efac; }
+.catering-status--lost { background: rgba(239, 68, 68, 0.22); color: #fca5a5; }
 .catering-status--converted { background: rgba(20, 184, 166, 0.18); color: #5eead4; }
+
+.catering-kpi-grid--crm {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.catering-kpi-grid--values {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (min-width: 900px) {
+  .catering-kpi-grid--crm {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .catering-kpi-grid--values {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1200px) {
+  .catering-kpi-grid--values {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}
+
+.catering-kpi-card--blue { border-color: rgba(59, 130, 246, 0.45); }
+.catering-kpi-card--yellow { border-color: rgba(234, 179, 8, 0.45); }
+.catering-kpi-card--orange { border-color: rgba(249, 115, 22, 0.45); }
+.catering-kpi-card--purple { border-color: rgba(168, 85, 247, 0.45); }
+.catering-kpi-card--green { border-color: rgba(34, 197, 94, 0.45); }
+.catering-kpi-card--red { border-color: rgba(239, 68, 68, 0.45); }
+
+.catering-widgets-grid {
+  display: grid;
+  gap: var(--erp-space-24);
+}
+
+@media (min-width: 1100px) {
+  .catering-widgets-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+.catering-sla,
+.catering-followup-alert {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.catering-sla--green { background: rgba(34, 197, 94, 0.18); color: #86efac; }
+.catering-sla--yellow { background: rgba(234, 179, 8, 0.18); color: #fde047; }
+.catering-sla--orange { background: rgba(249, 115, 22, 0.18); color: #fdba74; }
+.catering-sla--red { background: rgba(239, 68, 68, 0.18); color: #fca5a5; }
+.catering-sla--responded { background: rgba(148, 163, 184, 0.15); color: #cbd5e1; }
+
+.catering-followup-alert--overdue { background: rgba(239, 68, 68, 0.2); color: #fecaca; }
+.catering-followup-alert--today { background: rgba(249, 115, 22, 0.2); color: #fdba74; }
+
+.catering-followup-list {
+  display: grid;
+  gap: var(--erp-space-8);
+}
+
+.catering-followup-item {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--erp-border, #334155);
+  border-radius: var(--erp-radius-badge);
+  background: #0b1424;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.catering-followup-item:hover {
+  border-color: #14b8a6;
+}
+
+.catering-followup-item small {
+  color: var(--erp-text-secondary, #94a3b8);
+}
+
+.catering-timeline {
+  display: grid;
+  gap: var(--erp-space-12);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.catering-timeline-item {
+  position: relative;
+  padding-left: 16px;
+  border-left: 2px solid rgba(20, 184, 166, 0.45);
+}
+
+.catering-timeline-item time {
+  display: block;
+  color: var(--erp-text-secondary, #94a3b8);
+  font-size: 12px;
+}
+
+.catering-timeline-item strong {
+  display: block;
+  margin-top: 4px;
+}
+
+.catering-timeline-item p {
+  margin: 4px 0 0;
+  color: var(--erp-text-secondary, #94a3b8);
+  font-size: 13px;
+}
+
+.catering-detail-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--erp-space-8);
+  justify-content: flex-end;
+}
+
+.catering-detail-panel {
+  max-height: calc(100vh - 120px);
+  overflow: auto;
+}
+
+.catering-table td small {
+  display: block;
+  color: var(--erp-text-secondary, #94a3b8);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.catering-response-time {
+  font-weight: 600;
+}
 
 .catering-detail-grid {
   display: grid;

@@ -40,6 +40,31 @@ export async function getCateringRequestDetail(requestId) {
   return result(data, error)
 }
 
+export async function getCateringActivityLog(requestId) {
+  const { data, error } = await supabase.rpc("get_catering_activity_log", {
+    p_request_id: requestId
+  })
+  return result(Array.isArray(data) ? data : [], error)
+}
+
+export async function getCateringAssigneeRanking(dateFrom = null, dateTo = null) {
+  const { data, error } = await supabase.rpc("get_catering_assignee_ranking", {
+    p_date_from: dateFrom || null,
+    p_date_to: dateTo || null
+  })
+  return result(data, error)
+}
+
+export async function getCateringPendingFollowups() {
+  const { data, error } = await supabase.rpc("get_catering_pending_followups")
+  return result(data?.rows || [], error)
+}
+
+export async function syncCateringFollowupReminders() {
+  const { data, error } = await supabase.rpc("sync_catering_followup_reminders")
+  return result(data ?? 0, error)
+}
+
 export async function updateCateringRequestStatus(requestId, status, notes = null) {
   const { data, error } = await supabase.rpc("update_catering_request_status", {
     p_request_id: requestId,
@@ -65,7 +90,29 @@ export async function updateCateringFollowup(requestId, payload = {}) {
     p_conversion_status: payload.conversionStatus || null,
     p_estimated_value: payload.estimatedValue != null && payload.estimatedValue !== ""
       ? Number(payload.estimatedValue)
+      : null,
+    p_win_probability: payload.winProbability != null && payload.winProbability !== ""
+      ? Number(payload.winProbability)
       : null
   })
   return result(data, error)
+}
+
+export async function getCateringAssignableProfiles() {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, full_name, username, role, status")
+    .eq("status", "active")
+    .order("full_name", { ascending: true })
+  if (error) return result([], error)
+  const roles = new Set([
+    "admin",
+    "gerente_general",
+    "gerente",
+    "gerente_operaciones",
+    "supervisor",
+    "ventas"
+  ])
+  const rows = (data || []).filter((profile) => roles.has(String(profile.role || "").toLowerCase()))
+  return result(rows, null)
 }

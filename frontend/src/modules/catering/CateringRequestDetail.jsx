@@ -1,28 +1,37 @@
 import { useEffect, useState } from "react"
 import {
   assignCateringLead,
+  getCateringActivityLog,
   getCateringRequestDetail,
   updateCateringFollowup,
   updateCateringRequestStatus
 } from "./cateringService"
+import CateringActivityTimeline from "./CateringActivityTimeline"
+import CateringSlaBadge from "./CateringSlaBadge"
 import {
   CONVERSION_STATUS_LABELS,
   CONVERSION_STATUS_OPTIONS,
+  DEFAULT_WIN_PROBABILITY,
   OPERATIONAL_STATUS_LABELS,
   OPERATIONAL_STATUS_OPTIONS,
   conversionStatusClass,
+  effectiveWinProbability,
+  followUpAlertClass,
   formatDate,
   formatDateTime,
   formatMoney,
   formatProducts,
-  formatTime
+  formatTime,
+  getFollowUpAlert,
+  weightedPipelineValue
 } from "./cateringUtils"
 
 const EMPTY_FOLLOWUP = {
   followUpDate: "",
   notes: "",
   conversionStatus: "",
-  estimatedValue: ""
+  estimatedValue: "",
+  winProbability: ""
 }
 
 export default function CateringRequestDetail({
@@ -33,7 +42,9 @@ export default function CateringRequestDetail({
   onUpdated
 }) {
   const [request, setRequest] = useState(null)
+  const [activities, setActivities] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadingActivity, setLoadingActivity] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
   const [message, setMessage] = useState("")
@@ -50,23 +61,30 @@ export default function CateringRequestDetail({
   async function loadDetail() {
     if (!requestId) return
     setLoading(true)
+    setLoadingActivity(true)
     setError("")
-    const result = await getCateringRequestDetail(requestId)
-    if (result.error) {
-      setError(result.error)
+    const [detailResult, activityResult] = await Promise.all([
+      getCateringRequestDetail(requestId),
+      getCateringActivityLog(requestId)
+    ])
+    if (detailResult.error) {
+      setError(detailResult.error)
       setRequest(null)
     } else {
-      setRequest(result.data)
-      setOperationalStatus(result.data?.status || "new")
-      setAssigneeId(result.data?.assigned_to || "")
+      setRequest(detailResult.data)
+      setOperationalStatus(detailResult.data?.status || "new")
+      setAssigneeId(detailResult.data?.assigned_to || "")
       setFollowup({
-        followUpDate: result.data?.follow_up_date ? String(result.data.follow_up_date).slice(0, 10) : "",
+        followUpDate: detailResult.data?.follow_up_date ? String(detailResult.data.follow_up_date).slice(0, 10) : "",
         notes: "",
-        conversionStatus: result.data?.conversion_status || "",
-        estimatedValue: result.data?.estimated_value ?? ""
+        conversionStatus: detailResult.data?.conversion_status || "",
+        estimatedValue: detailResult.data?.estimated_value ?? "",
+        winProbability: detailResult.data?.win_probability ?? effectiveWinProbability(detailResult.data)
       })
     }
+    if (!activityResult.error) setActivities(activityResult.data || [])
     setLoading(false)
+    setLoadingActivity(false)
   }
 
   async function handleStatusUpdate() {
@@ -83,6 +101,7 @@ export default function CateringRequestDetail({
     setStatusNotes("")
     setMessage("Estado operativo actualizado.")
     onUpdated?.(result.data)
+    loadDetail()
   }
 
   async function handleAssign() {
@@ -102,6 +121,7 @@ export default function CateringRequestDetail({
     setRequest(result.data)
     setMessage("Responsable asignado.")
     onUpdated?.(result.data)
+    loadDetail()
   }
 
   async function handleFollowupSubmit(event) {
@@ -113,7 +133,8 @@ export default function CateringRequestDetail({
       followUpDate: followup.followUpDate || null,
       notes: followup.notes || null,
       conversionStatus: followup.conversionStatus || null,
-      estimatedValue: followup.estimatedValue
+      estimatedValue: followup.estimatedValue,
+      winProbability: followup.winProbability
     })
     setSaving(false)
     if (result.error) {
@@ -125,6 +146,7 @@ export default function CateringRequestDetail({
     setShowFollowup(false)
     setMessage("Seguimiento registrado.")
     onUpdated?.(result.data)
+    loadDetail()
   }
 
   if (loading) {
@@ -145,9 +167,12 @@ export default function CateringRequestDetail({
   }
 
   const assignee = request.assigned_to ? profilesById[request.assigned_to] : null
+  const followUpAlert = getFollowUpAlert(request)
+  const probability = effectiveWinProbability(request)
+  const weightedValue = weightedPipelineValue(request)
 
   return (
-    <aside className="catering-panel">
+    <aside className="catering-panel catering-detail-panel">
       <div className="catering-detail-back catering-actions">
         <button type="button" className="ghost" onClick={onClose}>Cerrar detalle</button>
       </div>
@@ -158,10 +183,14 @@ export default function CateringRequestDetail({
           <h2>{request.customer_name}</h2>
           <span>Ingreso: {formatDateTime(request.created_at)}</span>
         </div>
-        <div>
+        <div className="catering-detail-badges">
           <span className={conversionStatusClass(request.conversion_status)}>
             {CONVERSION_STATUS_LABELS[request.conversion_status] || request.conversion_status}
           </span>
+          <CateringSlaBadge request={request} />
+          {followUpAlert ? (
+            <span className={followUpAlertClass(followUpAlert.level)}>{followUpAlert.label}</span>
+          ) : null}
         </div>
       </header>
 
@@ -184,7 +213,16 @@ export default function CateringRequestDetail({
             <div><dt>Hora</dt><dd>{formatTime(request.event_time)}</dd></div>
             <div><dt>Ubicacion</dt><dd>{request.event_location || "—"}</dd></div>
             <div><dt>Invitados</dt><dd>{request.guest_count ?? "—"}</dd></div>
+          </dl>
+        </section>
+
+        <section className="catering-detail-section">
+          <h4>Valor comercial</h4>
+          <dl className="catering-detail-list">
             <div><dt>Valor estimado</dt><dd>{formatMoney(request.estimated_value)}</dd></div>
+            <div><dt>Probabilidad</dt><dd>{probability}%</dd></div>
+            <div><dt>Pipeline ponderado</dt><dd>{formatMoney(weightedValue)}</dd></div>
+            <div><dt>Default por etapa</dt><dd>{DEFAULT_WIN_PROBABILITY[request.conversion_status] ?? 10}%</dd></div>
           </dl>
         </section>
 
@@ -217,6 +255,11 @@ export default function CateringRequestDetail({
           </dl>
         </section>
       </div>
+
+      <section className="catering-detail-section">
+        <h4>Linea de tiempo comercial</h4>
+        <CateringActivityTimeline activities={activities} loading={loadingActivity} />
+      </section>
 
       {message ? <p className="catering-message success">{message}</p> : null}
       {error ? <p className="catering-message error">{error}</p> : null}
@@ -307,6 +350,17 @@ export default function CateringRequestDetail({
                 step="0.01"
                 value={followup.estimatedValue}
                 onChange={(event) => setFollowup((current) => ({ ...current, estimatedValue: event.target.value }))}
+              />
+            </label>
+            <label>
+              Probabilidad (%)
+              <input
+                type="number"
+                min="0"
+                max="100"
+                step="1"
+                value={followup.winProbability}
+                onChange={(event) => setFollowup((current) => ({ ...current, winProbability: event.target.value }))}
               />
             </label>
             <label>

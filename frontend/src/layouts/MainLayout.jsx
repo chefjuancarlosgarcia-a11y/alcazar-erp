@@ -19,6 +19,7 @@ function MainLayout() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const isLegacyModule = ["/inventory", "/hr"].includes(location.pathname)
   const deviceClass = device.isMobile ? "device-mobile" : device.isTablet ? "device-tablet" : "device-desktop"
+  const showAccountHeader = Boolean(user)
 
   return (
     <div className={`app-layout ${deviceClass} ${device.isTouchDevice ? "device-touch" : ""}`}>
@@ -30,7 +31,7 @@ function MainLayout() {
         </>
       )}
       <div className="app-content">
-        {user && (
+        {showAccountHeader && (
           <header className="app-account-header">
             <div className="app-account-header-brand">
               <BrandLogo branding={branding} variant="header" showText={!device.isMobile} />

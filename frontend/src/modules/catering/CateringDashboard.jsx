@@ -1,17 +1,30 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { useAuth } from "../../context/AuthContext"
-import { getChecklistProfiles } from "../../services/checklistsService"
+import CateringAssigneeRanking from "./CateringAssigneeRanking"
+import CateringCommercialKpis from "./CateringCommercialKpis"
+import CateringPendingFollowups from "./CateringPendingFollowups"
 import CateringRequestDetail from "./CateringRequestDetail"
 import CateringRequestsList from "./CateringRequestsList"
 import {
+  getCateringAssignableProfiles,
+  getCateringAssigneeRanking,
+  getCateringPendingFollowups,
   getCateringPipelineSummary,
-  listCateringRequests
+  listCateringRequests,
+  syncCateringFollowupReminders
 } from "./cateringService"
 import { CONVERSION_STATUS_OPTIONS, matchesEventDate, matchesSearch } from "./cateringUtils"
 import "./Catering.css"
 
-const CATERING_ROLES = ["admin", "gerente_general", "gerente", "gerente_operaciones", "supervisor"]
+const CATERING_ROLES = [
+  "admin",
+  "gerente_general",
+  "gerente",
+  "gerente_operaciones",
+  "supervisor",
+  "ventas"
+]
 
 function currentMonthRange() {
   const now = new Date()
@@ -32,9 +45,13 @@ export default function CateringDashboard() {
   const [summaryFrom, setSummaryFrom] = useState(defaultRange.from)
   const [summaryTo, setSummaryTo] = useState(defaultRange.to)
   const [summary, setSummary] = useState(null)
+  const [ranking, setRanking] = useState(null)
+  const [pendingFollowups, setPendingFollowups] = useState([])
   const [requests, setRequests] = useState([])
   const [profiles, setProfiles] = useState([])
   const [loadingSummary, setLoadingSummary] = useState(true)
+  const [loadingRanking, setLoadingRanking] = useState(true)
+  const [loadingFollowups, setLoadingFollowups] = useState(true)
   const [loadingRequests, setLoadingRequests] = useState(true)
   const [error, setError] = useState("")
 
@@ -61,6 +78,21 @@ export default function CateringDashboard() {
     setLoadingSummary(false)
   }, [summaryFrom, summaryTo])
 
+  const loadRanking = useCallback(async () => {
+    setLoadingRanking(true)
+    const result = await getCateringAssigneeRanking(summaryFrom, summaryTo)
+    if (!result.error) setRanking(result.data)
+    setLoadingRanking(false)
+  }, [summaryFrom, summaryTo])
+
+  const loadFollowups = useCallback(async () => {
+    setLoadingFollowups(true)
+    await syncCateringFollowupReminders()
+    const result = await getCateringPendingFollowups()
+    if (!result.error) setPendingFollowups(result.data)
+    setLoadingFollowups(false)
+  }, [])
+
   const loadRequests = useCallback(async () => {
     setLoadingRequests(true)
     const result = await listCateringRequests({
@@ -76,7 +108,13 @@ export default function CateringDashboard() {
   useEffect(() => {
     if (!canAccess) return
     loadSummary()
-  }, [canAccess, loadSummary])
+    loadRanking()
+  }, [canAccess, loadSummary, loadRanking])
+
+  useEffect(() => {
+    if (!canAccess) return
+    loadFollowups()
+  }, [canAccess, loadFollowups])
 
   useEffect(() => {
     if (!canAccess) return
@@ -86,7 +124,7 @@ export default function CateringDashboard() {
   useEffect(() => {
     if (!canAccess) return
     async function loadProfiles() {
-      const result = await getChecklistProfiles()
+      const result = await getCateringAssignableProfiles()
       if (!result.error) setProfiles(result.data || [])
     }
     loadProfiles()
@@ -103,6 +141,8 @@ export default function CateringDashboard() {
   function handleUpdated(updatedRequest) {
     setRequests((current) => current.map((item) => (item.id === updatedRequest.id ? updatedRequest : item)))
     loadSummary()
+    loadRanking()
+    loadFollowups()
   }
 
   if (!canAccess) {
@@ -121,8 +161,8 @@ export default function CateringDashboard() {
       <header className="catering-header erp-module-header">
         <div>
           <p>Ventas</p>
-          <h1>Catering</h1>
-          <span>Solicitudes ingresadas desde Wix y seguimiento comercial del pipeline.</span>
+          <h1>Catering CRM</h1>
+          <span>Gestion comercial de leads desde Wix con SLA, pipeline y seguimiento.</span>
         </div>
       </header>
 
@@ -136,38 +176,30 @@ export default function CateringDashboard() {
             Hasta
             <input type="date" value={summaryTo} onChange={(event) => setSummaryTo(event.target.value)} />
           </label>
-          <button type="button" className="primary" onClick={loadSummary} disabled={loadingSummary}>
+          <button
+            type="button"
+            className="primary"
+            onClick={() => {
+              loadSummary()
+              loadRanking()
+            }}
+            disabled={loadingSummary}
+          >
             {loadingSummary ? "Actualizando..." : "Actualizar KPIs"}
           </button>
         </div>
       </section>
 
-      <section className="catering-kpi-grid">
-        <article className="catering-kpi-card">
-          <span>Total leads</span>
-          <strong>{summary?.total_leads ?? (loadingSummary ? "…" : 0)}</strong>
-        </article>
-        <article className="catering-kpi-card">
-          <span>Leads nuevos</span>
-          <strong>{summary?.new_leads ?? (loadingSummary ? "…" : 0)}</strong>
-        </article>
-        <article className="catering-kpi-card">
-          <span>Cotizados</span>
-          <strong>{summary?.quoted_leads ?? (loadingSummary ? "…" : 0)}</strong>
-        </article>
-        <article className="catering-kpi-card">
-          <span>Aprobados</span>
-          <strong>{summary?.approved_leads ?? (loadingSummary ? "…" : 0)}</strong>
-        </article>
-        <article className="catering-kpi-card">
-          <span>Perdidos</span>
-          <strong>{summary?.lost_leads ?? (loadingSummary ? "…" : 0)}</strong>
-        </article>
-        <article className="catering-kpi-card">
-          <span>Tasa conversion</span>
-          <strong>{summary ? `${Number(summary.conversion_rate || 0).toFixed(1)}%` : loadingSummary ? "…" : "0%"}</strong>
-        </article>
-      </section>
+      <CateringCommercialKpis summary={summary} loading={loadingSummary} />
+
+      <div className="catering-widgets-grid">
+        <CateringPendingFollowups
+          items={pendingFollowups}
+          loading={loadingFollowups}
+          onSelect={handleSelectRequest}
+        />
+        <CateringAssigneeRanking ranking={ranking} loading={loadingRanking} />
+      </div>
 
       <section className="catering-panel catering-filters">
         <h2>Filtros</h2>
