@@ -1,11 +1,21 @@
 import { supabase } from "../lib/supabase"
 
-export async function getNotifications() {
-  return supabase
-    .from("notifications")
-    .select("*")
-    .order("created_at", { ascending: false })
-    .limit(50)
+export async function getNotifications(limit = 100) {
+  const { data, error } = await supabase.rpc("get_my_notifications", {
+    p_limit: limit
+  })
+
+  if (error) {
+    const fallback = await supabase
+      .from("notifications")
+      .select("*")
+      .order("is_read", { ascending: true })
+      .order("created_at", { ascending: false })
+      .limit(limit)
+    return fallback
+  }
+
+  return { data: Array.isArray(data) ? data : [], error: null }
 }
 
 export async function markNotificationRead(id) {

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
+import useSupabaseRealtime from "../hooks/useSupabaseRealtime"
 import { getNotifications, markNotificationRead } from "../services/notificationsService"
 import {
   buildPurchaseOrderNotificationUrl,
@@ -23,7 +24,7 @@ function NotificationsBell({ currentUser }) {
   const [error, setError] = useState("")
 
   const loadNotifications = useCallback(async () => {
-    const { data, error: queryError } = await getNotifications()
+    const { data, error: queryError } = await getNotifications(100)
     if (queryError) {
       setError("No se pudieron cargar las notificaciones.")
       return
@@ -31,6 +32,13 @@ function NotificationsBell({ currentUser }) {
     setError("")
     setNotifications(data || [])
   }, [])
+
+  useSupabaseRealtime({
+    table: "notifications",
+    event: "INSERT",
+    enabled: Boolean(currentUser?.id),
+    onChange: loadNotifications
+  })
 
   useEffect(() => {
     const initialLoad = window.setTimeout(loadNotifications, 0)

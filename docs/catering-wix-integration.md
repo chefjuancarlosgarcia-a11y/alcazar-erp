@@ -555,7 +555,7 @@ Al crear una solicitud via `create_catering_request` (Wix Edge Function o ERP), 
 
 **Resiliencia:** si falla el envío de notificaciones, el lead **sí se guarda**. El error se registra como `WARNING` en PostgreSQL (`notify_new_catering_request`).
 
-**Frontend:** la campanita (`NotificationsBell`) abre `/catering?id=…` con botón **Ver solicitud**.
+**Frontend:** la campanita (`NotificationsBell`) abre `/catering?id=…` con botón **Ver solicitud**. Lectura via RPC `get_my_notifications` (migración `085`).
 
 ---
 
@@ -620,6 +620,7 @@ Pendiente además: plantillas PDF, WhatsApp/correo, frontend ERP, integración `
 | `supabase/schema/082_catering_requests.sql` | Tabla base, RLS, RPCs iniciales |
 | `supabase/schema/083_catering_pipeline_phase_1_5.sql` | Pipeline comercial, RPCs CRM |
 | `supabase/schema/084_catering_request_notifications.sql` | Notificaciones al crear solicitud |
+| `supabase/schema/085_notifications_read_rpc.sql` | RPC `get_my_notifications` + RLS normalizado |
 | `docs/catering-phase-2-architecture.md` | Diseño Fase 2 (solo documentación) |
 | `supabase/functions/wix-catering-request/index.ts` | Webhook Wix |
 | `docs/examples/wix-catering-payload.example.json` | Payload de ejemplo |
