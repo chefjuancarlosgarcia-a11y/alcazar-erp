@@ -1,6 +1,7 @@
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
 import { buildCompanyFooterLines } from "./cateringQuoteSettings"
+import { detectImageFormat, loadQuoteLogoDataUrl, resolveQuoteLogoUrl } from "./cateringQuoteLogo"
 import { PDF_FONT_FAMILY, registerPdfFonts, setPdfFont } from "./cateringQuotePdfFonts"
 import {
   repairCateringCompanySettings,
@@ -16,46 +17,28 @@ const ACCENT = [20, 184, 166]
 const INK = [15, 23, 42]
 const MUTED = [100, 116, 139]
 
-async function loadImageDataUrl(url) {
-  if (!url) return null
-  try {
-    const response = await fetch(url)
-    if (!response.ok) return null
-    const blob = await response.blob()
-    return await new Promise((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve(reader.result)
-      reader.onerror = reject
-      reader.readAsDataURL(blob)
-    })
-  } catch {
-    return null
-  }
-}
-
-function detectImageFormat(dataUrl) {
-  if (String(dataUrl).includes("image/jpeg") || String(dataUrl).includes("image/jpg")) return "JPEG"
-  if (String(dataUrl).includes("image/webp")) return "WEBP"
-  if (String(dataUrl).includes("image/svg")) return "SVG"
-  return "PNG"
-}
-
-async function addLogo(doc, logoUrl, x, y, width = 28, height = 18) {
-  const dataUrl = await loadImageDataUrl(logoUrl)
+async function addLogo(doc, logoUrl, x, y, width = 30, height = 22) {
+  const dataUrl = await loadQuoteLogoDataUrl(logoUrl)
   if (!dataUrl) return false
+
+  doc.setFillColor(255, 255, 255)
+  doc.roundedRect(x - 2, y - 2, width + 4, height + 4, 2, 2, "F")
+
   try {
-    doc.addImage(dataUrl, detectImageFormat(dataUrl), x, y, width, height)
+    doc.addImage(dataUrl, detectImageFormat(dataUrl, logoUrl), x, y, width, height)
     return true
   } catch {
     return false
   }
 }
 
-function addHeader(doc, quoteNumber, company, hasLogo) {
+function paintHeaderBand(doc) {
   doc.setFillColor(...ACCENT)
   doc.rect(0, 0, 210, 36, "F")
+}
 
-  const textX = hasLogo ? 46 : 14
+function paintHeaderText(doc, quoteNumber, company, hasLogo) {
+  const textX = hasLogo ? 50 : 14
 
   doc.setTextColor(255, 255, 255)
   setPdfFont(doc, "bold")
@@ -78,6 +61,11 @@ function addHeader(doc, quoteNumber, company, hasLogo) {
   setPdfFont(doc, "normal")
   doc.setFontSize(9)
   doc.text(`Generada: ${new Date().toLocaleString("es-GT")}`, 196, 21, { align: "right" })
+}
+
+async function paintQuoteLogo(doc, logoUrl) {
+  if (!logoUrl) return false
+  return addLogo(doc, logoUrl, 14, 9, 30, 22)
 }
 
 function addSectionTitle(doc, title, y) {
@@ -134,18 +122,26 @@ function addCompanyFooter(doc, company, startY) {
   return y
 }
 
-export async function downloadCateringQuotePdf({ quote, items = [], request = {}, company = {} }) {
+export async function downloadCateringQuotePdf({
+  quote,
+  items = [],
+  request = {},
+  company = {},
+  branding = {}
+}) {
   const doc = new jsPDF()
   await registerPdfFonts(doc)
 
   const quoteRow = repairCateringQuote(quote || {})
   const requestRow = repairCateringRequest(request || {})
   const companyRow = repairCateringCompanySettings(company || {})
+  const logoUrl = resolveQuoteLogoUrl(companyRow, { ...branding, ...companyRow })
   const safeItems = repairCateringQuoteItems(items || [])
   const quoteNumber = repairSpanishText(quoteRow.quote_number || "cotizacion")
 
-  const hasLogo = await addLogo(doc, companyRow.logoUrl, 14, 9, 28, 18)
-  addHeader(doc, quoteNumber, companyRow, hasLogo)
+  paintHeaderBand(doc)
+  const hasLogo = await paintQuoteLogo(doc, logoUrl)
+  paintHeaderText(doc, quoteNumber, companyRow, hasLogo)
 
   let y = 44
   y = addSectionTitle(doc, "Cliente", y)

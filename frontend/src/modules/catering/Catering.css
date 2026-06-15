@@ -783,18 +783,19 @@
 }
 
 .catering-quote-preview__logo {
-  width: 56px;
-  height: 56px;
+  width: 72px;
+  height: 72px;
   object-fit: contain;
   border-radius: 8px;
   background: #f8fafc;
+  border: 1px solid #e2e8f0;
 }
 
 .catering-quote-preview__logo-placeholder {
   display: grid;
   place-items: center;
-  width: 56px;
-  height: 56px;
+  width: 72px;
+  height: 72px;
   border-radius: 8px;
   background: #e2e8f0;
   color: #64748b;

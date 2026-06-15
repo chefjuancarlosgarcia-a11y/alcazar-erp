@@ -1,6 +1,9 @@
 import { supabase } from "../../lib/supabase"
 import { DEFAULT_QUOTE_TERMS } from "./cateringQuoteTemplates"
 import { repairCateringCompanySettings } from "./cateringTextEncoding"
+import { resolveQuoteLogoUrl } from "./cateringQuoteLogo"
+
+export { resolveQuoteLogoUrl } from "./cateringQuoteLogo"
 
 const BRANDING_BUCKET = "branding-assets"
 const ALLOWED_LOGO_TYPES = ["image/png", "image/jpeg", "image/jpg", "image/svg+xml", "image/webp"]
@@ -71,15 +74,17 @@ export async function uploadCateringQuoteLogo(file) {
 }
 
 export function mergeQuoteSettings(quoteSettings, branding = {}) {
-  const brandingLogo = branding.logoUrl || branding.logo_url || ""
-  return {
+  const merged = {
     ...DEFAULT_QUOTE_SETTINGS,
     ...quoteSettings,
-    logoUrl: quoteSettings?.logoUrl ?? brandingLogo,
     commercialName:
       quoteSettings?.commercialName
       || branding.commercialName
       || branding.appName
       || DEFAULT_QUOTE_SETTINGS.commercialName
+  }
+  return {
+    ...merged,
+    logoUrl: resolveQuoteLogoUrl(merged, branding)
   }
 }

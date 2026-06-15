@@ -230,7 +230,8 @@ export default function CateringQuoteModal({ open, request, quoteId = null, onCl
         total_price: item.quantity * item.unit_price
       })),
       request: safeRequest,
-      company
+      company,
+      branding
     })
   }
 
