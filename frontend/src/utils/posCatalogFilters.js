@@ -22,3 +22,51 @@ export function catalogStatusLabel(state) {
   if (state.productionReady) return "Listo KDS"
   return "Pendiente KDS"
 }
+
+function normalizeSearchQuery(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+}
+
+function recipeIngredientNames(recipe) {
+  return (recipe?.ingredients || recipe?.recipe_ingredients || [])
+    .map((ingredient) => ingredient?.item?.name || ingredient?.inventory_item?.name || ingredient?.name || "")
+    .filter(Boolean)
+}
+
+export function buildProductSearchHaystack(product, recipe = null) {
+  return [
+    product?.nombre,
+    product?.name,
+    product?.description,
+    product?.descripcion,
+    product?.categoria,
+    product?.categoryName,
+    product?.category_name,
+    product?.sku,
+    product?.codigo,
+    product?.code,
+    product?.id,
+    ...recipeIngredientNames(recipe)
+  ]
+    .filter(Boolean)
+    .join(" ")
+}
+
+export function matchesPosProductQuickSearch(product, query, recipe = null) {
+  const normalizedQuery = normalizeSearchQuery(query)
+  if (!normalizedQuery) return false
+  const haystack = normalizeSearchQuery(buildProductSearchHaystack(product, recipe))
+  return haystack.includes(normalizedQuery)
+}
+
+export function filterPosProductQuickSearch(items, query, getRecipe, limit = 12) {
+  const normalizedQuery = normalizeSearchQuery(query)
+  if (!normalizedQuery) return []
+  return items
+    .filter((item) => matchesPosProductQuickSearch(item, normalizedQuery, getRecipe?.(item)))
+    .slice(0, limit)
+}

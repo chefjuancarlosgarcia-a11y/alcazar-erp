@@ -1,13 +1,18 @@
+import PosProductQuickSearch from "./PosProductQuickSearch"
+
 export default function PosServiceTerminal({
   notices,
   categories,
   activeCategoryId,
   onSelectCategory,
-  showSearch,
-  onToggleSearch,
-  productSearch,
-  onProductSearchChange,
-  searchInputRef,
+  quickSearchRef,
+  searchItems,
+  getSearchRecipe,
+  getSearchItemState,
+  getProductBasePrice,
+  productCategoryId,
+  posCategories,
+  onQuickSearchAdd,
   salesChannel,
   salesChannelLabel,
   salesChannels,
@@ -31,41 +36,34 @@ export default function PosServiceTerminal({
       {notices}
 
       <header className="pos-classic-topbar">
-        <div className="pos-classic-categories" role="tablist" aria-label="Categorías del menú">
-          {categories.map((category) => (
-            <button
-              key={category.id}
-              type="button"
-              role="tab"
-              aria-selected={activeCategoryId === category.id}
-              className={`pos-classic-category${activeCategoryId === category.id ? " active" : ""}${category.isPizza ? " pizza" : ""}`}
-              style={{ "--pos-cat-color": category.color || "#0d9488" }}
-              onClick={() => onSelectCategory(category.id)}
-            >
-              {category.icon && <span className="pos-classic-category-icon">{category.icon}</span>}
-              <span className="pos-classic-category-label">{category.name}</span>
-            </button>
-          ))}
-        </div>
-        <button
-          type="button"
-          className={`pos-classic-search-toggle${showSearch ? " active" : ""}`}
-          onClick={onToggleSearch}
-        >
-          Buscar
-        </button>
-        {showSearch && (
-          <div className="pos-classic-search-field">
-            <input
-              ref={searchInputRef}
-              type="search"
-              placeholder="Buscar producto..."
-              value={productSearch}
-              onChange={(event) => onProductSearchChange(event.target.value)}
-              autoFocus
+        <div className="pos-classic-topbar-row">
+          <div className="pos-classic-categories" role="tablist" aria-label="Categorías del menú">
+            {categories.map((category) => (
+              <button
+                key={category.id}
+                type="button"
+                role="tab"
+                aria-selected={activeCategoryId === category.id}
+                className={`pos-classic-category${activeCategoryId === category.id ? " active" : ""}${category.isPizza ? " pizza" : ""}`}
+                style={{ "--pos-cat-color": category.color || "#0d9488" }}
+                onClick={() => onSelectCategory(category.id)}
+              >
+                {category.icon && <span className="pos-classic-category-icon">{category.icon}</span>}
+                <span className="pos-classic-category-label">{category.name}</span>
+              </button>
+            ))}
+            <PosProductQuickSearch
+              ref={quickSearchRef}
+              items={searchItems}
+              getRecipe={getSearchRecipe}
+              getItemState={getSearchItemState}
+              getProductBasePrice={getProductBasePrice}
+              productCategoryId={productCategoryId}
+              posCategories={posCategories}
+              onAddProduct={onQuickSearchAdd}
             />
           </div>
-        )}
+        </div>
       </header>
 
       <div className="pos-classic-main">

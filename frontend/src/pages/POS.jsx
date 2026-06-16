@@ -685,7 +685,6 @@ function POS() {
   const [editingCategoryId, setEditingCategoryId] = useState("")
   const [categoryError, setCategoryError] = useState("")
   const [categoriaActiva, setCategoriaActiva] = useState("entradas")
-  const [productSearch, setProductSearch] = useState("")
   const [orden, setOrden] = useState([])
   const [ordenesEnviadas, setOrdenesEnviadas] = useState([])
   const [currentOrder, setCurrentOrder] = useState(null)
@@ -723,7 +722,6 @@ function POS() {
   const [posStep, setPosStep] = useState(1)
   const [mesaCargando, setMesaCargando] = useState(false)
   const [showProductCatalog, setShowProductCatalog] = useState(false)
-  const [showPosSearch, setShowPosSearch] = useState(false)
   const [seatNames, setSeatNames] = useState(["Persona 1"])
   const [selectedAssignment, setSelectedAssignment] = useState("Mesa completa")
   const [deliveryForm, setDeliveryForm] = useState(emptyDeliveryForm)
@@ -754,7 +752,7 @@ function POS() {
   const [showTechnicalAudit, setShowTechnicalAudit] = useState(false)
   const [collapsedOrderSections, setCollapsedOrderSections] = useState({ served: true, closed: true, activity: true, previous: true, audit: true })
   const realtimeNoticeTimerRef = useRef(null)
-  const productSearchRef = useRef(null)
+  const quickSearchRef = useRef(null)
   const activeOrderIdRef = useRef("")
   const ordenMesaRef = useRef(null)
   const draftItemsRef = useRef([])
@@ -780,13 +778,16 @@ function POS() {
   )
   const finalRecipes = standardRecipes.filter((recipe) => recipe.recipe_type === "final_product" && recipe.active !== false)
   const itemsCategoria = useMemo(
-    () => items.filter((item) => {
-      const matchesCategory = !productSearch.trim() || productCategoryId(item) === categoriaActiva
-      const matchesSearch = !productSearch.trim() || normalizarTexto(item.nombre || item.name).includes(normalizarTexto(productSearch))
-      return matchesCategory && matchesSearch && getProductProductionState(item, finalRecipes, productionAreas, activeCategories).productionReady
-    }),
-    [items, categoriaActiva, productSearch, finalRecipes, productionAreas, activeCategories]
+    () => items.filter((item) =>
+      productCategoryId(item) === categoriaActiva
+      && getProductProductionState(item, finalRecipes, productionAreas, activeCategories).productionReady
+    ),
+    [items, categoriaActiva, finalRecipes, productionAreas, activeCategories]
   )
+  const getSearchRecipe = useCallback((product) => {
+    const recipeId = productRecipeId(product)
+    return finalRecipes.find((recipe) => String(recipe.id) === String(recipeId)) || product.recipe || null
+  }, [finalRecipes])
   const totalOrden = Number(currentOrder?.total ?? orden.reduce((total, item) => total + item.precio * item.cantidad, 0))
   const draftItems = orden.filter((item) => (item.status || "draft") === "draft")
   const sentItems = orden.filter((item) => !["draft", "cancelled"].includes(item.status || "draft"))
@@ -1947,7 +1948,7 @@ function POS() {
       setShowDeliveryModal(false)
       setPosStep(3)
       setOrdenMessage("Listo para agregar productos.")
-      window.setTimeout(() => productSearchRef.current?.focus(), 80)
+      window.setTimeout(() => quickSearchRef.current?.focus(), 80)
     } catch (error) {
       setOrdenError(`No se pudo crear el pedido delivery: ${error.message}`)
     } finally {
@@ -2389,8 +2390,49 @@ function POS() {
     })
   }
 
+  function productNeedsQuickConfiguration(item) {
+    const type = item?.productType || item?.product_type
+    return type === "pizza"
+      || getActiveProductModifiers(item).length > 0
+      || item?.allowKitchenNotes === true
+      || item?.allow_kitchen_notes === true
+  }
+
+  async function handleQuickSearchAdd(product, quantity = 1) {
+    setShowProductCatalog(true)
+    if (!ordenMesa) {
+      setOrdenError("Selecciona una mesa o tipo de orden antes de agregar productos.")
+      return false
+    }
+    if (product.estado !== "activo") {
+      setOrdenError("Este producto no está disponible.")
+      return false
+    }
+    const productionState = getProductProductionState(product, finalRecipes, productionAreas, activeCategories)
+    if (!productionState.productionReady) {
+      setOrdenError(`Producto ${product.nombre} no está listo para producción: ${productionState.issues.join(", ")}.`)
+      return false
+    }
+    if (mesaBloqueadaPorCobro) {
+      setOrdenError("Esta mesa está en proceso de cobro. Devuelve la precuenta antes de agregar productos.")
+      return false
+    }
+    if (productNeedsQuickConfiguration(product)) {
+      agregarAOrden(product)
+      return true
+    }
+    return await confirmarAgregarItem(product, quantity)
+  }
+
   function agregarAOrden(item) {
-    if (item.estado !== "activo") return
+    if (!ordenMesa) {
+      setOrdenError("Selecciona una mesa o tipo de orden antes de agregar productos.")
+      return
+    }
+    if (item.estado !== "activo") {
+      setOrdenError("Este producto no está disponible.")
+      return
+    }
     const productionState = getProductProductionState(item, finalRecipes, productionAreas, activeCategories)
     if (!productionState.productionReady) {
       setOrdenError(`Producto ${item.nombre} no está listo para producción: ${productionState.issues.join(", ")}.`)
@@ -2410,17 +2452,18 @@ function POS() {
     abrirConfiguracionProducto(item)
   }
 
-  async function confirmarAgregarItem(productOverride = itemPendiente) {
+  async function confirmarAgregarItem(productOverride = itemPendiente, quantity = 1) {
     const productToAdd = productOverride || itemPendiente
-    if (!productToAdd) return
+    if (!productToAdd) return false
+    const safeQuantity = Math.max(1, Number(quantity) || 1)
     if (!ordenMesa) {
-      setOrdenError("Selecciona una mesa antes de agregar productos.")
-      return
+      setOrdenError("Selecciona una mesa o tipo de orden antes de agregar productos.")
+      return false
     }
     const selectedVariant = (productToAdd.variants || []).find((variant) => String(variant.id) === String(configuracionPendiente.variantId))
     if ((productToAdd.productType || productToAdd.product_type) === "pizza" && !selectedVariant) {
       setOrdenError("Selecciona un tamaño de pizza antes de agregarla.")
-      return
+      return false
     }
     const assignment = selectedAssignment || "Mesa completa"
     const selectedModifiers = getActiveProductModifiers(productToAdd).filter((modifier) => configuracionPendiente.modifierKeys.includes(String(modifier.id || `${modifier.modifierType}-${modifier.name}`)))
@@ -2479,10 +2522,10 @@ function POS() {
         && ordenItem.status === "draft"
       )
       if (existe) {
-        const result = await updateOrderItemQuantity(existe.lineId, existe.cantidad + 1, existe.precio)
+        const result = await updateOrderItemQuantity(existe.lineId, existe.cantidad + safeQuantity, existe.precio)
         if (result.error) throw new Error(result.message || result.error.message)
       } else {
-        const result = await addItemToOrder(orderId, productToAdd, 1, {
+        const result = await addItemToOrder(orderId, productToAdd, safeQuantity, {
           notes: notas,
           modifiers: modifierLabels,
           unitPrice: finalUnitPrice,
@@ -2504,16 +2547,17 @@ function POS() {
       setItemPendiente(null)
       setConfiguracionPendiente({ variantId: "", modifierKeys: [], customNote: "" })
     }
-    if (!itemSaved) return
+    if (!itemSaved) return false
     setOrdenMessage("Producto agregado.")
     setOrdenError("")
     posDebug("orderItem creado", {
       productId: productToAdd.id,
       recipeId: productRecipeId(productToAdd),
       productionAreaId: productProductionAreaId(productToAdd),
-      cantidad: 1,
+      cantidad: safeQuantity,
       mesa: ordenMesa
     })
+    return true
   }
 
   async function handleChangeQuantity(lineId, delta) {
@@ -3751,11 +3795,11 @@ function POS() {
             setCategoriaActiva={setCategoriaActiva}
             setShowProductCatalog={setShowProductCatalog}
             showProductCatalog={showProductCatalog}
-            showPosSearch={showPosSearch}
-            setShowPosSearch={setShowPosSearch}
-            productSearch={productSearch}
-            setProductSearch={setProductSearch}
-            productSearchRef={productSearchRef}
+            quickSearchRef={quickSearchRef}
+            searchItems={items}
+            getSearchRecipe={getSearchRecipe}
+            getSearchItemState={getCatalogItemState}
+            onQuickSearchAdd={handleQuickSearchAdd}
             salesChannel={salesChannel}
             SALES_CHANNELS={SALES_CHANNELS}
             seleccionarCanalVenta={seleccionarCanalVenta}

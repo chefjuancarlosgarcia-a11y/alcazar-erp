@@ -15,11 +15,11 @@ export default function PosClassicOperation({
   setCategoriaActiva,
   showProductCatalog,
   setShowProductCatalog,
-  showPosSearch,
-  setShowPosSearch,
-  productSearch,
-  setProductSearch,
-  productSearchRef,
+  quickSearchRef,
+  searchItems,
+  getSearchRecipe,
+  getSearchItemState,
+  onQuickSearchAdd,
   salesChannel,
   SALES_CHANNELS,
   seleccionarCanalVenta,
@@ -127,15 +127,14 @@ export default function PosClassicOperation({
         categories={classicCategories}
         activeCategoryId={categoriaActiva}
         onSelectCategory={(categoryId) => { setCategoriaActiva(categoryId); setShowProductCatalog(true) }}
-        showSearch={showPosSearch}
-        onToggleSearch={() => setShowPosSearch((current) => {
-          const next = !current
-          if (next) setShowProductCatalog(true)
-          return next
-        })}
-        productSearch={productSearch}
-        onProductSearchChange={(value) => { setProductSearch(value); if (value.trim()) setShowProductCatalog(true) }}
-        searchInputRef={productSearchRef}
+        quickSearchRef={quickSearchRef}
+        searchItems={searchItems}
+        getSearchRecipe={getSearchRecipe}
+        getSearchItemState={getSearchItemState}
+        getProductBasePrice={getProductBasePrice}
+        productCategoryId={productCategoryId}
+        posCategories={posCategories}
+        onQuickSearchAdd={onQuickSearchAdd}
         salesChannel={salesChannel}
         salesChannelLabel={(SALES_CHANNELS.find((c) => c.id === salesChannel) || SALES_CHANNELS[0]).label}
         salesChannels={SALES_CHANNELS}
