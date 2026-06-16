@@ -125,6 +125,14 @@ export default function ExpedientesDashboard() {
         <KpiCard label="Expedientes completos" value={loadingDashboard ? "…" : dashboard?.complete_files} tone="green" />
       </section>
 
+      <section className="expediente-kpi-grid expediente-kpi-grid--discipline">
+        <KpiCard label="Llamadas de atencion" value={loadingDashboard ? "…" : dashboard?.verbal_warnings} tone="yellow" />
+        <KpiCard label="Memorandums" value={loadingDashboard ? "…" : dashboard?.memorandums} tone="orange" />
+        <KpiCard label="Suspensiones" value={loadingDashboard ? "…" : dashboard?.suspensions} tone="red" />
+        <KpiCard label="Reincidencias" value={loadingDashboard ? "…" : dashboard?.recurrences} tone="orange" />
+        <KpiCard label="Incidentes abiertos" value={loadingDashboard ? "…" : dashboard?.open_incidents} tone="red" />
+      </section>
+
       {showReports ? <ExpedientesReports onClose={() => setShowReports(false)} /> : null}
 
       <section className="expediente-panel expediente-filters">

@@ -10,9 +10,12 @@ function result(data, error = null) {
   return { data, error: error ? message(error) : "" }
 }
 
-function migrationHint(error, needsDocumentUx = false) {
+function migrationHint(error, needsDocumentUx = false, needsDiscipline = false) {
   const text = message(error).toLowerCase()
-  if (text.includes("could not find the function") || text.includes("does not exist") || text.includes("no_expires")) {
+  if (text.includes("could not find the function") || text.includes("does not exist") || text.includes("no_expires") || text.includes("employee_incidents")) {
+    if (needsDiscipline) {
+      return "Aplica las migraciones 090-093 en Supabase antes de usar disciplina e incidentes."
+    }
     if (needsDocumentUx) {
       return "Aplica las migraciones 090, 091 y 092 en Supabase antes de usar esta funcion."
     }
@@ -144,4 +147,68 @@ export async function removeEmployeeFileCurrent(profileId, fileTypeCode) {
     p_file_type_code: fileTypeCode
   })
   return result(data, error ? migrationHint(error, true) : null)
+}
+
+export async function getDisciplineDetail(profileId) {
+  const { data, error } = await supabase.rpc("get_employee_discipline_detail", {
+    p_profile_id: profileId
+  })
+  return result(data, error ? migrationHint(error, false, true) : null)
+}
+
+export async function saveIncident(profileId, payload) {
+  const { data, error } = await supabase.rpc("upsert_employee_incident", {
+    p_profile_id: profileId,
+    p_data: payload
+  })
+  return result(data, error ? migrationHint(error, false, true) : null)
+}
+
+export async function closeIncident(incidentId, closureSummary = null) {
+  const { data, error } = await supabase.rpc("close_employee_incident", {
+    p_incident_id: incidentId,
+    p_closure_summary: closureSummary
+  })
+  return result(data, error ? migrationHint(error, false, true) : null)
+}
+
+export async function saveDisciplinaryAction(profileId, payload) {
+  const { data, error } = await supabase.rpc("upsert_disciplinary_action", {
+    p_profile_id: profileId,
+    p_data: payload
+  })
+  return result(data, error ? migrationHint(error, false, true) : null)
+}
+
+export async function uploadIncidentEvidence({ profileId, incidentId, file, description = null }) {
+  if (!file) return result(null, "Selecciona un archivo de evidencia.")
+  const path = `${profileId}/incidents/${incidentId}/${Date.now()}-${safeFileName(file.name)}`
+  const { error: uploadError } = await supabase.storage.from(BUCKET).upload(path, file, {
+    cacheControl: "3600",
+    contentType: file.type || undefined,
+    upsert: false
+  })
+  if (uploadError) return result(null, uploadError)
+
+  const { data, error } = await supabase.rpc("register_incident_evidence", {
+    p_incident_id: incidentId,
+    p_storage_path: path,
+    p_file_name: file.name,
+    p_mime_type: file.type || null,
+    p_file_size: file.size || null,
+    p_description: description
+  })
+  return result(data, error ? migrationHint(error, false, true) : null)
+}
+
+export async function uploadDisciplinaryDocument({ profileId, file }) {
+  if (!file) return result(null, "Selecciona un documento.")
+  const path = `${profileId}/discipline/${Date.now()}-${safeFileName(file.name)}`
+  const { error: uploadError } = await supabase.storage.from(BUCKET).upload(path, file, {
+    cacheControl: "3600",
+    contentType: file.type || undefined,
+    upsert: false
+  })
+  if (uploadError) return result(null, uploadError)
+  return result({ storagePath: path, fileName: file.name }, null)
 }

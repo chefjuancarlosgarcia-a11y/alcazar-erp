@@ -54,6 +54,10 @@
   .expediente-kpi-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
+
+  .expediente-kpi-grid--discipline {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
 }
 
 .expediente-kpi {
@@ -645,4 +649,196 @@
 .expediente-history-card p {
   margin: var(--erp-space-8) 0 0;
   color: var(--erp-text-secondary, #94a3b8);
+}
+
+.expediente-discipline__head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--erp-space-12);
+  margin-bottom: var(--erp-space-16);
+}
+
+.expediente-discipline__head h3 {
+  margin: 0 0 var(--erp-space-4);
+}
+
+.expediente-discipline__hint {
+  margin: 0;
+  color: var(--erp-text-secondary, #94a3b8);
+  font-size: 13px;
+}
+
+.expediente-discipline__head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--erp-space-8);
+}
+
+.expediente-discipline-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--erp-space-12);
+  margin-bottom: var(--erp-space-16);
+}
+
+@media (min-width: 760px) {
+  .expediente-discipline-kpi-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1100px) {
+  .expediente-discipline-kpi-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}
+
+.expediente-discipline-kpi {
+  padding: var(--erp-space-12);
+  border: 1px solid var(--erp-border, #334155);
+  border-radius: var(--erp-radius-badge);
+  background: #0b1424;
+}
+
+.expediente-discipline-kpi span {
+  display: block;
+  font-size: 11px;
+  color: var(--erp-text-secondary, #94a3b8);
+  margin-bottom: 4px;
+}
+
+.expediente-discipline-kpi strong {
+  font-size: 22px;
+}
+
+.expediente-discipline-kpi--yellow { border-color: rgba(234, 179, 8, 0.35); }
+.expediente-discipline-kpi--orange { border-color: rgba(249, 115, 22, 0.35); }
+.expediente-discipline-kpi--red { border-color: rgba(239, 68, 68, 0.35); }
+
+.expediente-discipline-form {
+  display: grid;
+  gap: var(--erp-space-12);
+  margin-bottom: var(--erp-space-16);
+  padding: var(--erp-space-16);
+  border: 1px solid var(--erp-border, #334155);
+  border-radius: var(--erp-radius-card);
+  background: rgba(15, 23, 42, 0.65);
+}
+
+.expediente-discipline-form h4 {
+  margin: 0;
+}
+
+.expediente-discipline-block {
+  display: grid;
+  gap: var(--erp-space-12);
+  margin-bottom: var(--erp-space-20);
+}
+
+.expediente-discipline-block h4 {
+  margin: 0;
+}
+
+.expediente-discipline-list {
+  display: grid;
+  gap: var(--erp-space-12);
+}
+
+.expediente-discipline-card {
+  display: grid;
+  gap: var(--erp-space-10);
+  padding: var(--erp-space-16);
+  border: 1px solid var(--erp-border, #334155);
+  border-radius: var(--erp-radius-card);
+  background: #0b1424;
+  min-width: 0;
+}
+
+.expediente-discipline-card--permanent {
+  border-left: 3px solid #14b8a6;
+}
+
+.expediente-discipline-card--closed {
+  opacity: 0.92;
+  border-style: dashed;
+}
+
+.expediente-discipline-card header {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--erp-space-8);
+  align-items: flex-start;
+}
+
+.expediente-discipline-card header strong {
+  display: block;
+}
+
+.expediente-discipline-card header small {
+  color: var(--erp-text-secondary, #94a3b8);
+}
+
+.expediente-discipline-card p {
+  margin: 0;
+  color: var(--erp-text-secondary, #94a3b8);
+  white-space: pre-wrap;
+}
+
+.expediente-discipline-card__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--erp-space-6);
+  justify-content: flex-end;
+}
+
+.expediente-discipline-nested {
+  font-size: 13px;
+  color: var(--erp-text-secondary, #94a3b8);
+}
+
+.expediente-discipline-nested ul {
+  margin: var(--erp-space-6) 0 0;
+  padding-left: var(--erp-space-16);
+}
+
+.expediente-discipline__related,
+.expediente-discipline__closure {
+  font-size: 13px;
+}
+
+.expediente-discipline-close {
+  display: grid;
+  gap: var(--erp-space-8);
+  padding-top: var(--erp-space-8);
+  border-top: 1px solid var(--erp-border, #334155);
+}
+
+.expediente-discipline-close label {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.expediente-discipline-close input {
+  min-height: 40px;
+  padding: 0 var(--erp-space-12);
+  border: 1px solid var(--erp-border, #334155);
+  border-radius: var(--erp-radius-badge);
+  background: #0f172a;
+  color: var(--erp-text-primary, #f8fafc);
+}
+
+.expediente-link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: #5eead4;
+  cursor: pointer;
+  text-decoration: underline;
+  font: inherit;
+}
+
+.expediente-tabs {
+  flex-wrap: wrap;
 }

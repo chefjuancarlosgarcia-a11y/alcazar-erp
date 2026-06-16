@@ -41,6 +41,7 @@ export const TAB_ITEMS = [
   { id: "recruitment", label: "Reclutamiento" },
   { id: "background", label: "Antecedentes" },
   { id: "health", label: "Salud" },
+  { id: "discipline", label: "Disciplina e Incidentes" },
   { id: "history", label: "Historial laboral" }
 ]
 
@@ -49,6 +50,49 @@ export const FILE_TYPES_BY_TAB = {
   recruitment: ["cv", "recommendation", "id_photo"],
   background: ["criminal_record", "police_record"],
   health: ["medical_certificate", "health_card", "food_handling"]
+}
+
+export const INCIDENT_CATEGORIES = {
+  attendance: "Asistencia",
+  conduct: "Conducta",
+  performance: "Desempeno",
+  safety: "Seguridad",
+  policy: "Politicas internas",
+  other: "Otro"
+}
+
+export const INCIDENT_SEVERITIES = {
+  low: { label: "Baja", tone: "neutral" },
+  medium: { label: "Media", tone: "yellow" },
+  high: { label: "Alta", tone: "orange" },
+  critical: { label: "Critica", tone: "red" }
+}
+
+export const INCIDENT_STATUSES = {
+  open: { label: "Abierto", tone: "red" },
+  under_review: { label: "En revision", tone: "yellow" },
+  closed: { label: "Cerrado", tone: "neutral" }
+}
+
+export const DISCIPLINARY_ACTION_TYPES = {
+  verbal_warning: { label: "Llamada de atencion", tone: "yellow" },
+  memorandum: { label: "Memorandum", tone: "orange" },
+  suspension: { label: "Suspension", tone: "red" },
+  other: { label: "Otra accion", tone: "neutral" }
+}
+
+export const DISCIPLINARY_ACTION_STATUSES = {
+  active: { label: "Activa", tone: "red" },
+  completed: { label: "Completada", tone: "green" },
+  revoked: { label: "Revocada", tone: "neutral" }
+}
+
+export function incidentStatusClass(status) {
+  return `expediente-status expediente-status--${INCIDENT_STATUSES[status]?.tone || "neutral"}`
+}
+
+export function actionTypeClass(type) {
+  return `expediente-doc-badge expediente-doc-badge--${DISCIPLINARY_ACTION_TYPES[type]?.tone || "neutral"}`
 }
 
 export function canAccessExpedientes(role) {

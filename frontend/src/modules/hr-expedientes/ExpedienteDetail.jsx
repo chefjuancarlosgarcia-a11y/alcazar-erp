@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import CompletenessBar from "./CompletenessBar"
+import DisciplineTab from "./DisciplineTab"
 import DocumentCard from "./DocumentCard"
 import { getExpedienteDetail, saveExpedienteProfile } from "./expedientesService"
 import {
@@ -214,6 +215,14 @@ export default function ExpedienteDetail({ profileId, canWrite, onClose, onUpdat
       {tab === "recruitment" ? renderDocumentCards(FILE_TYPES_BY_TAB.recruitment) : null}
       {tab === "background" ? renderDocumentCards(FILE_TYPES_BY_TAB.background) : null}
       {tab === "health" ? renderDocumentCards(FILE_TYPES_BY_TAB.health) : null}
+
+      {tab === "discipline" ? (
+        <DisciplineTab
+          profileId={profileId}
+          canWrite={writeEnabled}
+          initialKpis={detail.discipline_kpis}
+        />
+      ) : null}
 
       {tab === "history" ? (
         <section className="expediente-section">
