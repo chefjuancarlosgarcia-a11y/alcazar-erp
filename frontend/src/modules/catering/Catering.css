@@ -5,6 +5,9 @@
 
 .catering-page {
   color: var(--erp-text-primary, #f8fafc);
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: clip;
 }
 
 .catering-header {
@@ -78,12 +81,18 @@
 .catering-layout {
   display: grid;
   gap: var(--erp-space-24);
+  min-width: 0;
+  max-width: 100%;
 }
 
 @media (min-width: 1100px) {
   .catering-layout--split {
-    grid-template-columns: minmax(0, 1.2fr) minmax(360px, 0.8fr);
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
     align-items: start;
+  }
+
+  .catering-layout--split > * {
+    min-width: 0;
   }
 }
 
@@ -92,6 +101,8 @@
   border-radius: var(--erp-radius-card);
   background: var(--erp-surface, #0f172a);
   padding: var(--erp-card-padding);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .catering-panel h2,
@@ -140,7 +151,8 @@
 }
 
 .catering-table-wrap {
-  overflow: auto;
+  overflow-x: auto;
+  max-width: 100%;
 }
 
 .catering-table {
@@ -330,7 +342,8 @@
 
 .catering-detail-panel {
   max-height: calc(100vh - 120px);
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .catering-table td small {
@@ -573,16 +586,21 @@
   position: fixed;
   inset: 0;
   z-index: 120;
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: var(--erp-space-24);
   background: rgba(2, 6, 23, 0.72);
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .catering-quote-modal {
-  width: min(980px, 100%);
-  max-height: min(92vh, 920px);
-  overflow: auto;
+  width: min(980px, calc(100vw - 48px));
+  max-height: min(94vh, 980px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
   border: 1px solid var(--erp-border, #334155);
   border-radius: 18px;
   background: #0c1629;
@@ -597,6 +615,7 @@
   align-items: center;
   justify-content: space-between;
   padding: var(--erp-space-16) var(--erp-space-24);
+  flex-shrink: 0;
 }
 
 .catering-quote-modal__header {
@@ -621,9 +640,102 @@
 }
 
 .catering-quote-modal__body {
+  display: block;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: var(--erp-space-24);
+}
+
+.catering-quote-editor {
+  min-width: 0;
+}
+
+.catering-quote-editor__layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+  gap: var(--erp-space-16);
+  align-items: start;
+}
+
+.catering-quote-editor__main {
   display: grid;
   gap: var(--erp-space-16);
-  padding: var(--erp-space-24);
+  min-width: 0;
+}
+
+.catering-quote-editor__aside {
+  display: grid;
+  gap: var(--erp-space-16);
+  min-width: 0;
+}
+
+.catering-quote-section {
+  display: grid;
+  gap: var(--erp-space-12);
+  padding: var(--erp-space-16);
+  border: 1px solid var(--erp-border, #334155);
+  border-radius: var(--erp-radius-card);
+  background: #0b1424;
+  min-width: 0;
+}
+
+.catering-quote-section h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--erp-text-secondary, #94a3b8);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.catering-quote-section__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--erp-space-8);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.catering-quote-section--items {
+  padding-bottom: var(--erp-space-12);
+}
+
+.catering-quote-context dl {
+  display: grid;
+  gap: var(--erp-space-8);
+  margin: 0;
+}
+
+.catering-quote-context div {
+  display: grid;
+  gap: 2px;
+}
+
+.catering-quote-context dt {
+  font-size: 11px;
+  color: var(--erp-text-secondary, #94a3b8);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.catering-quote-context dd {
+  margin: 0;
+  font-size: 14px;
+  word-break: break-word;
+}
+
+.catering-quote-aside-card--sticky {
+  position: sticky;
+  top: 0;
+  border-color: rgba(20, 184, 166, 0.35);
+  background: rgba(20, 184, 166, 0.06);
+}
+
+.catering-quote-editor__main > .catering-quote-modal__footer {
+  margin-top: var(--erp-space-8);
+  padding: var(--erp-space-16) 0 0;
+  border-top: 1px solid var(--erp-border, #334155);
 }
 
 .catering-quote-modal__footer {
@@ -638,8 +750,22 @@
 
 @media (min-width: 760px) {
   .catering-quote-toolbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1100px) {
+  .catering-quote-toolbar {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+}
+
+.catering-quote-toolbar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--erp-space-8);
+  align-items: end;
+  grid-column: 1 / -1;
 }
 
 .catering-quote-toolbar label,
@@ -672,12 +798,11 @@
 .catering-quote-totals {
   display: grid;
   gap: var(--erp-space-8);
-  margin-left: auto;
-  width: min(320px, 100%);
-  padding: var(--erp-space-16);
-  border: 1px solid rgba(20, 184, 166, 0.35);
-  border-radius: var(--erp-radius-badge);
-  background: rgba(20, 184, 166, 0.06);
+  width: 100%;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
 }
 
 .catering-quote-totals div {
@@ -705,31 +830,29 @@
 }
 
 .catering-quote-modal--split {
-  width: min(1280px, 100%);
+  width: min(1280px, calc(100vw - 48px));
   max-height: min(94vh, 980px);
 }
 
 .catering-quote-modal--wide {
-  width: min(1100px, 100%);
+  width: min(1100px, calc(100vw - 48px));
 }
 
 .catering-quote-modal__split {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(300px, 0.85fr);
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
   gap: 0;
+  flex: 1;
   min-height: 0;
-}
-
-.catering-quote-modal__body {
-  overflow: auto;
-  max-height: calc(min(94vh, 980px) - 120px);
+  overflow: hidden;
 }
 
 .catering-quote-modal__preview-wrap {
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   border-left: 1px solid var(--erp-border, #334155);
   background: #08111f;
-  max-height: calc(min(94vh, 980px) - 120px);
+  min-width: 0;
 }
 
 .catering-quote-tabs {
@@ -752,15 +875,28 @@
   background: rgba(20, 184, 166, 0.12);
 }
 
+.catering-quote-lines-scroll {
+  max-width: 100%;
+  min-width: 0;
+}
+
 .catering-quote-lines {
   display: grid;
   gap: var(--erp-space-8);
+  min-width: 0;
 }
 
 .catering-quote-lines__head,
 .catering-quote-line {
   display: grid;
-  grid-template-columns: 110px minmax(140px, 1.6fr) 72px 100px 96px minmax(120px, 1fr) 36px;
+  grid-template-columns:
+    minmax(72px, 0.85fr)
+    minmax(0, 2fr)
+    minmax(52px, 0.55fr)
+    minmax(72px, 0.75fr)
+    minmax(72px, 0.75fr)
+    minmax(80px, 0.85fr)
+    32px;
   gap: var(--erp-space-8);
   align-items: center;
 }
@@ -780,15 +916,29 @@
   background: #0b1424;
 }
 
+.catering-quote-line__field {
+  display: contents;
+}
+
+.catering-quote-line__label {
+  display: none;
+}
+
 .catering-quote-line select,
 .catering-quote-line input {
   width: 100%;
+  min-width: 0;
   min-height: 36px;
   padding: 0 var(--erp-space-8);
   border: 1px solid var(--erp-border, #334155);
   border-radius: var(--erp-radius-badge);
   background: #071023;
   color: var(--erp-text-primary, #f8fafc);
+}
+
+.catering-quote-line__remove {
+  min-width: 32px;
+  padding: 0;
 }
 
 .catering-quote-line__total {
@@ -803,6 +953,8 @@
 
 .catering-quote-preview {
   padding: var(--erp-space-16);
+  min-width: 0;
+  overflow-x: hidden;
 }
 
 .catering-quote-preview__paper {
@@ -814,6 +966,9 @@
   background: #fff;
   color: #0f172a;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .catering-quote-preview__header {
@@ -1040,22 +1195,65 @@
   z-index: 130;
 }
 
+@media (max-width: 1100px) {
+  .catering-quote-editor__layout {
+    grid-template-columns: 1fr;
+  }
+
+  .catering-quote-aside-card--sticky {
+    position: static;
+  }
+}
+
 @media (max-width: 980px) {
+  .catering-quote-modal {
+    width: min(100%, calc(100vw - 24px));
+    max-height: min(96vh, 980px);
+  }
+
+  .catering-quote-modal--split {
+    width: min(100%, calc(100vw - 24px));
+  }
+
+  .catering-quote-backdrop {
+    padding: var(--erp-space-12);
+  }
+
   .catering-quote-modal__split {
     grid-template-columns: 1fr;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  .catering-quote-modal__body {
+    max-height: none;
+  }
+
+  .catering-quote-editor__layout {
+    grid-template-columns: 1fr;
+  }
+
+  .catering-quote-aside-card--sticky {
+    position: static;
   }
 
   .catering-quote-modal__preview-wrap {
     border-left: none;
     border-top: 1px solid var(--erp-border, #334155);
+    max-height: none;
   }
 
   .catering-quote-tabs {
     display: flex;
+    flex-shrink: 0;
   }
 
   .is-hidden-mobile {
     display: none;
+  }
+
+  .catering-quote-lines-scroll {
+    overflow-x: visible;
   }
 
   .catering-quote-lines__head {
@@ -1064,13 +1262,44 @@
 
   .catering-quote-line {
     grid-template-columns: 1fr 1fr;
+    gap: var(--erp-space-8);
+  }
+
+  .catering-quote-line__field {
+    display: grid;
+    gap: var(--erp-space-4);
+    min-width: 0;
+  }
+
+  .catering-quote-line__field--wide {
+    grid-column: 1 / -1;
+  }
+
+  .catering-quote-line__label {
+    display: block;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--erp-text-secondary, #94a3b8);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
   }
 
   .catering-quote-line__total {
     grid-column: 1 / -1;
   }
 
+  .catering-quote-line__remove {
+    grid-column: 1 / -1;
+    justify-self: end;
+  }
+
   .catering-template-manager {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .catering-quote-toolbar {
     grid-template-columns: 1fr;
   }
 }
