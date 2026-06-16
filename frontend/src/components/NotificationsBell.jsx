@@ -50,11 +50,9 @@ function NotificationsBell({ currentUser }) {
 
   useEffect(() => {
     const initialLoad = window.setTimeout(loadNotifications, 0)
-    const interval = window.setInterval(loadNotifications, 180000)
     window.addEventListener("notifications-updated", loadNotifications)
     return () => {
       window.clearTimeout(initialLoad)
-      window.clearInterval(interval)
       window.removeEventListener("notifications-updated", loadNotifications)
     }
   }, [loadNotifications])

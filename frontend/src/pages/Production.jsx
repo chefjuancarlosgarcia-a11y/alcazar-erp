@@ -141,16 +141,19 @@ function Production() {
     if (!selectedArea) return undefined
     kdsDebug("fuente de comandas: Supabase production_tickets", { areaId: selectedArea })
     const initialRefresh = window.setTimeout(refreshTickets, 0)
-    const interval = window.setInterval(() => setClock((current) => current + 1), 30000)
-    const refreshInterval = window.setInterval(refreshTickets, 60000)
+    const clockInterval = window.setInterval(() => setClock((current) => current + 1), 30000)
     window.addEventListener("production-tickets-updated", refreshTickets)
+    let refreshInterval = null
+    if (!realtimeActive) {
+      refreshInterval = window.setInterval(refreshTickets, 60000)
+    }
     return () => {
       window.clearTimeout(initialRefresh)
-      window.clearInterval(interval)
-      window.clearInterval(refreshInterval)
+      window.clearInterval(clockInterval)
+      if (refreshInterval) window.clearInterval(refreshInterval)
       window.removeEventListener("production-tickets-updated", refreshTickets)
     }
-  }, [selectedArea, refreshTickets])
+  }, [selectedArea, refreshTickets, realtimeActive])
 
   useEffect(() => () => window.clearTimeout(noticeTimerRef.current), [])
 

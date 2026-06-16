@@ -752,6 +752,8 @@ function POS() {
   const [showTechnicalAudit, setShowTechnicalAudit] = useState(false)
   const [collapsedOrderSections, setCollapsedOrderSections] = useState({ served: true, closed: true, activity: true, previous: true, audit: true })
   const realtimeNoticeTimerRef = useRef(null)
+  const tableLiveRefreshTimerRef = useRef(null)
+  const refreshTableLiveRef = useRef(null)
   const quickSearchRef = useRef(null)
   const activeOrderIdRef = useRef("")
   const ordenMesaRef = useRef(null)
@@ -890,15 +892,12 @@ function POS() {
     realtimeNoticeTimerRef.current = window.setTimeout(() => setRealtimeNotice(""), 4500)
   }
 
-  async function refreshSelectedTableLive() {
-    if (!ordenMesaRef.current || sendingToKitchenRef.current) return
-    try {
-      await cargarMesaDesdeSupabase(ordenMesaRef.current, activeOrderIdRef.current || "")
-    } catch (realtimeError) {
-      console.error("POS realtime refresh error:", realtimeError)
-      setOrdenError(`No se pudo actualizar la mesa en vivo: ${realtimeError.message}`)
-    }
-  }
+  const scheduleSelectedTableLiveRefresh = useCallback(() => {
+    window.clearTimeout(tableLiveRefreshTimerRef.current)
+    tableLiveRefreshTimerRef.current = window.setTimeout(() => {
+      refreshTableLiveRef.current?.()
+    }, 400)
+  }, [])
 
   function salirOrdenActual() {
     setOrdenMesa(null)
@@ -930,14 +929,14 @@ function POS() {
     event: "*",
     filter: ordenMesa?.mesaId ? `table_id=eq.${ordenMesa.mesaId}` : undefined,
     enabled: Boolean(posSession && ordenMesa?.mesaId),
-    onChange: refreshSelectedTableLive
+    onChange: scheduleSelectedTableLiveRefresh
   })
   const orderItemsRealtime = useSupabaseRealtime({
     table: "pos_order_items",
     event: "*",
     filter: currentOrder?.id ? `order_id=eq.${currentOrder.id}` : undefined,
     enabled: Boolean(posSession && currentOrder?.id),
-    onChange: refreshSelectedTableLive
+    onChange: scheduleSelectedTableLiveRefresh
   })
   const readyTicketsRealtime = useSupabaseRealtime({
     table: "production_tickets",
@@ -947,7 +946,7 @@ function POS() {
     onChange: (payload) => {
       if (payload.new?.status !== "ready" || payload.old?.status === "ready") return
       showPOSRealtimeNotice(`${payload.new.table_name || "Una mesa"} tiene productos listos.`)
-      if (String(payload.new.table_id) === String(ordenMesa?.mesaId)) refreshSelectedTableLive()
+      if (String(payload.new.table_id) === String(ordenMesa?.mesaId)) scheduleSelectedTableLiveRefresh()
     }
   })
   const posRealtimeActive = ordersRealtime.isLive && (!currentOrder || orderItemsRealtime.isLive) && readyTicketsRealtime.isLive
@@ -957,7 +956,10 @@ function POS() {
     return () => clearInterval(interval)
   }, [])
 
-  useEffect(() => () => window.clearTimeout(realtimeNoticeTimerRef.current), [])
+  useEffect(() => () => {
+    window.clearTimeout(realtimeNoticeTimerRef.current)
+    window.clearTimeout(tableLiveRefreshTimerRef.current)
+  }, [])
 
   useEffect(() => {
     let mounted = true
@@ -1660,23 +1662,39 @@ function POS() {
     return estado
   }
 
-  async function cargarMesaDesdeSupabase(tableData, orderId = "") {
+  async function cargarMesaDesdeSupabase(tableData, orderId = "", { includeHistory = true } = {}) {
     const orderResult = orderId
       ? await getOrderWithItems(orderId)
       : await getOpenOrderByTable(tableData.mesaId)
     if (orderResult.error) throw orderResult.error
     const order = orderResult.data || null
-    const history = await getTableOrderHistory(tableData.mesaId)
-    if (history.error) throw history.error
+    if (includeHistory) {
+      const history = await getTableOrderHistory(tableData.mesaId)
+      if (history.error) throw history.error
+      setOrdenesEnviadas(history.data || [])
+    }
     const events = await getTableOrderEvents(tableData.mesaId)
     if (events.error) throw events.error
     setCurrentOrder(order)
     setActiveOrderId(mesaOrderId(order))
     setOrden(order?.items || [])
     setOrderEvents(events.data || [])
-    setOrdenesEnviadas(history.data || [])
     sincronizarEstadoVisualMesa(tableData, order)
     return order
+  }
+
+  refreshTableLiveRef.current = async () => {
+    if (!ordenMesaRef.current || sendingToKitchenRef.current) return
+    try {
+      await cargarMesaDesdeSupabase(
+        ordenMesaRef.current,
+        activeOrderIdRef.current || "",
+        { includeHistory: false }
+      )
+    } catch (realtimeError) {
+      console.error("POS realtime refresh error:", realtimeError)
+      setOrdenError(`No se pudo actualizar la mesa en vivo: ${realtimeError.message}`)
+    }
   }
 
   async function verDetalleOrdenAnterior(orderId) {
@@ -1723,10 +1741,6 @@ function POS() {
       } else {
         setPosStep(3)
         setOrdenMessage("Mesa disponible. Agrega productos para iniciar el servicio.")
-      }
-      if (order) {
-        const events = await getTableOrderEvents(selectedTable.mesaId)
-        if (!events.error) setOrderEvents(events.data || [])
       }
     } catch (error) {
       console.error("Supabase POS table order error:", error)

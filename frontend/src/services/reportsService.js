@@ -102,6 +102,54 @@ async function fetchProducts() {
   return { data: data || [], error }
 }
 
+const ACTIVE_TABLE_STATUSES = ["open", "awaiting_bill", "sent_to_cashier"]
+
+function countActiveTables(orders = []) {
+  return orders.filter((order) => ACTIVE_TABLE_STATUSES.includes(order.status)).length
+}
+
+export function buildExecutiveKPIsFromDashboardReport(reportData, { tickets = [], stock = [], requisitions = [] } = {}) {
+  if (!reportData) return null
+  return {
+    salesToday: number(reportData.current?.day?.total),
+    salesMonth: number(reportData.current?.month?.total),
+    ordersToday: Number(reportData.current?.day?.orders || 0),
+    averageTicket: number(reportData.current?.day?.averageTicket),
+    activeTables: Number(reportData.activeTables || 0),
+    activeTickets: tickets.length,
+    lowStock: stock.filter((row) => number(row.quantity) <= number(row.minimum_quantity)).length,
+    pendingRequisitions: requisitions.length,
+    range: reportData.ranges?.day ? { start: reportData.ranges.day.start, end: reportData.ranges.day.end } : getReportDateRange({ preset: "today" })
+  }
+}
+
+async function fetchCommandCenterSupportMetrics() {
+  const [tickets, stock, requisitions] = await Promise.all([
+    supabase.from("production_tickets").select("id,status").not("status", "in", "(served,cancelled)"),
+    supabase.from("area_inventory").select("quantity,minimum_quantity"),
+    supabase.from("requisitions").select("id,status").eq("is_test", false).in("status", ["draft", "pending", "approved"])
+  ])
+  return {
+    tickets: tickets.data || [],
+    stock: stock.data || [],
+    requisitions: requisitions.data || [],
+    error: tickets.error || stock.error || requisitions.error
+  }
+}
+
+export async function getCommandCenterExecutiveBundle() {
+  const [reportResult, support] = await Promise.all([
+    getExecutiveDashboardReport(),
+    fetchCommandCenterSupportMetrics()
+  ])
+  const error = reportResult.error || support.error
+  const executiveReport = reportResult.data || null
+  return empty({
+    executiveReport,
+    kpis: buildExecutiveKPIsFromDashboardReport(executiveReport, support)
+  }, error)
+}
+
 export async function getExecutiveKPIs(filters = {}) {
   const monthFilters = { preset: "month" }
   const [todayOrders, monthOrders, tickets, stock, requisitions] = await Promise.all([
@@ -114,7 +162,7 @@ export async function getExecutiveKPIs(filters = {}) {
   const errors = [todayOrders.error, monthOrders.error, tickets.error, stock.error, requisitions.error].filter(Boolean)
   const ordersToday = todayOrders.data || []
   const salesToday = ordersToday.reduce((sum, order) => sum + number(order.total), 0)
-  const activeTables = ordersToday.filter((order) => ["open", "awaiting_bill", "sent_to_cashier"].includes(order.status)).length
+  const activeTables = countActiveTables(ordersToday)
   return empty({
     salesToday,
     salesMonth: (monthOrders.data || []).reduce((sum, order) => sum + number(order.total), 0),
@@ -171,7 +219,12 @@ export async function getExecutiveDashboardReport() {
     month: summarize(prevMonthOrders.data),
     year: summarize(prevYearOrders.data)
   }
-  return empty({ current, previous, ranges }, errors[0])
+  return empty({
+    current,
+    previous,
+    ranges,
+    activeTables: countActiveTables(dayOrders.data)
+  }, errors[0])
 }
 
 export async function getSalesAnalyticsReport(filters = {}) {

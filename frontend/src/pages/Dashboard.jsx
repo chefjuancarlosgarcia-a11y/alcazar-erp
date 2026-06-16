@@ -13,7 +13,6 @@ import {
 import { money } from "../components/commandCenter/commandCenterHelpers"
 import { useAuth } from "../context/AuthContext"
 import useAppBranding from "../hooks/useAppBranding"
-import { getExecutiveDashboardReport } from "../services/reportsService"
 import {
   getCurrentUserTaskId,
   loadAssignedTasks,
@@ -42,18 +41,9 @@ function formatDelta(value) {
 function ExecutiveCommandCenter({ recentTasks = [] }) {
   const navigate = useNavigate()
   const cc = useCommandCenter(recentTasks)
-  const [executiveReport, setExecutiveReport] = useState(null)
 
-  useEffect(() => {
-    let mounted = true
-    getExecutiveDashboardReport().then((result) => {
-      if (mounted) setExecutiveReport(result.data || null)
-    })
-    return () => { mounted = false }
-  }, [])
-
-  const prev = executiveReport?.previous || {}
-  const curr = executiveReport?.current || {}
+  const prev = cc.executiveReport?.previous || {}
+  const curr = cc.executiveReport?.current || {}
   const kpis = cc.kpis
 
   const kpiCards = useMemo(() => ([

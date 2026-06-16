@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import {
   getFoodCostReport,
-  getExecutiveKPIs,
+  getCommandCenterExecutiveBundle,
   getInventoryReport,
   getOperationalAlerts,
   getProductionReport
@@ -28,6 +28,7 @@ export default function useCommandCenter(recentTasks = []) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [kpis, setKpis] = useState(null)
+  const [executiveReport, setExecutiveReport] = useState(null)
   const [alerts, setAlerts] = useState([])
   const [production, setProduction] = useState(null)
   const [inventory, setInventory] = useState(null)
@@ -52,7 +53,7 @@ export default function useCommandCenter(recentTasks = []) {
       const today = getLocalDateString()
       try {
         const [
-          kpisResult,
+          executiveBundle,
           alertsResult,
           productionResult,
           inventoryResult,
@@ -62,7 +63,7 @@ export default function useCommandCenter(recentTasks = []) {
           marksResult,
           profilesResult
         ] = await Promise.all([
-          getExecutiveKPIs(),
+          getCommandCenterExecutiveBundle(),
           getOperationalAlerts(),
           getProductionReport({ preset: "today" }),
           getInventoryReport({ preset: "today" }),
@@ -76,7 +77,7 @@ export default function useCommandCenter(recentTasks = []) {
         if (!mounted) return
 
         const loadError = [
-          kpisResult.error,
+          executiveBundle.error,
           alertsResult.error,
           productionResult.error,
           inventoryResult.error
@@ -86,7 +87,8 @@ export default function useCommandCenter(recentTasks = []) {
           setError(typeof loadError === "string" ? loadError : loadError.message || "No se pudo cargar el centro de comando.")
         }
 
-        setKpis(kpisResult.data || null)
+        setExecutiveReport(executiveBundle.data?.executiveReport || null)
+        setKpis(executiveBundle.data?.kpis || null)
         setProduction(productionResult.data || null)
         setInventory(inventoryResult.data || null)
         setAlerts(buildAlertList(alertsResult.data || [], yieldResult.data?.alerts || []))
@@ -150,6 +152,7 @@ export default function useCommandCenter(recentTasks = []) {
     loading,
     error,
     kpis,
+    executiveReport,
     alerts,
     hr,
     costs,
