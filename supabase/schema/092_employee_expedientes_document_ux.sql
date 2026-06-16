@@ -1,5 +1,5 @@
 -- Employee expedientes: no_expires + update/remove current document
--- Apply after 090_employee_expedientes.sql
+-- Apply after 091_restrict_employee_expedientes_access.sql
 
 alter table public.employee_file_versions
   add column if not exists no_expires boolean not null default false;

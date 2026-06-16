@@ -9,7 +9,7 @@ import {
   listExpedientes,
   syncExpedienteAlerts
 } from "./expedientesService"
-import { EXPEDIENTE_STATUS, canAccessExpedientes, canWriteExpedientes } from "./expedientesUtils"
+import { EXPEDIENTE_STATUS, canAccessExpedientes, canWriteExpedientes, EXPEDIENTE_ACCESS_DENIED_MESSAGE } from "./expedientesUtils"
 import "./Expedientes.css"
 
 function KpiCard({ label, value, tone = "" }) {
@@ -94,7 +94,7 @@ export default function ExpedientesDashboard() {
       <section className="expediente-page erp-page-shell">
         <article className="expediente-panel">
           <h1>Expedientes</h1>
-          <p className="expediente-empty">No tienes permiso para consultar expedientes de colaboradores.</p>
+          <p className="expediente-message error">{EXPEDIENTE_ACCESS_DENIED_MESSAGE}</p>
         </article>
       </section>
     )
@@ -117,10 +117,6 @@ export default function ExpedientesDashboard() {
           ) : null}
         </div>
       </header>
-
-      {!canWrite ? (
-        <p className="expediente-readonly-banner">Modo solo lectura: puedes consultar expedientes pero no cargar ni editar documentos.</p>
-      ) : null}
 
       <section className="expediente-kpi-grid">
         <KpiCard label="Documentos vencidos" value={loadingDashboard ? "…" : dashboard?.expired_documents} tone="red" />

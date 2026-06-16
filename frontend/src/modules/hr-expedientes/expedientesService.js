@@ -10,13 +10,13 @@ function result(data, error = null) {
   return { data, error: error ? message(error) : "" }
 }
 
-function migrationHint(error, needs091 = false) {
+function migrationHint(error, needsDocumentUx = false) {
   const text = message(error).toLowerCase()
   if (text.includes("could not find the function") || text.includes("does not exist") || text.includes("no_expires")) {
-    if (needs091) {
-      return "Aplica las migraciones 090 y 091 en Supabase antes de usar esta funcion."
+    if (needsDocumentUx) {
+      return "Aplica las migraciones 090, 091 y 092 en Supabase antes de usar esta funcion."
     }
-    return "Aplica la migracion 090_employee_expedientes.sql en Supabase antes de usar este modulo."
+    return "Aplica las migraciones 090 y 091 en Supabase antes de usar este modulo."
   }
   return message(error)
 }

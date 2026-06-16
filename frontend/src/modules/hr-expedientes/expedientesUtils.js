@@ -4,15 +4,18 @@ export const EXPEDIENTE_ACCESS_ROLES = [
   "admin",
   "gerente_general",
   "recursos_humanos",
-  "gerente_operaciones",
-  "supervisor"
+  "rrhh"
 ]
 
 export const EXPEDIENTE_WRITE_ROLES = [
   "admin",
   "gerente_general",
-  "recursos_humanos"
+  "recursos_humanos",
+  "rrhh"
 ]
+
+export const EXPEDIENTE_ACCESS_DENIED_MESSAGE =
+  "No tienes permisos para acceder a Expedientes de Colaboradores."
 
 export const EXPEDIENTE_STATUS = {
   complete: { label: "Expediente completo", tone: "green" },
