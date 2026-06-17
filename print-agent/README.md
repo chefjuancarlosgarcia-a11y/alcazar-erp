@@ -46,6 +46,26 @@ MesaCaliente
 
 El script genera un archivo temporal `.bin` con ESC/POS y lo envia como RAW a la impresora de Windows.
 
+## Agente ERP
+
+Configura `.env` con service role y ubicacion:
+
+```env
+SUPABASE_URL=https://tu-proyecto.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=tu-service-role-key
+PRINT_AGENT_ID=CAJA-PC
+PRINT_AGENT_LOCATION=CAJA
+PRINT_AGENT_POLL_MS=2000
+```
+
+Ejecuta el agente local:
+
+```bash
+npm run agent
+```
+
+El agente consulta `print_jobs` pendientes cada 2 segundos, imprime por `windows_printer_name` y marca el trabajo como `printed` o `failed`.
+
 ## Modo TCP/IP
 
 Configura:

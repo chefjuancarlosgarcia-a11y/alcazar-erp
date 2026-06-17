@@ -5,6 +5,7 @@
   "description": "Prueba local de impresion ESC/POS por red.",
   "type": "module",
   "scripts": {
-    "test-print": "node test-print.js"
+    "test-print": "node test-print.js",
+    "agent": "node agent.js"
   }
 }

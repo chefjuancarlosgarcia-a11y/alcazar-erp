@@ -31,28 +31,30 @@ const printerIp = env.PRINTER_IP
 const printerPort = Number(env.PRINTER_PORT || 9100)
 const windowsPrinterName = env.WINDOWS_PRINTER_NAME
 
-if (!["tcp", "windows"].includes(printMode)) {
-  console.error("PRINT_MODE no es valido. Usa PRINT_MODE=tcp o PRINT_MODE=windows.")
-  process.exit(1)
-}
-
-if (printMode === "tcp" && !printerIp) {
-  console.error("Falta PRINTER_IP. Crea print-agent/.env usando .env.example.")
-  process.exit(1)
-}
-
-if (printMode === "tcp" && (!Number.isInteger(printerPort) || printerPort <= 0 || printerPort > 65535)) {
-  console.error("PRINTER_PORT no es valido. Usa un puerto TCP como 9100.")
-  process.exit(1)
-}
-
-if (printMode === "windows" && !windowsPrinterName) {
-  console.error("Falta WINDOWS_PRINTER_NAME. Ejemplo: WINDOWS_PRINTER_NAME=CAJA.")
-  process.exit(1)
-}
-
 const ESC = 0x1b
 const GS = 0x1d
+
+function validateLocalTestConfig() {
+  if (!["tcp", "windows"].includes(printMode)) {
+    console.error("PRINT_MODE no es valido. Usa PRINT_MODE=tcp o PRINT_MODE=windows.")
+    process.exit(1)
+  }
+
+  if (printMode === "tcp" && !printerIp) {
+    console.error("Falta PRINTER_IP. Crea print-agent/.env usando .env.example.")
+    process.exit(1)
+  }
+
+  if (printMode === "tcp" && (!Number.isInteger(printerPort) || printerPort <= 0 || printerPort > 65535)) {
+    console.error("PRINTER_PORT no es valido. Usa un puerto TCP como 9100.")
+    process.exit(1)
+  }
+
+  if (printMode === "windows" && !windowsPrinterName) {
+    console.error("Falta WINDOWS_PRINTER_NAME. Ejemplo: WINDOWS_PRINTER_NAME=CAJA.")
+    process.exit(1)
+  }
+}
 
 function cp850(text) {
   const map = {
@@ -272,6 +274,7 @@ async function printWindowsTest() {
 }
 
 async function main() {
+  validateLocalTestConfig()
   console.log(`Modo de impresion: ${printMode}`)
   if (printMode === "windows") {
     await printWindowsTest()
@@ -281,4 +284,8 @@ async function main() {
   printTcpTest()
 }
 
-main()
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main()
+}
+
+export { buildTicket, sendWindowsRaw, writeTempTicket }
