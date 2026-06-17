@@ -80,7 +80,7 @@ function line(text = "") {
   return Buffer.concat([cp850(text), Buffer.from("\n")])
 }
 
-function buildTicket({ title = "PRUEBA DE IMPRESIÓN" } = {}) {
+function buildTicket({ title = "PRUEBA DE IMPRESIÓN", lines = [], includeTimestamp = true } = {}) {
   const now = new Date().toLocaleString("es-GT", {
     timeZone: "America/Guatemala",
     dateStyle: "short",
@@ -96,7 +96,9 @@ function buildTicket({ title = "PRUEBA DE IMPRESIÓN" } = {}) {
     line(title),
     Buffer.from([ESC, 0x45, 0x00]), // bold off
     line(""),
-    line(now),
+    Buffer.from([ESC, 0x61, 0x00]), // left
+    ...(includeTimestamp ? [line(now)] : []),
+    ...lines.map((text) => line(text)),
     line(""),
     line(""),
     line(""),

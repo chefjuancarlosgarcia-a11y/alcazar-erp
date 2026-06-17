@@ -6,8 +6,8 @@ import { useToast } from "../hooks/useToast"
 import { ToastContainer } from "../components/ToastContainer"
 import { createStockRequisition } from "../utils/posProduction"
 import { createPreBillFromPOSOrder, createSplitBill, printPreBill as markPreBillPrinted, sendPreBillToCashier } from "../utils/cashier"
-import { printPreCheck } from "../services/posPrintService"
 import { getProductionAreas } from "../services/areasService"
+import { buildPrebillPrintPayload, createPrintJob, getActivePosPrinters } from "../services/printingService"
 import { savePOSCustomerFromDelivery, searchPOSCustomers } from "../services/posCustomersService"
 import { getActiveRecipes, getPOSRecipeLink } from "../services/recipesService"
 import {
@@ -736,6 +736,12 @@ function POS() {
   const [creatingDeliveryOrder, setCreatingDeliveryOrder] = useState(false)
   const [ordenError, setOrdenError] = useState("")
   const [ordenMessage, setOrdenMessage] = useState("")
+  const [prebillPrinters, setPrebillPrinters] = useState([])
+  const [prebillPrintersLoading, setPrebillPrintersLoading] = useState(false)
+  const [prebillPrintOrder, setPrebillPrintOrder] = useState(null)
+  const [selectedPrebillPrinterId, setSelectedPrebillPrinterId] = useState("")
+  const [prebillPrintError, setPrebillPrintError] = useState("")
+  const [prebillPrintSubmitting, setPrebillPrintSubmitting] = useState(false)
   const [realtimeNotice, setRealtimeNotice] = useState("")
   const [productionErrors, setProductionErrors] = useState([])
   const [sendingOrder, setSendingOrder] = useState(false)
@@ -751,6 +757,15 @@ function POS() {
   const [edicionEnviada, setEdicionEnviada] = useState(null)
   const [showTechnicalAudit, setShowTechnicalAudit] = useState(false)
   const [collapsedOrderSections, setCollapsedOrderSections] = useState({ served: true, closed: true, activity: true, previous: true, audit: true })
+
+  const loadPrebillPrinters = useCallback(async () => {
+    setPrebillPrintersLoading(true)
+    const result = await getActivePosPrinters({ jobType: "prebill" })
+    setPrebillPrintersLoading(false)
+    if (result.error) throw new Error(result.error.message)
+    setPrebillPrinters(result.data || [])
+    return result.data || []
+  }, [])
   const realtimeNoticeTimerRef = useRef(null)
   const tableLiveRefreshTimerRef = useRef(null)
   const refreshTableLiveRef = useRef(null)
@@ -3026,8 +3041,29 @@ function POS() {
     }
   }
 
-  async function imprimirPrecuenta(order) {
+  async function imprimirPrecuenta(order, printerId = "") {
     try {
+      const printers = prebillPrinters.length ? prebillPrinters : await loadPrebillPrinters()
+      const selectedPrinter = printerId
+        ? printers.find((printer) => printer.id === printerId)
+        : printers.length === 1
+          ? printers[0]
+          : null
+
+      if (!selectedPrinter) {
+        if (printers.length > 1 && !printerId) {
+          setPrebillPrintOrder(order)
+          setSelectedPrebillPrinterId(printers[0]?.id || "")
+          setPrebillPrintError("")
+          return false
+        }
+        setPrebillPrintError("Selecciona una impresora.")
+        setOrdenError("Selecciona una impresora.")
+        showToast("Selecciona una impresora.", "error", 2200)
+        return false
+      }
+
+      setPrebillPrintSubmitting(true)
       if (draftItems.length) throw new Error("Envía o quita los productos nuevos antes de imprimir la precuenta.")
       if (order.status === "open") {
         const requested = await requestOrderBill(order.id)
@@ -3035,16 +3071,35 @@ function POS() {
       }
       const refreshed = await getOrderWithItems(order.id)
       if (refreshed.error) throw new Error(refreshed.message || refreshed.error.message)
-      const preBill = createPreBillFromPOSOrder(buildCashierOrder(refreshed.data), user, { peopleCount: personasOrden })
+      const cashierOrder = { ...buildCashierOrder(refreshed.data), peopleCount: personasOrden }
+      const preBill = createPreBillFromPOSOrder(cashierOrder, user, { peopleCount: personasOrden })
       if (!preBill.ok) throw new Error(preBill.message)
       markPreBillPrinted(preBill.preBill.id, user)
-      await printPreCheck({ ...buildCashierOrder(refreshed.data), peopleCount: personasOrden })
+      const printJob = await createPrintJob({
+        printerId: selectedPrinter.id,
+        jobType: "prebill",
+        payload: buildPrebillPrintPayload(cashierOrder, {
+          orderId: refreshed.data.id,
+          tableId: cashierOrder.mesaId,
+          restaurantName: "EL GRAN ALCÁZAR"
+        })
+      })
+      if (printJob.error) throw new Error(printJob.error.message)
       await cargarMesaDesdeSupabase(ordenMesa, order.id)
-      setOrdenMessage("Precuenta impresa. La mesa queda esperando pago.")
+      setOrdenMessage("Precuenta enviada a impresión.")
       setOrdenError("")
-      showToast("Precuenta impresa.", "success", 1800)
+      setPrebillPrintOrder(null)
+      setPrebillPrintError("")
+      showToast("Precuenta enviada a impresión.", "success", 1800)
+      return true
     } catch (error) {
-      setOrdenError(`No se pudo imprimir precuenta: ${error.message}`)
+      console.error("No se pudo enviar la precuenta a impresión.", error)
+      setPrebillPrintError("No se pudo enviar la precuenta a impresión.")
+      setOrdenError("No se pudo enviar la precuenta a impresión.")
+      showToast("No se pudo enviar la precuenta a impresión.", "error", 2400)
+      return false
+    } finally {
+      setPrebillPrintSubmitting(false)
     }
   }
 
@@ -3922,6 +3977,62 @@ function POS() {
                 <strong>Total: Q{Number(orderDetail.total || 0).toFixed(2)}</strong>
                 <button type="button" onClick={() => setOrderDetail(null)} style={secondaryButtonStyle}>Cerrar</button>
               </div>
+            </div>
+          )}
+          {prebillPrintOrder && (
+            <div style={modalOverlayStyle}>
+              <form
+                style={modifierModalStyle}
+                onSubmit={async (event) => {
+                  event.preventDefault()
+                  if (!selectedPrebillPrinterId) {
+                    setPrebillPrintError("Selecciona una impresora.")
+                    return
+                  }
+                  await imprimirPrecuenta(prebillPrintOrder, selectedPrebillPrinterId)
+                }}
+              >
+                <div style={historyHeaderStyle}>
+                  <h2 style={{ margin: 0 }}>Imprimir precuenta</h2>
+                  <span style={orderStatusStyle}>{prebillPrintOrder.tableName || `Mesa ${ordenMesa?.mesaNumero || ""}`}</span>
+                </div>
+                <label style={fieldStackStyle}>
+                  <span style={fieldTitleStyle}>Impresora</span>
+                  <select
+                    value={selectedPrebillPrinterId}
+                    onChange={(event) => {
+                      setSelectedPrebillPrinterId(event.target.value)
+                      setPrebillPrintError("")
+                    }}
+                    style={inputStyle}
+                    disabled={prebillPrintSubmitting || prebillPrintersLoading}
+                  >
+                    <option value="">Selecciona una impresora</option>
+                    {prebillPrinters.map((printer) => (
+                      <option key={printer.id} value={printer.id}>
+                        {printer.name} · {printer.windows_printer_name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {prebillPrintError && <div style={errorBoxStyle}>{prebillPrintError}</div>}
+                <div style={buttonRowStyle}>
+                  <button type="submit" style={primaryButtonStyle} disabled={prebillPrintSubmitting || prebillPrintersLoading}>
+                    {prebillPrintSubmitting ? "Enviando..." : "Enviar a impresión"}
+                  </button>
+                  <button
+                    type="button"
+                    style={secondaryButtonStyle}
+                    onClick={() => {
+                      setPrebillPrintOrder(null)
+                      setPrebillPrintError("")
+                    }}
+                    disabled={prebillPrintSubmitting}
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </form>
             </div>
           )}
           {diagnostic && (

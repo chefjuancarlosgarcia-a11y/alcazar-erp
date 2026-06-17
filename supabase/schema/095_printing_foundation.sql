@@ -12,7 +12,7 @@ create table if not exists public.pos_printers (
   port integer not null default 9100,
   paper_width text not null default '80mm'
     check (paper_width in ('58mm', '80mm')),
-  supported_job_types text[] not null default array['test']::text[],
+  supported_job_types text[] not null default array['test', 'prebill']::text[],
   is_active boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -73,7 +73,7 @@ $$;
 drop policy if exists "pos_printers_admin_read" on public.pos_printers;
 create policy "pos_printers_admin_read"
   on public.pos_printers for select to authenticated
-  using (public.can_manage_printing());
+  using (public.can_manage_printing() or is_active = true);
 
 drop policy if exists "pos_printers_admin_write" on public.pos_printers;
 create policy "pos_printers_admin_write"
@@ -112,6 +112,14 @@ create trigger set_pos_printers_updated_at
   before update on public.pos_printers
   for each row execute procedure public.set_pos_printer_updated_at();
 
+update public.pos_printers
+set supported_job_types = array(
+  select distinct unnest(supported_job_types || array['prebill']::text[])
+)
+where is_active = true
+  and 'test' = any(supported_job_types)
+  and not ('prebill' = any(supported_job_types));
+
 create or replace function public.create_print_job(
   p_printer_id uuid,
   p_job_type text,
@@ -127,7 +135,7 @@ declare
   created_job public.print_jobs;
   actor_role text := coalesce(public.normalize_profile_role(public.current_profile_role()), '');
 begin
-  if actor_role not in ('admin', 'gerente_general') then
+  if actor_role not in ('admin', 'gerente_general', 'gerente', 'supervisor', 'mesero', 'caja', 'cajero') then
     raise exception 'No tienes permiso para crear trabajos de impresion.';
   end if;
 

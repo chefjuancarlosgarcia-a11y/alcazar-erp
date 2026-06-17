@@ -22,7 +22,7 @@ const EMPTY_PRINTER = {
   ip_address: "",
   port: 9100,
   paper_width: "80mm",
-  supported_job_types: ["test"],
+  supported_job_types: ["test", "prebill"],
   is_active: true
 }
 
@@ -95,7 +95,7 @@ function PrinterSettings() {
       const nextTypes = currentTypes.includes(jobType)
         ? currentTypes.filter((type) => type !== jobType)
         : [...currentTypes, jobType]
-      return { ...current, supported_job_types: nextTypes.length ? nextTypes : ["test"] }
+      return { ...current, supported_job_types: nextTypes.length ? nextTypes : ["test", "prebill"] }
     })
   }
 
@@ -103,7 +103,7 @@ function PrinterSettings() {
     setForm({
       ...EMPTY_PRINTER,
       ...printer,
-      supported_job_types: printer.supported_job_types?.length ? printer.supported_job_types : ["test"],
+      supported_job_types: printer.supported_job_types?.length ? printer.supported_job_types : ["test", "prebill"],
       port: printer.port || 9100
     })
     setMessage("")
