@@ -101,6 +101,8 @@ import { hasYieldAuditForTask } from "../services/yieldCostingService"
 import "./Tasks.css"
 
 const TODAY = new Date().toISOString().slice(0, 10)
+/** Vista temporal: activar solo durante validación de corridas duplicadas. */
+const SHOW_CHECKLIST_RUN_DIAGNOSTIC = false
 const MANAGEMENT_ROLES = ["admin", "gerente", "gerente_general", "recursos_humanos", "supervisor"]
 const ADMIN_TABS = [
   ["dashboard", "Dashboard"],
@@ -1579,17 +1581,32 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       area: run?.area || ""
     })
   }, [runs, user?.id])
-  const sections = [
-    ["today", "Hoy"],
-    ...(canViewChecklistLibrary ? [["templates", "Checklists"]] : []),
-    ...(canCreateDirectly || canProposeEdits || editingTemplate ? [["create", editingTemplate ? "Editar checklist" : "Crear checklist"]] : []),
-    ...(canManageManagementAlerts ? [["alerts", "Avisos a Gerencia"]] : []),
-    ...(canViewChecklistLibrary ? [
-      ["incidents", "Incidencias"],
-      ["approvals", canApproveTemplateChanges ? "Aprobaciones de plantillas" : "Mis solicitudes"],
-      ["reports", "Reportes"]
-    ] : [])
-  ]
+  const sections = useMemo(() => {
+    const todayCount = visibleRuns.filter(isChecklistRunTodayWork).length
+    const overdueCount = visibleRuns.filter(isChecklistRunHistoricPending).length
+    const completedCount = visibleRuns.filter(isChecklistRunCompleted).length
+    return [
+      ["today", todayCount ? `Hoy (${todayCount})` : "Hoy"],
+      ["overdue", overdueCount ? `Vencidas (${overdueCount})` : "Vencidas"],
+      ["completed", completedCount ? `Completadas (${completedCount})` : "Completadas"],
+      ...(canViewChecklistLibrary ? [["templates", "Checklists"]] : []),
+      ...(canCreateDirectly || canProposeEdits || editingTemplate ? [["create", editingTemplate ? "Editar checklist" : "Crear checklist"]] : []),
+      ...(canManageManagementAlerts ? [["alerts", "Avisos a Gerencia"]] : []),
+      ...(canViewChecklistLibrary ? [
+        ["incidents", "Incidencias"],
+        ["approvals", canApproveTemplateChanges ? "Aprobaciones de plantillas" : "Mis solicitudes"],
+        ["reports", "Reportes"]
+      ] : [])
+    ]
+  }, [
+    visibleRuns,
+    canViewChecklistLibrary,
+    canCreateDirectly,
+    canProposeEdits,
+    editingTemplate,
+    canManageManagementAlerts,
+    canApproveTemplateChanges
+  ])
 
   const refresh = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true)
@@ -1637,9 +1654,12 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
     if (initialRunId || !user?.id) return
     const activeSession = getActiveChecklistSession(user.id)
     if (!activeSession?.runId) return
-    setSection("today")
+    const run = runs.find((item) => item.id === activeSession.runId)
+    if (run && isChecklistRunHistoricPending(run)) setSection("overdue")
+    else if (run && isChecklistRunCompleted(run)) setSection("completed")
+    else setSection("today")
     setSelectedRunId(activeSession.runId)
-  }, [initialRunId, user?.id])
+  }, [initialRunId, user?.id, runs])
 
   useEffect(() => {
     if (section === "create") setCreateWizardOpen(true)
@@ -1684,9 +1704,12 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
 
   useEffect(() => {
     if (!initialRunId || ["incidents", "alerts"].includes(initialChecklistView)) return
-    setSection("today")
+    const run = runs.find((item) => item.id === initialRunId)
+    if (run && isChecklistRunHistoricPending(run)) setSection("overdue")
+    else if (run && isChecklistRunCompleted(run)) setSection("completed")
+    else setSection("today")
     selectRun(initialRunId)
-  }, [initialRunId, initialChecklistView, selectRun])
+  }, [initialRunId, initialChecklistView, selectRun, runs])
 
   useEffect(() => {
     if (initialChecklistView !== "approvals") return
@@ -1979,7 +2002,18 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
 
       <nav className="checklists-main-tabs" aria-label="Checklists">
         {sections.map(([id, label]) => (
-          <button key={id} type="button" className={section === id ? "active" : ""} onClick={() => { if (id === "create" && !editingTemplate) setEditingTemplate(null); setSection(id) }}>{label}</button>
+          <button
+            key={id}
+            type="button"
+            className={section === id ? "active" : ""}
+            onClick={() => {
+              if (id === "create" && !editingTemplate) setEditingTemplate(null)
+              setSelectedRunId("")
+              setSection(id)
+            }}
+          >
+            {label}
+          </button>
         ))}
       </nav>
 
@@ -1987,9 +2021,32 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
         <ChecklistToday
           runs={visibleRuns}
           profiles={profiles}
-          selectedRun={selectedRun}
+          selectedRun={selectedRun && isChecklistRunTodayWork(selectedRun) ? selectedRun : null}
           onSelect={selectRun}
           onStart={startRun}
+          onUpdateItem={updateRunItem}
+          onComplete={completeRun}
+          currentUser={user}
+        />
+      )}
+      {section === "overdue" && (
+        <ChecklistOverdue
+          runs={visibleRuns}
+          profiles={profiles}
+          selectedRun={selectedRun && isChecklistRunHistoricPending(selectedRun) ? selectedRun : null}
+          onSelect={selectRun}
+          onStart={startRun}
+          onUpdateItem={updateRunItem}
+          onComplete={completeRun}
+          currentUser={user}
+        />
+      )}
+      {section === "completed" && (
+        <ChecklistCompleted
+          runs={visibleRuns}
+          profiles={profiles}
+          selectedRun={selectedRun && isChecklistRunCompleted(selectedRun) ? selectedRun : null}
+          onSelect={selectRun}
           onUpdateItem={updateRunItem}
           onComplete={completeRun}
           currentUser={user}
@@ -2146,65 +2203,241 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   )
 }
 
+function ChecklistRunDetailShell({ backLabel, summary, selectedRun, profiles, currentUser, onSelect, onUpdateItem, onComplete, children }) {
+  if (selectedRun) {
+    return (
+      <>
+        <div className="checklist-today-toolbar">
+          <button type="button" className="checklist-back-button" onClick={() => onSelect("")}>
+            {backLabel}
+          </button>
+          {summary ? <span className="tasks-muted">{summary}</span> : null}
+        </div>
+        <ChecklistGuidedRun
+          run={selectedRun}
+          profiles={profiles}
+          currentUser={currentUser}
+          onClose={() => onSelect("")}
+          onUpdateItem={onUpdateItem}
+          onComplete={onComplete}
+        />
+      </>
+    )
+  }
+  return children
+}
+
 function ChecklistToday({ runs, profiles, selectedRun, onSelect, onStart, onUpdateItem, onComplete, currentUser }) {
-  const todayRuns = runs.filter((run) => run.run_date === TODAY || ["overdue", "rejected"].includes(run.status))
+  const todayRuns = useMemo(
+    () => runs
+      .filter(isChecklistRunTodayWork)
+      .sort((a, b) => {
+        const statusOrder = { overdue: 0, in_progress: 1, pending: 2 }
+        const statusDiff = (statusOrder[a.status] ?? 9) - (statusOrder[b.status] ?? 9)
+        if (statusDiff !== 0) return statusDiff
+        return String(a.checklist_templates?.title || "").localeCompare(String(b.checklist_templates?.title || ""))
+      }),
+    [runs]
+  )
+
   const pending = todayRuns.filter((run) => run.status === "pending")
   const inProgress = todayRuns.filter((run) => run.status === "in_progress")
-  const completed = todayRuns.filter((run) => run.status === "completed")
   const overdue = todayRuns.filter((run) => run.status === "overdue")
   const cards = [
-    ["Pendientes hoy", pending.length, "pending"],
+    ["Pendientes", pending.length, "pending"],
     ["En progreso", inProgress.length, "in_progress"],
-    ["Completadas", completed.length, "completed"],
-    ["Vencidas", overdue.length, "overdue"]
+    ["Vencidas hoy", overdue.length, "overdue"]
   ]
+
   return (
     <div className="checklists-today">
-      {!selectedRun && (
-        <div className="checklists-kpis">
-          {cards.map(([label, value, tone]) => <article className={`checklists-kpi ${tone}`} key={label}><span>{label}</span><strong>{value}</strong></article>)}
-        </div>
-      )}
-
-      {selectedRun ? (
-        <>
-          <div className="checklist-today-toolbar">
-            <button type="button" className="checklist-back-button" onClick={() => onSelect("")}>
-              ← Volver a checklists de hoy
-            </button>
-            <span className="tasks-muted">{todayRuns.length} checklist{todayRuns.length === 1 ? "" : "s"} asignada{todayRuns.length === 1 ? "" : "s"} hoy</span>
+      <ChecklistRunDetailShell
+        backLabel="← Volver a checklists de hoy"
+        summary={`${todayRuns.length} checklist${todayRuns.length === 1 ? "" : "s"} para hoy`}
+        selectedRun={selectedRun}
+        profiles={profiles}
+        currentUser={currentUser}
+        onSelect={onSelect}
+        onUpdateItem={onUpdateItem}
+        onComplete={onComplete}
+      >
+        {!selectedRun && (
+          <div className="checklists-kpis">
+            {cards.map(([label, value, tone]) => <article className={`checklists-kpi ${tone}`} key={label}><span>{label}</span><strong>{value}</strong></article>)}
           </div>
-          <ChecklistGuidedRun
-            run={selectedRun}
-            profiles={profiles}
-            currentUser={currentUser}
-            onClose={() => onSelect("")}
-            onUpdateItem={onUpdateItem}
-            onComplete={onComplete}
-          />
-        </>
-      ) : (
-        <div className="checklists-card-grid">
-          {todayRuns.map((run) => <ChecklistTodayCard key={run.id} run={run} profiles={profiles} onOpen={() => ["pending", "rejected"].includes(run.status) ? onStart(run.id) : onSelect(run.id)} />)}
-          {!todayRuns.length && <FriendlyEmpty title="No hay checklists pendientes para hoy." text="Cuando gerencia asigne una checklist, aparecera aqui lista para iniciar." />}
-        </div>
-      )}
+        )}
+        {!selectedRun && (
+          <div className="checklists-card-grid">
+            {todayRuns.map((run) => (
+              <ChecklistTodayCard
+                key={run.id}
+                run={run}
+                profiles={profiles}
+                onOpen={() => (run.status === "pending" ? onStart(run.id) : onSelect(run.id))}
+              />
+            ))}
+            {!todayRuns.length && (
+              <FriendlyEmpty
+                title="No hay checklists para ejecutar hoy."
+                text="Las asignaciones del día aparecerán aquí. Las vencidas de días anteriores están en la pestaña Vencidas."
+              />
+            )}
+          </div>
+        )}
+      </ChecklistRunDetailShell>
     </div>
   )
 }
 
-function ChecklistTodayCard({ run, profiles, onOpen }) {
+function ChecklistOverdue({ runs, profiles, selectedRun, onSelect, onStart, onUpdateItem, onComplete, currentUser }) {
+  const groupedRuns = useMemo(
+    () => groupHistoricOverdueRuns(runs.filter(isChecklistRunHistoricPending), profiles),
+    [runs, profiles]
+  )
+  const totalRuns = useMemo(
+    () => groupedRuns.reduce((sum, group) => sum + group.dateGroups.reduce((inner, dateGroup) => inner + dateGroup.runs.length, 0), 0),
+    [groupedRuns]
+  )
+
+  return (
+    <div className="checklists-overdue">
+      <ChecklistRunDetailShell
+        backLabel="← Volver a vencidas"
+        summary={`${totalRuns} corrida${totalRuns === 1 ? "" : "s"} histórica${totalRuns === 1 ? "" : "s"} pendientes`}
+        selectedRun={selectedRun}
+        profiles={profiles}
+        currentUser={currentUser}
+        onSelect={onSelect}
+        onUpdateItem={onUpdateItem}
+        onComplete={onComplete}
+      >
+        {!selectedRun && !groupedRuns.length ? (
+          <FriendlyEmpty
+            title="No hay checklists vencidas pendientes."
+            text="Las corridas anteriores sin cerrar aparecerán aquí para seguimiento gerencial."
+          />
+        ) : null}
+        {!selectedRun && groupedRuns.map((templateGroup) => (
+          <section key={templateGroup.templateId} className="checklist-overdue-template">
+            <header className="checklist-overdue-template__head">
+              <div>
+                <h3>{templateGroup.title}</h3>
+                <p className="tasks-muted">
+                  {templateGroup.dateGroups.length} fecha{templateGroup.dateGroups.length === 1 ? "" : "s"} · {templateGroup.totalRuns} corrida{templateGroup.totalRuns === 1 ? "" : "s"}
+                </p>
+              </div>
+            </header>
+            {templateGroup.dateGroups.map((dateGroup) => (
+              <div key={`${templateGroup.templateId}-${dateGroup.runDate}`} className="checklist-overdue-date">
+                <div className="checklist-overdue-date__head">
+                  <strong>{formatChecklistRunDateLabel(dateGroup.runDate)}</strong>
+                  <span>{historicOverdueDaysLabel(dateGroup.runDate)}</span>
+                  <span className="checklist-overdue-date__count">
+                    {dateGroup.runs.length} corrida{dateGroup.runs.length === 1 ? "" : "s"}
+                  </span>
+                </div>
+                <div className="checklists-card-grid checklist-overdue-date__grid">
+                  {dateGroup.runs.map((run) => (
+                    <ChecklistTodayCard
+                      key={run.id}
+                      run={run}
+                      profiles={profiles}
+                      variant="overdue"
+                      onOpen={() => (["pending", "rejected"].includes(run.status) ? onStart(run.id) : onSelect(run.id))}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </section>
+        ))}
+      </ChecklistRunDetailShell>
+    </div>
+  )
+}
+
+function ChecklistCompleted({ runs, profiles, selectedRun, onSelect, onUpdateItem, onComplete, currentUser }) {
+  const completedRuns = useMemo(
+    () => runs
+      .filter(isChecklistRunCompleted)
+      .sort((a, b) => String(b.run_date || "").localeCompare(String(a.run_date || "")) || String(b.completed_at || b.updated_at || "").localeCompare(String(a.completed_at || a.updated_at || ""))),
+    [runs]
+  )
+
+  return (
+    <div className="checklists-completed">
+      <ChecklistRunDetailShell
+        backLabel="← Volver a completadas"
+        summary={`${completedRuns.length} checklist${completedRuns.length === 1 ? "" : "s"} completada${completedRuns.length === 1 ? "" : "s"}`}
+        selectedRun={selectedRun}
+        profiles={profiles}
+        currentUser={currentUser}
+        onSelect={onSelect}
+        onUpdateItem={onUpdateItem}
+        onComplete={onComplete}
+      >
+        {!selectedRun && (
+          <div className="checklists-card-grid">
+            {completedRuns.map((run) => (
+              <ChecklistTodayCard
+                key={run.id}
+                run={run}
+                profiles={profiles}
+                variant="completed"
+                onOpen={() => onSelect(run.id)}
+              />
+            ))}
+            {!completedRuns.length && (
+              <FriendlyEmpty
+                title="No hay checklists completadas."
+                text="Cuando cierres una corrida, aparecerá aquí para consulta."
+              />
+            )}
+          </div>
+        )}
+      </ChecklistRunDetailShell>
+    </div>
+  )
+}
+
+function ChecklistTodayContextBadges({ run, variant = "today" }) {
+  const badges = getChecklistRunContextBadges(run, variant)
+  if (!badges.length) return null
+  return (
+    <div className="checklist-today-badges">
+      {badges.map((badge) => (
+        <span key={badge} className={`checklist-today-badge checklist-today-badge--${badge.toLowerCase()}`}>{badge}</span>
+      ))}
+    </div>
+  )
+}
+
+function ChecklistTodayCard({ run, profiles, onOpen, variant = "today" }) {
   const progress = checklistRunProgress(run)
   const completedItems = (run.checklist_run_items || []).filter(itemHasAnswer).length
   const totalItems = run.checklist_run_items?.length || 0
+  const scheduleLabel = variant === "completed"
+    ? `Completada · ${formatChecklistRunDateLabel(run.run_date)}`
+    : checklistRunScheduleLabel(run)
+  const dueLabel = formatChecklistDueDeadline(run)
+  const cardClassName = [
+    "checklist-today-card",
+    variant === "overdue" ? "checklist-today-card--past-date" : "",
+    variant === "completed" ? "checklist-today-card--completed" : ""
+  ].filter(Boolean).join(" ")
+
   return (
-    <article className="checklist-today-card">
+    <article className={cardClassName}>
       <div className="checklist-card-top">
         <div>
           <h3>{run.checklist_templates?.title || "Checklist"}</h3>
           <p>{run.area || "Sin area"} · {responsibleLabel(run, profiles)}</p>
         </div>
-        <Badge type="status" value={run.status} />
+        <ChecklistTodayContextBadges run={run} variant={variant} />
+      </div>
+      <div className="checklist-today-schedule">
+        <p className={`checklist-today-schedule__primary${isChecklistRunOverdue(run) ? " is-overdue" : ""}`}>{scheduleLabel}</p>
+        <p className="checklist-today-schedule__due">{dueLabel}</p>
       </div>
       <div className="checklist-progress-row">
         <progress value={progress} max="100" />
@@ -2213,9 +2446,19 @@ function ChecklistTodayCard({ run, profiles, onOpen }) {
       <div className="checklist-card-meta">
         <span>{completedItems} / {totalItems} items</span>
         <span>Rol: {run.assigned_role || "Sin rol"}</span>
-        <span>Hora limite: {run.due_time || "Sin hora"}</span>
+        {variant !== "today" ? <span>Corrida: {formatChecklistRunDateLabel(run.run_date)}</span> : null}
       </div>
-      <button type="button" className="checklist-primary-action" onClick={onOpen}>{run.status === "pending" ? "Iniciar checklist" : "Ver checklist"}</button>
+      <button type="button" className="checklist-primary-action" onClick={onOpen}>
+        {run.status === "pending" ? "Iniciar checklist" : run.status === "completed" ? "Ver detalle" : "Ver checklist"}
+      </button>
+      {SHOW_CHECKLIST_RUN_DIAGNOSTIC ? (
+        <div className="checklist-today-diagnostic" aria-label="Diagnóstico temporal de corrida">
+          <span><code>id</code> {run.id}</span>
+          <span><code>run_date</code> {run.run_date || "—"}</span>
+          <span><code>template_id</code> {run.template_id || "—"}</span>
+          <span><code>status</code> {run.status}</span>
+        </div>
+      ) : null}
     </article>
   )
 }
@@ -3560,6 +3803,113 @@ function readEvidenceFile(event, callback) {
   const reader = new FileReader()
   reader.onload = () => callback(String(reader.result || ""))
   reader.readAsDataURL(file)
+}
+
+const CHECKLIST_TODAY_STATUSES = ["pending", "in_progress", "overdue"]
+const CHECKLIST_HISTORIC_PENDING_STATUSES = ["pending", "in_progress", "overdue", "rejected"]
+
+function isChecklistRunTodayWork(run) {
+  return Boolean(run?.run_date === TODAY && CHECKLIST_TODAY_STATUSES.includes(run.status))
+}
+
+function isChecklistRunHistoricPending(run) {
+  return Boolean(run?.run_date && run.run_date < TODAY && CHECKLIST_HISTORIC_PENDING_STATUSES.includes(run.status))
+}
+
+function isChecklistRunCompleted(run) {
+  return run?.status === "completed"
+}
+
+function historicOverdueDaysLabel(runDate) {
+  const days = daysPastRunDate(runDate)
+  if (days === 1) return "Vencida hace 1 día"
+  return `Vencida hace ${days} días`
+}
+
+function groupHistoricOverdueRuns(runs, profiles = []) {
+  const byTemplate = new Map()
+  runs.forEach((run) => {
+    const templateId = run.template_id || run.id
+    if (!byTemplate.has(templateId)) {
+      byTemplate.set(templateId, {
+        templateId,
+        title: run.checklist_templates?.title || "Checklist",
+        dateGroups: new Map(),
+        totalRuns: 0
+      })
+    }
+    const templateGroup = byTemplate.get(templateId)
+    const runDate = run.run_date || "sin-fecha"
+    if (!templateGroup.dateGroups.has(runDate)) templateGroup.dateGroups.set(runDate, [])
+    templateGroup.dateGroups.get(runDate).push(run)
+    templateGroup.totalRuns += 1
+  })
+
+  return [...byTemplate.values()]
+    .map((templateGroup) => ({
+      ...templateGroup,
+      dateGroups: [...templateGroup.dateGroups.entries()]
+        .sort((a, b) => String(b[0]).localeCompare(String(a[0])))
+        .map(([runDate, dateRuns]) => ({
+          runDate,
+          daysOverdue: daysPastRunDate(runDate),
+          runs: [...dateRuns].sort((a, b) => String(responsibleLabel(a, profiles)).localeCompare(String(responsibleLabel(b, profiles))))
+        }))
+    }))
+    .sort((a, b) => a.title.localeCompare(b.title))
+}
+
+function parseChecklistLocalDate(dateStr) {
+  if (!dateStr) return null
+  const [year, month, day] = String(dateStr).split("-").map(Number)
+  if (!year || !month || !day) return null
+  return new Date(year, month - 1, day)
+}
+
+function formatChecklistRunDateLabel(dateStr) {
+  const date = parseChecklistLocalDate(dateStr)
+  if (!date) return "Sin fecha"
+  return date.toLocaleDateString("es-GT", { day: "2-digit", month: "2-digit", year: "numeric" })
+}
+
+function daysPastRunDate(runDate) {
+  const run = parseChecklistLocalDate(runDate)
+  const today = parseChecklistLocalDate(TODAY)
+  if (!run || !today) return 0
+  return Math.round((today.getTime() - run.getTime()) / 86400000)
+}
+
+function isChecklistRunOverdue(run) {
+  if (!run) return false
+  if (run.status === "overdue") return true
+  const days = daysPastRunDate(run.run_date)
+  return days > 0 && ["pending", "in_progress"].includes(run.status)
+}
+
+function checklistRunScheduleLabel(run) {
+  if (isChecklistRunOverdue(run)) {
+    const days = daysPastRunDate(run.run_date)
+    if (days === 1) return "Vencida hace 1 día"
+    return `Vencida hace ${days} días`
+  }
+  return `Programada: ${formatChecklistRunDateLabel(run.run_date)}`
+}
+
+function formatChecklistDueDeadline(run) {
+  if (!run?.due_time) return "Sin hora límite"
+  const time = String(run.due_time).slice(0, 5)
+  const datePart = run.run_date === TODAY ? "hoy" : formatChecklistRunDateLabel(run.run_date)
+  return `Límite: ${datePart} · ${time}`
+}
+
+function getChecklistRunContextBadges(run, variant = "today") {
+  const badges = []
+  if (run.status === "rejected") return ["RECHAZADA"]
+  if (run.status === "completed") return ["COMPLETADA"]
+  if (variant === "today" && run.run_date === TODAY) badges.push("HOY")
+  if (isChecklistRunOverdue(run) || isChecklistRunHistoricPending(run)) badges.push("VENCIDA")
+  if (run.status === "pending") badges.push("PENDIENTE")
+  return badges
 }
 
 function checklistRunProgress(run) {

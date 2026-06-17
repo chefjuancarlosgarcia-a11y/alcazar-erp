@@ -943,6 +943,192 @@
   background: #101c30;
 }
 
+.checklist-today-card--past-date {
+  border-color: #5c3d28;
+  box-shadow: inset 3px 0 0 #fb923c;
+}
+
+.checklist-today-card--multi-template {
+  border-color: #355070;
+}
+
+.checklist-today-multi-banner {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #172a45;
+  border: 1px dashed #4b6a8a;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.checklist-today-multi-banner strong {
+  color: #bae6fd;
+  font-size: 12px;
+}
+
+.checklist-today-multi-banner span {
+  color: #94a3b8;
+}
+
+.checklist-today-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.checklist-today-badge {
+  padding: 5px 9px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.checklist-today-badge--hoy {
+  background: #0f766e;
+  color: #ccfbf1;
+}
+
+.checklist-today-badge--pendiente {
+  background: #172f55;
+  color: #93c5fd;
+}
+
+.checklist-today-badge--vencida {
+  background: #441620;
+  color: #fca5a5;
+}
+
+.checklist-today-badge--rechazada {
+  background: #4a1942;
+  color: #f0abfc;
+}
+
+.checklist-today-badge--completada {
+  background: #123427;
+  color: #86efac;
+}
+
+.checklists-overdue,
+.checklists-completed {
+  display: grid;
+  gap: 16px;
+}
+
+.checklist-overdue-template {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid #223348;
+  border-radius: 15px;
+  background: #0f172a;
+}
+
+.checklist-overdue-template__head h3 {
+  margin: 0 0 4px;
+  color: #f8fafc;
+  font-size: 18px;
+}
+
+.checklist-overdue-template__head p {
+  margin: 0;
+}
+
+.checklist-overdue-date {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  background: #101c30;
+  border: 1px solid #25364d;
+}
+
+.checklist-overdue-date__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #223348;
+}
+
+.checklist-overdue-date__head strong {
+  color: #e2e8f0;
+  font-size: 14px;
+}
+
+.checklist-overdue-date__head span {
+  color: #fca5a5;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.checklist-overdue-date__count {
+  margin-left: auto;
+  color: #94a3b8 !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+}
+
+.checklist-overdue-date__grid {
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+}
+
+.checklist-today-card--completed {
+  border-color: #1e3a2f;
+  box-shadow: inset 3px 0 0 #86efac;
+}
+
+.checklist-today-schedule {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #0b2230;
+}
+
+.checklist-today-schedule__primary {
+  margin: 0;
+  color: #e2e8f0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.checklist-today-schedule__primary.is-overdue {
+  color: #fca5a5;
+}
+
+.checklist-today-schedule__due {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.checklist-today-diagnostic {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px dashed #475569;
+  background: #0a1628;
+  color: #64748b;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.45;
+  word-break: break-all;
+}
+
+.checklist-today-diagnostic code {
+  color: #94a3b8;
+  font-size: 10px;
+}
+
 .checklist-template-card {
   display: flex;
   flex-direction: column;
