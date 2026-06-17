@@ -1,0 +1,10 @@
+{
+  "name": "alcazar-print-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Prueba local de impresion ESC/POS por red.",
+  "type": "module",
+  "scripts": {
+    "test-print": "node test-print.js"
+  }
+}
