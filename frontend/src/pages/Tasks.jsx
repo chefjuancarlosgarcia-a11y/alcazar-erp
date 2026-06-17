@@ -100,7 +100,16 @@ import ChecklistWizardStepBoundary from "../components/checklists/ChecklistWizar
 import { hasYieldAuditForTask } from "../services/yieldCostingService"
 import "./Tasks.css"
 
-const TODAY = new Date().toISOString().slice(0, 10)
+function guatemalaDateString(date = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Guatemala",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(date)
+}
+
+const TODAY = guatemalaDateString()
 /** Vista temporal: activar solo durante validación de corridas duplicadas. */
 const SHOW_CHECKLIST_RUN_DIAGNOSTIC = false
 const MANAGEMENT_ROLES = ["admin", "gerente", "gerente_general", "recursos_humanos", "supervisor"]
@@ -1582,7 +1591,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
     })
   }, [runs, user?.id])
   const sections = useMemo(() => {
-    const todayCount = visibleRuns.filter(isChecklistRunTodayWork).length
+    const todayCount = dedupeLogicalChecklistRuns(visibleRuns).filter(isChecklistRunTodayWork).length
     const overdueCount = visibleRuns.filter(isChecklistRunHistoricPending).length
     const completedCount = visibleRuns.filter(isChecklistRunCompleted).length
     return [
@@ -1627,6 +1636,8 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       if (!silent) {
         setMessage(templateResult.error?.message || runResult.error?.message || incidentResult.error?.message || requestResult.error?.message || suggestionResult.error?.message || alertResult?.error?.message || "No se pudieron cargar checklists.")
       }
+      if (!silent) setLoading(false)
+      return { runs: [], error: templateResult.error || runResult.error || incidentResult.error || requestResult.error || suggestionResult.error || alertResult?.error }
     } else {
       setTemplates(templateResult.data || [])
       const syncedRuns = await replayPendingChecklistDrafts(markOverdueRuns(runResult.data || []))
@@ -1635,9 +1646,10 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       setChangeRequests(requestResult.data || [])
       setSuggestions(suggestionResult.data || [])
       if (alertResult) setManagementAlerts(alertResult.data || [])
+      if (!profileResult.error) setProfiles(profileResult.data || [])
+      if (!silent) setLoading(false)
+      return { runs: syncedRuns, error: null }
     }
-    if (!profileResult.error) setProfiles(profileResult.data || [])
-    if (!silent) setLoading(false)
   }, [canManageManagementAlerts, isLibraryAdmin, replayPendingChecklistDrafts])
 
   const refreshRef = useRef(refresh)
@@ -1834,12 +1846,43 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       return setMessage("Esta checklist aun no esta activa. Espera la aprobacion antes de asignarla.")
     }
     setLoading(true)
-    const result = await createChecklistRunFromTemplate(payload.template_id, payload)
-    setLoading(false)
-    if (result.error) return setMessage(result.error.message || "No se pudo asignar la checklist.")
-    setMessage("Checklist asignada correctamente.")
-    setSection("today")
-    refresh()
+    try {
+      const result = await createChecklistRunFromTemplate(payload.template_id, payload)
+      if (result.error) {
+        console.error("Checklist assignment error:", result.error)
+        setMessage("No se pudo asignar la checklist.")
+        return { ok: false, error: result.error }
+      }
+
+      const assignedRun = result.data
+      const runDate = assignedRun?.run_date || payload.run_date || TODAY
+      const validationErrors = validateChecklistAssignmentResult(assignedRun, payload, { existing: assignedRun?.existedAlready })
+      if (validationErrors.length) {
+        console.error("Checklist assignment validation failed:", { errors: validationErrors, run: assignedRun, payload })
+        setMessage("No se pudo asignar la checklist.")
+        return { ok: false, error: new Error(validationErrors.join(", ")) }
+      }
+
+      const refreshResult = await refresh()
+      const freshRun = refreshResult?.runs?.find((run) => run.id === assignedRun.id) || assignedRun
+      setSelectedRunId(freshRun.id)
+      let successMessage = ""
+      if (runDate === TODAY) {
+        setSection("today")
+        successMessage = assignedRun.existedAlready ? "Esta checklist ya está asignada para hoy." : "Checklist asignada correctamente."
+      } else {
+        setSection("templates")
+        successMessage = `Checklist asignada para ${formatChecklistRunDateLabel(runDate)}.`
+      }
+      setMessage(successMessage)
+      return { ok: true, message: successMessage, data: freshRun }
+    } catch (error) {
+      console.error("Checklist assignment error:", error)
+      setMessage("No se pudo asignar la checklist.")
+      return { ok: false, error }
+    } finally {
+      setLoading(false)
+    }
   }
 
   async function duplicateTemplate(template) {
@@ -1998,7 +2041,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
         {loading && <span className="tasks-access-chip">Cargando</span>}
       </article>
 
-      {message && <p className={message.includes("correctamente") || message.includes("guardad") || message.includes("enviad") || message.includes("actualizad") ? "tasks-success" : "tasks-warning"} role="status">{message}</p>}
+      {message && <p className={message.includes("correctamente") || message.includes("asignada") || message.includes("guardad") || message.includes("enviad") || message.includes("actualizad") ? "tasks-success" : "tasks-warning"} role="status">{message}</p>}
 
       <nav className="checklists-main-tabs" aria-label="Checklists">
         {sections.map(([id, label]) => (
@@ -2229,7 +2272,7 @@ function ChecklistRunDetailShell({ backLabel, summary, selectedRun, profiles, cu
 
 function ChecklistToday({ runs, profiles, selectedRun, onSelect, onStart, onUpdateItem, onComplete, currentUser }) {
   const todayRuns = useMemo(
-    () => runs
+    () => dedupeLogicalChecklistRuns(runs)
       .filter(isChecklistRunTodayWork)
       .sort((a, b) => {
         const statusOrder = { overdue: 0, in_progress: 1, pending: 2 }
@@ -2472,6 +2515,7 @@ function ChecklistTemplatesView({ templates, changeRequests = [], profiles, curr
   const [filters, setFilters] = useState({ area: "", frequency: "", status: "all" })
   const [assigning, setAssigning] = useState(null)
   const [suggesting, setSuggesting] = useState(null)
+  const [feedback, setFeedback] = useState("")
   const pendingCreates = getVisiblePendingCreateRequests(changeRequests, currentUser?.id, isLibraryAdmin, isSupervisorOnly)
   const supervisorArea = currentUser?.area_name || ""
   const filtered = templates.filter((template) => {
@@ -2509,11 +2553,23 @@ function ChecklistTemplatesView({ templates, changeRequests = [], profiles, curr
     const creatorName = template.creator_name || profileDisplayName(profiles, template.created_by)
     const responsibleName = profileDisplayName(profiles, template.assigned_profile_id)
     const itemCount = template.checklist_template_items?.length || 0
+    function openAssign(event) {
+      event.preventDefault()
+      event.stopPropagation()
+      console.log("CLICK ASIGNAR", template.id)
+      if (!canAssign) {
+        setFeedback("No tienes permiso para asignar checklists.")
+        return
+      }
+      setFeedback("Asignando checklist...")
+      setAssigning(template)
+    }
+
     const primaryActions = [
       canEdit && { key: "edit", label: "Editar", className: "tasks-secondary", onClick: () => onEdit(template) },
       canProposeEdits && !canEdit && { key: "edit-propose", label: "Editar checklist", className: "tasks-secondary", onClick: () => onEdit(template) },
       canSuggest && { key: "suggest", label: "Sugerir cambios", className: "tasks-secondary", onClick: () => setSuggesting(template) },
-      canAssign && template.status === "active" && pendingRequest?.status !== "pending_review" && { key: "assign", label: "Asignar", className: "tasks-secondary", onClick: () => setAssigning(template) },
+      canAssign && template.status === "active" && pendingRequest?.status !== "pending_review" && { key: "assign", label: "Asignar", className: "tasks-secondary", onClick: openAssign },
       canEdit && { key: "duplicate", label: "Duplicar", className: "tasks-secondary", onClick: () => onDuplicate(template) },
       canEdit && template.status !== "active" && pendingRequest?.status !== "pending_review" && { key: "reactivate", label: "Reactivar", className: "tasks-primary", onClick: () => onReactivate(template.id) }
     ].filter(Boolean)
@@ -2625,6 +2681,7 @@ function ChecklistTemplatesView({ templates, changeRequests = [], profiles, curr
     <div className="checklists-admin-layout">
       <article className="tasks-panel">
         <div className="tasks-panel-title"><div><h2>Checklists</h2><p className="tasks-muted">Biblioteca de plantillas operativas.{isLibraryAdmin ? " Vista completa del catalogo." : " Plantillas activas y solicitudes propias."}</p></div></div>
+        {feedback && <p className={feedback.includes("permiso") ? "tasks-warning" : "tasks-success"} role="status">{feedback}</p>}
         <div className="tasks-filters">
           <select value={filters.area} onChange={(event) => setFilters((current) => ({ ...current, area: event.target.value }))}><option value="">Todas las areas</option>{CHECKLIST_AREAS.map((area) => <option key={area} value={area}>{checklistAreaLabel(area)}</option>)}</select>
           <select value={filters.frequency} onChange={(event) => setFilters((current) => ({ ...current, frequency: event.target.value }))}><option value="">Todas las frecuencias</option>{CHECKLIST_FREQUENCIES.map(([id, label]) => <option value={id} key={id}>{label}</option>)}</select>
@@ -2643,8 +2700,31 @@ function ChecklistTemplatesView({ templates, changeRequests = [], profiles, curr
         {filteredPendingCreates.map(renderPendingCreateCard)}
         {!filtered.length && !filteredPendingCreates.length && <FriendlyEmpty title="Crea tu primera plantilla de apertura." text={isSupervisorOnly ? "Usa Crear checklist para enviar una nueva plantilla a aprobacion." : "Usa Crear checklist para definir pasos simples por area."} />}
       </div>
-      {assigning && <ChecklistAssignPanel template={assigning} profiles={profiles} currentUser={currentUser} userRole={userRole} onClose={() => setAssigning(null)} onAssign={(payload) => { onAssign(payload); setAssigning(null) }} />}
-      {suggesting && <ChecklistSuggestionPanel template={suggesting} currentUser={currentUser} onClose={() => setSuggesting(null)} onSubmit={(payload) => { onSuggest(payload); setSuggesting(null) }} />}
+      {assigning && (
+        <div className="tasks-modal-backdrop" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) setAssigning(null) }}>
+          <ChecklistAssignPanel
+            template={assigning}
+            profiles={profiles}
+            currentUser={currentUser}
+            userRole={userRole}
+            onClose={() => setAssigning(null)}
+            onAssign={async (payload) => {
+              setFeedback("Asignando checklist...")
+              const result = await onAssign(payload)
+              if (result?.ok) {
+                setFeedback(result.message || "Checklist asignada correctamente.")
+                setAssigning(null)
+              }
+              return result
+            }}
+          />
+        </div>
+      )}
+      {suggesting && (
+        <div className="tasks-modal-backdrop" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) setSuggesting(null) }}>
+          <ChecklistSuggestionPanel template={suggesting} currentUser={currentUser} onClose={() => setSuggesting(null)} onSubmit={(payload) => { onSuggest(payload); setSuggesting(null) }} />
+        </div>
+      )}
     </div>
   )
 }
@@ -2652,6 +2732,8 @@ function ChecklistTemplatesView({ templates, changeRequests = [], profiles, curr
 function ChecklistAssignPanel({ template, profiles, currentUser, userRole, onClose, onAssign }) {
   const isSupervisorOnly = normalizeRole(userRole) === "supervisor"
   const supervisorArea = currentUser?.area_name || ""
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState("")
   const [form, setForm] = useState({
     template_id: template.id,
     run_date: TODAY,
@@ -2671,9 +2753,20 @@ function ChecklistAssignPanel({ template, profiles, currentUser, userRole, onClo
   function update(field, value) {
     setForm((current) => ({ ...current, [field]: value }))
   }
+  async function submit() {
+    setError("")
+    setSaving(true)
+    const result = await onAssign(form)
+    if (!result?.ok) {
+      setError("No se pudo asignar la checklist.")
+      setSaving(false)
+    }
+  }
   return (
-    <article className="tasks-panel checklist-assign-panel">
-      <div className="tasks-panel-title"><div><h2>Asignar checklist</h2><p className="tasks-muted">{template.title}</p></div><button type="button" onClick={onClose}>Cerrar</button></div>
+    <article className="tasks-panel checklist-assign-panel" role="dialog" aria-modal="true" aria-labelledby="checklist-assign-title">
+      <div className="tasks-panel-title"><div><h2 id="checklist-assign-title">Asignar checklist</h2><p className="tasks-muted">{template.title}</p></div><button type="button" disabled={saving} onClick={onClose}>Cerrar</button></div>
+      {saving && <p className="tasks-success" role="status">Asignando checklist...</p>}
+      {error && <p className="tasks-warning" role="alert">{error}</p>}
       <div className="tasks-form-grid">
         <Field label="Fecha"><input type="date" value={form.run_date} onChange={(event) => update("run_date", event.target.value)} /></Field>
         <Field label="Hora limite"><input type="time" value={form.due_time} onChange={(event) => update("due_time", event.target.value)} /></Field>
@@ -2682,7 +2775,7 @@ function ChecklistAssignPanel({ template, profiles, currentUser, userRole, onClo
         <Field label="Colaborador" hint={isSupervisorOnly ? "Solo colaboradores a tu cargo en tu area." : undefined}><select value={form.assigned_profile_id} onChange={(event) => update("assigned_profile_id", event.target.value)}><option value="">Sin colaborador especifico</option>{assignableProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.full_name || profile.username}</option>)}</select></Field>
       </div>
       <Field label="Observacion"><textarea value={form.notes} onChange={(event) => update("notes", event.target.value)} /></Field>
-      <button type="button" className="tasks-primary" onClick={() => onAssign(form)}>Asignar</button>
+      <button type="button" className="tasks-primary" disabled={saving} onClick={submit}>{saving ? "Asignando..." : "Asignar"}</button>
     </article>
   )
 }
@@ -4015,6 +4108,45 @@ function canSeeChecklistRun(run, user, profiles) {
 function profileDisplayName(profiles, profileId, fallbackName = "") {
   const profile = profiles.find((item) => item.id === profileId)
   return profile?.full_name || profile?.username || fallbackName || "Colaborador"
+}
+
+function validateChecklistAssignmentResult(run, payload, { existing = false } = {}) {
+  const errors = []
+  if (!run?.id) errors.push("missing run id")
+  if (run?.template_id !== payload.template_id) errors.push("missing or mismatched template_id")
+  if (!run?.run_date) errors.push("missing run_date")
+  if (payload.run_date && run?.run_date !== payload.run_date) errors.push("mismatched run_date")
+  if (!run?.assigned_profile_id && !run?.assigned_role) errors.push("missing assignee")
+  if (!existing && run?.status !== "pending") errors.push("status is not pending")
+  if (!Array.isArray(run?.checklist_run_items) || run.checklist_run_items.length === 0) errors.push("missing checklist run items")
+  return errors
+}
+
+function checklistLogicalRunKey(run) {
+  return [
+    run?.template_id || "NO_TEMPLATE",
+    run?.run_date || "NO_DATE",
+    run?.assigned_profile_id || "NO_PROFILE",
+    String(run?.assigned_role || "").trim() || "NO_ROLE",
+    String(run?.area || "").trim() || "NO_AREA"
+  ].join("|")
+}
+
+function preferChecklistRun(left, right) {
+  const statusRank = { in_progress: 0, pending: 1, overdue: 2, rejected: 3, completed: 4 }
+  const leftRank = statusRank[left?.status] ?? 9
+  const rightRank = statusRank[right?.status] ?? 9
+  if (leftRank !== rightRank) return leftRank < rightRank ? left : right
+  return String(left?.created_at || "") <= String(right?.created_at || "") ? left : right
+}
+
+function dedupeLogicalChecklistRuns(runs) {
+  const grouped = new Map()
+  ;(runs || []).forEach((run) => {
+    const key = checklistLogicalRunKey(run)
+    grouped.set(key, grouped.has(key) ? preferChecklistRun(grouped.get(key), run) : run)
+  })
+  return Array.from(grouped.values())
 }
 
 function markOverdueRuns(runs) {

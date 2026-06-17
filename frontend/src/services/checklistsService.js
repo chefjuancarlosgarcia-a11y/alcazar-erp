@@ -13,6 +13,15 @@ function activeTemplateItems(items) {
 const RUN_SELECT = "*, checklist_templates(title, description, frequency, shift_context), checklist_run_items(*)"
 const INCIDENT_SELECT = "*, checklist_runs(run_date, area, checklist_templates(title)), checklist_run_items(title, response_type, checked, response_text, response_number, photo_url, comment), profiles!checklist_incidents_reported_by_fkey(full_name, username)"
 const MANAGEMENT_ALERT_SELECT = "*, checklist_runs(run_date, area, checklist_templates(title)), sender:sender_profile_id(full_name, username)"
+
+function guatemalaDateString(date = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Guatemala",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(date)
+}
 const RRULE_DAY_TO_ISO = { MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6, SU: 7 }
 const ISO_TO_RRULE_DAY = { 1: "MO", 2: "TU", 3: "WE", 4: "TH", 5: "FR", 6: "SA", 7: "SU" }
 
@@ -461,21 +470,44 @@ export async function getChecklistRuns(filters = {}) {
 }
 
 export async function createChecklistRunFromTemplate(templateId, assignmentPayload = {}) {
-  const runDate = assignmentPayload.run_date || new Date().toISOString().slice(0, 10)
+  const runDate = assignmentPayload.run_date || guatemalaDateString()
+  const assignedProfileId = assignmentPayload.assigned_profile_id || null
+  const assignedRole = assignmentPayload.assigned_role?.trim() || null
+  const area = assignmentPayload.area?.trim() || null
+  let existingQuery = supabase
+    .from("checklist_runs")
+    .select("id")
+    .eq("template_id", templateId)
+    .eq("run_date", runDate)
+    .neq("status", "cancelled")
+    .limit(1)
+  existingQuery = assignedProfileId
+    ? existingQuery.eq("assigned_profile_id", assignedProfileId)
+    : existingQuery.is("assigned_profile_id", null)
+  existingQuery = assignedRole
+    ? existingQuery.eq("assigned_role", assignedRole)
+    : existingQuery.is("assigned_role", null)
+  existingQuery = area
+    ? existingQuery.eq("area", area)
+    : existingQuery.is("area", null)
+  const { data: existingRuns, error: existingError } = await existingQuery
+  if (existingError) return { data: null, error: existingError }
+
   const { data: run, error } = await supabase.rpc("create_checklist_run_from_template", {
     p_template_id: templateId,
     p_run_date: runDate,
     p_assignment_source: assignmentPayload.assignment_source || "manual",
-    p_assigned_profile_id: assignmentPayload.assigned_profile_id || null,
-    p_notes: assignmentPayload.notes?.trim() || null
+    p_assigned_profile_id: assignedProfileId,
+    p_notes: assignmentPayload.notes?.trim() || null,
+    p_area: area,
+    p_assigned_role: assignedRole
   })
   if (error) return { data: null, error }
-  if (assignmentPayload.area || assignmentPayload.assigned_role || assignmentPayload.due_time) {
+  const existedAlready = Boolean(existingRuns?.some((item) => item.id === run.id))
+  if (assignmentPayload.due_time) {
     const { error: updateError } = await supabase
       .from("checklist_runs")
       .update({
-        area: assignmentPayload.area || run.area || null,
-        assigned_role: assignmentPayload.assigned_role || run.assigned_role || null,
         due_time: assignmentPayload.due_time || run.due_time || null
       })
       .eq("id", run.id)
@@ -484,10 +516,10 @@ export async function createChecklistRunFromTemplate(templateId, assignmentPaylo
   window.dispatchEvent(new CustomEvent("notifications-updated"))
 
   const result = await getChecklistRuns({ date: runDate })
-  return { data: result.data.find((item) => item.id === run.id) || run, error: result.error }
+  return { data: { ...(result.data.find((item) => item.id === run.id) || run), existedAlready }, error: result.error }
 }
 
-export async function generateDueChecklistRuns(date = new Date().toISOString().slice(0, 10)) {
+export async function generateDueChecklistRuns(date = guatemalaDateString()) {
   const result = await supabase.rpc("generate_due_checklist_runs", { p_target_date: date })
   if (!result.error) window.dispatchEvent(new CustomEvent("notifications-updated"))
   return result
@@ -612,7 +644,7 @@ export async function rejectChecklistRun(runId, reviewNotes) {
 }
 
 export async function getChecklistDashboardStats() {
-  const today = new Date().toISOString().slice(0, 10)
+  const today = guatemalaDateString()
   const { data, error } = await getChecklistRuns({ date: today })
   if (error) return { data: null, error }
   const runs = data || []

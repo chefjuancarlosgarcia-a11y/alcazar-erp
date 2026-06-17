@@ -1282,9 +1282,12 @@
 }
 
 .checklist-template-card-actions {
+  position: relative;
+  z-index: 2;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
   gap: 8px;
+  pointer-events: auto;
 }
 
 .checklist-template-card-actions .tasks-secondary,
@@ -1293,6 +1296,15 @@
   min-height: 38px;
   padding: 8px 10px;
   font-size: 13px;
+  pointer-events: auto;
+}
+
+.checklist-assign-panel {
+  width: min(760px, calc(100vw - 32px));
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  padding: 18px;
+  box-shadow: 0 24px 70px rgba(2, 8, 23, 0.55);
 }
 
 .checklist-template-card-links {
