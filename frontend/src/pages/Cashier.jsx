@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useAuth } from "../context/AuthContext"
 import {
   PAYMENT_METHODS,
@@ -32,6 +32,7 @@ import {
 } from "../utils/cashier"
 import { getPosOrderPaymentStatus, getOrderWithItems, linkOrderBillingCustomer } from "../services/posOrdersService"
 import { printFinalCheck } from "../services/posPrintService"
+import { queueReceiptPrintJob } from "../services/printingService"
 import SplitPaymentModal from "../components/SplitPaymentModal"
 import CashierBillingCustomer from "../components/CashierBillingCustomer"
 import useOperationalAlerts from "../hooks/useOperationalAlerts"
@@ -44,6 +45,89 @@ import {
   orderWithBillingCustomer
 } from "../utils/billingCustomer"
 import "./Cashier.css"
+
+const RECEIPT_FLAG_RAW = import.meta.env.VITE_ENABLE_RECEIPT_PRINTING
+const RECEIPT_PRINTING_ENABLED = String(RECEIPT_FLAG_RAW ?? "false").toLowerCase() === "true"
+const POST_PAYMENT_PRINT_TIMEOUT_MS = 5000
+const RECEIPT_PRINT_NOTICE = "Cobro registrado. Recibo térmico pendiente/no enviado."
+
+function logReceiptFlagState(context = "module") {
+  console.log("[Receipt Flag] value", RECEIPT_FLAG_RAW === undefined ? "undefined" : String(RECEIPT_FLAG_RAW))
+  console.log("[Receipt Flag] enabled", RECEIPT_PRINTING_ENABLED, { context, mode: import.meta.env.MODE })
+}
+
+logReceiptFlagState("Cashier.jsx load")
+
+function withPostPaymentTimeout(promise, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      window.setTimeout(() => reject(new Error(`Timeout en ${label}`)), POST_PAYMENT_PRINT_TIMEOUT_MS)
+    })
+  ])
+}
+
+function schedulePostPaymentPrints({
+  orderForPrint,
+  payment,
+  billingCustomer,
+  comandaNo,
+  billOrderId,
+  cashierName,
+  onPrintNotice
+}) {
+  void withPostPaymentTimeout(
+    printFinalCheck(orderForPrint, { ...payment, billingCustomer }),
+    "PDF cuenta final"
+  ).then((printed) => {
+    if (printed === false) {
+      console.warn("[Cashier] print skipped/failed pdf")
+    } else {
+      console.log("[Cashier] print queued pdf")
+    }
+  }).catch((error) => {
+    console.warn("[Cashier] print skipped/failed pdf", error?.message || error)
+  })
+
+  if (!RECEIPT_PRINTING_ENABLED) {
+    logReceiptFlagState("schedulePostPaymentPrints skipped")
+    console.log("[Cashier] print skipped receipt (disabled)")
+    return
+  }
+
+  console.log("[Receipt Print] attempting queueReceiptPrintJob", {
+    orderId: billOrderId,
+    comandaNo,
+    paymentId: payment?.id
+  })
+
+  void withPostPaymentTimeout(
+    queueReceiptPrintJob({
+      order: orderForPrint,
+      payment: { ...payment, billingCustomer },
+      options: {
+        restaurantName: "EL GRAN ALCÁZAR",
+        cashierName,
+        orderId: billOrderId,
+        orderLabel: comandaNo,
+        receiptNumber: payment?.paymentNumber || comandaNo,
+        billingCustomer
+      }
+    }),
+    "recibo térmico"
+  ).then((receiptResult) => {
+    console.log("[Receipt Print] result", receiptResult)
+    if (!receiptResult?.ok) {
+      console.warn("[Receipt Print] error", receiptResult?.error?.message || receiptResult)
+      onPrintNotice?.(RECEIPT_PRINT_NOTICE)
+      return
+    }
+    console.log("[Cashier] print queued receipt", { jobId: receiptResult.data?.id })
+  }).catch((error) => {
+    console.warn("[Receipt Print] error", error?.message || error)
+    onPrintNotice?.(RECEIPT_PRINT_NOTICE)
+  })
+}
 
 const TABS = [
   ["dashboard", "Dashboard Caja"],
@@ -153,14 +237,41 @@ function Cashier() {
   }
 
   function openCharge(bill) {
-    const result = beginPayment(bill.id, user)
-    if (!result.ok) {
-      refresh(`Error en Caja > Solicitudes de cobro > Cobrar: ${result.message || "No se pudo iniciar el cobro."}`)
+    console.log("[Cashier] openCharge", { preBillId: bill?.id, tableName: bill?.tableName })
+    if (!session) {
+      refresh("Abre la caja en Dashboard Caja antes de cobrar mesas.")
+      setTab("dashboard")
       return
     }
-    setSelectedBillId(bill.id)
-    setTab("charge")
-    setStore(loadStore())
+    try {
+      const result = beginPayment(bill.id, user)
+      if (!result.ok) {
+        refresh(`Error en Caja > Solicitudes de cobro > Cobrar: ${result.message || "No se pudo iniciar el cobro."}`)
+        return
+      }
+      setSelectedBillId(String(bill.id))
+      setTab("charge")
+      setFeedback("")
+      setStore(loadStore())
+    } catch (error) {
+      console.error("[Cashier] openCharge failed", error)
+      refresh("No se pudo abrir el cobro. Intenta de nuevo.")
+    }
+  }
+
+  function selectTab(nextTab) {
+    if (nextTab === "charge") {
+      if (!session) {
+        refresh("Abre la caja en Dashboard Caja antes de cobrar mesas.")
+        setTab("dashboard")
+        return
+      }
+      if (!selectedBillId && requests.length) {
+        openCharge(requests[0])
+        return
+      }
+    }
+    setTab(nextTab)
   }
 
   function completeCharge(message = "Pago completado correctamente.") {
@@ -206,7 +317,7 @@ function Cashier() {
 
       <nav className="cashier-tabs" aria-label="Caja">
         {TABS.map(([id, label]) => (
-          <button key={id} type="button" className={tab === id ? "active" : ""} onClick={() => setTab(id)}>
+          <button key={id} type="button" className={tab === id ? "active" : ""} onClick={() => selectTab(id)}>
             {label}
             {id === "requests" && requests.length > 0 && <b>{requests.length}</b>}
           </button>
@@ -319,6 +430,7 @@ function RequestRow({ bill, isNew = false, onCharge }) {
 }
 
 function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onPaymentComplete }) {
+  const submitLockRef = useRef(false)
   const [tip, setTip] = useState(bill ? String(bill.tipSuggested || 0) : "0")
   const [discount, setDiscount] = useState("0")
   const [methods, setMethods] = useState([{ method: "cash", amount: bill ? String(bill.total) : "", reference: "" }])
@@ -331,7 +443,7 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
   const [showSplitModal, setShowSplitModal] = useState(false)
   const [paymentStatus, setPaymentStatus] = useState(null)
   const [billingCustomer, setBillingCustomer] = useState(DEFAULT_BILLING_CUSTOMER)
-  const isSupabaseBill = bill?.source === "supabase_pos" && bill?.orderId
+  const isSupabaseBill = Boolean(bill?.source === "supabase_pos" && bill?.orderId)
   const splitBill = splitBills.find((split) => String(split.preBillId) === String(bill?.id))
   const split = splitBill?.splits.find((part) => part.id === splitId)
   const productSubtotal = Number(split?.subtotal ?? (paymentStatus ? paymentStatus.balance_due : null) ?? bill?.subtotal ?? 0)
@@ -345,6 +457,14 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
     ? String(bill.orderId).slice(0, 8).toUpperCase()
     : String(bill?.id || "").slice(0, 8).toUpperCase()
   const billTimestamp = bill?.sentAt || bill?.createdAt
+
+  useEffect(() => {
+    submitLockRef.current = false
+    setProcessingPayment(false)
+    setPaymentMode("full")
+    setShowSplitModal(false)
+    setMessage("")
+  }, [bill?.id])
 
   function applyTipPercent(percent) {
     setTip((productSubtotal * (percent / 100)).toFixed(2))
@@ -441,7 +561,22 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
     }
     setShowSplitModal(false)
     if (result.orderFullyPaid) {
-      onPaymentComplete(`Subcuenta cobrada. Cuenta cerrada. Saldo restante: Q0.00`)
+      console.log("[Cashier] payment complete flow", { source: "handleSplitPaid" })
+      onPaymentComplete("Subcuenta cobrada. Cuenta cerrada. Saldo restante: Q0.00")
+      const orderForPrint = orderWithBillingCustomer(bill, normalizeBillingCustomer(billingCustomer))
+      schedulePostPaymentPrints({
+        orderForPrint,
+        payment: {
+          ...local.payment,
+          methods: result.methods || local.payment?.methods || [],
+          paymentNumber: result.payment_number || local.payment?.paymentNumber
+        },
+        billingCustomer: normalizeBillingCustomer(billingCustomer),
+        comandaNo,
+        billOrderId: bill.orderId,
+        cashierName: user?.name || local.payment?.cashierName,
+        onPrintNotice: (notice) => onRefresh(notice)
+      })
       return
     }
     await refreshPaymentStatus()
@@ -450,7 +585,12 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
   }
 
   async function submit() {
-    if (processingPayment) return
+    console.log("[Cashier] submit entered")
+    if (submitLockRef.current) {
+      console.warn("[Cashier] submit ignored: already in progress")
+      return
+    }
+    submitLockRef.current = true
     setProcessingPayment(true)
     setMessage("Procesando pago...")
     try {
@@ -468,7 +608,16 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
       }
 
       if (isSupabaseBill) {
-        const syncResult = await syncSupabaseFullPayment(bill.orderId, methods, "Cuenta completa")
+        let syncResult
+        try {
+          syncResult = await withPostPaymentTimeout(
+            syncSupabaseFullPayment(bill.orderId, methods, "Cuenta completa"),
+            "sync Supabase"
+          )
+        } catch (error) {
+          setMessage(`Error en Caja > Cobrar mesa > Supabase: ${error.message || "Tiempo de espera agotado."}`)
+          return
+        }
         if (!syncResult.ok) {
           setMessage(`Error en Caja > Cobrar mesa > Supabase: ${syncResult.message}`)
           return
@@ -486,12 +635,18 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
         productSubtotalOverride: isSupabaseBill ? productSubtotal : undefined,
         billingCustomer: normalizedBilling
       }, user)
+      console.log("[Cashier] confirmPayment result", {
+        ok: result.ok,
+        allPaid: result.allPaid,
+        requiresAuthorization: result.requiresAuthorization
+      })
       if (result.requiresAuthorization) {
         createAuthorizationRequest("Descuento o cortesía", result.message, Number(discount), user)
         setMessage("Caja > Cobrar mesa > Confirmar pago: solicitud de autorización enviada. Espera aprobación para cobrar.")
         onRefresh("")
         return
       }
+
       if (!result.ok) {
         setMessage(`Error en Caja > Cobrar mesa > Confirmar pago: ${result.message || "No se pudo registrar el pago."}`)
         return
@@ -502,22 +657,23 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
         return
       }
 
-      let finalMessage = "Pago completado correctamente. Orden liberada."
-      try {
-        const printed = await printFinalCheck(
-          orderWithBillingCustomer(bill, normalizedBilling),
-          { ...result.payment, billingCustomer: normalizedBilling }
-        )
-        if (!printed) finalMessage = "Pago completado correctamente. No se pudo abrir la impresión automática."
-      } catch (error) {
-        console.error("[Cashier] Error imprimiendo cuenta final.", error)
-        finalMessage = `Pago completado correctamente. Error en Caja > Cobrar mesa > Impresión final: ${error.message || "la impresión falló"}`
-      }
-      onPaymentComplete(finalMessage)
+      console.log("[Cashier] payment complete flow", { source: "submit" })
+      onPaymentComplete("Pago completado correctamente. Orden liberada.")
+      schedulePostPaymentPrints({
+        orderForPrint: orderWithBillingCustomer(bill, normalizedBilling),
+        payment: result.payment,
+        billingCustomer: normalizedBilling,
+        comandaNo,
+        billOrderId: bill.orderId,
+        cashierName: user?.name || result.payment.cashierName,
+        onPrintNotice: (notice) => onRefresh(notice)
+      })
     } catch (error) {
       console.error("[Cashier] Error confirmando pago.", error)
       setMessage(`Error en Caja > Cobrar mesa > Confirmar pago: ${error.message || "No se pudo completar la transacción."}`)
     } finally {
+      submitLockRef.current = false
+      console.log("[Cashier] submit finally")
       setProcessingPayment(false)
     }
   }
@@ -634,7 +790,11 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
             </div>
           )}
           {paymentMode === "split" && isSupabaseBill && !showSplitModal && (
-            <p className="cashier-split-hint">Selecciona productos para armar la subcuenta de cada cliente.</p>
+            <>
+              <p className="cashier-split-hint">Modo subcuenta activo. Abre la división o vuelve al pago completo.</p>
+              <button type="button" className="secondary" onClick={() => setPaymentMode("full")}>Volver a pagar cuenta completa</button>
+              <button type="button" className="secondary" onClick={() => setShowSplitModal(true)}>Abrir división por productos</button>
+            </>
           )}
           {(!isSupabaseBill || paymentMode === "full") && (
             <>
@@ -698,9 +858,6 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
               </button>
             </>
           )}
-          {paymentMode === "split" && isSupabaseBill && (
-            <button type="button" className="secondary" onClick={() => setShowSplitModal(true)}>Abrir división por productos</button>
-          )}
         </section>
       </div>
 
@@ -735,7 +892,10 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
         <SplitPaymentModal
           bill={bill}
           user={user}
-          onClose={() => setShowSplitModal(false)}
+          onClose={() => {
+            setShowSplitModal(false)
+            setPaymentMode("full")
+          }}
           onPaid={handleSplitPaid}
         />
       )}

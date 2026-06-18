@@ -12,6 +12,100 @@ const LAYOUT_KEY = "posLayout"
 const LEGACY_LAYOUT_KEY = "posRestaurantAreas"
 const NOTIFICATIONS_KEY = "notifications"
 
+const DEFAULT_STORAGE_LIMIT = 400
+const STORAGE_LIMITS = {
+  [FINANCIAL_AUDIT_KEY]: 200,
+  [PAYMENTS_KEY]: 400,
+  [CASH_MOVEMENTS_KEY]: 400,
+  [TIP_RECORDS_KEY]: 300,
+  [NOTIFICATIONS_KEY]: 150,
+  [PRE_BILLS_KEY]: 150,
+  [AUTHORIZATION_REQUESTS_KEY]: 100,
+  [SPLIT_BILLS_KEY]: 100,
+  [CASH_SESSIONS_KEY]: 80,
+  [ORDERS_KEY]: 120
+}
+
+function auditSnapshot(value) {
+  if (!value || typeof value !== "object") return value ?? null
+  return {
+    id: value.id ?? null,
+    orderId: value.orderId ?? null,
+    status: value.status ?? value.estado ?? null,
+    total: value.total ?? null,
+    tableName: value.tableName ?? null
+  }
+}
+
+function trimArrayForStorage(key, value) {
+  if (!Array.isArray(value)) return value
+  const limit = STORAGE_LIMITS[key] ?? DEFAULT_STORAGE_LIMIT
+  return value.length > limit ? value.slice(0, limit) : value
+}
+
+function parseArray(key) {
+  try {
+    const value = JSON.parse(localStorage.getItem(key) || "[]")
+    return Array.isArray(value) ? value : []
+  } catch {
+    return []
+  }
+}
+
+function saveArray(key, value) {
+  let payload = trimArrayForStorage(key, value)
+  try {
+    localStorage.setItem(key, JSON.stringify(payload))
+    return true
+  } catch (error) {
+    if (error?.name !== "QuotaExceededError") {
+      console.warn("[cashier] saveArray failed", key, error)
+      return false
+    }
+    if (Array.isArray(payload)) {
+      payload = payload.slice(0, Math.max(25, Math.floor(payload.length / 2)))
+    }
+    try {
+      localStorage.setItem(key, JSON.stringify(payload))
+      console.warn("[cashier] storage quota recovered after trim", key, Array.isArray(payload) ? payload.length : 0)
+      return true
+    } catch (retryError) {
+      if (key !== FINANCIAL_AUDIT_KEY) {
+        try {
+          localStorage.removeItem(FINANCIAL_AUDIT_KEY)
+          localStorage.setItem(key, JSON.stringify(trimArrayForStorage(key, value)))
+          console.warn("[cashier] cleared financialAuditLog to recover storage for", key)
+          return true
+        } catch {
+          // fall through
+        }
+      }
+      console.warn("[cashier] saveArray quota exceeded", key, retryError)
+      return false
+    }
+  }
+}
+
+function pruneCashierStorage() {
+  try {
+    const logs = parseArray(FINANCIAL_AUDIT_KEY)
+    if (!logs.length) return
+    const trimmed = logs.slice(0, STORAGE_LIMITS[FINANCIAL_AUDIT_KEY]).map((entry) => ({
+      ...entry,
+      before: auditSnapshot(entry.before),
+      after: auditSnapshot(entry.after)
+    }))
+    saveArray(FINANCIAL_AUDIT_KEY, trimmed)
+  } catch (error) {
+    console.warn("[cashier] pruneCashierStorage failed", error)
+    try {
+      localStorage.removeItem(FINANCIAL_AUDIT_KEY)
+    } catch {
+      // ignore
+    }
+  }
+}
+
 export const PAYMENT_METHODS = [
   { id: "cash", label: "Efectivo" },
   { id: "card", label: "Tarjeta" },
@@ -25,18 +119,7 @@ export const PAYMENT_METHODS = [
 export const CASHIER_ROLES = ["admin", "gerente", "gerente_general", "supervisor", "cajero", "caja"]
 export const FINANCE_AUTHORIZER_ROLES = ["admin", "gerente", "gerente_general", "supervisor"]
 
-function parseArray(key) {
-  try {
-    const value = JSON.parse(localStorage.getItem(key) || "[]")
-    return Array.isArray(value) ? value : []
-  } catch {
-    return []
-  }
-}
-
-function saveArray(key, value) {
-  localStorage.setItem(key, JSON.stringify(value))
-}
+pruneCashierStorage()
 
 function id(prefix) {
   return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 100000)}`
@@ -109,8 +192,8 @@ function audit(action, entityType, entityId, before, after, user, reason = "", a
     action,
     entityType,
     entityId,
-    before,
-    after,
+    before: auditSnapshot(before),
+    after: auditSnapshot(after),
     performedBy: actorName(user),
     authorizedBy,
     reason,
@@ -325,7 +408,11 @@ export function beginPayment(preBillId, user) {
   const preBill = loadPreBills().find((bill) => String(bill.id) === String(preBillId))
   if (!preBill || preBill.status === "paid") return { ok: false, message: "Precuenta no disponible." }
   const order = updateOrder(preBill.orderId, (current) => ({ ...current, status: "payment_in_progress", estado: "pago en proceso" }))
-  audit("begin_payment", "preBill", preBill.id, null, order, user)
+  try {
+    audit("begin_payment", "preBill", preBill.id, null, order, user)
+  } catch (error) {
+    console.warn("[cashier] beginPayment audit skipped", error)
+  }
   emit()
   return { ok: true, order }
 }

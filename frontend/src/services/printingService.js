@@ -1,6 +1,87 @@
 import { supabase } from "../lib/supabase"
+import { withTimeout } from "./productionTicketsService"
+import {
+  formatEscPosReceiptLines,
+  loadFinalBillTemplate
+} from "./ticketEscPosRenderer"
 
 export const PRINT_JOB_TYPES = ["test", "prebill", "receipt", "delivery_order"]
+
+const RECEIPT_PRINT_QUERY_TIMEOUT_MS = 8000
+const RECEIPT_PRINT_RPC_TIMEOUT_MS = 8000
+const RECEIPT_PRINT_LOOKUP_TIMEOUT_MS = 5000
+
+const ACTIVE_PRINTER_SELECT =
+  "id,name,windows_printer_name,location,supported_job_types,is_active"
+
+function logReceiptQueryChain(label, { withOrder = false } = {}) {
+  console.log("[Receipt Print] query chain", {
+    label,
+    terminalMethods: {
+      maybeSingle: false,
+      single: false,
+      throwOnError: false,
+      returns: false,
+      overrideTypes: false,
+      executed: "default filter builder (array JSON response)"
+    },
+    withOrder
+  })
+}
+
+function sortPrintersByName(printers = []) {
+  return [...printers].sort((left, right) => String(left?.name || "").localeCompare(String(right?.name || ""), "es"))
+}
+
+function isReceiptDebug(jobType) {
+  return String(jobType || "").trim().toLowerCase() === "receipt"
+}
+
+async function awaitSupabaseQuery(queryBuilder, { timeoutMs, label, receiptDebug = false }) {
+  if (receiptDebug) {
+    console.log("[Receipt Print] timeout wrapper", {
+      strategy: "Promise.race",
+      helper: "withTimeout (productionTicketsService)",
+      abortController: false,
+      timeoutMs,
+      label
+    })
+    console.log("[Receipt Print] before supabase query", label)
+  }
+
+  const startedAt = Date.now()
+  try {
+    const result = await withTimeout(
+      (async () => queryBuilder)(),
+      timeoutMs,
+      label
+    )
+    if (receiptDebug) {
+      console.log("[Receipt Print] after supabase query", {
+        label,
+        ms: Date.now() - startedAt,
+        error: result.error?.message || null,
+        dataLength: result.data?.length ?? 0
+      })
+      if (result.error) {
+        console.warn("[Receipt Print] query error", result.error.message || result.error)
+      } else {
+        console.log("[Receipt Print] query data length", result.data?.length ?? 0)
+      }
+    }
+    return result
+  } catch (error) {
+    if (receiptDebug) {
+      console.warn("[Receipt Print] query error", error?.message || error)
+      console.log("[Receipt Print] after supabase query", {
+        label,
+        ms: Date.now() - startedAt,
+        timedOut: true
+      })
+    }
+    throw error
+  }
+}
 
 export function normalizeSupportedJobTypes(value) {
   if (Array.isArray(value)) {
@@ -44,15 +125,186 @@ export async function getPosPrinters() {
 }
 
 export async function getActivePosPrinters({ jobType = "" } = {}) {
-  const { data, error } = await supabase
-    .from("pos_printers")
-    .select("*")
-    .eq("is_active", true)
-    .order("name", { ascending: true })
+  const normalizedJobType = String(jobType || "").trim().toLowerCase()
+  const receiptDebug = isReceiptDebug(normalizedJobType)
 
-  const printers = jobType
-    ? (data || []).filter((printer) => printerSupportsJobType(printer, jobType))
+  if (receiptDebug) {
+    console.log("[Receipt Print] getActivePosPrinters start", { jobType: normalizedJobType })
+    console.log("[Receipt Print] query equivalent SQL", [
+      "-- minimal (receipt debug)",
+      "select id, name, supported_job_types",
+      "from pos_printers",
+      "where is_active = true;",
+      "",
+      "-- no-order diagnostic",
+      `select ${ACTIVE_PRINTER_SELECT.replace(/,/g, ", ")}`,
+      "from pos_printers",
+      "where is_active = true;",
+      "",
+      "-- full with order (diagnostic)",
+      `select ${ACTIVE_PRINTER_SELECT.replace(/,/g, ", ")}`,
+      "from pos_printers",
+      "where is_active = true",
+      "order by name asc;"
+    ].join("\n"))
+    console.log("[Receipt Print] receipt vs prebill", {
+      sqlDifference: "none — same Supabase query; jobType filtered client-side",
+      prebillFilter: "supported_job_types includes 'prebill'",
+      receiptFilter: "supported_job_types includes 'receipt'"
+    })
+  }
+
+  if (receiptDebug) {
+    console.log("[Receipt Print] minimal query start", {
+      from: "pos_printers",
+      select: "id,name,supported_job_types",
+      eq: { is_active: true }
+    })
+    try {
+      await awaitSupabaseQuery(
+        supabase
+          .from("pos_printers")
+          .select("id,name,supported_job_types")
+          .eq("is_active", true),
+        {
+          timeoutMs: RECEIPT_PRINT_QUERY_TIMEOUT_MS,
+          label: "pos_printers minimal",
+          receiptDebug: true
+        }
+      )
+    } catch (error) {
+      console.warn("[Receipt Print] minimal query failed", error?.message || error)
+      return { data: [], error: { message: error?.message || "Timeout en consulta mínima de impresoras." } }
+    }
+  }
+
+  let data
+  let error
+
+  if (receiptDebug) {
+    console.log("[Receipt Print] no-order query start", {
+      from: "pos_printers",
+      select: ACTIVE_PRINTER_SELECT,
+      eq: { is_active: true },
+      order: null
+    })
+    logReceiptQueryChain("pos_printers no-order", { withOrder: false })
+    try {
+      const noOrderResult = await awaitSupabaseQuery(
+        supabase
+          .from("pos_printers")
+          .select(ACTIVE_PRINTER_SELECT)
+          .eq("is_active", true),
+        {
+          timeoutMs: RECEIPT_PRINT_QUERY_TIMEOUT_MS,
+          label: "pos_printers no-order",
+          receiptDebug: true
+        }
+      )
+      console.log("[Receipt Print] no-order query result", {
+        dataLength: noOrderResult.data?.length ?? 0,
+        error: noOrderResult.error?.message || null
+      })
+    } catch (noOrderError) {
+      console.warn("[Receipt Print] no-order query failed", noOrderError?.message || noOrderError)
+    }
+
+    console.log("[Receipt Print] full query start", {
+      from: "pos_printers",
+      select: ACTIVE_PRINTER_SELECT,
+      eq: { is_active: true },
+      order: { name: "asc" }
+    })
+    logReceiptQueryChain("pos_printers full", { withOrder: true })
+
+    let queryWithOrder = supabase
+      .from("pos_printers")
+      .select(ACTIVE_PRINTER_SELECT)
+      .eq("is_active", true)
+    console.log("[Receipt Print] before order(name)")
+    queryWithOrder = queryWithOrder.order("name", { ascending: true })
+    console.log("[Receipt Print] after order(name)")
+
+    try {
+      const orderedResult = await awaitSupabaseQuery(queryWithOrder, {
+        timeoutMs: RECEIPT_PRINT_QUERY_TIMEOUT_MS,
+        label: "pos_printers full",
+        receiptDebug: true
+      })
+      data = orderedResult.data
+      error = orderedResult.error
+      console.log("[Receipt Print] full query with order succeeded", {
+        dataLength: data?.length ?? 0,
+        error: error?.message || null
+      })
+    } catch (orderedError) {
+      console.warn("[Receipt Print] full query with order failed", orderedError?.message || orderedError)
+      console.log("[Receipt Print] falling back to no-order + client sort")
+      try {
+        const fallbackResult = await awaitSupabaseQuery(
+          supabase
+            .from("pos_printers")
+            .select(ACTIVE_PRINTER_SELECT)
+            .eq("is_active", true),
+          {
+            timeoutMs: RECEIPT_PRINT_QUERY_TIMEOUT_MS,
+            label: "pos_printers fallback no-order",
+            receiptDebug: true
+          }
+        )
+        data = sortPrintersByName(fallbackResult.data || [])
+        error = fallbackResult.error
+      } catch (fallbackError) {
+        if (receiptDebug) {
+          console.log("[Receipt Print] getActivePosPrinters result", {
+            error: fallbackError?.message || String(fallbackError),
+            rawCount: 0,
+            filteredCount: 0
+          })
+        }
+        return { data: [], error: { message: fallbackError?.message || "Timeout listando impresoras." } }
+      }
+    }
+  } else {
+    try {
+      const fullResult = await awaitSupabaseQuery(
+        supabase
+          .from("pos_printers")
+          .select(ACTIVE_PRINTER_SELECT)
+          .eq("is_active", true),
+        {
+          timeoutMs: RECEIPT_PRINT_QUERY_TIMEOUT_MS,
+          label: "pos_printers active",
+          receiptDebug: false
+        }
+      )
+      data = sortPrintersByName(fullResult.data || [])
+      error = fullResult.error
+    } catch (queryError) {
+      return { data: [], error: { message: queryError?.message || "Timeout listando impresoras." } }
+    }
+  }
+
+  const printers = normalizedJobType
+    ? (data || []).filter((printer) => printerSupportsJobType(printer, normalizedJobType))
     : (data || [])
+
+  if (receiptDebug) {
+    const allActive = data || []
+    console.log("[Receipt Print] getActivePosPrinters result", {
+      ms: "see after supabase query logs",
+      error: error?.message || null,
+      rawCount: allActive.length,
+      receiptCount: printers.length,
+      prebillCount: allActive.filter((printer) => printerSupportsJobType(printer, "prebill")).length,
+      printers: allActive.map((printer) => ({
+        id: printer.id,
+        name: printer.name,
+        location: printer.location,
+        supported_job_types: printer.supported_job_types
+      }))
+    })
+  }
 
   return { data: printers, error }
 }
@@ -102,7 +354,7 @@ export async function savePosPrinter(printer) {
     paper_width: printer.paper_width || "80mm",
     supported_job_types: Array.isArray(printer.supported_job_types) && printer.supported_job_types.length
       ? printer.supported_job_types
-      : ["test", "prebill"],
+      : ["test", "prebill", "receipt"],
     is_active: printer.is_active !== false
   }
 
@@ -126,28 +378,71 @@ export async function setPosPrinterActive(id, isActive) {
 
 export async function createPrintJob({ printerId, jobType = "test", payload = {} }) {
   const normalizedJobType = String(jobType || "test").trim().toLowerCase()
-  const { data: printerRow, error: printerError } = await getPosPrinterById(printerId)
+  const isReceiptJob = normalizedJobType === "receipt"
+  if (isReceiptJob) {
+    console.log("[Receipt Print] createPrintJob start", { printerId, jobType: normalizedJobType })
+  }
+
+  let printerRow
+  let printerError
+  try {
+    const lookup = await withTimeout(
+      getPosPrinterById(printerId),
+      RECEIPT_PRINT_LOOKUP_TIMEOUT_MS,
+      "getPosPrinterById"
+    )
+    printerRow = lookup.data
+    printerError = lookup.error
+  } catch (error) {
+    if (isReceiptJob) {
+      console.warn("[Receipt Print] createPrintJob error", error?.message || error)
+    }
+    return { data: null, error: { message: error?.message || "Timeout consultando impresora." } }
+  }
+
   const supportedTypes = normalizeSupportedJobTypes(printerRow?.supported_job_types)
 
   if (printerError) {
+    if (isReceiptJob) console.warn("[Receipt Print] createPrintJob error", printerError.message || printerError)
     return { data: null, error: printerError }
   }
   if (!printerRow?.is_active) {
-    return { data: null, error: { message: "Impresora no encontrada o inactiva." } }
+    const message = "Impresora no encontrada o inactiva."
+    if (isReceiptJob) console.warn("[Receipt Print] createPrintJob error", message)
+    return { data: null, error: { message } }
   }
   if (!supportedTypes.includes(normalizedJobType)) {
     const message = `La impresora "${printerRow.name}" (${printerId}) no incluye "${normalizedJobType}" en supported_job_types: [${supportedTypes.join(", ")}]`
+    if (isReceiptJob) console.warn("[Receipt Print] createPrintJob error", message)
     return { data: null, error: { message } }
   }
 
-  const { data, error } = await supabase.rpc("create_print_job", {
-    p_printer_id: printerId,
-    p_job_type: normalizedJobType,
-    p_payload: payload
-  })
+  let data
+  let error
+  try {
+    const rpcResult = await withTimeout(
+      supabase.rpc("create_print_job", {
+        p_printer_id: printerId,
+        p_job_type: normalizedJobType,
+        p_payload: payload
+      }),
+      RECEIPT_PRINT_RPC_TIMEOUT_MS,
+      "create_print_job rpc"
+    )
+    data = rpcResult.data
+    error = rpcResult.error
+  } catch (rpcError) {
+    if (isReceiptJob) {
+      console.warn("[Receipt Print] createPrintJob error", rpcError?.message || rpcError)
+    }
+    return { data: null, error: { message: rpcError?.message || "Timeout en create_print_job." } }
+  }
 
   if (error) {
     console.error("[printingService] createPrintJob failed:", error.message, { printerId, jobType: normalizedJobType })
+    if (isReceiptJob) console.warn("[Receipt Print] createPrintJob error", error.message || error)
+  } else if (isReceiptJob) {
+    console.log("[Receipt Print] createPrintJob result", { jobId: data?.id, status: data?.status })
   }
 
   return { data, error }
@@ -220,5 +515,197 @@ export function buildPrebillPrintPayload(order, options = {}) {
     total,
     people_count: order?.peopleCount || null,
     notes: order?.notes || order?.notas || ""
+  }
+}
+
+const PAYMENT_METHOD_LABELS = {
+  cash: "Efectivo",
+  card: "Tarjeta",
+  transfer: "Transferencia",
+  qr: "QR",
+  gift_card: "Gift card",
+  accounts_receivable: "Cuenta por cobrar",
+  courtesy: "Cortesía"
+}
+
+function formatPaymentMethods(methods = []) {
+  return (methods || [])
+    .filter((method) => Number(method.amount) > 0)
+    .map((method) => {
+      const label = PAYMENT_METHOD_LABELS[method.method] || method.method || "Pago"
+      return `${label}: Q${toNumber(method.amount).toFixed(2)}`
+    })
+    .join(", ")
+}
+
+export function buildReceiptPrintPayload(order, payment = {}, options = {}) {
+  const rawItems = Array.isArray(order?.items) ? order.items : []
+  const items = rawItems
+    .filter((item) => item.status !== "cancelled")
+    .map((item) => {
+      const quantity = toNumber(item.cantidad ?? item.quantity ?? item.qty, 1)
+      const unitPrice = toNumber(item.precio ?? item.price ?? item.unitPrice ?? item.unit_price, 0)
+      const subtotal = toNumber(item.subtotal ?? item.line_total ?? item.total, quantity * unitPrice)
+
+      return {
+        name: itemName(item),
+        quantity,
+        unit_price: unitPrice,
+        subtotal,
+        notes: itemNotes(item)
+      }
+    })
+
+  const itemsSubtotal = items.reduce((sum, item) => sum + item.subtotal, 0)
+  const subtotal = toNumber(order?.subtotal ?? payment?.subtotal, itemsSubtotal)
+  const discountAmount = toNumber(payment.discountAmount ?? order?.discounts, 0)
+  const tipAmount = toNumber(payment.tipAmount, 0)
+  const total = toNumber(payment.totalAmount ?? order?.total, subtotal - discountAmount + tipAmount)
+  const printedAt = new Date().toLocaleString("es-GT", {
+    timeZone: "America/Guatemala",
+    dateStyle: "short",
+    timeStyle: "medium"
+  })
+
+  return {
+    restaurant_name: options.restaurantName || "EL GRAN ALCÁZAR",
+    receipt_number: options.receiptNumber || payment.paymentNumber || payment.id || null,
+    order_id: options.orderId || order?.id || payment.orderId || null,
+    order_label: options.orderLabel || options.receiptNumber || null,
+    table_name: order?.tableName || order?.mesa || order?.table_name || "Mesa",
+    waiter_name: order?.waiterName || order?.usuarioNombre || payment.waiterName || "—",
+    cashier_name: payment.cashierName || options.cashierName || "Caja",
+    printed_at_gt: printedAt,
+    created_at: printedAt,
+    items,
+    subtotal,
+    discount_amount: discountAmount,
+    tip_amount: tipAmount,
+    total,
+    payment_methods: formatPaymentMethods(payment.methods),
+    footer_message: "Gracias por visitarnos"
+  }
+}
+
+export async function buildReceiptPrintPayloadAsync(order, payment = {}, options = {}) {
+  const base = buildReceiptPrintPayload(order, payment, options)
+
+  try {
+    const template = options.template || await loadFinalBillTemplate()
+    if (!template) {
+      console.warn("[Ticket ESC/POS] template loaded", { templateKey: null, fallback: true })
+      return base
+    }
+
+    console.log("[Ticket ESC/POS] template loaded", {
+      templateKey: template.template_key,
+      name: template.name,
+      paperWidth: template.paper_width
+    })
+
+    const ticketType = options.ticketType || "final_bill"
+    const rendered = formatEscPosReceiptLines(
+      order,
+      template,
+      ticketType,
+      payment,
+      {
+        ...options,
+        printedAt: base.printed_at_gt,
+        billingCustomer: options.billingCustomer || payment.billingCustomer
+      }
+    )
+
+    console.log("[Ticket ESC/POS] lines generated", {
+      count: rendered.lines.length,
+      paperWidth: rendered.paperWidth
+    })
+
+    return {
+      ...base,
+      lines: rendered.lines,
+      paper_width: rendered.paperWidth,
+      paperWidth: rendered.paperWidth,
+      template_key: rendered.templateKey,
+      ticket_type: rendered.ticketType,
+      footer_message: template.settings?.messages?.footerMessage || base.footer_message
+    }
+  } catch (error) {
+    console.warn("[Ticket ESC/POS] renderer failed, using fallback payload", error?.message || error)
+    return base
+  }
+}
+
+export async function queueReceiptPrintJob({ payload, order, payment, options, locationHint = "CAJA" } = {}) {
+  console.log("[Receipt Print] attempting queueReceiptPrintJob", { locationHint })
+  try {
+    let resolvedPayload = payload
+    if (!resolvedPayload && order) {
+      try {
+        resolvedPayload = await buildReceiptPrintPayloadAsync(order, payment || {}, options || {})
+      } catch (error) {
+        console.warn("[Receipt Print] payload build failed, using minimal fallback", error?.message || error)
+        resolvedPayload = buildReceiptPrintPayload(order, payment || {}, options || {})
+      }
+    }
+
+    if (!resolvedPayload) {
+      return { ok: false, error: { message: "Payload de recibo requerido." } }
+    }
+
+    console.log("[Receipt Print] payload lines count", resolvedPayload.lines?.length ?? 0)
+    let printersResult
+    try {
+      printersResult = await getActivePosPrinters({ jobType: "receipt" })
+    } catch (error) {
+      return { ok: false, error: { message: error?.message || "Timeout listando impresoras." } }
+    }
+
+    if (printersResult.error) {
+      console.warn("[Receipt Print] error", printersResult.error?.message || printersResult.error)
+      return { ok: false, error: printersResult.error }
+    }
+
+    const selectedPrinter = pickPosPrinterForJob(printersResult.data || [], {
+      jobType: "receipt",
+      locationHint
+    })
+
+    if (!selectedPrinter) {
+      const message = "No hay impresora configurada para recibos."
+      console.warn("[Receipt Print] error", message)
+      return { ok: false, error: { message } }
+    }
+
+    console.log("[Receipt Print] selected printer", {
+      id: selectedPrinter.id,
+      name: selectedPrinter.name,
+      location: selectedPrinter.location,
+      windows_printer_name: selectedPrinter.windows_printer_name,
+      supported_job_types: selectedPrinter.supported_job_types
+    })
+
+    const printJob = await createPrintJob({
+      printerId: selectedPrinter.id,
+      jobType: "receipt",
+      payload: resolvedPayload
+    })
+
+    if (printJob.error) {
+      return { ok: false, error: printJob.error }
+    }
+
+    console.log("[Receipt Print] result", {
+      ok: true,
+      jobId: printJob.data?.id,
+      printerId: selectedPrinter.id,
+      printerName: selectedPrinter.name
+    })
+    return { ok: true, data: printJob.data, printer: selectedPrinter }
+  } catch (error) {
+    console.warn("[Receipt Print] error", error?.message || error)
+    return { ok: false, error: { message: error?.message || "Error encolando recibo." } }
+  } finally {
+    console.log("[Receipt Print] queueReceiptPrintJob complete")
   }
 }

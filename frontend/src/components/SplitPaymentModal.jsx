@@ -104,38 +104,41 @@ export default function SplitPaymentModal({ bill, user, onClose, onPaid }) {
 
     setProcessing(true)
     setMessage("Procesando subcuenta...")
-    const result = await createPosSplitPayment({
-      orderId,
-      items: selectedLines.map(({ order_item_id, quantity_paid }) => ({ order_item_id, quantity_paid })),
-      methods: paymentMethods,
-      paidByLabel
-    })
-    if (result.error) {
-      setMessage(result.message || "No se pudo registrar la subcuenta.")
-      setProcessing(false)
-      return
-    }
-
     try {
-      await printSubCheck(bill, {
+      const result = await createPosSplitPayment({
+        orderId,
+        items: selectedLines.map(({ order_item_id, quantity_paid }) => ({ order_item_id, quantity_paid })),
+        methods: paymentMethods,
+        paidByLabel
+      })
+      if (result.error) {
+        setMessage(result.message || "No se pudo registrar la subcuenta.")
+        return
+      }
+
+      void printSubCheck(bill, {
         items: selectedLines,
         totalAmount: selectedTotal,
         methods: paymentMethods,
         paidByLabel,
         paymentNumber: result.data?.payment_number
+      }).catch((error) => {
+        console.warn("[Cashier] print skipped/failed subcheck", error?.message || error)
+      })
+
+      onPaid?.({
+        ...result.data,
+        selectedLines,
+        methods: paymentMethods,
+        balanceDue: money(result.data?.balance_due ?? 0),
+        orderFullyPaid: money(result.data?.balance_due ?? 0) <= 0
       })
     } catch (error) {
-      console.warn("[SplitPayment] Impresion fallida.", error)
+      console.warn("[Cashier] split payment failed", error?.message || error)
+      setMessage("No se pudo registrar la subcuenta.")
+    } finally {
+      setProcessing(false)
     }
-
-    onPaid?.({
-      ...result.data,
-      selectedLines,
-      methods: paymentMethods,
-      balanceDue: money(result.data?.balance_due ?? 0),
-      orderFullyPaid: money(result.data?.balance_due ?? 0) <= 0
-    })
-    setProcessing(false)
   }
 
   return (
