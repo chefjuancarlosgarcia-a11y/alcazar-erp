@@ -7,6 +7,7 @@ import {
   buildPurchaseOrderNotificationUrl,
   resolveNotificationTarget
 } from "../utils/inventoryNotificationRoutes"
+import { filterVisibleNotifications } from "../utils/cateringNotificationRoles"
 import "./NotificationsBell.css"
 
 const PURCHASE_ORDER_APPROVAL_ROLES = ["admin", "gerente_general"]
@@ -38,8 +39,8 @@ function NotificationsBell({ currentUser }) {
     }
 
     setError("")
-    setNotifications(data || [])
-  }, [session?.user?.id])
+    setNotifications(filterVisibleNotifications(data || [], currentUser?.role))
+  }, [currentUser?.role, session?.user?.id])
 
   useSupabaseRealtime({
     table: "notifications",

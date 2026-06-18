@@ -1,4 +1,5 @@
 import { supabase } from "../lib/supabase"
+import { filterVisibleNotifications } from "../utils/cateringNotificationRoles"
 
 function normalizeNotificationRows(data) {
   if (Array.isArray(data)) return data
@@ -26,6 +27,13 @@ export async function getNotifications(limit = 100) {
     return { data: [], error: null }
   }
 
+  const { data: profileData } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", sessionUserId)
+    .maybeSingle()
+  const userRole = profileData?.role || null
+
   const { data, error } = await supabase.rpc("get_my_notifications", {
     p_limit: limit
   })
@@ -38,12 +46,15 @@ export async function getNotifications(limit = 100) {
       .order("created_at", { ascending: false })
       .limit(limit)
     return {
-      data: normalizeNotificationRows(fallback.data),
+      data: filterVisibleNotifications(normalizeNotificationRows(fallback.data), userRole),
       error: fallback.error
     }
   }
 
-  return { data: normalizeNotificationRows(data), error: null }
+  return {
+    data: filterVisibleNotifications(normalizeNotificationRows(data), userRole),
+    error: null
+  }
 }
 
 export async function markNotificationRead(id) {
