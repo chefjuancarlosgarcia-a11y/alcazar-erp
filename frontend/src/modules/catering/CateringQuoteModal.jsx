@@ -12,6 +12,7 @@ import {
 import { getCateringQuoteSettings, mergeQuoteSettings } from "./cateringQuoteSettings"
 import { repairCateringRequest } from "./cateringTextEncoding"
 import { downloadCateringQuotePdf } from "./cateringQuotePdf"
+import CateringManualLeadModal from "./CateringManualLeadModal"
 import CateringQuotePreview from "./CateringQuotePreview"
 import CateringQuoteSettingsPanel from "./CateringQuoteSettingsPanel"
 import CateringQuoteTemplateManager from "./CateringQuoteTemplateManager"
@@ -42,7 +43,15 @@ function mapItemsFromApi(items = []) {
   }))
 }
 
-export default function CateringQuoteModal({ open, request, quoteId = null, onClose, onSaved }) {
+export default function CateringQuoteModal({
+  open,
+  request,
+  quoteId = null,
+  profiles = [],
+  onClose,
+  onSaved,
+  onRequestUpdated
+}) {
   const branding = useBrandingContext()
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -60,10 +69,12 @@ export default function CateringQuoteModal({ open, request, quoteId = null, onCl
   const [companySettings, setCompanySettings] = useState(null)
   const [showTemplateManager, setShowTemplateManager] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [showEditLead, setShowEditLead] = useState(false)
+  const [displayRequest, setDisplayRequest] = useState(request || {})
   const [mobileTab, setMobileTab] = useState("edit")
 
   const totals = useMemo(() => calculateQuoteTotals(items, discountAmount), [items, discountAmount])
-  const safeRequest = useMemo(() => repairCateringRequest(request || {}), [request])
+  const safeRequest = useMemo(() => repairCateringRequest(displayRequest || {}), [displayRequest])
   const company = useMemo(
     () => mergeQuoteSettings(companySettings || {}, branding),
     [companySettings, branding]
@@ -71,6 +82,11 @@ export default function CateringQuoteModal({ open, request, quoteId = null, onCl
 
   const isDraft = !quote?.status || quote.status === "draft"
   const canEdit = isDraft
+
+  useEffect(() => {
+    if (!open) return
+    setDisplayRequest(request || {})
+  }, [open, request])
 
   useEffect(() => {
     if (!open) return
@@ -145,7 +161,17 @@ export default function CateringQuoteModal({ open, request, quoteId = null, onCl
   }
 
   function removeItem(index) {
-    setItems((current) => (current.length <= 1 ? current : current.filter((_, itemIndex) => itemIndex !== index)))
+    setItems((current) => {
+      const next = current.filter((_, itemIndex) => itemIndex !== index)
+      return next.length ? next : [createEmptyQuoteItem()]
+    })
+  }
+
+  function handleLeadUpdated({ request: updatedRequest }) {
+    setDisplayRequest(updatedRequest)
+    setShowEditLead(false)
+    setMessage("Datos del lead actualizados.")
+    onRequestUpdated?.(updatedRequest)
   }
 
   async function handleSave(event) {
@@ -161,7 +187,7 @@ export default function CateringQuoteModal({ open, request, quoteId = null, onCl
     setMessage("")
     const result = currentQuoteId
       ? await updateCateringQuote(currentQuoteId, payload)
-      : await createCateringQuote(request.id, payload)
+      : await createCateringQuote(displayRequest.id, payload)
 
     setSaving(false)
     if (result.error) {
@@ -272,9 +298,60 @@ export default function CateringQuoteModal({ open, request, quoteId = null, onCl
                 className={`catering-quote-modal__body catering-quote-editor ${mobileTab === "preview" ? "is-hidden-mobile" : ""}`}
                 onSubmit={handleSave}
               >
-                <div className="catering-quote-editor__layout">
-                  <div className="catering-quote-editor__main">
-                    <section className="catering-quote-section" aria-labelledby="catering-quote-general">
+                <div className="catering-quote-editor">
+                  <div className="catering-quote-top-bar">
+                    <section className="catering-quote-section catering-quote-context" aria-labelledby="catering-quote-client">
+                      <div className="catering-quote-section__head">
+                        <h3 id="catering-quote-client">Cliente y evento</h3>
+                        {canEdit ? (
+                          <button type="button" className="ghost catering-quote-edit-lead" onClick={() => setShowEditLead(true)}>
+                            Editar lead
+                          </button>
+                        ) : null}
+                      </div>
+                      <dl className="catering-quote-context-grid">
+                        <div>
+                          <dt>Cliente</dt>
+                          <dd>{safeRequest.customer_name || "—"}</dd>
+                        </div>
+                        <div>
+                          <dt>Contacto</dt>
+                          <dd>{safeRequest.customer_phone || safeRequest.customer_email || "—"}</dd>
+                        </div>
+                        <div>
+                          <dt>Evento</dt>
+                          <dd>{safeRequest.event_type || "—"}</dd>
+                        </div>
+                        <div>
+                          <dt>Fecha</dt>
+                          <dd>
+                            {formatDate(safeRequest.event_date)}
+                            {safeRequest.event_time ? ` ${formatTime(safeRequest.event_time)}` : ""}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Ubicacion</dt>
+                          <dd>{safeRequest.event_location || "—"}</dd>
+                        </div>
+                        <div className="catering-quote-context-grid__wide">
+                          <dt>Productos solicitados</dt>
+                          <dd>{formatProducts(safeRequest.products_requested)}</dd>
+                        </div>
+                      </dl>
+                    </section>
+
+                    <section className="catering-quote-section catering-quote-summary-card" aria-labelledby="catering-quote-summary">
+                      <h3 id="catering-quote-summary">Resumen</h3>
+                      <div className="catering-quote-totals">
+                        <div><span>Subtotal</span><strong>{formatMoney(totals.subtotal)}</strong></div>
+                        {totals.discount_amount > 0 ? <div><span>Descuento</span><strong>-{formatMoney(totals.discount_amount)}</strong></div> : null}
+                        <div className="is-total"><span>Total</span><strong>{formatMoney(totals.total)}</strong></div>
+                        <small className="catering-quote-preview__vat">Precios incluyen IVA</small>
+                      </div>
+                    </section>
+                  </div>
+
+                  <section className="catering-quote-section" aria-labelledby="catering-quote-general">
                       <h3 id="catering-quote-general">Datos generales</h3>
                       <div className="catering-quote-toolbar">
                         <label>
@@ -308,60 +385,62 @@ export default function CateringQuoteModal({ open, request, quoteId = null, onCl
                           <button type="button" className="ghost catering-quote-section__add" onClick={addItem}>+ Agregar linea</button>
                         ) : null}
                       </div>
-                      <div className="catering-quote-lines-scroll">
-                        <div className="catering-quote-lines">
-                          <div className="catering-quote-lines__head">
-                            <span>Tipo</span>
-                            <span>Descripcion</span>
-                            <span>Cantidad</span>
-                            <span>Unidad</span>
-                            <span>Precio unit.</span>
-                            <span>Total</span>
-                            <span />
-                          </div>
+                      <div className="catering-quote-lines-stack">
                           {items.map((item, index) => {
                             const lineTotal = (Number(item.quantity) || 0) * (Number(item.unit_price) || 0)
                             return (
-                              <div key={`${index}-${item.sort_order}`} className="catering-quote-line">
-                                <label className="catering-quote-line__field">
-                                  <span className="catering-quote-line__label">Tipo</span>
-                                  <select value={item.item_type} disabled={!canEdit} onChange={(e) => updateItem(index, "item_type", e.target.value)}>
-                                    {QUOTE_ITEM_TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
-                                  </select>
-                                </label>
-                                <label className="catering-quote-line__field catering-quote-line__field--wide">
-                                  <span className="catering-quote-line__label">Descripcion</span>
-                                  <input type="text" value={item.description} disabled={!canEdit} placeholder="Descripcion" onChange={(e) => updateItem(index, "description", e.target.value)} />
-                                </label>
-                                <label className="catering-quote-line__field">
-                                  <span className="catering-quote-line__label">Cantidad</span>
-                                  <input type="number" min="0.01" step="0.01" value={item.quantity} disabled={!canEdit} onChange={(e) => updateItem(index, "quantity", e.target.value)} />
-                                </label>
-                                <label className="catering-quote-line__field">
-                                  <span className="catering-quote-line__label">Unidad</span>
-                                  <select value={item.quantity_unit} disabled={!canEdit} onChange={(e) => updateItem(index, "quantity_unit", e.target.value)}>
-                                    {QUANTITY_UNITS.map((unit) => <option key={unit.value} value={unit.value}>{unit.label}</option>)}
-                                  </select>
-                                </label>
-                                <label className="catering-quote-line__field">
-                                  <span className="catering-quote-line__label">Precio unit.</span>
-                                  <input type="number" min="0" step="0.01" value={item.unit_price} disabled={!canEdit} onChange={(e) => updateItem(index, "unit_price", e.target.value)} />
-                                </label>
-                                <div className="catering-quote-line__total">
-                                  <span className="catering-quote-line__label">Total</span>
-                                  <strong>{formatMoney(lineTotal)}</strong>
-                                  <small>{formatQuantityLine(item)}</small>
+                              <article key={`${index}-${item.sort_order}`} className="catering-quote-line-card">
+                                <div className="catering-quote-line-card__top">
+                                  <strong>Linea {index + 1}</strong>
+                                  {canEdit ? (
+                                    <button
+                                      type="button"
+                                      className="ghost catering-quote-line-card__remove"
+                                      onClick={() => removeItem(index)}
+                                      aria-label={`Eliminar linea ${index + 1}`}
+                                      title="Eliminar linea"
+                                    >
+                                      Quitar linea
+                                    </button>
+                                  ) : null}
                                 </div>
-                                {canEdit ? (
-                                  <button type="button" className="ghost catering-quote-line__remove" onClick={() => removeItem(index)} aria-label="Eliminar linea">×</button>
-                                ) : (
-                                  <span />
-                                )}
-                              </div>
+                                <label className="catering-quote-line-card__description">
+                                  <span>Descripcion</span>
+                                  <input type="text" value={item.description} disabled={!canEdit} placeholder="Descripcion del servicio o producto" onChange={(e) => updateItem(index, "description", e.target.value)} />
+                                </label>
+                                <div className="catering-quote-line-card__grid">
+                                  <label>
+                                    <span>Tipo</span>
+                                    <select value={item.item_type} disabled={!canEdit} onChange={(e) => updateItem(index, "item_type", e.target.value)}>
+                                      {QUOTE_ITEM_TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
+                                    </select>
+                                  </label>
+                                  <label>
+                                    <span>Cantidad</span>
+                                    <input type="number" min="0.01" step="0.01" value={item.quantity} disabled={!canEdit} onChange={(e) => updateItem(index, "quantity", e.target.value)} />
+                                  </label>
+                                  <label>
+                                    <span>Unidad</span>
+                                    <select value={item.quantity_unit} disabled={!canEdit} onChange={(e) => updateItem(index, "quantity_unit", e.target.value)}>
+                                      {QUANTITY_UNITS.map((unit) => <option key={unit.value} value={unit.value}>{unit.label}</option>)}
+                                    </select>
+                                  </label>
+                                  <label>
+                                    <span>Precio unit.</span>
+                                    <input type="number" min="0" step="0.01" value={item.unit_price} disabled={!canEdit} onChange={(e) => updateItem(index, "unit_price", e.target.value)} />
+                                  </label>
+                                </div>
+                                <div className="catering-quote-line-card__total">
+                                  <span>Total linea</span>
+                                  <div>
+                                    <strong>{formatMoney(lineTotal)}</strong>
+                                    <small>{formatQuantityLine(item)}</small>
+                                  </div>
+                                </div>
+                              </article>
                             )
                           })}
                         </div>
-                      </div>
                     </section>
 
                     <section className="catering-quote-section" aria-labelledby="catering-quote-notes">
@@ -406,52 +485,6 @@ export default function CateringQuoteModal({ open, request, quoteId = null, onCl
                         ) : null}
                       </div>
                     </footer>
-                  </div>
-
-                  <aside className="catering-quote-editor__aside">
-                    <section className="catering-quote-section catering-quote-context" aria-labelledby="catering-quote-client">
-                      <h3 id="catering-quote-client">Cliente y evento</h3>
-                      <dl>
-                        <div>
-                          <dt>Cliente</dt>
-                          <dd>{safeRequest.customer_name || "—"}</dd>
-                        </div>
-                        <div>
-                          <dt>Contacto</dt>
-                          <dd>{safeRequest.customer_phone || safeRequest.customer_email || "—"}</dd>
-                        </div>
-                        <div>
-                          <dt>Evento</dt>
-                          <dd>{safeRequest.event_type || "—"}</dd>
-                        </div>
-                        <div>
-                          <dt>Fecha</dt>
-                          <dd>
-                            {formatDate(safeRequest.event_date)}
-                            {safeRequest.event_time ? ` ${formatTime(safeRequest.event_time)}` : ""}
-                          </dd>
-                        </div>
-                        <div>
-                          <dt>Ubicacion</dt>
-                          <dd>{safeRequest.event_location || "—"}</dd>
-                        </div>
-                        <div>
-                          <dt>Productos solicitados</dt>
-                          <dd>{formatProducts(safeRequest.products_requested)}</dd>
-                        </div>
-                      </dl>
-                    </section>
-
-                    <section className="catering-quote-section catering-quote-aside-card--sticky" aria-labelledby="catering-quote-summary">
-                      <h3 id="catering-quote-summary">Resumen</h3>
-                      <div className="catering-quote-totals">
-                        <div><span>Subtotal</span><strong>{formatMoney(totals.subtotal)}</strong></div>
-                        {totals.discount_amount > 0 ? <div><span>Descuento</span><strong>-{formatMoney(totals.discount_amount)}</strong></div> : null}
-                        <div className="is-total"><span>Total</span><strong>{formatMoney(totals.total)}</strong></div>
-                        <small className="catering-quote-preview__vat">Precios incluyen IVA</small>
-                      </div>
-                    </section>
-                  </aside>
                 </div>
               </form>
 
@@ -485,6 +518,14 @@ export default function CateringQuoteModal({ open, request, quoteId = null, onCl
           setCompanySettings(data)
           if (!terms || terms === DEFAULT_QUOTE_TERMS) setTerms(data.defaultTerms || DEFAULT_QUOTE_TERMS)
         }}
+      />
+      <CateringManualLeadModal
+        open={showEditLead}
+        request={displayRequest}
+        profiles={profiles}
+        nested
+        onClose={() => setShowEditLead(false)}
+        onSaved={handleLeadUpdated}
       />
     </>
   )

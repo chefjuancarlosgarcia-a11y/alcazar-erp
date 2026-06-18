@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { createManualCateringLead } from "./cateringService"
+import { createManualCateringLead, updateCateringRequest } from "./cateringService"
 import { LEAD_SOURCE_OPTIONS, parseProductsInput } from "./cateringUtils"
 
 const EMPTY_FORM = {
@@ -19,13 +19,38 @@ const EMPTY_FORM = {
   followUpDate: ""
 }
 
+function mapRequestToForm(request) {
+  if (!request) return EMPTY_FORM
+  return {
+    customerName: request.customer_name || "",
+    customerPhone: request.customer_phone || "",
+    customerEmail: request.customer_email || "",
+    eventDate: request.event_date ? String(request.event_date).slice(0, 10) : "",
+    eventTime: request.event_time ? String(request.event_time).slice(0, 5) : "",
+    eventLocation: request.event_location || "",
+    eventType: request.event_type || "",
+    guestCount: request.guest_count != null ? String(request.guest_count) : "",
+    leadSource: request.lead_source || "other",
+    productsRequested: Array.isArray(request.products_requested)
+      ? request.products_requested.join("\n")
+      : "",
+    notes: request.notes || "",
+    assignedTo: request.assigned_to || "",
+    estimatedValue: request.estimated_value != null ? String(request.estimated_value) : "",
+    followUpDate: request.follow_up_date ? String(request.follow_up_date).slice(0, 10) : ""
+  }
+}
+
 export default function CateringManualLeadModal({
   open,
   mode = "lead",
+  request = null,
   profiles = [],
+  nested = false,
   onClose,
   onSaved
 }) {
+  const isEdit = Boolean(request?.id)
   const [form, setForm] = useState(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
@@ -33,11 +58,11 @@ export default function CateringManualLeadModal({
 
   useEffect(() => {
     if (!open) return
-    setForm(EMPTY_FORM)
+    setForm(isEdit ? mapRequestToForm(request) : EMPTY_FORM)
     setError("")
     setSavedRequest(null)
     setSaving(false)
-  }, [open])
+  }, [open, request, isEdit])
 
   function updateField(field, value) {
     setForm((current) => ({ ...current, [field]: value }))
@@ -66,14 +91,22 @@ export default function CateringManualLeadModal({
 
     setSaving(true)
     setError("")
-    const result = await createManualCateringLead({
+    const payload = {
       ...form,
       productsRequested: parseProductsInput(form.productsRequested)
-    })
+    }
+    const result = isEdit
+      ? await updateCateringRequest(request.id, payload)
+      : await createManualCateringLead(payload)
     setSaving(false)
 
     if (result.error) {
       setError(result.error)
+      return
+    }
+
+    if (isEdit) {
+      onSaved?.({ request: result.data, action: "updated" })
       return
     }
 
@@ -96,12 +129,18 @@ export default function CateringManualLeadModal({
   if (!open) return null
 
   return (
-    <div className="catering-quote-backdrop" onClick={onClose}>
+    <div className={`catering-quote-backdrop${nested ? " catering-quote-backdrop--nested" : ""}`} onClick={onClose}>
       <section className="catering-quote-modal catering-manual-lead-modal" onClick={(event) => event.stopPropagation()}>
         <header className="catering-quote-modal__header">
           <div>
             <p>Catering CRM</p>
-            <h2>{mode === "quickQuote" ? "Cotizacion rapida" : "Nuevo lead de catering"}</h2>
+            <h2>
+              {isEdit
+                ? "Editar lead de catering"
+                : mode === "quickQuote"
+                  ? "Cotizacion rapida"
+                  : "Nuevo lead de catering"}
+            </h2>
           </div>
           <button type="button" className="ghost" onClick={onClose}>Cerrar</button>
         </header>
@@ -279,7 +318,13 @@ export default function CateringManualLeadModal({
             <footer className="catering-quote-modal__footer">
               <button type="button" className="ghost" onClick={onClose}>Cancelar</button>
               <button type="submit" className="primary" disabled={saving}>
-                {saving ? "Guardando..." : mode === "quickQuote" ? "Guardar y cotizar" : "Guardar lead"}
+                {saving
+                  ? "Guardando..."
+                  : isEdit
+                    ? "Guardar cambios"
+                    : mode === "quickQuote"
+                      ? "Guardar y cotizar"
+                      : "Guardar lead"}
               </button>
             </footer>
           </form>

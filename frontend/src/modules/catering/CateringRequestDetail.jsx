@@ -8,6 +8,7 @@ import {
   updateCateringRequestStatus
 } from "./cateringService"
 import CateringActivityTimeline from "./CateringActivityTimeline"
+import CateringManualLeadModal from "./CateringManualLeadModal"
 import CateringQuoteModal from "./CateringQuoteModal"
 import CateringRequestQuotes from "./CateringRequestQuotes"
 import CateringSlaBadge from "./CateringSlaBadge"
@@ -64,6 +65,7 @@ export default function CateringRequestDetail({
   const [quoteModalOpen, setQuoteModalOpen] = useState(false)
   const [activeQuoteId, setActiveQuoteId] = useState(null)
   const [quoteAutoOpened, setQuoteAutoOpened] = useState(false)
+  const [editLeadOpen, setEditLeadOpen] = useState(false)
 
   useEffect(() => {
     loadDetail()
@@ -257,6 +259,12 @@ export default function CateringRequestDetail({
           ) : null}
         </div>
       </header>
+
+      <div className="catering-actions catering-detail-edit-lead">
+        <button type="button" className="ghost" onClick={() => setEditLeadOpen(true)}>
+          Editar lead
+        </button>
+      </div>
 
       <div className="catering-detail-grid">
         <section className="catering-detail-section">
@@ -460,8 +468,28 @@ export default function CateringRequestDetail({
         open={quoteModalOpen}
         request={request}
         quoteId={activeQuoteId}
+        profiles={profiles}
         onClose={() => setQuoteModalOpen(false)}
         onSaved={handleQuoteSaved}
+        onRequestUpdated={(updatedRequest) => {
+          setRequest(updatedRequest)
+          onUpdated?.(updatedRequest)
+          loadDetail()
+        }}
+      />
+
+      <CateringManualLeadModal
+        open={editLeadOpen}
+        request={request}
+        profiles={profiles}
+        onClose={() => setEditLeadOpen(false)}
+        onSaved={({ request: updatedRequest }) => {
+          setEditLeadOpen(false)
+          setRequest(updatedRequest)
+          setMessage("Lead actualizado.")
+          onUpdated?.(updatedRequest)
+          loadDetail()
+        }}
       />
     </aside>
   )

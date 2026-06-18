@@ -148,6 +148,7 @@ export function followUpAlertClass(level) {
 export const ACTIVITY_TYPE_LABELS = {
   lead_received: "Lead recibido",
   lead_created_manual: "Lead creado manualmente",
+  lead_updated: "Lead actualizado",
   lead_assigned: "Lead asignado",
   status_changed: "Estado cambiado",
   followup_recorded: "Seguimiento registrado",
