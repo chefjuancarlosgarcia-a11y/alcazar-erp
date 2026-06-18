@@ -2,6 +2,38 @@ import { supabase } from "../lib/supabase"
 
 export const PRINT_JOB_TYPES = ["test", "prebill", "receipt", "delivery_order"]
 
+export function normalizeSupportedJobTypes(value) {
+  if (Array.isArray(value)) {
+    return value.map((entry) => String(entry || "").trim()).filter(Boolean)
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim()
+    if (!trimmed) return []
+    if (trimmed.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(trimmed)
+        return Array.isArray(parsed) ? parsed.map((entry) => String(entry || "").trim()).filter(Boolean) : []
+      } catch {
+        // fall through
+      }
+    }
+    if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+      return trimmed
+        .slice(1, -1)
+        .split(",")
+        .map((entry) => entry.trim().replace(/^"|"$/g, ""))
+        .filter(Boolean)
+    }
+    return trimmed.split(",").map((entry) => entry.trim()).filter(Boolean)
+  }
+  return []
+}
+
+export function printerSupportsJobType(printer, jobType) {
+  if (!jobType) return true
+  return normalizeSupportedJobTypes(printer?.supported_job_types).includes(jobType)
+}
+
 export async function getPosPrinters() {
   const { data, error } = await supabase
     .from("pos_printers")
@@ -19,10 +51,44 @@ export async function getActivePosPrinters({ jobType = "" } = {}) {
     .order("name", { ascending: true })
 
   const printers = jobType
-    ? (data || []).filter((printer) => (printer.supported_job_types || []).includes(jobType))
+    ? (data || []).filter((printer) => printerSupportsJobType(printer, jobType))
     : (data || [])
 
   return { data: printers, error }
+}
+
+export function pickPosPrinterForJob(printers, { jobType = "", locationHint = "CAJA" } = {}) {
+  const candidates = (printers || []).filter((printer) => !jobType || printerSupportsJobType(printer, jobType))
+  if (!candidates.length) return null
+
+  const hint = String(locationHint || "").trim().toUpperCase()
+  const matchers = hint
+    ? [
+      (printer) => String(printer.location || "").trim().toUpperCase() === hint,
+      (printer) => String(printer.windows_printer_name || "").trim().toUpperCase() === hint,
+      (printer) => String(printer.name || "").trim().toUpperCase() === hint,
+      (printer) => String(printer.location || "").toUpperCase().includes(hint),
+      (printer) => String(printer.name || "").toUpperCase().includes(hint),
+      (printer) => String(printer.windows_printer_name || "").toUpperCase().includes(hint)
+    ]
+    : []
+
+  for (const match of matchers) {
+    const selected = candidates.find(match)
+    if (selected) return selected
+  }
+
+  return candidates[0] || null
+}
+
+export async function getPosPrinterById(printerId) {
+  if (!printerId) return { data: null, error: { message: "printer_id requerido" } }
+  const { data, error } = await supabase
+    .from("pos_printers")
+    .select("id, name, windows_printer_name, location, supported_job_types, is_active")
+    .eq("id", printerId)
+    .maybeSingle()
+  return { data, error }
 }
 
 export async function savePosPrinter(printer) {
@@ -59,11 +125,62 @@ export async function setPosPrinterActive(id, isActive) {
 }
 
 export async function createPrintJob({ printerId, jobType = "test", payload = {} }) {
+  const normalizedJobType = String(jobType || "test").trim().toLowerCase()
+  const { data: printerRow, error: printerError } = await getPosPrinterById(printerId)
+  const supportedTypes = normalizeSupportedJobTypes(printerRow?.supported_job_types)
+
+  console.log("[printingService] createPrintJob preflight", {
+    printerId,
+    jobType: normalizedJobType,
+    selectedPrinter_id: printerRow?.id || null,
+    selectedPrinter_name: printerRow?.name || null,
+    selectedPrinter_windows_printer_name: printerRow?.windows_printer_name || null,
+    selectedPrinter_supported_job_types_raw: printerRow?.supported_job_types ?? null,
+    selectedPrinter_supported_job_types_normalized: supportedTypes,
+    job_type: normalizedJobType,
+    supportsJobType: supportedTypes.includes(normalizedJobType)
+  })
+
+  if (printerError) {
+    console.error("[printingService] createPrintJob printer lookup failed", printerError)
+    return { data: null, error: printerError }
+  }
+  if (!printerRow?.is_active) {
+    const message = "Impresora no encontrada o inactiva."
+    console.error("[printingService] createPrintJob blocked", { printerId, message })
+    return { data: null, error: { message } }
+  }
+  if (!supportedTypes.includes(normalizedJobType)) {
+    const message = `La impresora "${printerRow.name}" (${printerId}) no incluye "${normalizedJobType}" en supported_job_types: [${supportedTypes.join(", ")}]`
+    console.error("[printingService] createPrintJob blocked", { printerId, message })
+    return { data: null, error: { message } }
+  }
+
   const { data, error } = await supabase.rpc("create_print_job", {
     p_printer_id: printerId,
-    p_job_type: jobType,
+    p_job_type: normalizedJobType,
     p_payload: payload
   })
+
+  if (error) {
+    console.error("[printingService] createPrintJob rpc failed", {
+      printerId,
+      jobType: normalizedJobType,
+      supportedTypes,
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      code: error.code
+    })
+  } else {
+    console.log("[printingService] createPrintJob ok", {
+      printerId,
+      jobType: normalizedJobType,
+      jobId: data?.id,
+      status: data?.status
+    })
+  }
+
   return { data, error }
 }
 
