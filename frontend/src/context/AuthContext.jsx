@@ -138,6 +138,7 @@ export function normalizeProfileToCurrentUser(profile, sessionUser) {
     legacyRole: LEGACY_ROLE_NAMES[role] || "Colaborador",
     areaId: profile.area_id || "",
     areaName: profile.area_name || "",
+    area_name: profile.area_name || "",
     employeeId: profile.employee_id || "",
     status: profile.status || "active",
     permissions: ROLE_PERMISSIONS[role] || ROLE_PERMISSIONS.colaborador,
@@ -175,10 +176,26 @@ function friendlyAuthError(error) {
   return "No se pudo iniciar sesión. Intenta nuevamente."
 }
 
+async function probeChecklistModuleAccess(currentUser) {
+  if (!currentUser?.id) return false
+  if (currentUser.permissions?.includes("tasks")) return true
+  const { data, error } = await supabase
+    .from("checklist_runs")
+    .select("id")
+    .neq("status", "cancelled")
+    .limit(1)
+  if (error) {
+    console.warn("[Auth] No se pudo evaluar acceso a checklists.", error)
+    return false
+  }
+  return Boolean(data?.length)
+}
+
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(null)
   const [profile, setProfile] = useState(null)
   const [user, setUser] = useState(null)
+  const [checklistModuleAccess, setChecklistModuleAccess] = useState(false)
   const [loading, setLoading] = useState(isSupabaseConfigured)
   const [profileError, setProfileError] = useState(isSupabaseConfigured ? "" : "Supabase no está configurado. Revisa las variables de entorno.")
   const userRef = useRef(null)
@@ -198,6 +215,7 @@ export function AuthProvider({ children }) {
     if (!sessionUserId) {
       setProfile(null)
       setUser(null)
+      setChecklistModuleAccess(false)
       setProfileError("")
       syncLegacyUser(null)
       return { ok: true, user: null, profile: null }
@@ -248,11 +266,19 @@ export function AuthProvider({ children }) {
     }
 
     const currentUser = normalizeProfileToCurrentUser(data, activeSession.user)
+    const hasChecklistAccess = await probeChecklistModuleAccess(currentUser)
     setProfile(data)
     setUser(currentUser)
+    setChecklistModuleAccess(hasChecklistAccess)
     setProfileError("")
     syncLegacyUser(currentUser)
     return { ok: true, user: currentUser, profile: data }
+  }, [])
+
+  const refreshChecklistModuleAccess = useCallback(async (currentUser = userRef.current) => {
+    const hasChecklistAccess = await probeChecklistModuleAccess(currentUser)
+    setChecklistModuleAccess(hasChecklistAccess)
+    return hasChecklistAccess
   }, [])
 
   useEffect(() => {
@@ -378,6 +404,7 @@ export function AuthProvider({ children }) {
 
   const value = useMemo(() => {
     function canAccess(module) {
+      if (module === "tasks" && checklistModuleAccess) return true
       return Boolean(user?.permissions?.includes(module))
     }
     function getDefaultPath(currentUser = user) {
@@ -392,9 +419,11 @@ export function AuthProvider({ children }) {
       loading,
       profileError,
       isAuthenticated: Boolean(session && user),
+      checklistModuleAccess,
       login,
       logout,
       refreshProfile,
+      refreshChecklistModuleAccess,
       changePassword,
       changeOwnPassword,
       updateOwnProfile,
@@ -402,7 +431,7 @@ export function AuthProvider({ children }) {
       getDefaultPath,
       modules: MODULES
     }
-  }, [changeOwnPassword, changePassword, loading, login, logout, profile, profileError, refreshProfile, session, updateOwnProfile, user])
+  }, [changeOwnPassword, changePassword, checklistModuleAccess, loading, login, logout, profile, profileError, refreshChecklistModuleAccess, refreshProfile, session, updateOwnProfile, user])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

@@ -59,7 +59,7 @@ function AppRoutes() {
           <Route path="/kds" element={<ProtectedRoute module="production"><ProductionHub /></ProtectedRoute>} />
           <Route path="/kds/:areaId" element={<ProtectedRoute module="production"><ProductionLegacyRedirect /></ProtectedRoute>} />
           <Route path="/hr" element={<ProtectedRoute module="hr"><HR /></ProtectedRoute>} />
-          <Route path="/tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
+          <Route path="/tasks" element={<ProtectedRoute module="tasks"><Tasks /></ProtectedRoute>} />
           <Route path="/reports" element={<ProtectedRoute module="reports"><Reports /></ProtectedRoute>} />
           <Route path="/reports/goals/settings" element={<ProtectedRoute module="reports"><SalesGoalsSettings /></ProtectedRoute>} />
           <Route path="/catering" element={<ProtectedRoute module="catering"><CateringDashboard /></ProtectedRoute>} />

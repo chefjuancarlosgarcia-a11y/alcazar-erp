@@ -113,6 +113,11 @@ const TODAY = guatemalaDateString()
 /** Vista temporal: activar solo durante validación de corridas duplicadas. */
 const SHOW_CHECKLIST_RUN_DIAGNOSTIC = false
 const MANAGEMENT_ROLES = ["admin", "gerente", "gerente_general", "recursos_humanos", "supervisor"]
+const OPERATIONAL_TASK_TABS = [
+  ["checklists", "Mis checklists"],
+  ["mine", "Mis tareas"],
+  ["yieldForm", "Formulario rendimiento"]
+]
 const ADMIN_TABS = [
   ["dashboard", "Dashboard"],
   ["bank", "Banco de tareas"],
@@ -533,10 +538,11 @@ function buildChecklistWizardForm(editingTemplate) {
 }
 
 function Tasks() {
-  const { user } = useAuth()
+  const { user, canAccess, refreshChecklistModuleAccess } = useAuth()
   const [params, setParams] = useSearchParams()
   const currentUserRole = normalizeRole(user?.role)
   const isManager = MANAGEMENT_ROLES.includes(currentUserRole)
+  const canUseChecklists = canAccess("tasks")
   const [templates, setTemplates] = useState(loadTaskTemplates)
   const [editingTemplate, setEditingTemplate] = useState(null)
   const [assignedTasks, setAssignedTasks] = useState(loadAssignedTasks)
@@ -545,18 +551,30 @@ function Tasks() {
   const [employeesLoading, setEmployeesLoading] = useState(false)
   const [assignmentTemplate, setAssignmentTemplate] = useState(null)
   const [assignmentFeedback, setAssignmentFeedback] = useState(null)
-  const requestedTab = params.get("tab") === "checklists" ? "checklists" : params.get("view") || (isManager ? "dashboard" : "mine")
+  const requestedTab = params.get("tab") === "checklists"
+    ? "checklists"
+    : params.get("view") || (isManager ? "dashboard" : canUseChecklists ? "checklists" : "mine")
   const tab = requestedTab === "checklists"
     ? "checklists"
     : requestedTab === "yieldForm"
       ? "yieldForm"
       : isManager && ADMIN_TABS.some(([id]) => id === requestedTab)
         ? requestedTab
-        : "mine"
+        : !isManager && canUseChecklists && OPERATIONAL_TASK_TABS.some(([id]) => id === requestedTab)
+          ? requestedTab
+          : isManager
+            ? "dashboard"
+            : canUseChecklists
+              ? "checklists"
+              : "mine"
   const taskFromQuery = params.get("task") || ""
   const visibleTemplates = templates.filter((template) => mayUseTemplate(template, user, employees))
   const computedTasks = assignedTasks.map(withComputedTaskStatus)
   const permittedAreas = getPermittedAreas(areas, user, employees, visibleTemplates)
+
+  useEffect(() => {
+    refreshChecklistModuleAccess?.()
+  }, [refreshChecklistModuleAccess, user?.id])
 
   useEffect(() => {
     let mounted = true
@@ -696,7 +714,7 @@ function Tasks() {
       </header>
 
       <nav className="tasks-tabs" aria-label="Tareas">
-        {(isManager ? ADMIN_TABS : [["mine", "Mis tareas"], ["yieldForm", "Formulario rendimiento"]]).map(([id, label]) => (
+        {(isManager ? ADMIN_TABS : canUseChecklists ? OPERATIONAL_TASK_TABS : [["mine", "Mis tareas"], ["yieldForm", "Formulario rendimiento"]]).map(([id, label]) => (
           <button key={id} type="button" className={tab === id ? "active" : ""} onClick={() => { if (id === "create") setEditingTemplate(null); openTab(id) }}>{label}</button>
         ))}
       </nav>
@@ -1621,17 +1639,24 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
     if (!silent) setLoading(true)
     if (isLibraryAdmin) await generateDueChecklistRuns(TODAY)
     if (canManageManagementAlerts) await notifyOverdueChecklistRuns()
-    const requests = [
-      getChecklistTemplates(),
-      getChecklistRuns(),
-      getChecklistIncidents(),
-      getChecklistChangeRequests(),
-      getChecklistTemplateSuggestions(),
-      getChecklistProfiles()
-    ]
+    const libraryRequests = canViewChecklistLibrary
+      ? [
+        getChecklistTemplates(),
+        getChecklistIncidents(),
+        getChecklistChangeRequests(),
+        getChecklistTemplateSuggestions()
+      ]
+      : []
+    const requests = [...libraryRequests, getChecklistRuns(), getChecklistProfiles()]
     if (canManageManagementAlerts) requests.push(getChecklistManagementAlerts())
     const results = await Promise.all(requests)
-    const [templateResult, runResult, incidentResult, requestResult, suggestionResult, profileResult, alertResult] = results
+    const templateResult = libraryRequests.length ? results[0] : { data: [], error: null }
+    const incidentResult = libraryRequests.length ? results[1] : { data: [], error: null }
+    const requestResult = libraryRequests.length ? results[2] : { data: [], error: null }
+    const suggestionResult = libraryRequests.length ? results[3] : { data: [], error: null }
+    const runResult = results[libraryRequests.length]
+    const profileResult = results[libraryRequests.length + 1]
+    const alertResult = canManageManagementAlerts ? results[libraryRequests.length + 2] : null
     if (templateResult.error || runResult.error || incidentResult.error || requestResult.error || suggestionResult.error || alertResult?.error) {
       if (!silent) {
         setMessage(templateResult.error?.message || runResult.error?.message || incidentResult.error?.message || requestResult.error?.message || suggestionResult.error?.message || alertResult?.error?.message || "No se pudieron cargar checklists.")
@@ -1650,7 +1675,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       if (!silent) setLoading(false)
       return { runs: syncedRuns, error: null }
     }
-  }, [canManageManagementAlerts, isLibraryAdmin, replayPendingChecklistDrafts])
+  }, [canManageManagementAlerts, canViewChecklistLibrary, isLibraryAdmin, replayPendingChecklistDrafts])
 
   const refreshRef = useRef(refresh)
   refreshRef.current = refresh
@@ -4091,16 +4116,23 @@ function getChecklistAssignableProfiles(user, profiles, { templateArea = "" } = 
   })
 }
 
+function userChecklistArea(user) {
+  return user?.area_name || user?.areaName || ""
+}
+
 function canSeeChecklistRun(run, user, profiles) {
   const role = normalizeRole(user?.role)
+  const userArea = userChecklistArea(user)
   if (isChecklistRestaurantWideRole(role)) return true
   if (run.assigned_profile_id === user?.id) return true
+  if (run.assigned_role && normalizeRole(run.assigned_role) === role) return true
+  if (run.area && userArea && checklistAreasMatch(run.area, userArea)) return true
   if (role === "supervisor") {
     if (run.supervisor_profile_id === user?.id) return true
-    if (user?.area_name && run.area && checklistAreasMatch(run.area, user.area_name)) return true
+    if (userArea && run.area && checklistAreasMatch(run.area, userArea)) return true
     const assigned = profiles.find((profile) => profile.id === run.assigned_profile_id)
     if (assigned && String(assigned.supervisor_profile_id || "") === String(user?.id || "")) return true
-    return Boolean(user?.area_name && assigned?.area_name && checklistAreasMatch(assigned.area_name, user.area_name))
+    return Boolean(userArea && assigned?.area_name && checklistAreasMatch(assigned.area_name, userArea))
   }
   return false
 }
