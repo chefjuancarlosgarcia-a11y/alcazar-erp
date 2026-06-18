@@ -80,7 +80,115 @@ function line(text = "") {
   return Buffer.concat([cp850(text), Buffer.from("\n")])
 }
 
-function buildTicket({ title = "PRUEBA DE IMPRESIÓN", lines = [], includeTimestamp = true } = {}) {
+export function paperWidthChars(paperWidth = "58mm") {
+  const normalized = String(paperWidth || "58mm").trim().toLowerCase()
+  return normalized === "80mm" ? 48 : 32
+}
+
+function repeatChar(char, width) {
+  return String(char || "-").repeat(Math.max(0, width))
+}
+
+export function money(value) {
+  const number = Number(value)
+  return `Q${(Number.isFinite(number) ? number : 0).toFixed(2)}`
+}
+
+function padRight(text, width) {
+  const value = String(text ?? "")
+  if (value.length >= width) return value.slice(0, width)
+  return `${value}${" ".repeat(width - value.length)}`
+}
+
+function padLeft(text, width) {
+  const value = String(text ?? "")
+  if (value.length >= width) return value.slice(-width)
+  return `${" ".repeat(width - value.length)}${value}`
+}
+
+function wrapText(text, width) {
+  const words = String(text || "").trim().split(/\s+/).filter(Boolean)
+  if (!words.length) return [""]
+  const lines = []
+  let current = ""
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word
+    if (candidate.length <= width) {
+      current = candidate
+      continue
+    }
+    if (current) lines.push(current)
+    current = word.length > width ? word.slice(0, width) : word
+  }
+  if (current) lines.push(current)
+  return lines
+}
+
+export function buildPrebillTicketLines(payload = {}, { paperWidth = "58mm" } = {}) {
+  const width = paperWidthChars(paperWidth)
+  const qtyWidth = 4
+  const totalWidth = 8
+  const nameWidth = Math.max(8, width - qtyWidth - 1 - totalWidth)
+  const indent = " ".repeat(qtyWidth + 1)
+  const items = Array.isArray(payload.items) ? payload.items : []
+  const lines = [
+    `Mesa: ${payload.table_name || payload.table || "Mesa"}`,
+    `Mesero: ${payload.waiter_name || "POS"}`,
+    `Fecha: ${payload.printed_at_gt || new Date().toLocaleString("es-GT", {
+      timeZone: "America/Guatemala",
+      dateStyle: "short",
+      timeStyle: "medium"
+    })}`,
+    "",
+    repeatChar("-", width),
+    `${padRight("Cant", qtyWidth)} ${padRight("Producto", nameWidth)}${padLeft("Total", totalWidth)}`.slice(0, width),
+    repeatChar("-", width)
+  ]
+
+  for (const item of items) {
+    const quantity = Number(item.quantity || item.cantidad || 1)
+    const total = money(item.subtotal ?? item.total ?? (quantity * Number(item.unit_price || item.precio || 0)))
+    const nameLines = wrapText(item.name || item.nombre || "Producto", nameWidth)
+    lines.push(
+      `${padRight(String(quantity), qtyWidth)} ${padRight(nameLines[0], nameWidth)}${padLeft(total, totalWidth)}`.slice(0, width)
+    )
+    for (let index = 1; index < nameLines.length; index += 1) {
+      lines.push(`${indent}${padRight(nameLines[index], nameWidth)}`.slice(0, width))
+    }
+    if (item.notes) {
+      for (const noteLine of wrapText(item.notes, width - indent.length)) {
+        lines.push(`${indent}${noteLine}`.slice(0, width))
+      }
+    }
+  }
+
+  lines.push(
+    repeatChar("-", width),
+    `${padRight("TOTAL:", width - totalWidth)}${padLeft(money(payload.total), totalWidth)}`.slice(0, width),
+    repeatChar("-", width),
+    "",
+    "Documento no fiscal",
+    "Gracias por visitarnos"
+  )
+
+  return lines
+}
+
+export function buildPrebillTicket(payload = {}, { paperWidth = "58mm" } = {}) {
+  return buildTicket({
+    businessName: payload.business_name || "EL GRAN ALCÁZAR",
+    title: "PRECUENTA",
+    lines: buildPrebillTicketLines(payload, { paperWidth }),
+    includeTimestamp: false
+  })
+}
+
+function buildTicket({
+  businessName = "EL GRAN ALCÁZAR",
+  title = "PRUEBA DE IMPRESIÓN",
+  lines = [],
+  includeTimestamp = true
+} = {}) {
   const now = new Date().toLocaleString("es-GT", {
     timeZone: "America/Guatemala",
     dateStyle: "short",
@@ -92,7 +200,7 @@ function buildTicket({ title = "PRUEBA DE IMPRESIÓN", lines = [], includeTimest
     Buffer.from([ESC, 0x74, 0x02]), // CP850 on many ESC/POS printers
     Buffer.from([ESC, 0x61, 0x01]), // center
     Buffer.from([ESC, 0x45, 0x01]), // bold on
-    line("EL GRAN ALCÁZAR"),
+    line(businessName),
     line(title),
     Buffer.from([ESC, 0x45, 0x00]), // bold off
     line(""),
@@ -290,4 +398,4 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   main()
 }
 
-export { buildTicket, sendWindowsRaw, writeTempTicket }
+export { buildTicket, buildPrebillTicket, buildPrebillTicketLines, sendWindowsRaw, writeTempTicket, paperWidthChars, money }

@@ -129,30 +129,14 @@ export async function createPrintJob({ printerId, jobType = "test", payload = {}
   const { data: printerRow, error: printerError } = await getPosPrinterById(printerId)
   const supportedTypes = normalizeSupportedJobTypes(printerRow?.supported_job_types)
 
-  console.log("[printingService] createPrintJob preflight", {
-    printerId,
-    jobType: normalizedJobType,
-    selectedPrinter_id: printerRow?.id || null,
-    selectedPrinter_name: printerRow?.name || null,
-    selectedPrinter_windows_printer_name: printerRow?.windows_printer_name || null,
-    selectedPrinter_supported_job_types_raw: printerRow?.supported_job_types ?? null,
-    selectedPrinter_supported_job_types_normalized: supportedTypes,
-    job_type: normalizedJobType,
-    supportsJobType: supportedTypes.includes(normalizedJobType)
-  })
-
   if (printerError) {
-    console.error("[printingService] createPrintJob printer lookup failed", printerError)
     return { data: null, error: printerError }
   }
   if (!printerRow?.is_active) {
-    const message = "Impresora no encontrada o inactiva."
-    console.error("[printingService] createPrintJob blocked", { printerId, message })
-    return { data: null, error: { message } }
+    return { data: null, error: { message: "Impresora no encontrada o inactiva." } }
   }
   if (!supportedTypes.includes(normalizedJobType)) {
     const message = `La impresora "${printerRow.name}" (${printerId}) no incluye "${normalizedJobType}" en supported_job_types: [${supportedTypes.join(", ")}]`
-    console.error("[printingService] createPrintJob blocked", { printerId, message })
     return { data: null, error: { message } }
   }
 
@@ -163,22 +147,7 @@ export async function createPrintJob({ printerId, jobType = "test", payload = {}
   })
 
   if (error) {
-    console.error("[printingService] createPrintJob rpc failed", {
-      printerId,
-      jobType: normalizedJobType,
-      supportedTypes,
-      message: error.message,
-      details: error.details,
-      hint: error.hint,
-      code: error.code
-    })
-  } else {
-    console.log("[printingService] createPrintJob ok", {
-      printerId,
-      jobType: normalizedJobType,
-      jobId: data?.id,
-      status: data?.status
-    })
+    console.error("[printingService] createPrintJob failed:", error.message, { printerId, jobType: normalizedJobType })
   }
 
   return { data, error }

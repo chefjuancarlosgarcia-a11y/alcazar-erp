@@ -1,7 +1,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { buildTicket, sendWindowsRaw, writeTempTicket } from "./test-print.js"
+import { buildPrebillTicket, buildTicket, sendWindowsRaw, writeTempTicket } from "./test-print.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const envPath = path.join(__dirname, ".env")
@@ -55,60 +55,26 @@ async function rpc(name, body = {}) {
 
 function titleForJob(job) {
   if (job.job_type === "test") return job.payload?.title || "PRUEBA DE IMPRESIÓN ERP"
-  if (job.job_type === "prebill") return "PRECUENTA"
   if (job.job_type === "receipt") return "RECIBO"
   if (job.job_type === "delivery_order") return "ORDEN DELIVERY"
   return "IMPRESIÓN"
 }
 
-function money(value) {
-  const number = Number(value)
-  return `Q${(Number.isFinite(number) ? number : 0).toFixed(2)}`
-}
-
-function trimLine(text, width = 32) {
-  const value = String(text || "")
-  return value.length > width ? `${value.slice(0, width - 1)}.` : value
-}
-
-function prebillTicketLines(payload = {}) {
-  const items = Array.isArray(payload.items) ? payload.items : []
-  const lines = [
-    `Mesa: ${payload.table_name || payload.table || "Mesa"}`,
-    `Mesero: ${payload.waiter_name || "POS"}`,
-    `Fecha: ${payload.printed_at_gt || new Date().toLocaleString("es-GT", { timeZone: "America/Guatemala" })}`,
-    ""
-  ]
-
-  for (const item of items) {
-    const quantity = Number(item.quantity || item.cantidad || 1)
-    const name = trimLine(item.name || item.nombre || "Producto", 24)
-    lines.push(`${quantity} x ${name}`)
-    lines.push(`  ${money(item.unit_price || item.precio)}  ${money(item.subtotal || item.total)}`)
-    if (item.notes) lines.push(`  ${trimLine(item.notes, 28)}`)
-  }
-
-  lines.push("")
-  lines.push(`Total: ${money(payload.total)}`)
-  if (payload.notes) {
-    lines.push("")
-    lines.push(trimLine(payload.notes, 32))
-  }
-  lines.push("")
-  lines.push("Documento no fiscal")
-
-  return lines
+function resolvePaperWidth(job) {
+  return job.paper_width || "58mm"
 }
 
 async function printJob(job) {
   if (!job.windows_printer_name) {
     throw new Error(`El job ${job.id} no tiene windows_printer_name.`)
   }
+
   const ticket = job.job_type === "prebill"
-    ? buildTicket({ title: "PRECUENTA", lines: prebillTicketLines(job.payload), includeTimestamp: false })
+    ? buildPrebillTicket(job.payload || {}, { paperWidth: resolvePaperWidth(job) })
     : buildTicket({ title: titleForJob(job) })
+
   const filePath = writeTempTicket(ticket)
-  console.log(`[${agentId}] Job ${job.id}: impresora=${job.windows_printer_name}, archivo=${filePath}`)
+  console.log(`[${agentId}] Job ${job.id}: impresora=${job.windows_printer_name}, papel=${resolvePaperWidth(job)}, archivo=${filePath}`)
   await sendWindowsRaw(filePath, job.windows_printer_name)
 }
 

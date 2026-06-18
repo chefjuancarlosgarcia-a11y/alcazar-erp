@@ -3029,28 +3029,13 @@ function POS() {
 
   async function imprimirPrecuenta(order) {
     try {
-      const { getActivePosPrinters, pickPosPrinterForJob, normalizeSupportedJobTypes } = await import("../services/printingService")
+      const { getActivePosPrinters, pickPosPrinterForJob } = await import("../services/printingService")
       const printersResult = await getActivePosPrinters({ jobType: "prebill" })
       if (printersResult.error) throw new Error(printersResult.error.message)
       const printers = printersResult.data || []
-
-      console.log("[POS Prebill Print] getActivePosPrinters(prebill)", {
-        count: printers.length,
-        printers: printers.map((printer) => ({
-          id: printer.id,
-          name: printer.name,
-          windows_printer_name: printer.windows_printer_name,
-          location: printer.location,
-          supported_job_types_raw: printer.supported_job_types,
-          supported_job_types_normalized: normalizeSupportedJobTypes(printer.supported_job_types),
-          is_active: printer.is_active
-        }))
-      })
-
       const selectedPrinter = pickPosPrinterForJob(printers, { jobType: "prebill", locationHint: "CAJA" })
 
       if (!selectedPrinter) {
-        console.warn("[POS Prebill Print] no eligible prebill printer", { printersCount: printers.length })
         setOrdenError("No hay impresora activa configurada para precuentas (prebill).")
         showToast("No hay impresora activa configurada para precuentas.", "error", 2600)
         return false
@@ -3068,17 +3053,6 @@ function POS() {
       if (!preBill.ok) throw new Error(preBill.message)
       markPreBillPrinted(preBill.preBill.id, user)
       const { buildPrebillPrintPayload, createPrintJob } = await import("../services/printingService")
-
-      console.log("[POS Prebill Print] createPrintJob", {
-        selectedPrinter_id: selectedPrinter.id,
-        selectedPrinter_name: selectedPrinter.name,
-        selectedPrinter_windows_printer_name: selectedPrinter.windows_printer_name,
-        selectedPrinter_location: selectedPrinter.location,
-        selectedPrinter_supported_job_types_raw: selectedPrinter.supported_job_types,
-        selectedPrinter_supported_job_types_normalized: normalizeSupportedJobTypes(selectedPrinter.supported_job_types),
-        job_type: "prebill"
-      })
-
       const printJob = await createPrintJob({
         printerId: selectedPrinter.id,
         jobType: "prebill",
@@ -3088,13 +3062,7 @@ function POS() {
           restaurantName: "EL GRAN ALCÁZAR"
         })
       })
-      if (printJob.error) {
-        console.error("[POS Prebill Print] createPrintJob error", {
-          printerId: selectedPrinter.id,
-          message: printJob.error.message
-        })
-        throw new Error(printJob.error.message)
-      }
+      if (printJob.error) throw new Error(printJob.error.message)
       await cargarMesaDesdeSupabase(ordenMesa, order.id)
       setOrdenMessage("Precuenta enviada a impresión.")
       setOrdenError("")
