@@ -305,7 +305,7 @@ export default function CateringQuoteModal({ open, request, quoteId = null, onCl
                       <div className="catering-quote-section__head">
                         <h3 id="catering-quote-items">Lineas de cotizacion</h3>
                         {canEdit ? (
-                          <button type="button" className="ghost" onClick={addItem}>Agregar linea</button>
+                          <button type="button" className="ghost catering-quote-section__add" onClick={addItem}>+ Agregar linea</button>
                         ) : null}
                       </div>
                       <div className="catering-quote-lines-scroll">
@@ -379,26 +379,32 @@ export default function CateringQuoteModal({ open, request, quoteId = null, onCl
                     {message ? <p className="catering-message success">{message}</p> : null}
                     {error ? <p className="catering-message error">{error}</p> : null}
 
-                    <footer className="catering-quote-modal__footer">
-                      <button type="button" className="ghost" onClick={handleGeneratePdf}>Generar PDF</button>
-                      {currentQuoteId ? (
-                        <button type="button" className="ghost" disabled={saving} onClick={handleSaveAsTemplate}>Guardar como plantilla</button>
-                      ) : null}
-                      {canEdit ? (
-                        <button type="submit" className="primary" disabled={saving}>
-                          {saving ? "Guardando..." : currentQuoteId ? "Guardar borrador" : "Crear cotizacion"}
-                        </button>
-                      ) : null}
-                      {currentQuoteId && quote?.status === "draft" ? (
-                        <button type="button" className="primary" disabled={saving} onClick={() => handleStatusChange("sent")}>Marcar enviada</button>
-                      ) : null}
-                      {quote?.status === "sent" ? (
-                        <>
+                    <footer className="catering-quote-modal__footer catering-quote-actions">
+                      <div className="catering-quote-actions__group catering-quote-actions__group--secondary">
+                        <button type="button" className="ghost" onClick={handleGeneratePdf}>Generar PDF</button>
+                        {currentQuoteId ? (
+                          <button type="button" className="ghost" disabled={saving} onClick={handleSaveAsTemplate}>Guardar como plantilla</button>
+                        ) : null}
+                        {quote?.status === "sent" ? (
+                          <>
+                            <button type="button" className="ghost" disabled={saving} onClick={() => handleStatusChange("rejected")}>Cliente rechazo</button>
+                            <button type="button" className="ghost" disabled={saving} onClick={() => handleStatusChange("expired")}>Marcar vencida</button>
+                          </>
+                        ) : null}
+                      </div>
+                      <div className="catering-quote-actions__group catering-quote-actions__group--primary">
+                        {canEdit ? (
+                          <button type="submit" className="primary" disabled={saving}>
+                            {saving ? "Guardando..." : currentQuoteId ? "Guardar borrador" : "Crear cotizacion"}
+                          </button>
+                        ) : null}
+                        {currentQuoteId && quote?.status === "draft" ? (
+                          <button type="button" className="primary" disabled={saving} onClick={() => handleStatusChange("sent")}>Marcar enviada</button>
+                        ) : null}
+                        {quote?.status === "sent" ? (
                           <button type="button" className="primary" disabled={saving} onClick={() => handleStatusChange("approved")}>Cliente aprobo</button>
-                          <button type="button" className="ghost" disabled={saving} onClick={() => handleStatusChange("rejected")}>Cliente rechazo</button>
-                          <button type="button" className="ghost" disabled={saving} onClick={() => handleStatusChange("expired")}>Marcar vencida</button>
-                        </>
-                      ) : null}
+                        ) : null}
+                      </div>
                     </footer>
                   </div>
 
