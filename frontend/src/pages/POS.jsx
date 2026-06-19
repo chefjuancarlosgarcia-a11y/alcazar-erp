@@ -955,7 +955,7 @@ function POS() {
     table: "production_tickets",
     event: "UPDATE",
     filter: user?.id ? `waiter_id=eq.${user.id}` : undefined,
-    enabled: Boolean(posSession && user?.id),
+    enabled: Boolean(posSession && user?.id && section === "pos"),
     onChange: (payload) => {
       if (payload.new?.status !== "ready" || payload.old?.status === "ready") return
       showPOSRealtimeNotice(`${payload.new.table_name || "Una mesa"} tiene productos listos.`)
@@ -1097,12 +1097,12 @@ function POS() {
 
   useSupabaseRealtime({
     table: "pos_floor_zones",
-    enabled: floorLayoutSource === "supabase",
+    enabled: floorLayoutSource === "supabase" && section === "croquis",
     onChange: () => { reloadFloorFromCloud(true) }
   })
   useSupabaseRealtime({
     table: "pos_floor_tables",
-    enabled: floorLayoutSource === "supabase",
+    enabled: floorLayoutSource === "supabase" && section === "croquis",
     onChange: () => { reloadFloorFromCloud(true) }
   })
 

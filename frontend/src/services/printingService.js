@@ -5,6 +5,16 @@ import {
   loadFinalBillTemplate
 } from "./ticketEscPosRenderer"
 
+const IS_DEV = import.meta.env.DEV
+
+function printDebug(...args) {
+  if (IS_DEV) console.log(...args)
+}
+
+function printWarn(...args) {
+  if (IS_DEV) console.warn(...args)
+}
+
 export const PRINT_JOB_TYPES = ["test", "prebill", "receipt", "delivery_order"]
 
 const RECEIPT_PRINT_QUERY_TIMEOUT_MS = 8000
@@ -15,7 +25,7 @@ const ACTIVE_PRINTER_SELECT =
   "id,name,windows_printer_name,location,supported_job_types,is_active"
 
 function logReceiptQueryChain(label, { withOrder = false } = {}) {
-  console.log("[Receipt Print] query chain", {
+  printDebug("[Receipt Print] query chain", {
     label,
     terminalMethods: {
       maybeSingle: false,
@@ -39,14 +49,14 @@ function isReceiptDebug(jobType) {
 
 async function awaitSupabaseQuery(queryBuilder, { timeoutMs, label, receiptDebug = false }) {
   if (receiptDebug) {
-    console.log("[Receipt Print] timeout wrapper", {
+    printDebug("[Receipt Print] timeout wrapper", {
       strategy: "Promise.race",
       helper: "withTimeout (productionTicketsService)",
       abortController: false,
       timeoutMs,
       label
     })
-    console.log("[Receipt Print] before supabase query", label)
+    printDebug("[Receipt Print] before supabase query", label)
   }
 
   const startedAt = Date.now()
@@ -57,23 +67,23 @@ async function awaitSupabaseQuery(queryBuilder, { timeoutMs, label, receiptDebug
       label
     )
     if (receiptDebug) {
-      console.log("[Receipt Print] after supabase query", {
+      printDebug("[Receipt Print] after supabase query", {
         label,
         ms: Date.now() - startedAt,
         error: result.error?.message || null,
         dataLength: result.data?.length ?? 0
       })
       if (result.error) {
-        console.warn("[Receipt Print] query error", result.error.message || result.error)
+        printWarn("[Receipt Print] query error", result.error.message || result.error)
       } else {
-        console.log("[Receipt Print] query data length", result.data?.length ?? 0)
+        printDebug("[Receipt Print] query data length", result.data?.length ?? 0)
       }
     }
     return result
   } catch (error) {
     if (receiptDebug) {
-      console.warn("[Receipt Print] query error", error?.message || error)
-      console.log("[Receipt Print] after supabase query", {
+      printWarn("[Receipt Print] query error", error?.message || error)
+      printDebug("[Receipt Print] after supabase query", {
         label,
         ms: Date.now() - startedAt,
         timedOut: true
@@ -129,8 +139,8 @@ export async function getActivePosPrinters({ jobType = "" } = {}) {
   const receiptDebug = isReceiptDebug(normalizedJobType)
 
   if (receiptDebug) {
-    console.log("[Receipt Print] getActivePosPrinters start", { jobType: normalizedJobType })
-    console.log("[Receipt Print] query equivalent SQL", [
+    printDebug("[Receipt Print] getActivePosPrinters start", { jobType: normalizedJobType })
+    printDebug("[Receipt Print] query equivalent SQL", [
       "-- minimal (receipt debug)",
       "select id, name, supported_job_types",
       "from pos_printers",
@@ -147,7 +157,7 @@ export async function getActivePosPrinters({ jobType = "" } = {}) {
       "where is_active = true",
       "order by name asc;"
     ].join("\n"))
-    console.log("[Receipt Print] receipt vs prebill", {
+    printDebug("[Receipt Print] receipt vs prebill", {
       sqlDifference: "none — same Supabase query; jobType filtered client-side",
       prebillFilter: "supported_job_types includes 'prebill'",
       receiptFilter: "supported_job_types includes 'receipt'"
@@ -155,7 +165,7 @@ export async function getActivePosPrinters({ jobType = "" } = {}) {
   }
 
   if (receiptDebug) {
-    console.log("[Receipt Print] minimal query start", {
+    printDebug("[Receipt Print] minimal query start", {
       from: "pos_printers",
       select: "id,name,supported_job_types",
       eq: { is_active: true }
@@ -173,7 +183,7 @@ export async function getActivePosPrinters({ jobType = "" } = {}) {
         }
       )
     } catch (error) {
-      console.warn("[Receipt Print] minimal query failed", error?.message || error)
+      printWarn("[Receipt Print] minimal query failed", error?.message || error)
       return { data: [], error: { message: error?.message || "Timeout en consulta mínima de impresoras." } }
     }
   }
@@ -182,7 +192,7 @@ export async function getActivePosPrinters({ jobType = "" } = {}) {
   let error
 
   if (receiptDebug) {
-    console.log("[Receipt Print] no-order query start", {
+    printDebug("[Receipt Print] no-order query start", {
       from: "pos_printers",
       select: ACTIVE_PRINTER_SELECT,
       eq: { is_active: true },
@@ -201,15 +211,15 @@ export async function getActivePosPrinters({ jobType = "" } = {}) {
           receiptDebug: true
         }
       )
-      console.log("[Receipt Print] no-order query result", {
+      printDebug("[Receipt Print] no-order query result", {
         dataLength: noOrderResult.data?.length ?? 0,
         error: noOrderResult.error?.message || null
       })
     } catch (noOrderError) {
-      console.warn("[Receipt Print] no-order query failed", noOrderError?.message || noOrderError)
+      printWarn("[Receipt Print] no-order query failed", noOrderError?.message || noOrderError)
     }
 
-    console.log("[Receipt Print] full query start", {
+    printDebug("[Receipt Print] full query start", {
       from: "pos_printers",
       select: ACTIVE_PRINTER_SELECT,
       eq: { is_active: true },
@@ -221,9 +231,9 @@ export async function getActivePosPrinters({ jobType = "" } = {}) {
       .from("pos_printers")
       .select(ACTIVE_PRINTER_SELECT)
       .eq("is_active", true)
-    console.log("[Receipt Print] before order(name)")
+    printDebug("[Receipt Print] before order(name)")
     queryWithOrder = queryWithOrder.order("name", { ascending: true })
-    console.log("[Receipt Print] after order(name)")
+    printDebug("[Receipt Print] after order(name)")
 
     try {
       const orderedResult = await awaitSupabaseQuery(queryWithOrder, {
@@ -233,13 +243,13 @@ export async function getActivePosPrinters({ jobType = "" } = {}) {
       })
       data = orderedResult.data
       error = orderedResult.error
-      console.log("[Receipt Print] full query with order succeeded", {
+      printDebug("[Receipt Print] full query with order succeeded", {
         dataLength: data?.length ?? 0,
         error: error?.message || null
       })
     } catch (orderedError) {
-      console.warn("[Receipt Print] full query with order failed", orderedError?.message || orderedError)
-      console.log("[Receipt Print] falling back to no-order + client sort")
+      printWarn("[Receipt Print] full query with order failed", orderedError?.message || orderedError)
+      printDebug("[Receipt Print] falling back to no-order + client sort")
       try {
         const fallbackResult = await awaitSupabaseQuery(
           supabase
@@ -256,7 +266,7 @@ export async function getActivePosPrinters({ jobType = "" } = {}) {
         error = fallbackResult.error
       } catch (fallbackError) {
         if (receiptDebug) {
-          console.log("[Receipt Print] getActivePosPrinters result", {
+          printDebug("[Receipt Print] getActivePosPrinters result", {
             error: fallbackError?.message || String(fallbackError),
             rawCount: 0,
             filteredCount: 0
@@ -291,7 +301,7 @@ export async function getActivePosPrinters({ jobType = "" } = {}) {
 
   if (receiptDebug) {
     const allActive = data || []
-    console.log("[Receipt Print] getActivePosPrinters result", {
+    printDebug("[Receipt Print] getActivePosPrinters result", {
       ms: "see after supabase query logs",
       error: error?.message || null,
       rawCount: allActive.length,
@@ -380,7 +390,7 @@ export async function createPrintJob({ printerId, jobType = "test", payload = {}
   const normalizedJobType = String(jobType || "test").trim().toLowerCase()
   const isReceiptJob = normalizedJobType === "receipt"
   if (isReceiptJob) {
-    console.log("[Receipt Print] createPrintJob start", { printerId, jobType: normalizedJobType })
+    printDebug("[Receipt Print] createPrintJob start", { printerId, jobType: normalizedJobType })
   }
 
   let printerRow
@@ -395,7 +405,7 @@ export async function createPrintJob({ printerId, jobType = "test", payload = {}
     printerError = lookup.error
   } catch (error) {
     if (isReceiptJob) {
-      console.warn("[Receipt Print] createPrintJob error", error?.message || error)
+      printWarn("[Receipt Print] createPrintJob error", error?.message || error)
     }
     return { data: null, error: { message: error?.message || "Timeout consultando impresora." } }
   }
@@ -403,17 +413,17 @@ export async function createPrintJob({ printerId, jobType = "test", payload = {}
   const supportedTypes = normalizeSupportedJobTypes(printerRow?.supported_job_types)
 
   if (printerError) {
-    if (isReceiptJob) console.warn("[Receipt Print] createPrintJob error", printerError.message || printerError)
+    if (isReceiptJob) printWarn("[Receipt Print] createPrintJob error", printerError.message || printerError)
     return { data: null, error: printerError }
   }
   if (!printerRow?.is_active) {
     const message = "Impresora no encontrada o inactiva."
-    if (isReceiptJob) console.warn("[Receipt Print] createPrintJob error", message)
+    if (isReceiptJob) printWarn("[Receipt Print] createPrintJob error", message)
     return { data: null, error: { message } }
   }
   if (!supportedTypes.includes(normalizedJobType)) {
     const message = `La impresora "${printerRow.name}" (${printerId}) no incluye "${normalizedJobType}" en supported_job_types: [${supportedTypes.join(", ")}]`
-    if (isReceiptJob) console.warn("[Receipt Print] createPrintJob error", message)
+    if (isReceiptJob) printWarn("[Receipt Print] createPrintJob error", message)
     return { data: null, error: { message } }
   }
 
@@ -433,16 +443,16 @@ export async function createPrintJob({ printerId, jobType = "test", payload = {}
     error = rpcResult.error
   } catch (rpcError) {
     if (isReceiptJob) {
-      console.warn("[Receipt Print] createPrintJob error", rpcError?.message || rpcError)
+      printWarn("[Receipt Print] createPrintJob error", rpcError?.message || rpcError)
     }
     return { data: null, error: { message: rpcError?.message || "Timeout en create_print_job." } }
   }
 
   if (error) {
     console.error("[printingService] createPrintJob failed:", error.message, { printerId, jobType: normalizedJobType })
-    if (isReceiptJob) console.warn("[Receipt Print] createPrintJob error", error.message || error)
+    if (isReceiptJob) printWarn("[Receipt Print] createPrintJob error", error.message || error)
   } else if (isReceiptJob) {
-    console.log("[Receipt Print] createPrintJob result", { jobId: data?.id, status: data?.status })
+    printDebug("[Receipt Print] createPrintJob result", { jobId: data?.id, status: data?.status })
   }
 
   return { data, error }
@@ -593,11 +603,11 @@ export async function buildReceiptPrintPayloadAsync(order, payment = {}, options
   try {
     const template = options.template || await loadFinalBillTemplate()
     if (!template) {
-      console.warn("[Ticket ESC/POS] template loaded", { templateKey: null, fallback: true })
+      printWarn("[Ticket ESC/POS] template loaded", { templateKey: null, fallback: true })
       return base
     }
 
-    console.log("[Ticket ESC/POS] template loaded", {
+    printDebug("[Ticket ESC/POS] template loaded", {
       templateKey: template.template_key,
       name: template.name,
       paperWidth: template.paper_width
@@ -616,7 +626,7 @@ export async function buildReceiptPrintPayloadAsync(order, payment = {}, options
       }
     )
 
-    console.log("[Ticket ESC/POS] lines generated", {
+    printDebug("[Ticket ESC/POS] lines generated", {
       count: rendered.lines.length,
       paperWidth: rendered.paperWidth
     })
@@ -631,20 +641,20 @@ export async function buildReceiptPrintPayloadAsync(order, payment = {}, options
       footer_message: template.settings?.messages?.footerMessage || base.footer_message
     }
   } catch (error) {
-    console.warn("[Ticket ESC/POS] renderer failed, using fallback payload", error?.message || error)
+    printWarn("[Ticket ESC/POS] renderer failed, using fallback payload", error?.message || error)
     return base
   }
 }
 
 export async function queueReceiptPrintJob({ payload, order, payment, options, locationHint = "CAJA" } = {}) {
-  console.log("[Receipt Print] attempting queueReceiptPrintJob", { locationHint })
+  printDebug("[Receipt Print] attempting queueReceiptPrintJob", { locationHint })
   try {
     let resolvedPayload = payload
     if (!resolvedPayload && order) {
       try {
         resolvedPayload = await buildReceiptPrintPayloadAsync(order, payment || {}, options || {})
       } catch (error) {
-        console.warn("[Receipt Print] payload build failed, using minimal fallback", error?.message || error)
+        printWarn("[Receipt Print] payload build failed, using minimal fallback", error?.message || error)
         resolvedPayload = buildReceiptPrintPayload(order, payment || {}, options || {})
       }
     }
@@ -653,7 +663,7 @@ export async function queueReceiptPrintJob({ payload, order, payment, options, l
       return { ok: false, error: { message: "Payload de recibo requerido." } }
     }
 
-    console.log("[Receipt Print] payload lines count", resolvedPayload.lines?.length ?? 0)
+    printDebug("[Receipt Print] payload lines count", resolvedPayload.lines?.length ?? 0)
     let printersResult
     try {
       printersResult = await getActivePosPrinters({ jobType: "receipt" })
@@ -662,7 +672,7 @@ export async function queueReceiptPrintJob({ payload, order, payment, options, l
     }
 
     if (printersResult.error) {
-      console.warn("[Receipt Print] error", printersResult.error?.message || printersResult.error)
+      printWarn("[Receipt Print] error", printersResult.error?.message || printersResult.error)
       return { ok: false, error: printersResult.error }
     }
 
@@ -673,11 +683,11 @@ export async function queueReceiptPrintJob({ payload, order, payment, options, l
 
     if (!selectedPrinter) {
       const message = "No hay impresora configurada para recibos."
-      console.warn("[Receipt Print] error", message)
+      printWarn("[Receipt Print] error", message)
       return { ok: false, error: { message } }
     }
 
-    console.log("[Receipt Print] selected printer", {
+    printDebug("[Receipt Print] selected printer", {
       id: selectedPrinter.id,
       name: selectedPrinter.name,
       location: selectedPrinter.location,
@@ -695,7 +705,7 @@ export async function queueReceiptPrintJob({ payload, order, payment, options, l
       return { ok: false, error: printJob.error }
     }
 
-    console.log("[Receipt Print] result", {
+    printDebug("[Receipt Print] result", {
       ok: true,
       jobId: printJob.data?.id,
       printerId: selectedPrinter.id,
@@ -703,9 +713,9 @@ export async function queueReceiptPrintJob({ payload, order, payment, options, l
     })
     return { ok: true, data: printJob.data, printer: selectedPrinter }
   } catch (error) {
-    console.warn("[Receipt Print] error", error?.message || error)
+    printWarn("[Receipt Print] error", error?.message || error)
     return { ok: false, error: { message: error?.message || "Error encolando recibo." } }
   } finally {
-    console.log("[Receipt Print] queueReceiptPrintJob complete")
+    printDebug("[Receipt Print] queueReceiptPrintJob complete")
   }
 }

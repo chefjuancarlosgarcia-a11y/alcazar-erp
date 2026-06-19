@@ -70,14 +70,16 @@ export default function LoginSecurityAudit() {
           <p className="settings-eyebrow">Seguridad</p>
           <h2>Auditoria de login</h2>
           <p>
-            Intentos recientes de acceso al ERP. CAPTCHA progresivo solo aparece en login tras varios fallos.
-            La fase 2 agregara 2FA obligatorio para roles sensibles.
+            Intentos recientes de acceso al ERP (exitosos y fallidos). CAPTCHA solo en login.
+            Logs mayores a 90 dias se purgan automaticamente via cron o Edge Function programada.
           </p>
         </div>
         <div className="login-security-audit__rules">
           <span>5 fallos / email → bloqueo 15 min</span>
           <span>10 fallos / IP → bloqueo 15 min</span>
           <span>Intentos 4–5 → CAPTCHA</span>
+          <span>Retencion automatica: 90 dias</span>
+          <span>Alertas: IP/dispositivo/horario en roles sensibles</span>
         </div>
       </header>
 
@@ -125,6 +127,7 @@ export default function LoginSecurityAudit() {
                 <tr>
                   <th>Fecha</th>
                   <th>Correo</th>
+                  <th>Rol</th>
                   <th>IP</th>
                   <th>Navegador</th>
                   <th>Resultado</th>
@@ -137,6 +140,7 @@ export default function LoginSecurityAudit() {
                   <tr key={row.id}>
                     <td>{formatDateTime(row.created_at)}</td>
                     <td>{row.email_attempted}</td>
+                    <td>{row.profile_role || "—"}</td>
                     <td>{row.ip_address || "—"}</td>
                     <td title={row.user_agent || ""}>{shortenUserAgent(row.user_agent)}</td>
                     <td>

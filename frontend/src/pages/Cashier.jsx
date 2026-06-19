@@ -51,12 +51,18 @@ const RECEIPT_PRINTING_ENABLED = String(RECEIPT_FLAG_RAW ?? "false").toLowerCase
 const POST_PAYMENT_PRINT_TIMEOUT_MS = 5000
 const RECEIPT_PRINT_NOTICE = "Cobro registrado. Recibo térmico pendiente/no enviado."
 
-function logReceiptFlagState(context = "module") {
-  console.log("[Receipt Flag] value", RECEIPT_FLAG_RAW === undefined ? "undefined" : String(RECEIPT_FLAG_RAW))
-  console.log("[Receipt Flag] enabled", RECEIPT_PRINTING_ENABLED, { context, mode: import.meta.env.MODE })
+function cashierDebug(...args) {
+  if (import.meta.env.DEV) console.log(...args)
 }
 
-logReceiptFlagState("Cashier.jsx load")
+function cashierWarn(...args) {
+  if (import.meta.env.DEV) console.warn(...args)
+}
+
+function logReceiptFlagState(context = "module") {
+  cashierDebug("[Receipt Flag] value", RECEIPT_FLAG_RAW === undefined ? "undefined" : String(RECEIPT_FLAG_RAW))
+  cashierDebug("[Receipt Flag] enabled", RECEIPT_PRINTING_ENABLED, { context, mode: import.meta.env.MODE })
+}
 
 function withPostPaymentTimeout(promise, label) {
   return Promise.race([
@@ -81,21 +87,21 @@ function schedulePostPaymentPrints({
     "PDF cuenta final"
   ).then((printed) => {
     if (printed === false) {
-      console.warn("[Cashier] print skipped/failed pdf")
+      cashierWarn("[Cashier] print skipped/failed pdf")
     } else {
-      console.log("[Cashier] print queued pdf")
+      cashierDebug("[Cashier] print queued pdf")
     }
   }).catch((error) => {
-    console.warn("[Cashier] print skipped/failed pdf", error?.message || error)
+    cashierWarn("[Cashier] print skipped/failed pdf", error?.message || error)
   })
 
   if (!RECEIPT_PRINTING_ENABLED) {
     logReceiptFlagState("schedulePostPaymentPrints skipped")
-    console.log("[Cashier] print skipped receipt (disabled)")
+    cashierDebug("[Cashier] print skipped receipt (disabled)")
     return
   }
 
-  console.log("[Receipt Print] attempting queueReceiptPrintJob", {
+  cashierDebug("[Receipt Print] attempting queueReceiptPrintJob", {
     orderId: billOrderId,
     comandaNo,
     paymentId: payment?.id
@@ -116,15 +122,15 @@ function schedulePostPaymentPrints({
     }),
     "recibo térmico"
   ).then((receiptResult) => {
-    console.log("[Receipt Print] result", receiptResult)
+    cashierDebug("[Receipt Print] result", receiptResult)
     if (!receiptResult?.ok) {
-      console.warn("[Receipt Print] error", receiptResult?.error?.message || receiptResult)
+      cashierWarn("[Receipt Print] error", receiptResult?.error?.message || receiptResult)
       onPrintNotice?.(RECEIPT_PRINT_NOTICE)
       return
     }
-    console.log("[Cashier] print queued receipt", { jobId: receiptResult.data?.id })
+    cashierDebug("[Cashier] print queued receipt", { jobId: receiptResult.data?.id })
   }).catch((error) => {
-    console.warn("[Receipt Print] error", error?.message || error)
+    cashierWarn("[Receipt Print] error", error?.message || error)
     onPrintNotice?.(RECEIPT_PRINT_NOTICE)
   })
 }
@@ -237,7 +243,7 @@ function Cashier() {
   }
 
   function openCharge(bill) {
-    console.log("[Cashier] openCharge", { preBillId: bill?.id, tableName: bill?.tableName })
+    cashierDebug("[Cashier] openCharge", { preBillId: bill?.id, tableName: bill?.tableName })
     if (!session) {
       refresh("Abre la caja en Dashboard Caja antes de cobrar mesas.")
       setTab("dashboard")
@@ -561,7 +567,7 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
     }
     setShowSplitModal(false)
     if (result.orderFullyPaid) {
-      console.log("[Cashier] payment complete flow", { source: "handleSplitPaid" })
+      cashierDebug("[Cashier] payment complete flow", { source: "handleSplitPaid" })
       onPaymentComplete("Subcuenta cobrada. Cuenta cerrada. Saldo restante: Q0.00")
       const orderForPrint = orderWithBillingCustomer(bill, normalizeBillingCustomer(billingCustomer))
       schedulePostPaymentPrints({
@@ -585,9 +591,9 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
   }
 
   async function submit() {
-    console.log("[Cashier] submit entered")
+    cashierDebug("[Cashier] submit entered")
     if (submitLockRef.current) {
-      console.warn("[Cashier] submit ignored: already in progress")
+      cashierWarn("[Cashier] submit ignored: already in progress")
       return
     }
     submitLockRef.current = true
@@ -603,7 +609,7 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
           customerAddressId: normalizedBilling.addressId || null
         })
         if (linkResult.error) {
-          console.warn("[Cashier] No se pudo vincular cliente a la orden.", linkResult.message || linkResult.error)
+          cashierWarn("[Cashier] No se pudo vincular cliente a la orden.", linkResult.message || linkResult.error)
         }
       }
 
@@ -635,7 +641,7 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
         productSubtotalOverride: isSupabaseBill ? productSubtotal : undefined,
         billingCustomer: normalizedBilling
       }, user)
-      console.log("[Cashier] confirmPayment result", {
+      cashierDebug("[Cashier] confirmPayment result", {
         ok: result.ok,
         allPaid: result.allPaid,
         requiresAuthorization: result.requiresAuthorization
@@ -657,7 +663,7 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
         return
       }
 
-      console.log("[Cashier] payment complete flow", { source: "submit" })
+      cashierDebug("[Cashier] payment complete flow", { source: "submit" })
       onPaymentComplete("Pago completado correctamente. Orden liberada.")
       schedulePostPaymentPrints({
         orderForPrint: orderWithBillingCustomer(bill, normalizedBilling),
@@ -673,7 +679,7 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
       setMessage(`Error en Caja > Cobrar mesa > Confirmar pago: ${error.message || "No se pudo completar la transacción."}`)
     } finally {
       submitLockRef.current = false
-      console.log("[Cashier] submit finally")
+      cashierDebug("[Cashier] submit finally")
       setProcessingPayment(false)
     }
   }
