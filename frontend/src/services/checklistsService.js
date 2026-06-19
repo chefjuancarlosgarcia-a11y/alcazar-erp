@@ -686,3 +686,14 @@ export async function getChecklistProfiles() {
     .order("full_name", { ascending: true })
   return { data: data || [], error }
 }
+
+export async function assignChecklistRunReplacement(runId, replacementProfileId, reason, notes = "") {
+  const result = await supabase.rpc("assign_checklist_run_replacement", {
+    p_run_id: runId,
+    p_replacement_profile_id: replacementProfileId,
+    p_reason: reason,
+    p_notes: notes?.trim() || null
+  })
+  if (!result.error) window.dispatchEvent(new CustomEvent("notifications-updated"))
+  return { data: orderRun(result.data), error: result.error }
+}

@@ -7,6 +7,7 @@ import { getProfilesTaskUnavailability, getTaskAssignableProfiles } from "../ser
 import { createNotification } from "../services/notificationsService"
 import {
   approveChecklistChangeRequest,
+  assignChecklistRunReplacement,
   completeChecklistRun,
   checkTemplateHasRuns,
   createChecklistRunFromTemplate,
@@ -64,6 +65,17 @@ import {
   clearChecklistWizardDraft
 } from "../utils/checklistProgressPersistence"
 import { readChecklistEvidenceFile } from "../utils/checklistPhotoUtils"
+import {
+  CHECKLIST_OPERATIONAL_STATUS,
+  CHECKLIST_REPLACEMENT_REASONS,
+  getChecklistOperationalDisplayStatus,
+  getChecklistOperationalStatusLabel,
+  getChecklistReplacementReasonLabel,
+  hasChecklistReplacement,
+  isChecklistOperationallyExpired,
+  isChecklistRunHistoricPending,
+  isChecklistRunTodayWork
+} from "../utils/checklistOperationalStatus"
 import {
   TASK_CATEGORIES,
   TASK_DIFFICULTIES,
@@ -1667,7 +1679,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       return { runs: [], error: templateResult.error || runResult.error || incidentResult.error || requestResult.error || suggestionResult.error || alertResult?.error }
     } else {
       setTemplates(templateResult.data || [])
-      const syncedRuns = await replayPendingChecklistDrafts(markOverdueRuns(runResult.data || []))
+      const syncedRuns = await replayPendingChecklistDrafts(runResult.data || [])
       setRuns(syncedRuns)
       setIncidents(incidentResult.data || [])
       setChangeRequests(requestResult.data || [])
@@ -2057,6 +2069,32 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
     refresh()
   }
 
+  async function assignRunReplacement(runId, payload) {
+    const result = await assignChecklistRunReplacement(
+      runId,
+      payload.replacementProfileId,
+      payload.reason,
+      payload.notes
+    )
+    if (result.error) {
+      setMessage(result.error.message || "No se pudo asignar el reemplazo.")
+      return { error: result.error }
+    }
+    await logChecklistAudit("run_replacement", runId, {
+      replacementProfileId: payload.replacementProfileId,
+      reason: payload.reason
+    })
+    setMessage("Reemplazo asignado correctamente.")
+    await refresh({ silent: true })
+    if (result.data?.id) setSelectedRunId(result.data.id)
+    return { data: result.data }
+  }
+
+  const canAssignRunReplacement = useCallback((run) => {
+    if (!run || ["completed", "cancelled"].includes(run.status)) return false
+    return ["admin", "gerente_general", "gerente", "supervisor", "recursos_humanos", "rrhh"].includes(userRole)
+  }, [userRole])
+
   return (
     <div className="checklists-module">
       <article className="checklists-hero">
@@ -2096,6 +2134,8 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
           onStart={startRun}
           onUpdateItem={updateRunItem}
           onComplete={completeRun}
+          onAssignReplacement={assignRunReplacement}
+          canAssignReplacement={canAssignRunReplacement}
           currentUser={user}
         />
       )}
@@ -2108,6 +2148,8 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
           onStart={startRun}
           onUpdateItem={updateRunItem}
           onComplete={completeRun}
+          onAssignReplacement={assignRunReplacement}
+          canAssignReplacement={canAssignRunReplacement}
           currentUser={user}
         />
       )}
@@ -2119,6 +2161,8 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
           onSelect={selectRun}
           onUpdateItem={updateRunItem}
           onComplete={completeRun}
+          onAssignReplacement={assignRunReplacement}
+          canAssignReplacement={canAssignRunReplacement}
           currentUser={user}
         />
       )}
@@ -2273,7 +2317,19 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   )
 }
 
-function ChecklistRunDetailShell({ backLabel, summary, selectedRun, profiles, currentUser, onSelect, onUpdateItem, onComplete, children }) {
+function ChecklistRunDetailShell({
+  backLabel,
+  summary,
+  selectedRun,
+  profiles,
+  currentUser,
+  onSelect,
+  onUpdateItem,
+  onComplete,
+  onAssignReplacement,
+  canAssignReplacement,
+  children
+}) {
   if (selectedRun) {
     return (
       <>
@@ -2290,6 +2346,8 @@ function ChecklistRunDetailShell({ backLabel, summary, selectedRun, profiles, cu
           onClose={() => onSelect("")}
           onUpdateItem={onUpdateItem}
           onComplete={onComplete}
+          onAssignReplacement={onAssignReplacement}
+          canAssignReplacement={canAssignReplacement?.(selectedRun)}
         />
       </>
     )
@@ -2297,26 +2355,44 @@ function ChecklistRunDetailShell({ backLabel, summary, selectedRun, profiles, cu
   return children
 }
 
-function ChecklistToday({ runs, profiles, selectedRun, onSelect, onStart, onUpdateItem, onComplete, currentUser }) {
+function ChecklistToday({
+  runs,
+  profiles,
+  selectedRun,
+  onSelect,
+  onStart,
+  onUpdateItem,
+  onComplete,
+  onAssignReplacement,
+  canAssignReplacement,
+  currentUser
+}) {
   const todayRuns = useMemo(
     () => dedupeLogicalChecklistRuns(runs)
       .filter(isChecklistRunTodayWork)
       .sort((a, b) => {
-        const statusOrder = { overdue: 0, in_progress: 1, pending: 2 }
-        const statusDiff = (statusOrder[a.status] ?? 9) - (statusOrder[b.status] ?? 9)
+        const statusOrder = {
+          [CHECKLIST_OPERATIONAL_STATUS.VENCIDA]: 0,
+          [CHECKLIST_OPERATIONAL_STATUS.PENDIENTE_ATRASADA]: 1,
+          in_progress: 2,
+          pending: 3
+        }
+        const leftStatus = getChecklistOperationalDisplayStatus(a)
+        const rightStatus = getChecklistOperationalDisplayStatus(b)
+        const statusDiff = (statusOrder[leftStatus] ?? statusOrder[a.status] ?? 9) - (statusOrder[rightStatus] ?? statusOrder[b.status] ?? 9)
         if (statusDiff !== 0) return statusDiff
         return String(a.checklist_templates?.title || "").localeCompare(String(b.checklist_templates?.title || ""))
       }),
     [runs]
   )
 
-  const pending = todayRuns.filter((run) => run.status === "pending")
+  const pending = todayRuns.filter((run) => getChecklistOperationalDisplayStatus(run) === CHECKLIST_OPERATIONAL_STATUS.PENDIENTE)
   const inProgress = todayRuns.filter((run) => run.status === "in_progress")
-  const overdue = todayRuns.filter((run) => run.status === "overdue")
+  const latePending = todayRuns.filter((run) => getChecklistOperationalDisplayStatus(run) === CHECKLIST_OPERATIONAL_STATUS.PENDIENTE_ATRASADA)
   const cards = [
     ["Pendientes", pending.length, "pending"],
     ["En progreso", inProgress.length, "in_progress"],
-    ["Vencidas hoy", overdue.length, "overdue"]
+    ["Atrasadas", latePending.length, "late"]
   ]
 
   return (
@@ -2330,6 +2406,8 @@ function ChecklistToday({ runs, profiles, selectedRun, onSelect, onStart, onUpda
         onSelect={onSelect}
         onUpdateItem={onUpdateItem}
         onComplete={onComplete}
+        onAssignReplacement={onAssignReplacement}
+        canAssignReplacement={canAssignReplacement}
       >
         {!selectedRun && (
           <div className="checklists-kpis">
@@ -2359,7 +2437,18 @@ function ChecklistToday({ runs, profiles, selectedRun, onSelect, onStart, onUpda
   )
 }
 
-function ChecklistOverdue({ runs, profiles, selectedRun, onSelect, onStart, onUpdateItem, onComplete, currentUser }) {
+function ChecklistOverdue({
+  runs,
+  profiles,
+  selectedRun,
+  onSelect,
+  onStart,
+  onUpdateItem,
+  onComplete,
+  onAssignReplacement,
+  canAssignReplacement,
+  currentUser
+}) {
   const groupedRuns = useMemo(
     () => groupHistoricOverdueRuns(runs.filter(isChecklistRunHistoricPending), profiles),
     [runs, profiles]
@@ -2380,6 +2469,8 @@ function ChecklistOverdue({ runs, profiles, selectedRun, onSelect, onStart, onUp
         onSelect={onSelect}
         onUpdateItem={onUpdateItem}
         onComplete={onComplete}
+        onAssignReplacement={onAssignReplacement}
+        canAssignReplacement={canAssignReplacement}
       >
         {!selectedRun && !groupedRuns.length ? (
           <FriendlyEmpty
@@ -2426,7 +2517,17 @@ function ChecklistOverdue({ runs, profiles, selectedRun, onSelect, onStart, onUp
   )
 }
 
-function ChecklistCompleted({ runs, profiles, selectedRun, onSelect, onUpdateItem, onComplete, currentUser }) {
+function ChecklistCompleted({
+  runs,
+  profiles,
+  selectedRun,
+  onSelect,
+  onUpdateItem,
+  onComplete,
+  onAssignReplacement,
+  canAssignReplacement,
+  currentUser
+}) {
   const [filters, setFilters] = useState({
     search: "",
     area: "",
@@ -2500,6 +2601,8 @@ function ChecklistCompleted({ runs, profiles, selectedRun, onSelect, onUpdateIte
         onSelect={onSelect}
         onUpdateItem={onUpdateItem}
         onComplete={onComplete}
+        onAssignReplacement={onAssignReplacement}
+        canAssignReplacement={canAssignReplacement}
       >
         {!selectedRun && (
           <>
@@ -2604,14 +2707,16 @@ function ChecklistTodayCard({ run, profiles, onOpen, variant = "today" }) {
   const progress = checklistRunProgress(run)
   const completedItems = (run.checklist_run_items || []).filter(itemHasAnswer).length
   const totalItems = run.checklist_run_items?.length || 0
+  const displayStatus = getChecklistOperationalDisplayStatus(run)
   const scheduleLabel = variant === "completed"
-    ? `Completada · ${formatChecklistRunDateLabel(run.run_date)}`
+    ? `${getChecklistOperationalStatusLabel(displayStatus)} · ${formatChecklistRunDateLabel(run.run_date)}`
     : checklistRunScheduleLabel(run)
   const dueLabel = formatChecklistDueDeadline(run)
   const cardClassName = [
     "checklist-today-card",
     variant === "overdue" ? "checklist-today-card--past-date" : "",
-    variant === "completed" ? "checklist-today-card--completed" : ""
+    variant === "completed" ? "checklist-today-card--completed" : "",
+    displayStatus === CHECKLIST_OPERATIONAL_STATUS.PENDIENTE_ATRASADA ? "checklist-today-card--late-pending" : ""
   ].filter(Boolean).join(" ")
 
   return (
@@ -2619,12 +2724,13 @@ function ChecklistTodayCard({ run, profiles, onOpen, variant = "today" }) {
       <div className="checklist-card-top">
         <div>
           <h3>{run.checklist_templates?.title || "Checklist"}</h3>
-          <p>{run.area || "Sin area"} · {responsibleLabel(run, profiles)}</p>
+          <p>{run.area || "Sin area"}</p>
+          <ChecklistResponsibleInfo run={run} profiles={profiles} compact />
         </div>
         <ChecklistTodayContextBadges run={run} variant={variant} />
       </div>
       <div className="checklist-today-schedule">
-        <p className={`checklist-today-schedule__primary${isChecklistRunOverdue(run) ? " is-overdue" : ""}`}>{scheduleLabel}</p>
+        <p className={`checklist-today-schedule__primary${isChecklistOperationallyExpired(run) || displayStatus === CHECKLIST_OPERATIONAL_STATUS.PENDIENTE_ATRASADA ? " is-overdue" : ""}`}>{scheduleLabel}</p>
         <p className="checklist-today-schedule__due">{dueLabel}</p>
       </div>
       <div className="checklist-progress-row">
@@ -3362,13 +3468,107 @@ function ChecklistTemplatePreview({ form, items, profiles, templateId = "" }) {
   )
 }
 
-function ChecklistGuidedRun({ run, profiles, currentUser, onClose, onUpdateItem, onComplete }) {
+function ChecklistResponsibleInfo({ run, profiles, compact = false }) {
+  const originalId = run.original_assigned_profile_id || run.assigned_profile_id
+  const originalName = profileDisplayName(profiles, originalId)
+  const effectiveName = profileDisplayName(profiles, run.assigned_profile_id)
+  const replaced = hasChecklistReplacement(run)
+
+  if (!replaced) {
+    return compact
+      ? <p className="checklist-responsible-info">{originalName}</p>
+      : <p className="checklist-responsible-info"><strong>Responsable:</strong> {originalName}</p>
+  }
+
+  return (
+    <div className={`checklist-responsible-info${compact ? " checklist-responsible-info--compact" : ""}`}>
+      <p><strong>Responsable original:</strong> {originalName}</p>
+      <p><strong>Asignada hoy a:</strong> {effectiveName}</p>
+      <p><strong>Motivo:</strong> {getChecklistReplacementReasonLabel(run.replacement_reason)}</p>
+      {run.replacement_notes ? <p className="tasks-muted">{run.replacement_notes}</p> : null}
+    </div>
+  )
+}
+
+function ChecklistReplacementModal({ run, profiles, currentUser, onClose, onSubmit }) {
+  const [replacementProfileId, setReplacementProfileId] = useState("")
+  const [reason, setReason] = useState("vacaciones")
+  const [notes, setNotes] = useState("")
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState("")
+  const assignableProfiles = useMemo(
+    () => getChecklistAssignableProfiles(currentUser, profiles, { templateArea: run.area || "" })
+      .filter((profile) => profile.id !== (run.original_assigned_profile_id || run.assigned_profile_id)),
+    [currentUser, profiles, run.area, run.assigned_profile_id, run.original_assigned_profile_id]
+  )
+
+  async function handleSubmit(event) {
+    event.preventDefault()
+    if (!replacementProfileId) {
+      setError("Selecciona un colaborador de reemplazo.")
+      return
+    }
+    setSaving(true)
+    setError("")
+    const result = await onSubmit(run.id, { replacementProfileId, reason, notes })
+    setSaving(false)
+    if (result?.error) {
+      setError(result.error.message || "No se pudo asignar el reemplazo.")
+      return
+    }
+    onClose()
+  }
+
+  return (
+    <div className="tasks-modal-backdrop" role="presentation" onClick={onClose}>
+      <form className="tasks-modal checklist-replacement-modal" onClick={(event) => event.stopPropagation()} onSubmit={handleSubmit}>
+        <div className="tasks-modal-head">
+          <div>
+            <h3>Asignar reemplazo</h3>
+            <p className="tasks-muted">{run.checklist_templates?.title || "Checklist"} · {formatChecklistRunDateLabel(run.run_date)}</p>
+          </div>
+          <button type="button" className="tasks-link" onClick={onClose}>Cerrar</button>
+        </div>
+        <ChecklistResponsibleInfo run={run} profiles={profiles} />
+        <div className="tasks-form-grid">
+          <Field label="Reemplazo">
+            <select value={replacementProfileId} onChange={(event) => setReplacementProfileId(event.target.value)} required>
+              <option value="">Seleccionar colaborador</option>
+              {assignableProfiles.map((profile) => (
+                <option key={profile.id} value={profile.id}>{profile.full_name || profile.username}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Motivo">
+            <select value={reason} onChange={(event) => setReason(event.target.value)} required>
+              {CHECKLIST_REPLACEMENT_REASONS.map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Nota opcional">
+            <textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Detalle adicional del reemplazo" />
+          </Field>
+        </div>
+        {error ? <p className="tasks-warning">{error}</p> : null}
+        <div className="tasks-modal-actions">
+          <button type="button" className="tasks-secondary" onClick={onClose}>Cancelar</button>
+          <button type="submit" className="tasks-primary" disabled={saving}>{saving ? "Guardando..." : "Guardar reemplazo"}</button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
+function ChecklistGuidedRun({ run, profiles, currentUser, onClose, onUpdateItem, onComplete, onAssignReplacement, canAssignReplacement }) {
   const progress = checklistRunProgress(run)
   const completedCount = (run.checklist_run_items || []).filter(itemHasAnswer).length
   const canEdit = run.status !== "completed"
   const itemGroups = groupChecklistRunItems(run.checklist_run_items || [])
   const runMeta = getChecklistRunMeta(run.id)
   const [savingDraft, setSavingDraft] = useState(false)
+  const [replacementOpen, setReplacementOpen] = useState(false)
+  const displayStatus = getChecklistOperationalDisplayStatus(run)
 
   async function handleSaveAndContinueLater() {
     setSavingDraft(true)
@@ -3384,9 +3584,29 @@ function ChecklistGuidedRun({ run, profiles, currentUser, onClose, onUpdateItem,
     <article className="checklist-guided">
       <div className="checklist-guided-header">
         <button type="button" className="checklist-back-button compact" onClick={onClose}>← Volver</button>
-        <div><h2>{run.checklist_templates?.title || "Checklist"}</h2><p>{run.area || "Sin area"} · {responsibleLabel(run, profiles)}</p></div>
-        <Badge type="status" value={run.status} />
+        <div>
+          <h2>{run.checklist_templates?.title || "Checklist"}</h2>
+          <p>{run.area || "Sin area"}</p>
+          <ChecklistResponsibleInfo run={run} profiles={profiles} />
+        </div>
+        <span className={`checklist-today-badge checklist-today-badge--${displayStatus.replace(/_/g, "-")}`}>
+          {getChecklistOperationalStatusLabel(displayStatus)}
+        </span>
       </div>
+      {canAssignReplacement && onAssignReplacement ? (
+        <div className="checklist-guided-actions">
+          <button type="button" className="tasks-secondary" onClick={() => setReplacementOpen(true)}>Asignar reemplazo</button>
+        </div>
+      ) : null}
+      {replacementOpen ? (
+        <ChecklistReplacementModal
+          run={run}
+          profiles={profiles}
+          currentUser={currentUser}
+          onClose={() => setReplacementOpen(false)}
+          onSubmit={onAssignReplacement}
+        />
+      ) : null}
       {runMeta?.lastSuccessfulAutosaveAt && (
         <p className="tasks-muted checklist-autosave-meta">
           Ultimo guardado: {new Date(runMeta.lastSuccessfulAutosaveAt).toLocaleString("es-GT")}
@@ -3944,14 +4164,22 @@ function ChecklistRequestSummary({ title, request }) {
 function ChecklistReports({ runs, templates, profiles }) {
   const [filters, setFilters] = useState({ area: "", profile: "", template: "", status: "", date: "", minProgress: "" })
   const profileName = (id) => profiles.find((profile) => profile.id === id)?.full_name || id || "Sin colaborador"
-  const filteredRuns = runs.filter((run) =>
-    (!filters.area || run.area === filters.area) &&
-    (!filters.profile || run.assigned_profile_id === filters.profile) &&
-    (!filters.template || run.template_id === filters.template) &&
-    (!filters.status || run.status === filters.status) &&
-    (!filters.date || run.run_date === filters.date) &&
-    (!filters.minProgress || checklistRunProgress(run) >= Number(filters.minProgress))
-  )
+  const filteredRuns = runs.filter((run) => {
+    if (filters.area && run.area !== filters.area) return false
+    if (filters.profile && run.assigned_profile_id !== filters.profile) return false
+    if (filters.template && run.template_id !== filters.template) return false
+    if (filters.date && run.run_date !== filters.date) return false
+    if (filters.minProgress && checklistRunProgress(run) < Number(filters.minProgress)) return false
+    if (!filters.status) return true
+    if (filters.status === "completion_timing:on_time") {
+      return run.status === "completed" && getChecklistOperationalDisplayStatus(run) === CHECKLIST_OPERATIONAL_STATUS.COMPLETADA_A_TIEMPO
+    }
+    if (filters.status === "completion_timing:late") {
+      return run.status === "completed" && getChecklistOperationalDisplayStatus(run) === CHECKLIST_OPERATIONAL_STATUS.COMPLETADA_TARDE
+    }
+    if (filters.status === "replaced") return hasChecklistReplacement(run)
+    return run.status === filters.status
+  })
   function updateFilter(field, value) {
     setFilters((current) => ({ ...current, [field]: value }))
   }
@@ -3963,7 +4191,7 @@ function ChecklistReports({ runs, templates, profiles }) {
           <select value={filters.area} onChange={(event) => updateFilter("area", event.target.value)}><option value="">Todas las areas</option>{CHECKLIST_AREAS.map((area) => <option key={area} value={area}>{checklistAreaLabel(area)}</option>)}</select>
           <select value={filters.profile} onChange={(event) => updateFilter("profile", event.target.value)}><option value="">Todos los responsables</option>{profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.full_name || profile.username}</option>)}</select>
           <select value={filters.template} onChange={(event) => updateFilter("template", event.target.value)}><option value="">Todas las checklists</option>{templates.map((template) => <option key={template.id} value={template.id}>{template.title}</option>)}</select>
-          <select value={filters.status} onChange={(event) => updateFilter("status", event.target.value)}><option value="">Todos los estados</option><option value="pending">Pendientes</option><option value="in_progress">En progreso</option><option value="completed">Completadas</option><option value="overdue">Vencidas</option></select>
+          <select value={filters.status} onChange={(event) => updateFilter("status", event.target.value)}><option value="">Todos los estados</option><option value="pending">Pendientes</option><option value="in_progress">En progreso</option><option value="completed">Completadas</option><option value="overdue">Vencidas</option><option value="completion_timing:on_time">Completadas a tiempo</option><option value="completion_timing:late">Completadas tarde</option><option value="replaced">Reasignadas</option></select>
           <input type="date" value={filters.date} onChange={(event) => updateFilter("date", event.target.value)} />
           <input type="number" min="0" max="100" value={filters.minProgress} onChange={(event) => updateFilter("minProgress", event.target.value)} placeholder="% minimo" />
         </div>
@@ -4041,17 +4269,6 @@ function readEvidenceFile(event, callback) {
   const reader = new FileReader()
   reader.onload = () => callback(String(reader.result || ""))
   reader.readAsDataURL(file)
-}
-
-const CHECKLIST_TODAY_STATUSES = ["pending", "in_progress", "overdue"]
-const CHECKLIST_HISTORIC_PENDING_STATUSES = ["pending", "in_progress", "overdue", "rejected"]
-
-function isChecklistRunTodayWork(run) {
-  return Boolean(run?.run_date === TODAY && CHECKLIST_TODAY_STATUSES.includes(run.status))
-}
-
-function isChecklistRunHistoricPending(run) {
-  return Boolean(run?.run_date && run.run_date < TODAY && CHECKLIST_HISTORIC_PENDING_STATUSES.includes(run.status))
 }
 
 function isChecklistRunCompleted(run) {
@@ -4141,35 +4358,43 @@ function daysPastRunDate(runDate) {
 }
 
 function isChecklistRunOverdue(run) {
-  if (!run) return false
-  if (run.status === "overdue") return true
-  const days = daysPastRunDate(run.run_date)
-  return days > 0 && ["pending", "in_progress"].includes(run.status)
+  return isChecklistOperationallyExpired(run)
 }
 
 function checklistRunScheduleLabel(run) {
-  if (isChecklistRunOverdue(run)) {
+  const displayStatus = getChecklistOperationalDisplayStatus(run)
+  if (displayStatus === CHECKLIST_OPERATIONAL_STATUS.VENCIDA) {
     const days = daysPastRunDate(run.run_date)
     if (days === 1) return "Vencida hace 1 día"
     return `Vencida hace ${days} días`
+  }
+  if (displayStatus === CHECKLIST_OPERATIONAL_STATUS.PENDIENTE_ATRASADA) {
+    return `Esperada: ${formatChecklistDueDeadline(run).replace("Límite: ", "")}`
   }
   return `Programada: ${formatChecklistRunDateLabel(run.run_date)}`
 }
 
 function formatChecklistDueDeadline(run) {
-  if (!run?.due_time) return "Sin hora límite"
+  if (!run?.due_time) return "Sin hora esperada"
   const time = String(run.due_time).slice(0, 5)
   const datePart = run.run_date === TODAY ? "hoy" : formatChecklistRunDateLabel(run.run_date)
-  return `Límite: ${datePart} · ${time}`
+  return `Esperada: ${datePart} · ${time}`
 }
 
 function getChecklistRunContextBadges(run, variant = "today") {
   const badges = []
+  const displayStatus = getChecklistOperationalDisplayStatus(run)
   if (run.status === "rejected") return ["RECHAZADA"]
-  if (run.status === "completed") return ["COMPLETADA"]
-  if (variant === "today" && run.run_date === TODAY) badges.push("HOY")
-  if (isChecklistRunOverdue(run) || isChecklistRunHistoricPending(run)) badges.push("VENCIDA")
-  if (run.status === "pending") badges.push("PENDIENTE")
+  if (run.status === "completed") {
+    if (displayStatus === CHECKLIST_OPERATIONAL_STATUS.COMPLETADA_TARDE) return ["COMPLETADA TARDE"]
+    if (hasChecklistReplacement(run)) return ["REASIGNADA", "COMPLETADA"]
+    return ["COMPLETADA"]
+  }
+  if (variant === "today" && isChecklistRunTodayWork(run)) badges.push("HOY")
+  if (displayStatus === CHECKLIST_OPERATIONAL_STATUS.VENCIDA) badges.push("VENCIDA")
+  if (displayStatus === CHECKLIST_OPERATIONAL_STATUS.PENDIENTE_ATRASADA) badges.push("ATRASADA")
+  if (displayStatus === CHECKLIST_OPERATIONAL_STATUS.PENDIENTE) badges.push("PENDIENTE")
+  if (hasChecklistReplacement(run) && run.status !== "completed") badges.push("REASIGNADA")
   return badges
 }
 
@@ -4268,8 +4493,12 @@ function canSeeChecklistRun(run, user, profiles) {
   const userArea = userChecklistArea(user)
   if (isChecklistRestaurantWideRole(role)) return true
   if (run.assigned_profile_id === user?.id) return true
-  if (run.assigned_role && normalizeRole(run.assigned_role) === role) return true
-  if (run.area && userArea && checklistAreasMatch(run.area, userArea)) return true
+
+  const replaced = hasChecklistReplacement(run)
+  if (replaced && run.original_assigned_profile_id === user?.id) return false
+
+  if (!run.assigned_profile_id && run.assigned_role && normalizeRole(run.assigned_role) === role) return true
+  if (!run.assigned_profile_id && run.area && userArea && checklistAreasMatch(run.area, userArea)) return true
   if (role === "supervisor") {
     if (run.supervisor_profile_id === user?.id) return true
     if (userArea && run.area && checklistAreasMatch(run.area, userArea)) return true
@@ -4324,18 +4553,21 @@ function dedupeLogicalChecklistRuns(runs) {
   return Array.from(grouped.values())
 }
 
-function markOverdueRuns(runs) {
-  return runs.map((run) => run.run_date < TODAY && ["pending", "in_progress"].includes(run.status) ? { ...run, status: "overdue" } : run)
-}
-
 function groupChecklistCompliance(runs, getter) {
   const grouped = {}
   runs.forEach((run) => {
     const label = getter(run)
-    if (!grouped[label]) grouped[label] = { label, assigned: 0, completed: 0, late: 0, points: 0 }
+    if (!grouped[label]) grouped[label] = { label, assigned: 0, completed: 0, late: 0, onTime: 0, points: 0 }
     grouped[label].assigned += 1
-    if (run.status === "completed") grouped[label].completed += 1
-    if (run.status === "overdue") grouped[label].late += 1
+    if (run.status === "completed") {
+      grouped[label].completed += 1
+      const displayStatus = getChecklistOperationalDisplayStatus(run)
+      if (displayStatus === CHECKLIST_OPERATIONAL_STATUS.COMPLETADA_TARDE) grouped[label].late += 1
+      if (displayStatus === CHECKLIST_OPERATIONAL_STATUS.COMPLETADA_A_TIEMPO) grouped[label].onTime += 1
+    }
+    if (run.status === "overdue" || getChecklistOperationalDisplayStatus(run) === CHECKLIST_OPERATIONAL_STATUS.VENCIDA) {
+      grouped[label].late += 1
+    }
     grouped[label].points += Number(run.earned_points || 0)
   })
   return Object.values(grouped).map((row) => ({ ...row, rate: row.assigned ? Math.round((row.completed / row.assigned) * 100) : 0 })).sort((a, b) => b.assigned - a.assigned)

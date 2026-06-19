@@ -1014,6 +1014,56 @@
   color: #86efac;
 }
 
+.checklist-today-badge--atrasada,
+.checklist-today-badge--pendiente-atrasada {
+  background: #4a3414;
+  color: #fcd34d;
+}
+
+.checklist-today-badge--completada-tarde,
+.checklist-today-badge--completada-a-tiempo {
+  background: #123427;
+  color: #86efac;
+}
+
+.checklist-today-badge--completada-tarde {
+  background: #3b2f14;
+  color: #fde68a;
+}
+
+.checklist-today-badge--reasignada {
+  background: #1e3a5f;
+  color: #bfdbfe;
+}
+
+.checklist-today-card--late-pending {
+  border-color: rgba(252, 211, 77, 0.35);
+}
+
+.checklist-responsible-info {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: #cbd5e1;
+}
+
+.checklist-responsible-info--compact p {
+  margin: 0;
+}
+
+.checklist-responsible-info p {
+  margin: 0 0 4px;
+}
+
+.checklist-guided-actions {
+  margin: 0 0 12px;
+}
+
+.checklist-replacement-modal {
+  max-width: 560px;
+}
+
+.checklists-kpi.late strong { color: #fcd34d; }
+
 .checklists-overdue,
 .checklists-completed {
   display: grid;
