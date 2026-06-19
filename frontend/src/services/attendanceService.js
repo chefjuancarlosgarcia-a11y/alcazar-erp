@@ -51,37 +51,47 @@ export function canEmployeeMarkAttendance(employeeId, date = null) {
   })
 }
 
-export async function validateEmployeeScheduleForMarking(employeeId, date = null) {
-  const markDate = date || new Date().toLocaleDateString("en-CA", { timeZone: "America/Guatemala" })
-  const { data, error } = await canEmployeeMarkAttendance(employeeId, markDate)
-  console.log("[asistencia/marcaje] schedule validation", { employeeId, date: markDate, data, error })
+export function getAttendanceMarkingState(employeeId, markType = null) {
+  return supabase.rpc("get_attendance_marking_state", {
+    p_employee_id: employeeId,
+    p_mark_type: markType || null
+  })
+}
+
+export async function validateEmployeeScheduleForMarking(employeeId, markType = null) {
+  const { data, error } = await getAttendanceMarkingState(employeeId, markType)
+  if (import.meta.env.DEV) {
+    console.log("[asistencia/marcaje] marking state", { employeeId, markType, data, error })
+  }
   if (error) {
     return {
       allowed: false,
+      allowed_for_entrada: false,
+      allowed_for_completion: false,
       reason: error.message || "No se pudo validar el horario asignado.",
       reason_code: "validation_error",
       schedule_id: null,
       schedule_status: null,
-      is_work_day: false
+      is_work_day: false,
+      labor_date: null,
+      has_open_entry: false,
+      has_open_meal: false,
+      overnight_shift: false
     }
-  }
-  const allowed = data?.allowed === true
-  if (!allowed) {
-    if (data?.reason_code === "rest_day") {
-      console.log("[asistencia/marcaje] denied rest day", data)
-    } else {
-      console.log("[asistencia/marcaje] denied no schedule", data)
-    }
-  } else {
-    console.log("[asistencia/marcaje] allowed schedule found", data)
   }
   return data || {
     allowed: false,
+    allowed_for_entrada: false,
+    allowed_for_completion: false,
     reason: "Horario no asignado. Comunícate con Recursos Humanos antes de registrar tu asistencia.",
     reason_code: "no_schedule",
     schedule_id: null,
     schedule_status: null,
-    is_work_day: false
+    is_work_day: false,
+    labor_date: null,
+    has_open_entry: false,
+    has_open_meal: false,
+    overnight_shift: false
   }
 }
 

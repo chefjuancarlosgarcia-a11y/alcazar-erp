@@ -31,6 +31,7 @@ const MARK_LABELS = {
 }
 
 const MIN_PHOTO_BYTES = 4096
+const MARKING_STATE_REFRESH_MS = 60000
 
 function AttendanceTerminal({ kiosk = false }) {
   const videoRef = useRef(null)
@@ -56,7 +57,6 @@ function AttendanceTerminal({ kiosk = false }) {
   const [photoPhase, setPhotoPhase] = useState("live")
   const [capturedBlob, setCapturedBlob] = useState(null)
   const [previewUrl, setPreviewUrl] = useState("")
-  const [scheduleAllowed, setScheduleAllowed] = useState(null)
   const [scheduleValidation, setScheduleValidation] = useState(null)
 
   const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : ""
@@ -89,6 +89,25 @@ function AttendanceTerminal({ kiosk = false }) {
   const lastShiftMark = selectedMarks.find((mark) => ["entrada", "salida", "salida_final"].includes(mark.mark_type))
   const isCheckedIn = lastShiftMark?.mark_type === "entrada"
   const activeMeal = selectedMarks.find((mark) => ["salida_comida", "bano_inicio"].includes(mark.mark_type) && !selectedMarks.some((candidate) => candidate.related_mark_id === mark.id && ["regreso_comida", "bano_regreso"].includes(candidate.mark_type)))
+  const canMarkEntrada = scheduleValidation?.allowed_for_entrada === true
+  const canCompleteShift = scheduleValidation?.allowed_for_completion === true || isCheckedIn
+
+  async function refreshMarkingState(employeeId = selected?.id) {
+    if (!employeeId || !canMark) return null
+    const validation = await validateEmployeeScheduleForMarking(employeeId)
+    setScheduleValidation(validation)
+    return validation
+  }
+
+  useEffect(() => {
+    if (!selected?.id || !canMark) return undefined
+    const timer = window.setInterval(async () => {
+      const marksResult = await getAttendanceMarks(false)
+      if (!marksResult.error) setMarks(marksResult.data || [])
+      await refreshMarkingState(selected.id)
+    }, MARKING_STATE_REFRESH_MS)
+    return () => window.clearInterval(timer)
+  }, [selected?.id, canMark])
 
   async function initializeSecurity() {
     setSecurityLoading(true)
@@ -200,28 +219,40 @@ function AttendanceTerminal({ kiosk = false }) {
     setSelected(profile)
     setError("")
     setMessage("")
-    setScheduleAllowed(null)
     setScheduleValidation(null)
     setPendingMarkType("")
     resetPhotoCapture()
-    const validation = await validateEmployeeScheduleForMarking(profile.id)
+    const [validation, marksResult] = await Promise.all([
+      validateEmployeeScheduleForMarking(profile.id),
+      getAttendanceMarks(false)
+    ])
+    if (!marksResult.error) setMarks(marksResult.data || [])
     setScheduleValidation(validation)
-    setScheduleAllowed(validation?.allowed === true)
-    if (!validation?.allowed) {
+    const canUseTerminal = validation?.allowed === true
+      || validation?.allowed_for_completion === true
+      || validation?.has_open_entry === true
+    if (!canUseTerminal) {
       setError(validation?.reason || "Horario no asignado. Comunícate con Recursos Humanos antes de registrar tu asistencia.")
     }
   }
 
-  async function ensureScheduleAllowed() {
+  async function ensureScheduleAllowed(markType = pendingMarkType) {
     if (!selected?.id) return false
-    const validation = await validateEmployeeScheduleForMarking(selected.id)
+    const validation = await validateEmployeeScheduleForMarking(selected.id, markType || null)
     setScheduleValidation(validation)
-    setScheduleAllowed(validation?.allowed === true)
-    if (!validation?.allowed) {
-      setError(validation?.reason || "Horario no asignado. Comunícate con Recursos Humanos antes de registrar tu asistencia.")
-      return false
+    if (markType === "entrada") {
+      if (!validation?.allowed_for_entrada) {
+        setError(validation?.reason || "Horario no asignado. Comunícate con Recursos Humanos antes de registrar tu asistencia.")
+        return false
+      }
+      return true
     }
-    return true
+    if (validation?.allowed_for_completion || validation?.allowed) {
+      setError("")
+      return true
+    }
+    setError(validation?.reason || "Horario no asignado. Comunícate con Recursos Humanos antes de registrar tu asistencia.")
+    return false
   }
 
   async function takePhoto() {
@@ -229,7 +260,7 @@ function AttendanceTerminal({ kiosk = false }) {
       setError(securityStatus?.message || "Este dispositivo no esta autorizado para marcaje.")
       return
     }
-    if (!await ensureScheduleAllowed()) return
+    if (!await ensureScheduleAllowed(pendingMarkType)) return
     if (!pendingMarkType) {
       setError("Selecciona primero el tipo de marcaje.")
       return
@@ -265,7 +296,7 @@ function AttendanceTerminal({ kiosk = false }) {
       setError(securityStatus?.message || "Este dispositivo no esta autorizado para marcaje.")
       return
     }
-    if (!await ensureScheduleAllowed()) return
+    if (!await ensureScheduleAllowed(pendingMarkType)) return
     if (!selected || !pendingMarkType || !capturedBlob) {
       setError("Debes tomar y confirmar una foto antes de marcar.")
       return
@@ -321,7 +352,6 @@ function AttendanceTerminal({ kiosk = false }) {
     setObservation("")
     setError("")
     setMessage("")
-    setScheduleAllowed(null)
     setScheduleValidation(null)
   }
 
@@ -398,7 +428,16 @@ function AttendanceTerminal({ kiosk = false }) {
               {selected.avatarUrl ? <img src={selected.avatarUrl} alt="" /> : <span>{initials(selected.fullName)}</span>}
               <div>
                 <h2>{selected.fullName}</h2>
-                <p>{selected.areaName || "Sin area"} · {isCheckedIn ? activeMeal ? "En comida" : "Entrada activa" : "Fuera de turno"}</p>
+                <p>
+                  {selected.areaName || "Sin area"} ·{" "}
+                  {isCheckedIn
+                    ? activeMeal
+                      ? "En comida"
+                      : scheduleValidation?.overnight_shift
+                        ? "Entrada activa (turno anterior)"
+                        : "Entrada activa"
+                    : "Fuera de turno"}
+                </p>
               </div>
             </div>
 
@@ -408,15 +447,23 @@ function AttendanceTerminal({ kiosk = false }) {
             </label>
 
             <div className="attendance-actions attendance-actions-select">
-              <button type="button" className={`entry ${pendingMarkType === "entrada" ? "selected" : ""}`} disabled={saving || isCheckedIn || scheduleAllowed === false} onClick={() => selectMarkType("entrada")}>Entrada</button>
-              <button type="button" className={`meal ${pendingMarkType === "salida_comida" ? "selected" : ""}`} disabled={saving || !isCheckedIn || Boolean(activeMeal) || scheduleAllowed === false} onClick={() => selectMarkType("salida_comida")}>Salida a comida</button>
-              <button type="button" className={`meal ${pendingMarkType === "regreso_comida" ? "selected" : ""}`} disabled={saving || !isCheckedIn || !activeMeal || scheduleAllowed === false} onClick={() => selectMarkType("regreso_comida")}>Regreso de comida</button>
-              <button type="button" className={`exit ${pendingMarkType === "salida_final" ? "selected" : ""}`} disabled={saving || !isCheckedIn || Boolean(activeMeal) || scheduleAllowed === false} onClick={() => selectMarkType("salida_final")}>Salida final</button>
+              <button type="button" className={`entry ${pendingMarkType === "entrada" ? "selected" : ""}`} disabled={saving || isCheckedIn || !canMarkEntrada} onClick={() => selectMarkType("entrada")}>Entrada</button>
+              <button type="button" className={`meal ${pendingMarkType === "salida_comida" ? "selected" : ""}`} disabled={saving || !canCompleteShift || !isCheckedIn || Boolean(activeMeal)} onClick={() => selectMarkType("salida_comida")}>Salida a comida</button>
+              <button type="button" className={`meal ${pendingMarkType === "regreso_comida" ? "selected" : ""}`} disabled={saving || !canCompleteShift || !isCheckedIn || !activeMeal} onClick={() => selectMarkType("regreso_comida")}>Regreso de comida</button>
+              <button type="button" className={`exit ${pendingMarkType === "salida_final" ? "selected" : ""}`} disabled={saving || !canCompleteShift || !isCheckedIn || Boolean(activeMeal)} onClick={() => selectMarkType("salida_final")}>Salida final</button>
             </div>
 
-            {scheduleValidation?.allowed && scheduleValidation?.schedule_status && (
+            {(scheduleValidation?.allowed || scheduleValidation?.allowed_for_completion) && scheduleValidation?.schedule_status && (
               <p className="attendance-pending-mark">
-                Horario del día: <strong>{scheduleValidation.schedule_status === "draft" ? "Borrador" : "Publicado"}</strong>
+                Horario{scheduleValidation?.labor_date ? ` (${scheduleValidation.labor_date})` : ""}:{" "}
+                <strong>{scheduleValidation.schedule_status === "draft" ? "Borrador" : "Publicado"}</strong>
+                {scheduleValidation?.overnight_shift ? " · turno cruza medianoche" : ""}
+              </p>
+            )}
+
+            {scheduleValidation?.has_open_entry && !scheduleValidation?.allowed_for_entrada && (
+              <p className="attendance-pending-mark">
+                Turno abierto pendiente de cierre. Puedes registrar comida o salida final.
               </p>
             )}
 
