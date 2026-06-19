@@ -1,8 +1,9 @@
-import { Link } from "react-router-dom"
+import { Link, useSearchParams } from "react-router-dom"
 import { useEffect, useMemo, useState } from "react"
 import { useAuth } from "../context/AuthContext"
 import { canManageRoleCatalog, normalizeRole } from "../utils/profilePermissions"
 import BrandingAppearanceSettings from "../components/branding/BrandingAppearanceSettings"
+import LoginSecurityAudit from "../components/auth/LoginSecurityAudit"
 import {
   PRINT_JOB_TYPES,
   buildTestPrintPayload,
@@ -28,9 +29,21 @@ const EMPTY_PRINTER = {
 
 function Settings() {
   const { user } = useAuth()
+  const [searchParams] = useSearchParams()
   const canManageRoles = canManageRoleCatalog(user)
   const canManagePrinters = ["admin", "gerente_general"].includes(normalizeRole(user?.role))
-  const [activeTab, setActiveTab] = useState("branding")
+  const canManageLoginSecurity = canManagePrinters
+  const initialTab = searchParams.get("tab") || "branding"
+  const [activeTab, setActiveTab] = useState(
+    initialTab === "login-security" && canManageLoginSecurity ? "login-security" : initialTab
+  )
+
+  useEffect(() => {
+    const tab = searchParams.get("tab")
+    if (tab === "login-security" && canManageLoginSecurity) {
+      setActiveTab("login-security")
+    }
+  }, [searchParams, canManageLoginSecurity])
 
   return (
     <section className="settings-page">
@@ -51,11 +64,17 @@ function Settings() {
             Impresoras
           </button>
         )}
+        {canManageLoginSecurity && (
+          <button className={`settings-tab ${activeTab === "login-security" ? "active" : ""}`} onClick={() => setActiveTab("login-security")}>
+            Seguridad login
+          </button>
+        )}
       </nav>
 
       <div className="settings-content settings-content-wide">
         {activeTab === "branding" && <BrandingAppearanceSettings />}
         {activeTab === "printers" && canManagePrinters && <PrinterSettings />}
+        {activeTab === "login-security" && canManageLoginSecurity && <LoginSecurityAudit />}
       </div>
     </section>
   )

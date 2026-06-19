@@ -1,8 +1,21 @@
-import { useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { Link, Navigate, useNavigate } from "react-router-dom"
 import { BRANDING } from "../branding"
+import TurnstileWidget from "../components/auth/TurnstileWidget"
+import "../components/auth/LoginSecurityAudit.css"
 import { useAuth } from "../context/AuthContext"
 import { supabase } from "../lib/supabase"
+import {
+  BLOCKED_MESSAGE,
+  checkLoginSecurity,
+  getBlockedMessage,
+  getClientIpAddress,
+  getLoginUserAgent,
+  isCaptchaRequired,
+  isLoginBlocked,
+  recordLoginAttempt,
+  verifyLoginCaptcha
+} from "../services/loginSecurityService"
 
 function Login() {
   const { user, session, loading, profileError, login, logout, getDefaultPath } = useAuth()
@@ -15,12 +28,75 @@ function Login() {
   const [submitting, setSubmitting] = useState(false)
   const [debugging, setDebugging] = useState(false)
   const [debugResult, setDebugResult] = useState(null)
+  const [securityStatus, setSecurityStatus] = useState(null)
+  const [showCaptcha, setShowCaptcha] = useState(false)
+  const [captchaToken, setCaptchaToken] = useState("")
+  const [captchaSessionId, setCaptchaSessionId] = useState(null)
+  const [captchaResetKey, setCaptchaResetKey] = useState(0)
   const [securityMessage] = useState(() => {
     const message = sessionStorage.getItem("auth:autoLogoutMessage") || ""
     if (message) sessionStorage.removeItem("auth:autoLogoutMessage")
     return message
   })
   const isDevelopment = import.meta.env.DEV
+  const turnstileSiteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY || ""
+
+  const normalizedEmail = useMemo(() => email.trim().toLowerCase(), [email])
+
+  const resetCaptchaState = useCallback(() => {
+    setCaptchaToken("")
+    setCaptchaSessionId(null)
+    setCaptchaResetKey((current) => current + 1)
+  }, [])
+
+  useEffect(() => {
+    resetCaptchaState()
+    setShowCaptcha(false)
+    setSecurityStatus(null)
+  }, [normalizedEmail, resetCaptchaState])
+
+  useEffect(() => {
+    if (!normalizedEmail) return undefined
+    let cancelled = false
+    const timer = window.setTimeout(async () => {
+      const ip = await getClientIpAddress()
+      const result = await checkLoginSecurity(normalizedEmail, ip)
+      if (cancelled || result.error) return
+      setSecurityStatus(result.data)
+      setShowCaptcha(isCaptchaRequired(result.data))
+    }, 350)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [normalizedEmail])
+
+  const handleCaptchaVerify = useCallback(async (token) => {
+    setCaptchaToken(token)
+    setError("")
+    const ip = await getClientIpAddress()
+    const verifyResult = await verifyLoginCaptcha({
+      token,
+      email: normalizedEmail,
+      ipAddress: ip
+    })
+    if (verifyResult.error) {
+      setError(verifyResult.error)
+      resetCaptchaState()
+      return
+    }
+    setCaptchaSessionId(verifyResult.data?.captcha_session_id || null)
+  }, [normalizedEmail, resetCaptchaState])
+
+  const handleCaptchaExpire = useCallback(() => {
+    resetCaptchaState()
+    setError("La verificacion expiro. Intenta de nuevo.")
+  }, [resetCaptchaState])
+
+  const handleCaptchaError = useCallback((message) => {
+    resetCaptchaState()
+    setError(message || "No se pudo completar la verificacion de seguridad.")
+  }, [resetCaptchaState])
 
   if (loading) {
     return <main style={pageStyle}><section style={cardStyle}><p style={subtitleStyle}>Cargando sesión...</p></section></main>
@@ -35,15 +111,82 @@ function Login() {
     setError("")
     setAuthError(null)
     setSubmitting(true)
-    const result = await login(email, password)
-    setSubmitting(false)
 
-    if (!result.ok) {
-      setError(result.message)
-      setAuthError(result.error || null)
+    const ip = await getClientIpAddress()
+    const userAgent = getLoginUserAgent()
+    const securityResult = await checkLoginSecurity(normalizedEmail, ip)
+    if (securityResult.error) {
+      setSubmitting(false)
+      setError(securityResult.error)
       return
     }
 
+    const status = securityResult.data || {}
+    setSecurityStatus(status)
+
+    if (isLoginBlocked(status)) {
+      setSubmitting(false)
+      setError(getBlockedMessage(status))
+      return
+    }
+
+    const captchaNeeded = isCaptchaRequired(status)
+    setShowCaptcha(captchaNeeded)
+
+    if (captchaNeeded) {
+      if (turnstileSiteKey) {
+        if (!captchaSessionId) {
+          setSubmitting(false)
+          setError("Completa la verificacion de seguridad para continuar.")
+          return
+        }
+      } else if (!isDevelopment) {
+        setSubmitting(false)
+        setError("Verificacion de seguridad no disponible. Contacta administracion.")
+        return
+      }
+    }
+
+    const result = await login(normalizedEmail, password)
+
+    if (!result.ok) {
+      const recordResult = await recordLoginAttempt({
+        email: normalizedEmail,
+        ipAddress: ip,
+        userAgent,
+        success: false,
+        failureReason: result.error?.message || result.message,
+        captchaSessionId
+      })
+
+      resetCaptchaState()
+
+      if (recordResult.data?.blocked) {
+        setError(BLOCKED_MESSAGE)
+        setShowCaptcha(false)
+      } else if (recordResult.data?.captcha_required) {
+        setShowCaptcha(true)
+        setError(recordResult.data?.message || "Completa la verificacion de seguridad para continuar.")
+      } else {
+        setError(result.message)
+      }
+
+      setAuthError(result.error || null)
+      if (recordResult.data) setSecurityStatus(recordResult.data)
+      setSubmitting(false)
+      return
+    }
+
+    await recordLoginAttempt({
+      email: normalizedEmail,
+      ipAddress: ip,
+      userAgent,
+      success: true,
+      userId: result.user?.id || null,
+      captchaSessionId
+    })
+
+    setSubmitting(false)
     navigate(getDefaultPath(result.user), { replace: true })
   }
 
@@ -51,7 +194,7 @@ function Login() {
     setDebugging(true)
     setDebugResult(null)
     const credentials = {
-      email: email.trim().toLowerCase(),
+      email: normalizedEmail,
       password: password
     }
     const { data, error: loginError } = await supabase.auth.signInWithPassword(credentials)
@@ -108,6 +251,25 @@ function Login() {
                 </button>
               </span>
             </label>
+
+            {showCaptcha ? (
+              <div className="login-captcha-panel">
+                <p>Verificacion de seguridad requerida tras varios intentos fallidos.</p>
+                <TurnstileWidget
+                  siteKey={turnstileSiteKey}
+                  resetKey={captchaResetKey}
+                  onVerify={handleCaptchaVerify}
+                  onExpire={handleCaptchaExpire}
+                  onError={handleCaptchaError}
+                />
+              </div>
+            ) : null}
+
+            {securityStatus?.email_failures > 0 && !isLoginBlocked(securityStatus) ? (
+              <p style={hintStyle}>
+                Intentos fallidos recientes: {securityStatus.email_failures} / 5
+              </p>
+            ) : null}
 
             {securityMessage && <p style={successStyle}>{securityMessage}</p>}
             {(error || profileError) && <p style={errorStyle}>{error || profileError}</p>}
