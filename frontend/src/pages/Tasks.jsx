@@ -25,7 +25,9 @@ import {
   getChecklistTemplateSuggestions,
   getChecklistTemplates,
   generateDueChecklistRuns,
+  getChecklistCoverageForRuns,
   notifyOverdueChecklistRuns,
+  processChecklistCoverage,
   reactivateChecklistTemplate,
   rejectChecklistChangeRequest,
   startChecklistRun,
@@ -76,6 +78,14 @@ import {
   isChecklistRunHistoricPending,
   isChecklistRunTodayWork
 } from "../utils/checklistOperationalStatus"
+import {
+  buildChecklistCoverageMap,
+  getChecklistAvailabilityLabel,
+  getChecklistCoverageAlertMessage,
+  getChecklistCoverageSourceLabel,
+  getChecklistSuggestedReplacement,
+  needsChecklistCoverageAlert
+} from "../utils/checklistCoverage"
 import {
   TASK_CATEGORIES,
   TASK_DIFFICULTIES,
@@ -500,6 +510,11 @@ function normalizeChecklistWizardForm(form = {}) {
     assigned_profile_id: form.assigned_profile_id || "",
     supervisor_profile_id: form.supervisor_profile_id || "",
     backup_profile_id: form.backup_profile_id || "",
+    primary_replacement_profile_id: form.primary_replacement_profile_id || "",
+    secondary_replacement_profile_id: form.secondary_replacement_profile_id || "",
+    coverage_escalation_profile_id: form.coverage_escalation_profile_id || "",
+    auto_coverage_enabled: Boolean(form.auto_coverage_enabled),
+    auto_coverage_wait_minutes: Number(form.auto_coverage_wait_minutes || 20),
     frequency: form.frequency || "manual",
     shift_context: form.shift_context || "general",
     status: form.status || "active",
@@ -537,6 +552,11 @@ function buildChecklistWizardForm(editingTemplate) {
     assigned_profile_id: editingTemplate?.assigned_profile_id || "",
     supervisor_profile_id: editingTemplate?.supervisor_profile_id || "",
     backup_profile_id: editingTemplate?.backup_profile_id || "",
+    primary_replacement_profile_id: editingTemplate?.primary_replacement_profile_id || editingTemplate?.backup_profile_id || "",
+    secondary_replacement_profile_id: editingTemplate?.secondary_replacement_profile_id || "",
+    coverage_escalation_profile_id: editingTemplate?.coverage_escalation_profile_id || "",
+    auto_coverage_enabled: Boolean(editingTemplate?.auto_coverage_enabled),
+    auto_coverage_wait_minutes: editingTemplate?.auto_coverage_wait_minutes || 20,
     frequency: editingTemplate?.frequency || "manual",
     shift_context: editingTemplate?.shift_context || "general",
     status: editingTemplate?.status || "active",
@@ -1511,6 +1531,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   const canCreateChecklists = canCreateDirectly
   const canEditChecklistsDirectly = canEditDirectly
   const canManageManagementAlerts = ["admin", "gerente_general"].includes(userRole)
+  const canManageCoverage = ["admin", "gerente_general", "gerente", "supervisor", "recursos_humanos", "rrhh"].includes(userRole)
   const [section, setSection] = useState(initialChecklistView === "incidents" ? "incidents" : initialChecklistView === "alerts" ? "alerts" : "today")
   const [templates, setTemplates] = useState([])
   const [runs, setRuns] = useState([])
@@ -1526,6 +1547,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   const [selectedIncidentId, setSelectedIncidentId] = useState(initialChecklistView === "incidents" ? initialRunId : "")
   const [selectedAlertId, setSelectedAlertId] = useState(initialChecklistView === "alerts" ? initialRunId : "")
   const [createWizardOpen, setCreateWizardOpen] = useState(false)
+  const [coverageByRunId, setCoverageByRunId] = useState({})
   const stableUserRef = useRef(user)
   useEffect(() => {
     if (user) stableUserRef.current = user
@@ -1653,6 +1675,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
     if (!silent) setLoading(true)
     if (isLibraryAdmin) await generateDueChecklistRuns(TODAY)
     if (canManageManagementAlerts) await notifyOverdueChecklistRuns()
+    if (canManageCoverage) await processChecklistCoverage()
     const libraryRequests = canViewChecklistLibrary
       ? [
         getChecklistTemplates(),
@@ -1681,6 +1704,14 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       setTemplates(templateResult.data || [])
       const syncedRuns = await replayPendingChecklistDrafts(runResult.data || [])
       setRuns(syncedRuns)
+      const activeRunIds = syncedRuns
+        .filter((run) => run.status !== "cancelled" && canSeeChecklistRun(run, user, profileResult.data || profiles))
+        .filter((run) => isChecklistRunTodayWork(run) || isChecklistRunHistoricPending(run))
+        .map((run) => run.id)
+      const coverageResult = await getChecklistCoverageForRuns(activeRunIds)
+      if (!coverageResult.error) {
+        setCoverageByRunId(buildChecklistCoverageMap(coverageResult.data))
+      }
       setIncidents(incidentResult.data || [])
       setChangeRequests(requestResult.data || [])
       setSuggestions(suggestionResult.data || [])
@@ -1689,7 +1720,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       if (!silent) setLoading(false)
       return { runs: syncedRuns, error: null }
     }
-  }, [canManageManagementAlerts, canViewChecklistLibrary, isLibraryAdmin, replayPendingChecklistDrafts])
+  }, [canManageCoverage, canManageManagementAlerts, canViewChecklistLibrary, isLibraryAdmin, profiles, replayPendingChecklistDrafts, user])
 
   const refreshRef = useRef(refresh)
   refreshRef.current = refresh
@@ -2136,6 +2167,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
           onComplete={completeRun}
           onAssignReplacement={assignRunReplacement}
           canAssignReplacement={canAssignRunReplacement}
+          coverageByRunId={coverageByRunId}
           currentUser={user}
         />
       )}
@@ -2150,6 +2182,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
           onComplete={completeRun}
           onAssignReplacement={assignRunReplacement}
           canAssignReplacement={canAssignRunReplacement}
+          coverageByRunId={coverageByRunId}
           currentUser={user}
         />
       )}
@@ -2163,6 +2196,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
           onComplete={completeRun}
           onAssignReplacement={assignRunReplacement}
           canAssignReplacement={canAssignRunReplacement}
+          coverageByRunId={coverageByRunId}
           currentUser={user}
         />
       )}
@@ -2227,6 +2261,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
           onCancel={() => { clearChecklistWizardDraft(stableUser?.id || "", editingTemplate?.id || "new"); setCreateWizardOpen(false); setEditingTemplate(null); setSection("templates") }}
           onSave={saveTemplate}
           approvalMode={isSupervisorOnly}
+          canConfigureCoverage={canManageCoverage}
         />
       )}
       {section === "alerts" && canManageManagementAlerts && (
@@ -2328,9 +2363,11 @@ function ChecklistRunDetailShell({
   onComplete,
   onAssignReplacement,
   canAssignReplacement,
+  coverageByRunId,
   children
 }) {
   if (selectedRun) {
+    const coverage = coverageByRunId?.[selectedRun.id]
     return (
       <>
         <div className="checklist-today-toolbar">
@@ -2343,6 +2380,7 @@ function ChecklistRunDetailShell({
           run={selectedRun}
           profiles={profiles}
           currentUser={currentUser}
+          coverage={coverage}
           onClose={() => onSelect("")}
           onUpdateItem={onUpdateItem}
           onComplete={onComplete}
@@ -2365,6 +2403,7 @@ function ChecklistToday({
   onComplete,
   onAssignReplacement,
   canAssignReplacement,
+  coverageByRunId,
   currentUser
 }) {
   const todayRuns = useMemo(
@@ -2408,6 +2447,7 @@ function ChecklistToday({
         onComplete={onComplete}
         onAssignReplacement={onAssignReplacement}
         canAssignReplacement={canAssignReplacement}
+        coverageByRunId={coverageByRunId}
       >
         {!selectedRun && (
           <div className="checklists-kpis">
@@ -2421,6 +2461,9 @@ function ChecklistToday({
                 key={run.id}
                 run={run}
                 profiles={profiles}
+                coverage={coverageByRunId?.[run.id]}
+                canAssignReplacement={canAssignReplacement?.(run)}
+                onAssignReplacement={onAssignReplacement}
                 onOpen={() => (run.status === "pending" ? onStart(run.id) : onSelect(run.id))}
               />
             ))}
@@ -2447,6 +2490,7 @@ function ChecklistOverdue({
   onComplete,
   onAssignReplacement,
   canAssignReplacement,
+  coverageByRunId,
   currentUser
 }) {
   const groupedRuns = useMemo(
@@ -2471,6 +2515,7 @@ function ChecklistOverdue({
         onComplete={onComplete}
         onAssignReplacement={onAssignReplacement}
         canAssignReplacement={canAssignReplacement}
+        coverageByRunId={coverageByRunId}
       >
         {!selectedRun && !groupedRuns.length ? (
           <FriendlyEmpty
@@ -2526,6 +2571,7 @@ function ChecklistCompleted({
   onComplete,
   onAssignReplacement,
   canAssignReplacement,
+  coverageByRunId,
   currentUser
 }) {
   const [filters, setFilters] = useState({
@@ -2603,6 +2649,7 @@ function ChecklistCompleted({
         onComplete={onComplete}
         onAssignReplacement={onAssignReplacement}
         canAssignReplacement={canAssignReplacement}
+        coverageByRunId={coverageByRunId}
       >
         {!selectedRun && (
           <>
@@ -2703,7 +2750,8 @@ function ChecklistTodayContextBadges({ run, variant = "today" }) {
   )
 }
 
-function ChecklistTodayCard({ run, profiles, onOpen, variant = "today" }) {
+function ChecklistTodayCard({ run, profiles, coverage, canAssignReplacement, onAssignReplacement, onOpen, variant = "today" }) {
+  const [replacementOpen, setReplacementOpen] = useState(false)
   const progress = checklistRunProgress(run)
   const completedItems = (run.checklist_run_items || []).filter(itemHasAnswer).length
   const totalItems = run.checklist_run_items?.length || 0
@@ -2733,6 +2781,23 @@ function ChecklistTodayCard({ run, profiles, onOpen, variant = "today" }) {
         <p className={`checklist-today-schedule__primary${isChecklistOperationallyExpired(run) || displayStatus === CHECKLIST_OPERATIONAL_STATUS.PENDIENTE_ATRASADA ? " is-overdue" : ""}`}>{scheduleLabel}</p>
         <p className="checklist-today-schedule__due">{dueLabel}</p>
       </div>
+      {needsChecklistCoverageAlert(coverage) ? (
+        <div className="checklist-coverage-alert checklist-coverage-alert--compact">
+          <p>{getChecklistCoverageAlertMessage(coverage)}</p>
+          {canAssignReplacement && onAssignReplacement ? (
+            <button type="button" className="tasks-secondary" onClick={() => setReplacementOpen(true)}>Asignar reemplazo</button>
+          ) : null}
+        </div>
+      ) : null}
+      {replacementOpen ? (
+        <ChecklistReplacementModal
+          run={run}
+          profiles={profiles}
+          coverage={coverage}
+          onClose={() => setReplacementOpen(false)}
+          onSubmit={onAssignReplacement}
+        />
+      ) : null}
       <div className="checklist-progress-row">
         <progress value={progress} max="100" />
         <strong>{progress}%</strong>
@@ -3087,7 +3152,7 @@ function checklistWizardProfileOptions(profiles = []) {
   return profiles.filter((profile) => profile?.id)
 }
 
-function ChecklistTemplateWizard({ templateId = "", editingTemplate, profiles, profileId = "", onCancel, onSave, approvalMode = false }) {
+function ChecklistTemplateWizard({ templateId = "", editingTemplate, profiles, profileId = "", onCancel, onSave, approvalMode = false, canConfigureCoverage = false }) {
   const templateScope = templateId || editingTemplate?.id || "new"
   const initialState = loadChecklistWizardInitialState(editingTemplate, profileId, templateScope)
   const [step, setStep] = useState(initialState.step)
@@ -3281,6 +3346,37 @@ function ChecklistTemplateWizard({ templateId = "", editingTemplate, profiles, p
                 {profileOptions.map((profile) => <option key={profile.id} value={profile.id}>{profile.full_name || profile.username}</option>)}
               </select>
             </Field>
+            {canConfigureCoverage ? (
+              <>
+                <Field label="Reemplazo principal">
+                  <select value={form.primary_replacement_profile_id} onChange={(event) => update("primary_replacement_profile_id", event.target.value)}>
+                    <option value="">Sin reemplazo principal</option>
+                    {profileOptions.map((profile) => <option key={profile.id} value={profile.id}>{profile.full_name || profile.username}</option>)}
+                  </select>
+                </Field>
+                <Field label="Reemplazo secundario">
+                  <select value={form.secondary_replacement_profile_id} onChange={(event) => update("secondary_replacement_profile_id", event.target.value)}>
+                    <option value="">Sin reemplazo secundario</option>
+                    {profileOptions.map((profile) => <option key={profile.id} value={profile.id}>{profile.full_name || profile.username}</option>)}
+                  </select>
+                </Field>
+                <Field label="Escalar a">
+                  <select value={form.coverage_escalation_profile_id} onChange={(event) => update("coverage_escalation_profile_id", event.target.value)}>
+                    <option value="">Sin escalamiento</option>
+                    {profileOptions.map((profile) => <option key={profile.id} value={profile.id}>{profile.full_name || profile.username}</option>)}
+                  </select>
+                </Field>
+                <Field label="Minutos de espera auto-cobertura">
+                  <input
+                    type="number"
+                    min="0"
+                    max="240"
+                    value={form.auto_coverage_wait_minutes}
+                    onChange={(event) => update("auto_coverage_wait_minutes", event.target.value)}
+                  />
+                </Field>
+              </>
+            ) : null}
             <Field label="Supervisor aprobador">
               <select value={form.supervisor_profile_id} onChange={(event) => update("supervisor_profile_id", event.target.value)}>
                 <option value="">Gerencia / supervisor</option>
@@ -3311,6 +3407,13 @@ function ChecklistTemplateWizard({ templateId = "", editingTemplate, profiles, p
               <span>Excluir dias de descanso</span>
               <span className="checklist-inline-help" title="No se generaran checklists en los dias de descanso asignados al colaborador." aria-label="Ayuda">?</span>
             </label>
+            {canConfigureCoverage ? (
+              <label className="tasks-checkbox checklist-flag-chip">
+                <input type="checkbox" checked={form.auto_coverage_enabled} onChange={(event) => update("auto_coverage_enabled", event.target.checked)} />
+                <span>Activar auto-cobertura</span>
+                <span className="checklist-inline-help" title="Reasigna automaticamente cuando hay vacaciones, descanso o ausencia sin marcaje despues de la tolerancia." aria-label="Ayuda">?</span>
+              </label>
+            ) : null}
           </div>
 
           <div className="checklist-recurrence-card compact">
@@ -3468,6 +3571,83 @@ function ChecklistTemplatePreview({ form, items, profiles, templateId = "" }) {
   )
 }
 
+function ChecklistCoverageInfo({ run, profiles, coverage }) {
+  if (!coverage) return null
+  const availability = coverage.responsible_availability
+  const suggested = getChecklistSuggestedReplacement(coverage)
+  const originalId = coverage.original_profile_id || run.original_assigned_profile_id || run.assigned_profile_id
+  const effectiveId = coverage.effective_profile_id || run.assigned_profile_id
+
+  return (
+    <div className="checklist-coverage-info">
+      <p><strong>Estado de disponibilidad:</strong> {availability?.availability_label || getChecklistAvailabilityLabel(availability?.availability_state)}</p>
+      {suggested?.profileId ? (
+        <p>
+          <strong>Reemplazo sugerido:</strong> {profileDisplayName(profiles, suggested.profileId)}
+          {suggested.source ? ` (${getChecklistCoverageSourceLabel(suggested.source)})` : ""}
+        </p>
+      ) : coverage.escalation_profile_id ? (
+        <p><strong>Escalar a:</strong> {profileDisplayName(profiles, coverage.escalation_profile_id)}</p>
+      ) : null}
+      {coverage.auto_coverage_enabled ? (
+        <p className="tasks-muted">Auto-cobertura activa · espera {coverage.auto_coverage_wait_minutes || 20} min tras tolerancia</p>
+      ) : null}
+      {coverage.coverage_auto_applied_at ? (
+        <p className="tasks-success">Cobertura automatica aplicada</p>
+      ) : null}
+      {coverage.coverage_alert_notified_at ? (
+        <p className="tasks-muted">Alerta de cobertura enviada</p>
+      ) : null}
+      {!coverage.already_replaced && originalId !== effectiveId ? null : (
+        <p className="tasks-muted">Responsable efectivo: {profileDisplayName(profiles, effectiveId)}</p>
+      )}
+    </div>
+  )
+}
+
+function ChecklistCoverageAlert({ run, profiles, coverage, canAssignReplacement, onAssignReplacement, onViewOriginal }) {
+  const [replacementOpen, setReplacementOpen] = useState(false)
+  if (!needsChecklistCoverageAlert(coverage)) return null
+  const suggested = getChecklistSuggestedReplacement(coverage)
+  const originalId = coverage.original_profile_id || run.original_assigned_profile_id || run.assigned_profile_id
+
+  return (
+    <div className="checklist-coverage-alert" role="status">
+      <div>
+        <strong>Cobertura requerida</strong>
+        <p>{getChecklistCoverageAlertMessage(coverage)}</p>
+        {suggested?.profileId ? (
+          <p className="tasks-muted">
+            Sugerido: {profileDisplayName(profiles, suggested.profileId)}
+            {suggested.source ? ` · ${getChecklistCoverageSourceLabel(suggested.source)}` : ""}
+          </p>
+        ) : (
+          <p className="tasks-warning">Sin reemplazo disponible. Escalar a gerencia.</p>
+        )}
+      </div>
+      <div className="checklist-coverage-alert__actions">
+        {canAssignReplacement && onAssignReplacement ? (
+          <button type="button" className="tasks-primary" onClick={() => setReplacementOpen(true)}>Asignar reemplazo</button>
+        ) : null}
+        {originalId ? (
+          <button type="button" className="tasks-secondary" onClick={() => onViewOriginal?.(originalId)}>
+            Ver responsable original
+          </button>
+        ) : null}
+      </div>
+      {replacementOpen ? (
+        <ChecklistReplacementModal
+          run={run}
+          profiles={profiles}
+          coverage={coverage}
+          onClose={() => setReplacementOpen(false)}
+          onSubmit={onAssignReplacement}
+        />
+      ) : null}
+    </div>
+  )
+}
+
 function ChecklistResponsibleInfo({ run, profiles, compact = false }) {
   const originalId = run.original_assigned_profile_id || run.assigned_profile_id
   const originalName = profileDisplayName(profiles, originalId)
@@ -3490,17 +3670,22 @@ function ChecklistResponsibleInfo({ run, profiles, compact = false }) {
   )
 }
 
-function ChecklistReplacementModal({ run, profiles, currentUser, onClose, onSubmit }) {
-  const [replacementProfileId, setReplacementProfileId] = useState("")
-  const [reason, setReason] = useState("vacaciones")
+function ChecklistReplacementModal({ run, profiles, coverage, onClose, onSubmit }) {
+  const suggested = getChecklistSuggestedReplacement(coverage)
+  const [replacementProfileId, setReplacementProfileId] = useState(suggested?.profileId || "")
+  const [reason, setReason] = useState(suggested?.reason || "vacaciones")
   const [notes, setNotes] = useState("")
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
   const assignableProfiles = useMemo(
-    () => getChecklistAssignableProfiles(currentUser, profiles, { templateArea: run.area || "" })
-      .filter((profile) => profile.id !== (run.original_assigned_profile_id || run.assigned_profile_id)),
-    [currentUser, profiles, run.area, run.assigned_profile_id, run.original_assigned_profile_id]
+    () => profiles.filter((profile) => profile?.id && profile.id !== (run.original_assigned_profile_id || run.assigned_profile_id)),
+    [profiles, run.assigned_profile_id, run.original_assigned_profile_id]
   )
+
+  useEffect(() => {
+    if (suggested?.profileId) setReplacementProfileId(suggested.profileId)
+    if (suggested?.reason) setReason(suggested.reason)
+  }, [suggested?.profileId, suggested?.reason])
 
   async function handleSubmit(event) {
     event.preventDefault()
@@ -3530,6 +3715,9 @@ function ChecklistReplacementModal({ run, profiles, currentUser, onClose, onSubm
           <button type="button" className="tasks-link" onClick={onClose}>Cerrar</button>
         </div>
         <ChecklistResponsibleInfo run={run} profiles={profiles} />
+        {suggested?.profileId ? (
+          <p className="tasks-muted">Reemplazo sugerido preseleccionado segun disponibilidad y plantilla.</p>
+        ) : null}
         <div className="tasks-form-grid">
           <Field label="Reemplazo">
             <select value={replacementProfileId} onChange={(event) => setReplacementProfileId(event.target.value)} required>
@@ -3560,7 +3748,7 @@ function ChecklistReplacementModal({ run, profiles, currentUser, onClose, onSubm
   )
 }
 
-function ChecklistGuidedRun({ run, profiles, currentUser, onClose, onUpdateItem, onComplete, onAssignReplacement, canAssignReplacement }) {
+function ChecklistGuidedRun({ run, profiles, currentUser, coverage, onClose, onUpdateItem, onComplete, onAssignReplacement, canAssignReplacement }) {
   const progress = checklistRunProgress(run)
   const completedCount = (run.checklist_run_items || []).filter(itemHasAnswer).length
   const canEdit = run.status !== "completed"
@@ -3598,11 +3786,20 @@ function ChecklistGuidedRun({ run, profiles, currentUser, onClose, onUpdateItem,
           <button type="button" className="tasks-secondary" onClick={() => setReplacementOpen(true)}>Asignar reemplazo</button>
         </div>
       ) : null}
+      <ChecklistCoverageAlert
+        run={run}
+        profiles={profiles}
+        coverage={coverage}
+        canAssignReplacement={canAssignReplacement}
+        onAssignReplacement={onAssignReplacement}
+        onViewOriginal={() => {}}
+      />
+      <ChecklistCoverageInfo run={run} profiles={profiles} coverage={coverage} />
       {replacementOpen ? (
         <ChecklistReplacementModal
           run={run}
           profiles={profiles}
-          currentUser={currentUser}
+          coverage={coverage}
           onClose={() => setReplacementOpen(false)}
           onSubmit={onAssignReplacement}
         />

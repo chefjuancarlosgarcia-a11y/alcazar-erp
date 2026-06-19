@@ -23,6 +23,7 @@ export const CHECKLIST_REPLACEMENT_REASONS = [
   ["vacaciones", "Vacaciones"],
   ["permiso", "Permiso"],
   ["ausencia", "Ausencia"],
+  ["ausencia_no_marcaje", "Ausencia sin marcaje"],
   ["emergencia", "Emergencia"],
   ["otro", "Otro"]
 ]

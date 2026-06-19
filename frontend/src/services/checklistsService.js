@@ -10,7 +10,7 @@ function isPersistentItemId(id) {
 function activeTemplateItems(items) {
   return (items || []).filter((item) => item.is_active !== false)
 }
-const RUN_SELECT = "*, checklist_templates(title, description, frequency, shift_context), checklist_run_items(*)"
+const RUN_SELECT = "*, checklist_templates(title, description, frequency, shift_context, primary_replacement_profile_id, secondary_replacement_profile_id, coverage_escalation_profile_id, backup_profile_id, auto_coverage_enabled, auto_coverage_wait_minutes), checklist_run_items(*)"
 const INCIDENT_SELECT = "*, checklist_runs(run_date, area, checklist_templates(title)), checklist_run_items(title, response_type, checked, response_text, response_number, photo_url, comment), profiles!checklist_incidents_reported_by_fkey(full_name, username)"
 const MANAGEMENT_ALERT_SELECT = "*, checklist_runs(run_date, area, checklist_templates(title)), sender:sender_profile_id(full_name, username)"
 
@@ -81,6 +81,11 @@ function templatePayload(payload) {
     assigned_profile_id: payload.assigned_profile_id || null,
     supervisor_profile_id: payload.supervisor_profile_id || null,
     backup_profile_id: payload.backup_profile_id || null,
+    primary_replacement_profile_id: payload.primary_replacement_profile_id || null,
+    secondary_replacement_profile_id: payload.secondary_replacement_profile_id || null,
+    coverage_escalation_profile_id: payload.coverage_escalation_profile_id || null,
+    auto_coverage_enabled: Boolean(payload.auto_coverage_enabled),
+    auto_coverage_wait_minutes: Math.max(0, Math.min(240, Number(payload.auto_coverage_wait_minutes || 20))),
     frequency: payload.frequency || "manual",
     shift_context: payload.shift_context || "general",
     status: payload.status || "active",
@@ -137,6 +142,11 @@ function requestPayload(payload, items) {
     status_after_approval: payload.status_after_approval || payload.status || "active",
     supervisor_profile_id: payload.supervisor_profile_id || null,
     backup_profile_id: payload.backup_profile_id || null,
+    primary_replacement_profile_id: payload.primary_replacement_profile_id || null,
+    secondary_replacement_profile_id: payload.secondary_replacement_profile_id || null,
+    coverage_escalation_profile_id: payload.coverage_escalation_profile_id || null,
+    auto_coverage_enabled: Boolean(payload.auto_coverage_enabled),
+    auto_coverage_wait_minutes: Math.max(0, Math.min(240, Number(payload.auto_coverage_wait_minutes || 20))),
     reminder_time: payload.reminder_time || null,
     due_time: payload.due_time || null,
     recurrence_days: recurrence.recurrence_days,
@@ -696,4 +706,22 @@ export async function assignChecklistRunReplacement(runId, replacementProfileId,
   })
   if (!result.error) window.dispatchEvent(new CustomEvent("notifications-updated"))
   return { data: orderRun(result.data), error: result.error }
+}
+
+export async function processChecklistCoverage() {
+  const result = await supabase.rpc("process_checklist_coverage")
+  if (!result.error) window.dispatchEvent(new CustomEvent("notifications-updated"))
+  return result
+}
+
+export async function getChecklistCoverageForRuns(runIds = []) {
+  const ids = [...new Set((runIds || []).filter(Boolean))]
+  if (!ids.length) return { data: [], error: null }
+  const result = await supabase.rpc("get_checklist_coverage_for_runs", { p_run_ids: ids })
+  return { data: result.data || [], error: result.error }
+}
+
+export async function getChecklistRunCoverageContext(runId) {
+  const result = await supabase.rpc("get_checklist_run_coverage_context", { p_run_id: runId })
+  return { data: result.data, error: result.error }
 }
