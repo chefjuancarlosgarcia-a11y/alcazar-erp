@@ -97,6 +97,8 @@ import { normalizeRole } from "../utils/profilePermissions"
 import YieldAuditFormPanel from "../components/yield/YieldAuditFormPanel"
 import InfoTooltip from "../components/InfoTooltip"
 import ChecklistWizardStepBoundary from "../components/checklists/ChecklistWizardStepBoundary"
+import PaginationControls from "../components/PaginationControls"
+import { pageItems } from "../utils/pagination"
 import { hasYieldAuditForTask } from "../services/yieldCostingService"
 import "./Tasks.css"
 
@@ -2425,12 +2427,67 @@ function ChecklistOverdue({ runs, profiles, selectedRun, onSelect, onStart, onUp
 }
 
 function ChecklistCompleted({ runs, profiles, selectedRun, onSelect, onUpdateItem, onComplete, currentUser }) {
-  const completedRuns = useMemo(
-    () => runs
+  const [filters, setFilters] = useState({
+    search: "",
+    area: "",
+    role: "",
+    dateFrom: "",
+    dateTo: ""
+  })
+  const [page, setPage] = useState(1)
+  const completedPageSize = 24
+
+  const roleOptions = useMemo(() => {
+    const roles = new Set()
+    runs.filter(isChecklistRunCompleted).forEach((run) => {
+      if (run.assigned_role) roles.add(run.assigned_role)
+    })
+    return Array.from(roles).sort()
+  }, [runs])
+
+  const completedRuns = useMemo(() => {
+    const search = normalizeChecklistSearchText(filters.search)
+    return runs
       .filter(isChecklistRunCompleted)
-      .sort((a, b) => String(b.run_date || "").localeCompare(String(a.run_date || "")) || String(b.completed_at || b.updated_at || "").localeCompare(String(a.completed_at || a.updated_at || ""))),
-    [runs]
+      .filter((run) => matchesCompletedChecklistSearch(run, profiles, search))
+      .filter((run) => !filters.area || run.area === filters.area)
+      .filter((run) => !filters.role || run.assigned_role === filters.role)
+      .filter((run) => {
+        const runDate = run.run_date || ""
+        if (filters.dateFrom && runDate < filters.dateFrom) return false
+        if (filters.dateTo && runDate > filters.dateTo) return false
+        return true
+      })
+      .sort((a, b) => (
+        String(checklistCompletedSortKey(b)).localeCompare(String(checklistCompletedSortKey(a)))
+      ))
+  }, [runs, profiles, filters])
+
+  const pagedRuns = useMemo(
+    () => pageItems(completedRuns, page, completedPageSize),
+    [completedRuns, page]
   )
+
+  const hasActiveFilters = Boolean(
+    filters.search || filters.area || filters.role || filters.dateFrom || filters.dateTo
+  )
+
+  useEffect(() => {
+    setPage(1)
+  }, [filters.search, filters.area, filters.role, filters.dateFrom, filters.dateTo])
+
+  useEffect(() => {
+    const totalPages = Math.max(1, Math.ceil(completedRuns.length / completedPageSize))
+    if (page > totalPages) setPage(totalPages)
+  }, [completedRuns.length, page])
+
+  function updateFilter(field, value) {
+    setFilters((current) => ({ ...current, [field]: value }))
+  }
+
+  function clearFilters() {
+    setFilters({ search: "", area: "", role: "", dateFrom: "", dateTo: "" })
+  }
 
   return (
     <div className="checklists-completed">
@@ -2445,23 +2502,86 @@ function ChecklistCompleted({ runs, profiles, selectedRun, onSelect, onUpdateIte
         onComplete={onComplete}
       >
         {!selectedRun && (
-          <div className="checklists-card-grid">
-            {completedRuns.map((run) => (
-              <ChecklistTodayCard
-                key={run.id}
-                run={run}
-                profiles={profiles}
-                variant="completed"
-                onOpen={() => onSelect(run.id)}
-              />
-            ))}
-            {!completedRuns.length && (
-              <FriendlyEmpty
-                title="No hay checklists completadas."
-                text="Cuando cierres una corrida, aparecerá aquí para consulta."
-              />
-            )}
-          </div>
+          <>
+            <article className="tasks-panel checklist-completed-toolbar">
+              <div className="tasks-panel-title">
+                <div>
+                  <h2>Buscar completadas</h2>
+                  <p className="tasks-muted">
+                    Mostrando {pagedRuns.length} de {completedRuns.length} en esta página
+                  </p>
+                </div>
+                {hasActiveFilters ? (
+                  <button type="button" className="tasks-secondary" onClick={clearFilters}>
+                    Limpiar filtros
+                  </button>
+                ) : null}
+              </div>
+              <div className="tasks-filters checklist-completed-filters">
+                <input
+                  type="search"
+                  value={filters.search}
+                  onChange={(event) => updateFilter("search", event.target.value)}
+                  placeholder="Checklist, colaborador o area..."
+                />
+                <select value={filters.area} onChange={(event) => updateFilter("area", event.target.value)}>
+                  <option value="">Todas las areas</option>
+                  {CHECKLIST_AREAS.map((area) => (
+                    <option key={area} value={area}>{checklistAreaLabel(area)}</option>
+                  ))}
+                </select>
+                {roleOptions.length > 0 ? (
+                  <select value={filters.role} onChange={(event) => updateFilter("role", event.target.value)}>
+                    <option value="">Todos los roles</option>
+                    {roleOptions.map((role) => (
+                      <option key={role} value={role}>{formatChecklistRole(role)}</option>
+                    ))}
+                  </select>
+                ) : null}
+                <input
+                  type="date"
+                  value={filters.dateFrom}
+                  onChange={(event) => updateFilter("dateFrom", event.target.value)}
+                  aria-label="Fecha desde"
+                />
+                <input
+                  type="date"
+                  value={filters.dateTo}
+                  onChange={(event) => updateFilter("dateTo", event.target.value)}
+                  aria-label="Fecha hasta"
+                />
+              </div>
+            </article>
+
+            <div className="checklists-card-grid">
+              {pagedRuns.map((run) => (
+                <ChecklistTodayCard
+                  key={run.id}
+                  run={run}
+                  profiles={profiles}
+                  variant="completed"
+                  onOpen={() => onSelect(run.id)}
+                />
+              ))}
+              {!completedRuns.length ? (
+                <FriendlyEmpty
+                  title={hasActiveFilters
+                    ? "No encontramos checklists completadas con esos filtros."
+                    : "No hay checklists completadas."}
+                  text={hasActiveFilters
+                    ? "Prueba otro texto de búsqueda o ajusta las fechas y filtros."
+                    : "Cuando cierres una corrida, aparecerá aquí para consulta."}
+                />
+              ) : null}
+            </div>
+
+            <PaginationControls
+              page={page}
+              total={completedRuns.length}
+              pageSize={completedPageSize}
+              onChange={setPage}
+            />
+          </>
         )}
       </ChecklistRunDetailShell>
     </div>
@@ -3936,6 +4056,29 @@ function isChecklistRunHistoricPending(run) {
 
 function isChecklistRunCompleted(run) {
   return run?.status === "completed"
+}
+
+function checklistCompletedSortKey(run) {
+  return run?.completed_at || run?.updated_at || run?.run_date || ""
+}
+
+function normalizeChecklistSearchText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .trim()
+}
+
+function matchesCompletedChecklistSearch(run, profiles, search) {
+  if (!search) return true
+  const haystack = normalizeChecklistSearchText([
+    run.checklist_templates?.title,
+    responsibleLabel(run, profiles),
+    run.area,
+    run.assigned_role
+  ].filter(Boolean).join(" "))
+  return haystack.includes(search)
 }
 
 function historicOverdueDaysLabel(runDate) {

@@ -1020,6 +1020,25 @@
   gap: 16px;
 }
 
+.checklist-completed-toolbar {
+  margin: 0;
+}
+
+.checklist-completed-filters input[type="search"] {
+  grid-column: 1 / -1;
+}
+
+.checklists-completed .inventory-modal-actions {
+  justify-content: center;
+  gap: 12px;
+  padding: 4px 0 8px;
+}
+
+.checklists-completed .inventory-modal-actions span {
+  color: #94a3b8;
+  font-size: 14px;
+}
+
 .checklist-overdue-template {
   display: grid;
   gap: 14px;
