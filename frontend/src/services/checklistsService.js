@@ -1,4 +1,5 @@
 import { supabase } from "../lib/supabase"
+import { getChecklistOperationalDate } from "../utils/checklistOperationalStatus"
 
 const TEMPLATE_SELECT = "*, checklist_template_items(*)"
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -480,7 +481,7 @@ export async function getChecklistRuns(filters = {}) {
 }
 
 export async function createChecklistRunFromTemplate(templateId, assignmentPayload = {}) {
-  const runDate = assignmentPayload.run_date || guatemalaDateString()
+  const runDate = assignmentPayload.run_date || getChecklistOperationalDate()
   const assignedProfileId = assignmentPayload.assigned_profile_id || null
   const assignedRole = assignmentPayload.assigned_role?.trim() || null
   const area = assignmentPayload.area?.trim() || null
@@ -529,7 +530,7 @@ export async function createChecklistRunFromTemplate(templateId, assignmentPaylo
   return { data: { ...(result.data.find((item) => item.id === run.id) || run), existedAlready }, error: result.error }
 }
 
-export async function generateDueChecklistRuns(date = guatemalaDateString()) {
+export async function generateDueChecklistRuns(date = getChecklistOperationalDate()) {
   const result = await supabase.rpc("generate_due_checklist_runs", { p_target_date: date })
   if (!result.error) window.dispatchEvent(new CustomEvent("notifications-updated"))
   return result

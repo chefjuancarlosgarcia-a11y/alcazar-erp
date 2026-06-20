@@ -72,6 +72,7 @@ import {
   CHECKLIST_REPLACEMENT_REASONS,
   getChecklistOperationalDisplayStatus,
   getChecklistOperationalStatusLabel,
+  getChecklistOperationalDate,
   getChecklistReplacementReasonLabel,
   hasChecklistReplacement,
   isChecklistOperationallyExpired,
@@ -524,7 +525,9 @@ function normalizeChecklistWizardForm(form = {}) {
     recurrence_month_day: form.recurrence_month_day || "",
     recurrence_rule: form.recurrence_rule || "",
     skip_non_work_days: form.skip_non_work_days !== false,
-    auto_generate: Boolean(form.auto_generate),
+    auto_generate: form.frequency !== "manual"
+      ? form.auto_generate !== false
+      : Boolean(form.auto_generate),
     requires_approval: false
   }
 }
@@ -1704,7 +1707,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   const refresh = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true)
     try {
-      if (isLibraryAdmin) await generateDueChecklistRuns(TODAY)
+      await generateDueChecklistRuns(getChecklistOperationalDate())
       if (canManageManagementAlerts) await notifyOverdueChecklistRuns()
       if (canManageCoverage) await processChecklistCoverage()
       const libraryRequests = canViewChecklistLibrary
@@ -1752,7 +1755,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
     } finally {
       if (!silent) setLoading(false)
     }
-  }, [canManageCoverage, canManageManagementAlerts, canViewChecklistLibrary, isLibraryAdmin, profiles, replayPendingChecklistDrafts, user])
+  }, [canManageCoverage, canManageManagementAlerts, canViewChecklistLibrary, profiles, replayPendingChecklistDrafts, user])
 
   const refreshRef = useRef(refresh)
   refreshRef.current = refresh
@@ -1983,7 +1986,8 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       }
 
       const assignedRun = result.data
-      const runDate = assignedRun?.run_date || payload.run_date || TODAY
+      const operationalToday = getChecklistOperationalDate()
+      const runDate = assignedRun?.run_date || payload.run_date || operationalToday
       const validationErrors = validateChecklistAssignmentResult(assignedRun, payload, { existing: assignedRun?.existedAlready })
       if (validationErrors.length) {
         console.error("Checklist assignment validation failed:", { errors: validationErrors, run: assignedRun, payload })
@@ -1995,7 +1999,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       const freshRun = refreshResult?.runs?.find((run) => run.id === assignedRun.id) || assignedRun
       setSelectedRunId(freshRun.id)
       let successMessage = ""
-      if (runDate === TODAY) {
+      if (runDate === operationalToday) {
         setSection("today")
         successMessage = assignedRun.existedAlready ? "Esta checklist ya está asignada para hoy." : "Checklist asignada correctamente."
       } else {
@@ -2218,6 +2222,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
         <ChecklistToday
           runs={visibleRuns}
           profiles={profiles}
+          loading={loading}
           selectedRun={selectedRun && isChecklistRunTodayWork(selectedRun) ? selectedRun : null}
           onSelect={(runId) => (runId ? selectRun(runId, "today") : closeRunDetail())}
           onStart={startRun}
@@ -2454,6 +2459,7 @@ function ChecklistRunDetailShell({
 function ChecklistToday({
   runs,
   profiles,
+  loading = false,
   selectedRun,
   onSelect,
   onStart,
@@ -2525,7 +2531,13 @@ function ChecklistToday({
                 onOpen={() => (run.status === "pending" ? onStart(run.id) : onSelect(run.id))}
               />
             ))}
-            {!todayRuns.length && (
+            {!todayRuns.length && loading && (
+              <FriendlyEmpty
+                title="Preparando checklists de hoy..."
+                text="Generando o cargando las asignaciones del dia operativo actual."
+              />
+            )}
+            {!todayRuns.length && !loading && (
               <FriendlyEmpty
                 title="No hay checklists para ejecutar hoy."
                 text="Las asignaciones del día aparecerán aquí. Las vencidas de días anteriores están en la pestaña Vencidas."
@@ -3110,7 +3122,7 @@ function ChecklistAssignPanel({ template, profiles, currentUser, userRole, onClo
   const [error, setError] = useState("")
   const [form, setForm] = useState({
     template_id: template.id,
-    run_date: TODAY,
+    run_date: getChecklistOperationalDate(),
     due_time: template.due_time || "",
     area: template.area || (isSupervisorOnly ? supervisorArea : ""),
     assigned_profile_id: template.assigned_profile_id || "",
@@ -3265,7 +3277,13 @@ function ChecklistTemplateWizard({ templateId = "", editingTemplate, profiles, p
   }, [templateId])
 
   function update(field, value) {
-    setForm((current) => ({ ...current, [field]: value }))
+    setForm((current) => {
+      const next = { ...current, [field]: value }
+      if (field === "frequency" && value !== "manual") {
+        next.auto_generate = true
+      }
+      return next
+    })
   }
   function setRecurrenceDays(nextDays) {
     const recurrence_days = normalizeChecklistWeekdays(nextDays)
@@ -4607,7 +4625,7 @@ function formatChecklistRunDateLabel(dateStr) {
 
 function daysPastRunDate(runDate) {
   const run = parseChecklistLocalDate(runDate)
-  const today = parseChecklistLocalDate(TODAY)
+  const today = parseChecklistLocalDate(getChecklistOperationalDate())
   if (!run || !today) return 0
   return Math.round((today.getTime() - run.getTime()) / 86400000)
 }
@@ -4632,7 +4650,7 @@ function checklistRunScheduleLabel(run) {
 function formatChecklistDueDeadline(run) {
   if (!run?.due_time) return "Sin hora esperada"
   const time = String(run.due_time).slice(0, 5)
-  const datePart = run.run_date === TODAY ? "hoy" : formatChecklistRunDateLabel(run.run_date)
+  const datePart = run.run_date === getChecklistOperationalDate() ? "hoy" : formatChecklistRunDateLabel(run.run_date)
   return `Esperada: ${datePart} · ${time}`
 }
 
