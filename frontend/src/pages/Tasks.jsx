@@ -1548,6 +1548,13 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   const [selectedAlertId, setSelectedAlertId] = useState(initialChecklistView === "alerts" ? initialRunId : "")
   const [createWizardOpen, setCreateWizardOpen] = useState(false)
   const [coverageByRunId, setCoverageByRunId] = useState({})
+  const [detailReturnSection, setDetailReturnSection] = useState(null)
+  const [, setChecklistSearchParams] = useSearchParams()
+  const sectionRef = useRef(section)
+  const deepLinkRunHandledRef = useRef(false)
+  const runDetailDismissedRef = useRef(false)
+  const sessionRestoreHandledRef = useRef(false)
+  sectionRef.current = section
   const stableUserRef = useRef(user)
   useEffect(() => {
     if (user) stableUserRef.current = user
@@ -1635,15 +1642,38 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
     return mergeRunsWithLocalDrafts(mergedRuns)
   }, [logChecklistAudit, mergeRunsWithLocalDrafts, user?.id])
 
-  const selectRun = useCallback((runId) => {
+  const closeRunDetail = useCallback(() => {
+    runDetailDismissedRef.current = true
+    deepLinkRunHandledRef.current = true
+    const returnSection = detailReturnSection || sectionRef.current
+    setSelectedRunId("")
+    setDetailReturnSection(null)
+    if (user?.id) clearActiveChecklistSession(user?.id)
+    if (returnSection) setSection(returnSection)
+    setChecklistSearchParams((current) => {
+      const next = new URLSearchParams(current)
+      next.delete("id")
+      if (next.get("view") === "run") next.delete("view")
+      if (!next.get("tab") && !next.get("view")) next.set("tab", "checklists")
+      return next
+    }, { replace: true })
+  }, [detailReturnSection, setChecklistSearchParams, user?.id])
+
+  const selectRun = useCallback((runId, originSection) => {
+    if (!runId) {
+      closeRunDetail()
+      return
+    }
+    runDetailDismissedRef.current = false
+    setDetailReturnSection(originSection || sectionRef.current)
     setSelectedRunId(runId)
-    if (!runId || !user?.id) return
+    if (!user?.id) return
     const run = runs.find((item) => item.id === runId)
     persistActiveChecklistSession(user.id, runId, {
       templateTitle: run?.checklist_templates?.title || "",
       area: run?.area || ""
     })
-  }, [runs, user?.id])
+  }, [closeRunDetail, runs, user?.id])
   const sections = useMemo(() => {
     const todayCount = dedupeLogicalChecklistRuns(visibleRuns).filter(isChecklistRunTodayWork).length
     const overdueCount = visibleRuns.filter(isChecklistRunHistoricPending).length
@@ -1673,34 +1703,35 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
 
   const refresh = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true)
-    if (isLibraryAdmin) await generateDueChecklistRuns(TODAY)
-    if (canManageManagementAlerts) await notifyOverdueChecklistRuns()
-    if (canManageCoverage) await processChecklistCoverage()
-    const libraryRequests = canViewChecklistLibrary
-      ? [
-        getChecklistTemplates(),
-        getChecklistIncidents(),
-        getChecklistChangeRequests(),
-        getChecklistTemplateSuggestions()
-      ]
-      : []
-    const requests = [...libraryRequests, getChecklistRuns(), getChecklistProfiles()]
-    if (canManageManagementAlerts) requests.push(getChecklistManagementAlerts())
-    const results = await Promise.all(requests)
-    const templateResult = libraryRequests.length ? results[0] : { data: [], error: null }
-    const incidentResult = libraryRequests.length ? results[1] : { data: [], error: null }
-    const requestResult = libraryRequests.length ? results[2] : { data: [], error: null }
-    const suggestionResult = libraryRequests.length ? results[3] : { data: [], error: null }
-    const runResult = results[libraryRequests.length]
-    const profileResult = results[libraryRequests.length + 1]
-    const alertResult = canManageManagementAlerts ? results[libraryRequests.length + 2] : null
-    if (templateResult.error || runResult.error || incidentResult.error || requestResult.error || suggestionResult.error || alertResult?.error) {
-      if (!silent) {
-        setMessage(templateResult.error?.message || runResult.error?.message || incidentResult.error?.message || requestResult.error?.message || suggestionResult.error?.message || alertResult?.error?.message || "No se pudieron cargar checklists.")
+    try {
+      if (isLibraryAdmin) await generateDueChecklistRuns(TODAY)
+      if (canManageManagementAlerts) await notifyOverdueChecklistRuns()
+      if (canManageCoverage) await processChecklistCoverage()
+      const libraryRequests = canViewChecklistLibrary
+        ? [
+          getChecklistTemplates(),
+          getChecklistIncidents(),
+          getChecklistChangeRequests(),
+          getChecklistTemplateSuggestions()
+        ]
+        : []
+      const requests = [...libraryRequests, getChecklistRuns(), getChecklistProfiles()]
+      if (canManageManagementAlerts) requests.push(getChecklistManagementAlerts())
+      const results = await Promise.all(requests)
+      const templateResult = libraryRequests.length ? results[0] : { data: [], error: null }
+      const incidentResult = libraryRequests.length ? results[1] : { data: [], error: null }
+      const requestResult = libraryRequests.length ? results[2] : { data: [], error: null }
+      const suggestionResult = libraryRequests.length ? results[3] : { data: [], error: null }
+      const runResult = results[libraryRequests.length]
+      const profileResult = results[libraryRequests.length + 1]
+      const alertResult = canManageManagementAlerts ? results[libraryRequests.length + 2] : null
+      if (templateResult.error || runResult.error || incidentResult.error || requestResult.error || suggestionResult.error || alertResult?.error) {
+        if (!silent) {
+          setMessage(templateResult.error?.message || runResult.error?.message || incidentResult.error?.message || requestResult.error?.message || suggestionResult.error?.message || alertResult?.error?.message || "No se pudieron cargar checklists.")
+        }
+        return { runs: [], error: templateResult.error || runResult.error || incidentResult.error || requestResult.error || suggestionResult.error || alertResult?.error }
       }
-      if (!silent) setLoading(false)
-      return { runs: [], error: templateResult.error || runResult.error || incidentResult.error || requestResult.error || suggestionResult.error || alertResult?.error }
-    } else {
+
       setTemplates(templateResult.data || [])
       const syncedRuns = await replayPendingChecklistDrafts(runResult.data || [])
       setRuns(syncedRuns)
@@ -1717,8 +1748,9 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       setSuggestions(suggestionResult.data || [])
       if (alertResult) setManagementAlerts(alertResult.data || [])
       if (!profileResult.error) setProfiles(profileResult.data || [])
-      if (!silent) setLoading(false)
       return { runs: syncedRuns, error: null }
+    } finally {
+      if (!silent) setLoading(false)
     }
   }, [canManageCoverage, canManageManagementAlerts, canViewChecklistLibrary, isLibraryAdmin, profiles, replayPendingChecklistDrafts, user])
 
@@ -1733,15 +1765,50 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   useEffect(() => installChecklistLifecycleGuards(), [])
 
   useEffect(() => {
-    if (initialRunId || !user?.id) return
+    if (initialRunId || !user?.id || runDetailDismissedRef.current || sessionRestoreHandledRef.current) return
+    if (selectedRunId) return
     const activeSession = getActiveChecklistSession(user.id)
     if (!activeSession?.runId) return
     const run = runs.find((item) => item.id === activeSession.runId)
-    if (run && isChecklistRunHistoricPending(run)) setSection("overdue")
-    else if (run && isChecklistRunCompleted(run)) setSection("completed")
-    else setSection("today")
+    if (!run) return
+    sessionRestoreHandledRef.current = true
+    if (isChecklistRunHistoricPending(run)) {
+      setSection("overdue")
+      setDetailReturnSection("overdue")
+    } else if (isChecklistRunCompleted(run)) {
+      setSection("completed")
+      setDetailReturnSection("completed")
+    } else {
+      setSection("today")
+      setDetailReturnSection("today")
+    }
     setSelectedRunId(activeSession.runId)
-  }, [initialRunId, user?.id, runs])
+  }, [initialRunId, user?.id, runs, selectedRunId])
+
+  useEffect(() => {
+    if (deepLinkRunHandledRef.current || runDetailDismissedRef.current) return
+    if (!initialRunId || ["incidents", "alerts"].includes(initialChecklistView)) return
+    const run = runs.find((item) => item.id === initialRunId)
+    if (!run) return
+    deepLinkRunHandledRef.current = true
+    if (isChecklistRunHistoricPending(run)) {
+      setSection("overdue")
+      setDetailReturnSection("overdue")
+    } else if (isChecklistRunCompleted(run)) {
+      setSection("completed")
+      setDetailReturnSection("completed")
+    } else {
+      setSection("today")
+      setDetailReturnSection("today")
+    }
+    setSelectedRunId(initialRunId)
+    if (user?.id) {
+      persistActiveChecklistSession(user.id, initialRunId, {
+        templateTitle: run.checklist_templates?.title || "",
+        area: run.area || ""
+      })
+    }
+  }, [initialRunId, initialChecklistView, runs, user?.id])
 
   useEffect(() => {
     if (section === "create") setCreateWizardOpen(true)
@@ -1783,15 +1850,6 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
     enabled: true,
     onChange: scheduleRealtimeRefresh
   })
-
-  useEffect(() => {
-    if (!initialRunId || ["incidents", "alerts"].includes(initialChecklistView)) return
-    const run = runs.find((item) => item.id === initialRunId)
-    if (run && isChecklistRunHistoricPending(run)) setSection("overdue")
-    else if (run && isChecklistRunCompleted(run)) setSection("completed")
-    else setSection("today")
-    selectRun(initialRunId)
-  }, [initialRunId, initialChecklistView, selectRun, runs])
 
   useEffect(() => {
     if (initialChecklistView !== "approvals") return
@@ -2000,7 +2058,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   async function startRun(runId) {
     const result = await startChecklistRun(runId)
     if (result.error) return setMessage(result.error.message || "No se pudo iniciar la checklist.")
-    selectRun(runId)
+    selectRun(runId, sectionRef.current)
     refresh()
   }
 
@@ -2096,7 +2154,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
     if (result.error) return setMessage(result.error.message || "Completa los items obligatorios antes de finalizar.")
     clearActiveChecklistSession(user?.id, runId)
     setMessage("Checklist completada correctamente.")
-    setSelectedRunId("")
+    closeRunDetail()
     refresh()
   }
 
@@ -2147,7 +2205,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
             className={section === id ? "active" : ""}
             onClick={() => {
               if (id === "create" && !editingTemplate) setEditingTemplate(null)
-              setSelectedRunId("")
+              closeRunDetail()
               setSection(id)
             }}
           >
@@ -2161,7 +2219,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
           runs={visibleRuns}
           profiles={profiles}
           selectedRun={selectedRun && isChecklistRunTodayWork(selectedRun) ? selectedRun : null}
-          onSelect={selectRun}
+          onSelect={(runId) => (runId ? selectRun(runId, "today") : closeRunDetail())}
           onStart={startRun}
           onUpdateItem={updateRunItem}
           onComplete={completeRun}
@@ -2176,7 +2234,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
           runs={visibleRuns}
           profiles={profiles}
           selectedRun={selectedRun && isChecklistRunHistoricPending(selectedRun) ? selectedRun : null}
-          onSelect={selectRun}
+          onSelect={(runId) => (runId ? selectRun(runId, "overdue") : closeRunDetail())}
           onStart={startRun}
           onUpdateItem={updateRunItem}
           onComplete={completeRun}
@@ -2191,7 +2249,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
           runs={visibleRuns}
           profiles={profiles}
           selectedRun={selectedRun && isChecklistRunCompleted(selectedRun) ? selectedRun : null}
-          onSelect={selectRun}
+          onSelect={(runId) => (runId ? selectRun(runId, "completed") : closeRunDetail())}
           onUpdateItem={updateRunItem}
           onComplete={completeRun}
           onAssignReplacement={assignRunReplacement}
