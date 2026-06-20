@@ -22,9 +22,12 @@ import {
   getChecklistManagementAlerts,
   getChecklistProfiles,
   getChecklistRuns,
+  loadModuleChecklistRuns,
   getChecklistTemplateSuggestions,
   getChecklistTemplates,
   generateDueChecklistRuns,
+  ensureDueChecklistRunsFromTemplates,
+  auditLoadedChecklistModule,
   getChecklistCoverageForRuns,
   notifyOverdueChecklistRuns,
   processChecklistCoverage,
@@ -73,12 +76,24 @@ import {
   getChecklistOperationalDisplayStatus,
   getChecklistOperationalStatusLabel,
   getChecklistOperationalDate,
+  getChecklistTodayDateCandidates,
+  isChecklistRunActive,
+  isChecklistRunDateToday,
+  normalizeChecklistRunDate,
+  normalizeChecklistRunStatus,
   getChecklistReplacementReasonLabel,
   hasChecklistReplacement,
   isChecklistOperationallyExpired,
   isChecklistRunHistoricPending,
+  isChecklistRunOperationalTodayWork,
   isChecklistRunTodayWork
 } from "../utils/checklistOperationalStatus"
+import {
+  buildChecklistDisplayPipelineAudit,
+  canSeeAllChecklistModuleRuns,
+  canSeeChecklistRun,
+  dedupeChecklistRunsById
+} from "../utils/checklistRunDisplay"
 import {
   buildChecklistCoverageMap,
   getChecklistAvailabilityLabel,
@@ -1544,6 +1559,9 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   const [suggestions, setSuggestions] = useState([])
   const [profiles, setProfiles] = useState([])
   const [loading, setLoading] = useState(false)
+  const [ensuringToday, setEnsuringToday] = useState(false)
+  const [checklistAudit, setChecklistAudit] = useState(null)
+  const [checklistPipelineAudit, setChecklistPipelineAudit] = useState(null)
   const [message, setMessage] = useState("")
   const [editingTemplate, setEditingTemplate] = useState(null)
   const [selectedRunId, setSelectedRunId] = useState("")
@@ -1557,15 +1575,20 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   const deepLinkRunHandledRef = useRef(false)
   const runDetailDismissedRef = useRef(false)
   const sessionRestoreHandledRef = useRef(false)
+  const refreshInFlightRef = useRef(false)
+  const suppressRealtimeRefreshRef = useRef(false)
   sectionRef.current = section
   const stableUserRef = useRef(user)
   useEffect(() => {
     if (user) stableUserRef.current = user
   }, [user])
   const stableUser = user || stableUserRef.current
+  const seeAllModuleRuns = canSeeAllChecklistModuleRuns(stableUser, canViewChecklistLibrary)
   const selectedRun = runs.find((run) => run.id === selectedRunId)
   const activeTemplates = templates.filter((template) => template.status === "active")
-  const visibleRuns = runs.filter((run) => run.status !== "cancelled" && canSeeChecklistRun(run, user, profiles))
+  const visibleRuns = runs.filter((run) => (
+    run.status !== "cancelled" && canSeeChecklistRun(run, stableUser, profiles, { seeAll: seeAllModuleRuns })
+  ))
   const logChecklistAudit = useCallback(async (eventType, runId, details = {}) => {
     const meta = runId ? getChecklistRunMeta(runId) : null
     const profileId = user?.id || getLastActiveChecklistSession()?.profileId || null
@@ -1678,7 +1701,10 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
     })
   }, [closeRunDetail, runs, user?.id])
   const sections = useMemo(() => {
-    const todayCount = dedupeLogicalChecklistRuns(visibleRuns).filter(isChecklistRunTodayWork).length
+    const operationalToday = getChecklistOperationalDate()
+    const todayCount = dedupeChecklistRunsById(
+      visibleRuns.filter((run) => isChecklistRunOperationalTodayWork(run, operationalToday))
+    ).length
     const overdueCount = visibleRuns.filter(isChecklistRunHistoricPending).length
     const completedCount = visibleRuns.filter(isChecklistRunCompleted).length
     return [
@@ -1705,11 +1731,16 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   ])
 
   const refresh = useCallback(async ({ silent = false } = {}) => {
-    if (!silent) setLoading(true)
+    if (refreshInFlightRef.current) {
+      return { runs: [], skipped: true, error: null }
+    }
+    refreshInFlightRef.current = true
+    suppressRealtimeRefreshRef.current = true
+    const operationalToday = getChecklistOperationalDate()
+    let generationWarning = ""
+    const showLoading = !silent && runs.length === 0
+    if (showLoading) setLoading(true)
     try {
-      await generateDueChecklistRuns(getChecklistOperationalDate())
-      if (canManageManagementAlerts) await notifyOverdueChecklistRuns()
-      if (canManageCoverage) await processChecklistCoverage()
       const libraryRequests = canViewChecklistLibrary
         ? [
           getChecklistTemplates(),
@@ -1718,16 +1749,66 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
           getChecklistTemplateSuggestions()
         ]
         : []
-      const requests = [...libraryRequests, getChecklistRuns(), getChecklistProfiles()]
+      const requests = [...libraryRequests, loadModuleChecklistRuns(), getChecklistProfiles()]
       if (canManageManagementAlerts) requests.push(getChecklistManagementAlerts())
       const results = await Promise.all(requests)
       const templateResult = libraryRequests.length ? results[0] : { data: [], error: null }
       const incidentResult = libraryRequests.length ? results[1] : { data: [], error: null }
       const requestResult = libraryRequests.length ? results[2] : { data: [], error: null }
       const suggestionResult = libraryRequests.length ? results[3] : { data: [], error: null }
-      const runResult = results[libraryRequests.length]
+      let runResult = results[libraryRequests.length]
       const profileResult = results[libraryRequests.length + 1]
       const alertResult = canManageManagementAlerts ? results[libraryRequests.length + 2] : null
+      const profileRows = profileResult.data || []
+
+      try {
+        const genResult = await generateDueChecklistRuns(operationalToday)
+        const hasTodayWorkRuns = (runsList = []) => (runsList || []).some((run) => isChecklistRunTodayWork(run))
+
+        if (genResult.error) {
+          generationWarning = genResult.error.message || "No se pudieron generar checklists recurrentes."
+        }
+
+        if (!hasTodayWorkRuns(runResult.data)) {
+          if (canViewChecklistLibrary) {
+            const fallback = await ensureDueChecklistRunsFromTemplates(
+              templateResult.data || [],
+              operationalToday,
+              runResult.data || []
+            )
+            if (fallback.created > 0 || fallback.ensured > 0) {
+              generationWarning = ""
+              const reload = await loadModuleChecklistRuns()
+              if (!reload.error) runResult = reload
+            } else if (fallback.error) {
+              generationWarning = fallback.error.message || generationWarning
+            } else if (fallback.attempted === 0 && fallback.skipped > 0) {
+              generationWarning = `Ninguna plantilla activa corresponde al dia operativo ${operationalToday} (${fallback.skipped} omitida(s)). Si son diarias, aplica la migracion 112 en Supabase.`
+            } else if (fallback.attempted > 0) {
+              generationWarning = `No se pudieron crear checklists para hoy (${fallback.attempted} intento(s)). Revisa permisos o migracion 112.`
+            }
+          }
+        } else if (Number(genResult.data || 0) > 0) {
+          const reload = await loadModuleChecklistRuns()
+          if (!reload.error) runResult = reload
+        }
+      } catch (generationError) {
+        console.error("Checklist generation error:", generationError)
+        generationWarning = generationError?.message || "No se pudieron generar checklists recurrentes."
+      }
+
+      if (canManageManagementAlerts) {
+        notifyOverdueChecklistRuns().catch((error) => {
+          console.warn("notifyOverdueChecklistRuns failed:", error)
+        })
+      }
+
+      if (canManageCoverage) {
+        processChecklistCoverage().catch((error) => {
+          console.warn("processChecklistCoverage failed:", error)
+        })
+      }
+
       if (templateResult.error || runResult.error || incidentResult.error || requestResult.error || suggestionResult.error || alertResult?.error) {
         if (!silent) {
           setMessage(templateResult.error?.message || runResult.error?.message || incidentResult.error?.message || requestResult.error?.message || suggestionResult.error?.message || alertResult?.error?.message || "No se pudieron cargar checklists.")
@@ -1738,32 +1819,103 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       setTemplates(templateResult.data || [])
       const syncedRuns = await replayPendingChecklistDrafts(runResult.data || [])
       setRuns(syncedRuns)
+      const actor = user || stableUserRef.current
+      const seeAll = canSeeAllChecklistModuleRuns(actor, canViewChecklistLibrary)
+      const canSeeRun = (run) => canSeeChecklistRun(run, actor, profileRows, { seeAll })
       const activeRunIds = syncedRuns
-        .filter((run) => run.status !== "cancelled" && canSeeChecklistRun(run, user, profileResult.data || profiles))
+        .filter((run) => run.status !== "cancelled" && canSeeRun(run))
         .filter((run) => isChecklistRunTodayWork(run) || isChecklistRunHistoricPending(run))
         .map((run) => run.id)
-      const coverageResult = await getChecklistCoverageForRuns(activeRunIds)
-      if (!coverageResult.error) {
-        setCoverageByRunId(buildChecklistCoverageMap(coverageResult.data))
-      }
+      getChecklistCoverageForRuns(activeRunIds).then((coverageResult) => {
+        if (!coverageResult.error) {
+          setCoverageByRunId(buildChecklistCoverageMap(coverageResult.data))
+        }
+      }).catch((error) => {
+        console.warn("getChecklistCoverageForRuns failed:", error)
+      })
       setIncidents(incidentResult.data || [])
       setChangeRequests(requestResult.data || [])
       setSuggestions(suggestionResult.data || [])
       if (alertResult) setManagementAlerts(alertResult.data || [])
-      if (!profileResult.error) setProfiles(profileResult.data || [])
-      return { runs: syncedRuns, error: null }
+      if (!profileResult.error) setProfiles(profileRows)
+      const todayCount = syncedRuns.filter((run) => (
+        run.status !== "cancelled" && canSeeRun(run) && isChecklistRunOperationalTodayWork(run, operationalToday)
+      )).length
+      const audit = auditLoadedChecklistModule({
+        runs: syncedRuns.filter((run) => canSeeRun(run)),
+        templates: templateResult.data || []
+      })
+      const pipelineAudit = buildChecklistDisplayPipelineAudit({
+        rawRuns: syncedRuns,
+        user: actor,
+        profiles: profileRows,
+        canViewChecklistLibrary,
+        operationalToday,
+        loadDiagnostics: runResult.diagnostics || null
+      })
+      setChecklistAudit(canViewChecklistLibrary ? audit : null)
+      setChecklistPipelineAudit(canViewChecklistLibrary ? pipelineAudit : null)
+      if (canViewChecklistLibrary) {
+        console.info("[checklists] pipeline audit", pipelineAudit.counts, pipelineAudit.loadDiagnostics)
+      }
+      if (!silent && generationWarning && todayCount === 0) {
+        setMessage(`${generationWarning} Aplica la migracion 112 en Supabase si aun no lo hiciste, luego recarga con Ctrl+Shift+R.`)
+      } else if (!silent && todayCount === 0 && audit.userMessage && !generationWarning) {
+        setMessage(audit.userMessage)
+      }
+      return { runs: syncedRuns, error: null, audit }
     } finally {
-      if (!silent) setLoading(false)
+      suppressRealtimeRefreshRef.current = false
+      refreshInFlightRef.current = false
+      if (showLoading) setLoading(false)
     }
-  }, [canManageCoverage, canManageManagementAlerts, canViewChecklistLibrary, profiles, replayPendingChecklistDrafts, user])
+  }, [canManageCoverage, canManageManagementAlerts, canViewChecklistLibrary, replayPendingChecklistDrafts, runs.length, user])
+
+  const ensureTodayRuns = useCallback(async () => {
+    setEnsuringToday(true)
+    setMessage("")
+    try {
+      const operationalToday = getChecklistOperationalDate()
+      const templateResult = canViewChecklistLibrary ? await getChecklistTemplates() : { data: templates, error: null }
+      if (templateResult.error) {
+        setMessage(templateResult.error.message || "No se pudieron cargar plantillas.")
+        return
+      }
+      const runResult = await loadModuleChecklistRuns()
+      if (runResult.error) {
+        setMessage(runResult.error.message || "No se pudieron cargar checklists.")
+        return
+      }
+      await generateDueChecklistRuns(operationalToday)
+      const fallback = await ensureDueChecklistRunsFromTemplates(
+        templateResult.data || [],
+        operationalToday,
+        runResult.data || []
+      )
+      const refreshResult = await refresh({ silent: true })
+      const actor = user || stableUserRef.current
+      const seeAll = canSeeAllChecklistModuleRuns(actor, canViewChecklistLibrary)
+      const audit = auditLoadedChecklistModule({
+        runs: (refreshResult?.runs || []).filter((run) => (
+          canSeeChecklistRun(run, actor, profiles, { seeAll })
+        )),
+        templates: templateResult.data || [],
+        fallback
+      })
+      setChecklistAudit(canViewChecklistLibrary ? audit : null)
+      setMessage(audit.userMessage)
+    } finally {
+      setEnsuringToday(false)
+    }
+  }, [canViewChecklistLibrary, profiles, refresh, templates, user])
 
   const refreshRef = useRef(refresh)
   refreshRef.current = refresh
   const realtimeRefreshTimerRef = useRef(null)
 
   useEffect(() => {
-    refresh()
-  }, [refresh])
+    refreshRef.current()
+  }, [user?.id, canViewChecklistLibrary, canManageCoverage, canManageManagementAlerts])
 
   useEffect(() => installChecklistLifecycleGuards(), [])
 
@@ -1835,10 +1987,11 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   }, [logChecklistAudit])
 
   const scheduleRealtimeRefresh = useCallback(() => {
+    if (suppressRealtimeRefreshRef.current) return
     window.clearTimeout(realtimeRefreshTimerRef.current)
     realtimeRefreshTimerRef.current = window.setTimeout(() => {
       refreshRef.current({ silent: true })
-    }, 450)
+    }, 1200)
   }, [])
 
   useSupabaseRealtime({
@@ -2196,7 +2349,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
           <h2>Checklists</h2>
           <p className="tasks-muted">Haz lo que toca hoy, guarda evidencia y mide cumplimiento sin ruido.</p>
         </div>
-        {loading && <span className="tasks-access-chip">Cargando</span>}
+        {loading && runs.length === 0 && <span className="tasks-access-chip">Cargando</span>}
       </article>
 
       {message && <p className={message.includes("correctamente") || message.includes("asignada") || message.includes("guardad") || message.includes("enviad") || message.includes("actualizad") ? "tasks-success" : "tasks-warning"} role="status">{message}</p>}
@@ -2222,8 +2375,8 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
         <ChecklistToday
           runs={visibleRuns}
           profiles={profiles}
-          loading={loading}
-          selectedRun={selectedRun && isChecklistRunTodayWork(selectedRun) ? selectedRun : null}
+          loading={(loading || ensuringToday) && runs.length === 0}
+          selectedRun={selectedRun && isChecklistRunOperationalTodayWork(selectedRun) ? selectedRun : null}
           onSelect={(runId) => (runId ? selectRun(runId, "today") : closeRunDetail())}
           onStart={startRun}
           onUpdateItem={updateRunItem}
@@ -2232,6 +2385,12 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
           canAssignReplacement={canAssignRunReplacement}
           coverageByRunId={coverageByRunId}
           currentUser={user}
+          canEnsureToday={canViewChecklistLibrary}
+          ensuringToday={ensuringToday}
+          onEnsureToday={ensureTodayRuns}
+          checklistAudit={checklistAudit}
+          checklistPipelineAudit={checklistPipelineAudit}
+          onGoToOverdue={() => setSection("overdue")}
         />
       )}
       {section === "overdue" && (
@@ -2468,11 +2627,19 @@ function ChecklistToday({
   onAssignReplacement,
   canAssignReplacement,
   coverageByRunId,
-  currentUser
+  currentUser,
+  canEnsureToday = false,
+  ensuringToday = false,
+  onEnsureToday,
+  checklistAudit = null,
+  checklistPipelineAudit = null,
+  onGoToOverdue
 }) {
+  const operationalToday = getChecklistOperationalDate()
   const todayRuns = useMemo(
-    () => dedupeLogicalChecklistRuns(runs)
-      .filter(isChecklistRunTodayWork)
+    () => dedupeChecklistRunsById(
+      runs.filter((run) => isChecklistRunOperationalTodayWork(run, operationalToday))
+    )
       .sort((a, b) => {
         const statusOrder = {
           [CHECKLIST_OPERATIONAL_STATUS.VENCIDA]: 0,
@@ -2486,8 +2653,16 @@ function ChecklistToday({
         if (statusDiff !== 0) return statusDiff
         return String(a.checklist_templates?.title || "").localeCompare(String(b.checklist_templates?.title || ""))
       }),
-    [runs]
+    [runs, operationalToday]
   )
+
+  const activeNonTodayRuns = useMemo(
+    () => runs.filter((run) => (
+      isChecklistRunActive(run) && !isChecklistRunOperationalTodayWork(run, operationalToday)
+    )),
+    [runs, operationalToday]
+  )
+  const todayDateLabel = operationalToday
 
   const pending = todayRuns.filter((run) => getChecklistOperationalDisplayStatus(run) === CHECKLIST_OPERATIONAL_STATUS.PENDIENTE)
   const inProgress = todayRuns.filter((run) => run.status === "in_progress")
@@ -2540,9 +2715,32 @@ function ChecklistToday({
             {!todayRuns.length && !loading && (
               <FriendlyEmpty
                 title="No hay checklists para ejecutar hoy."
-                text="Las asignaciones del día aparecerán aquí. Las vencidas de días anteriores están en la pestaña Vencidas."
+                text={activeNonTodayRuns.length
+                  ? `Hay ${activeNonTodayRuns.length} checklist(s) activa(s) con otras fechas (${[...new Set(activeNonTodayRuns.map((run) => normalizeChecklistRunDate(run.run_date)))].slice(0, 3).join(", ")}). Día operativo actual: ${todayDateLabel}.`
+                  : "Las asignaciones del día aparecerán aquí."}
+                action={(
+                  <div className="checklists-empty-actions">
+                    {checklistAudit?.historicPendingCount > 0 ? (
+                      <button type="button" className="tasks-secondary" onClick={onGoToOverdue}>
+                        Ver vencidas ({checklistAudit.historicPendingCount})
+                      </button>
+                    ) : null}
+                    {canEnsureToday ? (
+                      <button type="button" className="tasks-primary" disabled={ensuringToday} onClick={onEnsureToday}>
+                        {ensuringToday ? "Generando..." : "Generar checklists de hoy"}
+                      </button>
+                    ) : null}
+                  </div>
+                )}
               />
             )}
+            {(checklistAudit || checklistPipelineAudit) && canEnsureToday ? (
+              <ChecklistModuleAuditPanel
+                audit={checklistAudit}
+                pipelineAudit={checklistPipelineAudit}
+                compact={todayRuns.length > 0}
+              />
+            ) : null}
           </div>
         )}
       </ChecklistRunDetailShell>
@@ -3142,7 +3340,10 @@ function ChecklistAssignPanel({ template, profiles, currentUser, userRole, onClo
   async function submit() {
     setError("")
     setSaving(true)
-    const result = await onAssign(form)
+    const result = await onAssign({
+      ...form,
+      run_date: getChecklistOperationalDate()
+    })
     if (!result?.ok) {
       setError("No se pudo asignar la checklist.")
       setSaving(false)
@@ -4757,31 +4958,6 @@ function getChecklistAssignableProfiles(user, profiles, { templateArea = "" } = 
   })
 }
 
-function userChecklistArea(user) {
-  return user?.area_name || user?.areaName || ""
-}
-
-function canSeeChecklistRun(run, user, profiles) {
-  const role = normalizeRole(user?.role)
-  const userArea = userChecklistArea(user)
-  if (isChecklistRestaurantWideRole(role)) return true
-  if (run.assigned_profile_id === user?.id) return true
-
-  const replaced = hasChecklistReplacement(run)
-  if (replaced && run.original_assigned_profile_id === user?.id) return false
-
-  if (!run.assigned_profile_id && run.assigned_role && normalizeRole(run.assigned_role) === role) return true
-  if (!run.assigned_profile_id && run.area && userArea && checklistAreasMatch(run.area, userArea)) return true
-  if (role === "supervisor") {
-    if (run.supervisor_profile_id === user?.id) return true
-    if (userArea && run.area && checklistAreasMatch(run.area, userArea)) return true
-    const assigned = profiles.find((profile) => profile.id === run.assigned_profile_id)
-    if (assigned && String(assigned.supervisor_profile_id || "") === String(user?.id || "")) return true
-    return Boolean(userArea && assigned?.area_name && checklistAreasMatch(assigned.area_name, userArea))
-  }
-  return false
-}
-
 function profileDisplayName(profiles, profileId, fallbackName = "") {
   const profile = profiles.find((item) => item.id === profileId)
   return profile?.full_name || profile?.username || fallbackName || "Colaborador"
@@ -4792,38 +4968,11 @@ function validateChecklistAssignmentResult(run, payload, { existing = false } = 
   if (!run?.id) errors.push("missing run id")
   if (run?.template_id !== payload.template_id) errors.push("missing or mismatched template_id")
   if (!run?.run_date) errors.push("missing run_date")
-  if (payload.run_date && run?.run_date !== payload.run_date) errors.push("mismatched run_date")
+  if (payload.run_date && normalizeChecklistRunDate(run?.run_date) !== normalizeChecklistRunDate(payload.run_date)) errors.push("mismatched run_date")
   if (!run?.assigned_profile_id && !run?.assigned_role) errors.push("missing assignee")
   if (!existing && run?.status !== "pending") errors.push("status is not pending")
   if (!Array.isArray(run?.checklist_run_items) || run.checklist_run_items.length === 0) errors.push("missing checklist run items")
   return errors
-}
-
-function checklistLogicalRunKey(run) {
-  return [
-    run?.template_id || "NO_TEMPLATE",
-    run?.run_date || "NO_DATE",
-    run?.assigned_profile_id || "NO_PROFILE",
-    String(run?.assigned_role || "").trim() || "NO_ROLE",
-    String(run?.area || "").trim() || "NO_AREA"
-  ].join("|")
-}
-
-function preferChecklistRun(left, right) {
-  const statusRank = { in_progress: 0, pending: 1, overdue: 2, rejected: 3, completed: 4 }
-  const leftRank = statusRank[left?.status] ?? 9
-  const rightRank = statusRank[right?.status] ?? 9
-  if (leftRank !== rightRank) return leftRank < rightRank ? left : right
-  return String(left?.created_at || "") <= String(right?.created_at || "") ? left : right
-}
-
-function dedupeLogicalChecklistRuns(runs) {
-  const grouped = new Map()
-  ;(runs || []).forEach((run) => {
-    const key = checklistLogicalRunKey(run)
-    grouped.set(key, grouped.has(key) ? preferChecklistRun(grouped.get(key), run) : run)
-  })
-  return Array.from(grouped.values())
 }
 
 function groupChecklistCompliance(runs, getter) {
@@ -4935,8 +5084,102 @@ function Empty({ text }) {
   return <p className="tasks-empty">{text}</p>
 }
 
-function FriendlyEmpty({ title, text }) {
-  return <div className="checklists-empty-card"><strong>{title}</strong><span>{text}</span></div>
+function FriendlyEmpty({ title, text, action = null }) {
+  return (
+    <div className="checklists-empty-card">
+      <strong>{title}</strong>
+      <span>{text}</span>
+      {action}
+    </div>
+  )
+}
+
+function ChecklistModuleAuditPanel({ audit, pipelineAudit = null, compact = false }) {
+  if (!audit && !pipelineAudit) return null
+  const dueTemplates = (audit?.templateSummaries || []).filter((item) => item.dueToday)
+  const skippedTemplates = (audit?.templateSummaries || []).filter((item) => !item.dueToday)
+  const counts = pipelineAudit?.counts || null
+
+  return (
+    <article className={`checklists-audit-panel${compact ? " compact" : ""}`}>
+      <h3>{compact ? "Diagnóstico (admin)" : "Diagnóstico del módulo"}</h3>
+      {counts ? (
+        <ul className="checklists-audit-list">
+          <li>Recibidas del servicio: <strong>{counts.rawFromService}</strong></li>
+          <li>Fecha operativa (carga): <strong>{pipelineAudit.loadDiagnostics?.operationalToday || audit?.operationalToday || "—"}</strong></li>
+          <li>Coinciden run_date operativo: <strong>{counts.operationalDateMatches}</strong></li>
+          <li>Pending activas hoy: <strong>{counts.todayPendingActive}</strong></li>
+          <li>Activas fecha operativa: <strong>{counts.todayOperationalActive}</strong></li>
+          <li>Ocultas por visibilidad: <strong>{counts.hiddenByVisibility}</strong></li>
+          <li>Trabajo de hoy (candidatas amplias): <strong>{counts.todayWorkRunsBroad ?? counts.todayWorkRuns}</strong></li>
+          <li>Removidas por dedupe (mismo id): <strong>{counts.removedByDedupe}</strong></li>
+          <li>Cards finales en Hoy: <strong>{counts.finalTodayCards}</strong></li>
+          {pipelineAudit.seeAllModuleRuns != null ? (
+            <li>Modo ver-todas: <strong>{pipelineAudit.seeAllModuleRuns ? "sí" : "no"}</strong> ({pipelineAudit.userRole})</li>
+          ) : null}
+        </ul>
+      ) : null}
+      {pipelineAudit?.loadDiagnostics?.queries?.length ? (
+        <div className="checklists-audit-group">
+          <strong>Queries de carga</strong>
+          <ul>
+            {pipelineAudit.loadDiagnostics.queries.map((query) => (
+              <li key={`${query.type}-${query.filter}`}>
+                {query.type === "sinceDate" ? "since" : "date"}={query.filter}: {query.count}
+                {query.error ? ` · error: ${query.error}` : ""}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {pipelineAudit?.dedupeDetails?.length ? (
+        <div className="checklists-audit-group">
+          <strong>Corridas del día operativo ({pipelineAudit.operationalToday || "—"})</strong>
+          <div className="checklists-audit-dedupe-table">
+            <header><span>ID</span><span>Checklist</span><span>Fecha</span><span>Asignado</span><span>Estado</span><span>Card</span></header>
+            {pipelineAudit.dedupeDetails.map((row) => (
+              <div key={row.id} className={row.removedByDedupe ? "removed" : ""}>
+                <span title={row.id}>{String(row.id).slice(0, 8)}…</span>
+                <span>{row.title}</span>
+                <span>{row.run_date}</span>
+                <span>{row.assignee}</span>
+                <span>{row.status}</span>
+                <span>{row.removedByDedupe ? "Eliminada (id dup.)" : "Mostrada"}</span>
+              </div>
+            ))}
+          </div>
+          {pipelineAudit.dedupeDetails.some((row) => row.logicalDuplicateIds?.length) ? (
+            <p className="tasks-muted">
+              Hay corridas con la misma clave lógica pero ids distintos; todas se muestran (no se deduplican).
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+      {audit ? (
+        <ul className="checklists-audit-list">
+          <li>Día operativo: <strong>{audit.operationalToday}</strong> ({audit.weekdayLabel})</li>
+          <li>Activas para hoy: <strong>{audit.todayActiveCount}</strong></li>
+          <li>Completadas hoy: <strong>{audit.todayCompletedCount}</strong></li>
+          <li>Vencidas pendientes: <strong>{audit.historicPendingCount}</strong></li>
+          <li>Plantillas activas / programadas hoy: <strong>{audit.activeTemplateCount}</strong> / <strong>{audit.templatesDueTodayCount}</strong></li>
+          {audit.staleDates?.length ? <li>Fechas activas anteriores: {audit.staleDates.join(", ")}</li> : null}
+        </ul>
+      ) : null}
+      {!compact && dueTemplates.length ? (
+        <div className="checklists-audit-group">
+          <strong>Programadas hoy</strong>
+          <ul>{dueTemplates.map((item) => <li key={item.id}>{item.title} · {item.frequencyLabel}</li>)}</ul>
+        </div>
+      ) : null}
+      {!compact && skippedTemplates.length ? (
+        <div className="checklists-audit-group">
+          <strong>No programadas hoy</strong>
+          <ul>{skippedTemplates.slice(0, 8).map((item) => <li key={item.id}>{item.title} · {item.frequencyLabel}</li>)}</ul>
+          {skippedTemplates.length > 8 ? <p className="tasks-muted">…y {skippedTemplates.length - 8} más</p> : null}
+        </div>
+      ) : null}
+    </article>
+  )
 }
 
 function listFromText(text) {

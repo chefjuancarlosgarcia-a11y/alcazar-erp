@@ -1,5 +1,12 @@
 import { supabase } from "../lib/supabase"
-import { getChecklistOperationalDate } from "../utils/checklistOperationalStatus"
+import {
+  getChecklistOperationalDate,
+  getChecklistTodayDateCandidates,
+  isChecklistTemplateDueOnDate,
+  normalizeChecklistRunDate,
+  shouldEnsureChecklistRunForOperationalDate
+} from "../utils/checklistOperationalStatus"
+import { buildChecklistModuleAudit } from "../utils/checklistModuleAudit"
 
 const TEMPLATE_SELECT = "*, checklist_template_items(*)"
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -11,7 +18,9 @@ function isPersistentItemId(id) {
 function activeTemplateItems(items) {
   return (items || []).filter((item) => item.is_active !== false)
 }
-const RUN_SELECT = "*, checklist_templates(title, description, frequency, shift_context, primary_replacement_profile_id, secondary_replacement_profile_id, coverage_escalation_profile_id, backup_profile_id, auto_coverage_enabled, auto_coverage_wait_minutes), checklist_run_items(*)"
+const RUN_SELECT_CORE = "*, checklist_templates(title, description, frequency, shift_context, backup_profile_id), checklist_run_items(*)"
+const RUN_SELECT_EXTENDED = "*, checklist_templates(title, description, frequency, shift_context, primary_replacement_profile_id, secondary_replacement_profile_id, coverage_escalation_profile_id, backup_profile_id, auto_coverage_enabled, auto_coverage_wait_minutes), checklist_run_items(*)"
+const RUN_SELECT = RUN_SELECT_EXTENDED
 const INCIDENT_SELECT = "*, checklist_runs(run_date, area, checklist_templates(title)), checklist_run_items(title, response_type, checked, response_text, response_number, photo_url, comment), profiles!checklist_incidents_reported_by_fkey(full_name, username)"
 const MANAGEMENT_ALERT_SELECT = "*, checklist_runs(run_date, area, checklist_templates(title)), sender:sender_profile_id(full_name, username)"
 
@@ -471,16 +480,103 @@ export async function deleteChecklistTemplate(id, { force = false } = {}) {
   return { data: { id }, error, mode: "deleted" }
 }
 
-export async function getChecklistRuns(filters = {}) {
-  let query = supabase.from("checklist_runs").select(RUN_SELECT)
+function buildChecklistRunsQuery(select, filters = {}) {
+  let query = supabase.from("checklist_runs").select(select)
   if (filters.date) query = query.eq("run_date", filters.date)
   if (filters.status) query = query.eq("status", filters.status)
   if (filters.area) query = query.eq("area", filters.area)
-  const { data, error } = await query.order("run_date", { ascending: false }).order("created_at", { ascending: false })
-  return { data: (data || []).map(orderRun), error }
+  if (filters.sinceDate) query = query.gte("run_date", filters.sinceDate)
+  return query.order("run_date", { ascending: false }).order("created_at", { ascending: false })
 }
 
-export async function createChecklistRunFromTemplate(templateId, assignmentPayload = {}) {
+export async function getChecklistRuns(filters = {}) {
+  const extended = await buildChecklistRunsQuery(RUN_SELECT_EXTENDED, filters)
+  if (!extended.error) {
+    return { data: (extended.data || []).map(orderRun), error: null, selectMode: "extended" }
+  }
+
+  console.warn("getChecklistRuns extended select failed, retrying core select:", extended.error.message)
+  const core = await buildChecklistRunsQuery(RUN_SELECT_CORE, filters)
+  return {
+    data: (core.data || []).map(orderRun),
+    error: core.error,
+    selectMode: core.error ? "failed" : "core"
+  }
+}
+
+function mergeChecklistRunsById(...groups) {
+  const merged = new Map()
+  groups.flat().forEach((run) => {
+    if (run?.id) merged.set(run.id, run)
+  })
+  return Array.from(merged.values())
+}
+
+export async function loadModuleChecklistRuns() {
+  const todayDates = getChecklistTodayDateCandidates()
+  const operationalToday = getChecklistOperationalDate()
+  const sinceDate = (() => {
+    const [year, month, day] = todayDates[0].split("-").map(Number)
+    const date = new Date(Date.UTC(year, month - 1, day))
+    date.setUTCDate(date.getUTCDate() - 45)
+    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`
+  })()
+
+  const [recentResult, ...todayResults] = await Promise.all([
+    getChecklistRuns({ sinceDate }),
+    ...todayDates.map((date) => getChecklistRuns({ date }))
+  ])
+
+  const errors = [recentResult, ...todayResults].map((result) => result.error).filter(Boolean)
+  const diagnostics = {
+    operationalToday,
+    todayDateCandidates: todayDates,
+    sinceDate,
+    queries: [
+      {
+        type: "sinceDate",
+        filter: sinceDate,
+        count: recentResult.error ? 0 : (recentResult.data?.length || 0),
+        error: recentResult.error?.message || null,
+        selectMode: recentResult.selectMode || null
+      },
+      ...todayDates.map((date, index) => {
+        const result = todayResults[index]
+        return {
+          type: "date",
+          filter: date,
+          count: result.error ? 0 : (result.data?.length || 0),
+          error: result.error?.message || null,
+          selectMode: result.selectMode || null
+        }
+      })
+    ]
+  }
+
+  if (errors.length === todayResults.length + 1) {
+    return { data: [], error: errors[0], diagnostics }
+  }
+
+  const merged = mergeChecklistRunsById(
+    ...(recentResult.error ? [] : [recentResult.data || []]),
+    ...todayResults.filter((result) => !result.error).map((result) => result.data || [])
+  )
+  diagnostics.mergedCount = merged.length
+  diagnostics.operationalDateCount = merged.filter((run) => (
+    normalizeChecklistRunDate(run.run_date) === operationalToday
+  )).length
+  diagnostics.pendingOperationalCount = merged.filter((run) => (
+    normalizeChecklistRunDate(run.run_date) === operationalToday && run.status === "pending"
+  )).length
+
+  return {
+    data: merged,
+    error: null,
+    diagnostics
+  }
+}
+
+export async function createChecklistRunFromTemplate(templateId, assignmentPayload = {}, options = {}) {
   const runDate = assignmentPayload.run_date || getChecklistOperationalDate()
   const assignedProfileId = assignmentPayload.assigned_profile_id || null
   const assignedRole = assignmentPayload.assigned_role?.trim() || null
@@ -524,16 +620,66 @@ export async function createChecklistRunFromTemplate(templateId, assignmentPaylo
       .eq("id", run.id)
     if (updateError) return { data: null, error: updateError }
   }
-  window.dispatchEvent(new CustomEvent("notifications-updated"))
-
-  const result = await getChecklistRuns({ date: runDate })
-  return { data: { ...(result.data.find((item) => item.id === run.id) || run), existedAlready }, error: result.error }
+  if (!options.skipReload) {
+    window.dispatchEvent(new CustomEvent("notifications-updated"))
+    const result = await getChecklistRuns({ date: runDate })
+    return { data: { ...(result.data.find((item) => item.id === run.id) || run), existedAlready }, error: result.error }
+  }
+  return { data: { ...run, existedAlready }, error: null }
 }
 
 export async function generateDueChecklistRuns(date = getChecklistOperationalDate()) {
   const result = await supabase.rpc("generate_due_checklist_runs", { p_target_date: date })
   if (!result.error) window.dispatchEvent(new CustomEvent("notifications-updated"))
   return result
+}
+
+export async function ensureDueChecklistRunsFromTemplates(templates = [], date = getChecklistOperationalDate(), existingRuns = []) {
+  const activeTemplates = (templates || []).filter((template) => template?.status === "active")
+  let created = 0
+  let ensured = 0
+  let skipped = 0
+  let attempted = 0
+  let lastError = null
+
+  const hasNonCancelledRunForDate = (templateId, targetDate) => (existingRuns || []).some((run) => (
+    run?.template_id === templateId
+    && run?.status !== "cancelled"
+    && normalizeChecklistRunDate(run.run_date) === normalizeChecklistRunDate(targetDate)
+  ))
+
+  for (const template of activeTemplates) {
+    if (hasNonCancelledRunForDate(template.id, date)) {
+      skipped += 1
+      continue
+    }
+    if (!shouldEnsureChecklistRunForOperationalDate(template, date, existingRuns)) {
+      skipped += 1
+      continue
+    }
+    attempted += 1
+    const result = await createChecklistRunFromTemplate(template.id, {
+      run_date: date,
+      assignment_source: "recurrence",
+      notes: "Generada automaticamente",
+      area: template.area || null,
+      assigned_role: template.assigned_role || null,
+      assigned_profile_id: template.assigned_profile_id || null
+    }, { skipReload: true })
+    if (result.error) {
+      lastError = result.error
+      continue
+    }
+    if (result.data?.existedAlready) ensured += 1
+    else created += 1
+  }
+
+  if (created > 0 || ensured > 0) window.dispatchEvent(new CustomEvent("notifications-updated"))
+  return { created, ensured, skipped, attempted, error: lastError }
+}
+
+export function auditLoadedChecklistModule({ runs = [], templates = [], fallback = null } = {}) {
+  return buildChecklistModuleAudit({ runs, templates, fallback })
 }
 
 export async function updateChecklistRunItem(runItemId, payload) {

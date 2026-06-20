@@ -55,10 +55,43 @@ function parseTimeToMinutes(timeStr) {
 }
 
 function shiftDateString(dateStr, days) {
-  const [year, month, day] = String(dateStr).split("-").map(Number)
-  const date = new Date(year, month - 1, day)
-  date.setDate(date.getDate() + days)
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`
+  const normalized = String(dateStr || "").slice(0, 10)
+  const [year, month, day] = normalized.split("-").map(Number)
+  if (!year || !month || !day) return normalized
+  const date = new Date(Date.UTC(year, month - 1, day))
+  date.setUTCDate(date.getUTCDate() + days)
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`
+}
+
+export function normalizeChecklistRunDate(value) {
+  if (!value) return ""
+  if (value instanceof Date) return getGuatemalaDateString(value)
+  const trimmed = String(value).trim()
+  const isoMatch = trimmed.match(/^(\d{4}-\d{2}-\d{2})/)
+  if (isoMatch) return isoMatch[1]
+  return trimmed.slice(0, 10)
+}
+
+export function normalizeChecklistRunStatus(value) {
+  return String(value || "").trim().toLowerCase()
+}
+
+export function isChecklistRunActive(run) {
+  return ["pending", "in_progress", "overdue", "rejected", "pending_review"].includes(
+    normalizeChecklistRunStatus(run?.status)
+  )
+}
+
+export function isChecklistRunDateToday(runDate, now = new Date()) {
+  const normalized = normalizeChecklistRunDate(runDate)
+  if (!normalized) return false
+  return getChecklistTodayDateCandidates(now).includes(normalized)
+}
+
+export function getChecklistTodayDateCandidates(now = new Date()) {
+  const operationalDate = getChecklistOperationalDate(now)
+  const calendarDate = getGuatemalaDateString(now)
+  return [...new Set([operationalDate, calendarDate, shiftDateString(operationalDate, -1)])]
 }
 
 export function getChecklistOperationalDate(
@@ -77,8 +110,9 @@ export function isChecklistOperationalWindowOpen(
   now = new Date(),
   dayEndTime = DEFAULT_CHECKLIST_OPERATIONAL_DAY_END
 ) {
-  if (!runDate) return false
-  const windowEndDate = shiftDateString(runDate, 1)
+  const normalizedRunDate = normalizeChecklistRunDate(runDate)
+  if (!normalizedRunDate) return false
+  const windowEndDate = shiftDateString(normalizedRunDate, 1)
   const calendarDate = getGuatemalaDateString(now)
   if (calendarDate < windowEndDate) return true
   if (calendarDate > windowEndDate) return false
@@ -137,17 +171,80 @@ export function getChecklistReplacementReasonLabel(reason) {
 }
 
 export function isChecklistRunTodayWork(run, now = new Date()) {
-  if (!["pending", "in_progress", "overdue", "rejected"].includes(run?.status)) return false
-  if (!isChecklistOperationalWindowOpen(run.run_date, now)) return false
-  const operationalDate = getChecklistOperationalDate(now)
-  if (run.run_date === operationalDate) return true
-  if (run.run_date === shiftDateString(operationalDate, -1)) return true
-  return false
+  if (!isChecklistRunActive(run)) return false
+  return isChecklistRunDateToday(run?.run_date, now)
+}
+
+export function isChecklistRunOperationalTodayWork(
+  run,
+  operationalToday = getChecklistOperationalDate(),
+  now = new Date()
+) {
+  if (!isChecklistRunActive(run)) return false
+  const today = operationalToday || getChecklistOperationalDate(now)
+  return normalizeChecklistRunDate(run?.run_date) === today
 }
 
 export function isChecklistRunHistoricPending(run, now = new Date()) {
-  return ["pending", "in_progress", "overdue", "rejected"].includes(run?.status)
-    && !isChecklistOperationalWindowOpen(run.run_date, now)
+  if (!isChecklistRunActive(run)) return false
+  if (isChecklistRunTodayWork(run, now)) return false
+  const runDate = normalizeChecklistRunDate(run?.run_date)
+  if (!runDate) return false
+  const operationalToday = getChecklistOperationalDate(now)
+  if (runDate < operationalToday) return true
+  if (isChecklistRunDateToday(runDate, now)) {
+    return isChecklistOperationallyExpired(run, now)
+  }
+  return !isChecklistOperationalWindowOpen(runDate, now)
+}
+
+function isoWeekdayFromDateString(dateStr) {
+  const [year, month, day] = String(dateStr).slice(0, 10).split("-").map(Number)
+  if (!year || !month || !day) return null
+  const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay()
+  return weekday === 0 ? 7 : weekday
+}
+
+export function isChecklistTemplateDueOnDate(template, dateStr = getChecklistOperationalDate()) {
+  if (!template || template.status !== "active") return false
+  const frequency = template.frequency || "manual"
+  const autoGenerate = template.auto_generate !== false
+  if (frequency === "manual") return autoGenerate
+  if (frequency === "diaria") return true
+  if (["apertura", "cierre", "por_turno"].includes(frequency)) return true
+  if (frequency === "semanal") {
+    const days = Array.isArray(template.recurrence_days) ? template.recurrence_days.map(Number) : []
+    if (!days.length) return true
+    const weekday = isoWeekdayFromDateString(dateStr)
+    return weekday != null && days.includes(weekday)
+  }
+  if (frequency === "mensual") {
+    const monthDay = Number(template.recurrence_month_day || 1)
+    const day = Number(String(dateStr).slice(8, 10))
+    return day === monthDay
+  }
+  return false
+}
+
+export function shouldEnsureChecklistRunForOperationalDate(template, dateStr = getChecklistOperationalDate(), existingRuns = []) {
+  if (!template || template.status !== "active") return false
+  if (isChecklistTemplateDueOnDate(template, dateStr)) return true
+
+  const frequency = template.frequency || "manual"
+  if (!["diaria", "apertura", "cierre", "por_turno"].includes(frequency)) return false
+
+  const templateRuns = (existingRuns || []).filter((run) => (
+    run?.template_id === template.id && isChecklistRunActive(run)
+  ))
+  if (!templateRuns.length) return false
+
+  const normalizedDate = normalizeChecklistRunDate(dateStr)
+  if (templateRuns.some((run) => normalizeChecklistRunDate(run.run_date) === normalizedDate)) return false
+
+  return templateRuns.some((run) => {
+    const runDate = normalizeChecklistRunDate(run.run_date)
+    return runDate && normalizedDate && runDate < normalizedDate
+  })
 }
 
 export function isChecklistOperationallyExpired(run, now = new Date()) {

@@ -1832,6 +1832,85 @@
   font-size: 17px;
 }
 
+.checklists-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+}
+
+.checklists-audit-panel {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 12px;
+  padding: 18px 20px;
+  border: 1px solid #334155;
+  border-radius: 15px;
+  background: #111827;
+  text-align: left;
+}
+
+.checklists-audit-panel.compact {
+  margin-top: 1rem;
+  font-size: 0.92rem;
+}
+
+.checklists-audit-panel.compact h3 {
+  font-size: 0.95rem;
+}
+
+.checklists-audit-panel h3 {
+  margin: 0;
+  color: #e2e8f0;
+  font-size: 16px;
+}
+
+.checklists-audit-list,
+.checklists-audit-group ul {
+  margin: 0;
+  padding-left: 18px;
+  color: #94a3b8;
+}
+
+.checklists-audit-group strong {
+  color: #cbd5e1;
+  display: block;
+  margin-bottom: 6px;
+}
+
+.checklists-audit-dedupe-table {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  overflow-x: auto;
+}
+
+.checklists-audit-dedupe-table header,
+.checklists-audit-dedupe-table > div {
+  display: grid;
+  grid-template-columns: 72px minmax(120px, 1.4fr) 88px minmax(100px, 1fr) 72px 96px;
+  gap: 8px;
+  align-items: center;
+}
+
+.checklists-audit-dedupe-table header {
+  color: #94a3b8;
+  font-weight: 600;
+  border-bottom: 1px solid #334155;
+  padding-bottom: 6px;
+}
+
+.checklists-audit-dedupe-table > div {
+  color: #cbd5e1;
+  padding: 4px 0;
+  border-bottom: 1px solid #1e293b;
+}
+
+.checklists-audit-dedupe-table > div.removed {
+  color: #f87171;
+  opacity: 0.85;
+}
+
 .checklist-builder,
 .checklist-run-item {
   display: grid;
