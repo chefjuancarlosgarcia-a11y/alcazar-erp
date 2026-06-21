@@ -22,9 +22,12 @@ import {
   createEmptyQuoteItem,
   DEFAULT_QUOTE_TERMS,
   formatQuantityLine,
+  getLineTotal,
+  isQuoteOptionLine,
   mapTemplateItemsToQuoteItems,
   normalizeQuoteItems,
   QUOTE_ITEM_TYPES,
+  QUOTE_LINE_KINDS,
   QUANTITY_UNITS,
   QUOTE_STATUS_LABELS,
   defaultValidUntil
@@ -39,7 +42,11 @@ function mapItemsFromApi(items = []) {
     quantity: item.quantity,
     quantity_unit: item.quantity_unit || "unidades",
     unit_price: item.unit_price,
-    sort_order: item.sort_order ?? index + 1
+    sort_order: item.sort_order ?? index + 1,
+    line_kind: item.line_kind || "normal",
+    option_group_name: item.option_group_name || "",
+    option_label: item.option_label || "",
+    is_selected_option: Boolean(item.is_selected_option)
   }))
 }
 
@@ -151,9 +158,35 @@ export default function CateringQuoteModal({
   }
 
   function updateItem(index, field, value) {
-    setItems((current) => current.map((item, itemIndex) => (
-      itemIndex === index ? { ...item, [field]: value } : item
-    )))
+    setItems((current) => {
+      let next = current.map((item, itemIndex) => (
+        itemIndex === index ? { ...item, [field]: value } : item
+      ))
+
+      if (field === "line_kind" && value === "normal") {
+        next[index] = {
+          ...next[index],
+          option_group_name: "",
+          option_label: "",
+          is_selected_option: false
+        }
+      }
+
+      if (field === "is_selected_option" && value) {
+        const groupName = next[index].option_group_name?.trim()
+        if (groupName) {
+          next = next.map((item, itemIndex) => {
+            if (itemIndex === index) return item
+            if (isQuoteOptionLine(item) && item.option_group_name?.trim() === groupName) {
+              return { ...item, is_selected_option: false }
+            }
+            return item
+          })
+        }
+      }
+
+      return next
+    })
   }
 
   function addItem() {
@@ -238,9 +271,10 @@ export default function CateringQuoteModal({
   }
 
   function handleGeneratePdf() {
-    const quoteRow = quote || {
-      quote_number: "BORRADOR",
-      status: "draft",
+    const quoteRow = {
+      ...(quote || {}),
+      quote_number: quote?.quote_number || "BORRADOR",
+      status: quote?.status || "draft",
       subtotal: totals.subtotal,
       discount_amount: totals.discount_amount,
       tax_amount: 0,
@@ -345,7 +379,17 @@ export default function CateringQuoteModal({
                       <div className="catering-quote-totals">
                         <div><span>Subtotal</span><strong>{formatMoney(totals.subtotal)}</strong></div>
                         {totals.discount_amount > 0 ? <div><span>Descuento</span><strong>-{formatMoney(totals.discount_amount)}</strong></div> : null}
-                        <div className="is-total"><span>Total</span><strong>{formatMoney(totals.total)}</strong></div>
+                        <div className="is-total">
+                          <span>Total</span>
+                          <strong>
+                            {totals.has_unresolved_option_groups ? "Según opción elegida" : formatMoney(totals.total)}
+                          </strong>
+                        </div>
+                        {totals.has_unresolved_option_groups ? (
+                          <small className="catering-quote-preview__option-note">
+                            El total final depende de la opción de menú seleccionada.
+                          </small>
+                        ) : null}
                         <small className="catering-quote-preview__vat">Precios incluyen IVA</small>
                       </div>
                     </section>
@@ -387,11 +431,13 @@ export default function CateringQuoteModal({
                       </div>
                       <div className="catering-quote-lines-stack">
                           {items.map((item, index) => {
-                            const lineTotal = (Number(item.quantity) || 0) * (Number(item.unit_price) || 0)
+                            const lineTotal = getLineTotal(item)
+                            const isOption = isQuoteOptionLine(item)
+                            const countsTowardTotal = !isOption || item.is_selected_option
                             return (
-                              <article key={`${index}-${item.sort_order}`} className="catering-quote-line-card">
+                              <article key={`${index}-${item.sort_order}`} className={`catering-quote-line-card${isOption ? " catering-quote-line-card--option" : ""}`}>
                                 <div className="catering-quote-line-card__top">
-                                  <strong>Linea {index + 1}</strong>
+                                  <strong>Linea {index + 1}{isOption ? " · Opción alternativa" : ""}</strong>
                                   {canEdit ? (
                                     <button
                                       type="button"
@@ -404,6 +450,28 @@ export default function CateringQuoteModal({
                                     </button>
                                   ) : null}
                                 </div>
+                                <label className="catering-quote-line-card__kind">
+                                  <span>Tipo de linea</span>
+                                  <select value={item.line_kind || "normal"} disabled={!canEdit} onChange={(e) => updateItem(index, "line_kind", e.target.value)}>
+                                    {QUOTE_LINE_KINDS.map((kind) => <option key={kind.value} value={kind.value}>{kind.label}</option>)}
+                                  </select>
+                                </label>
+                                {isOption ? (
+                                  <div className="catering-quote-line-card__option-fields">
+                                    <label>
+                                      <span>Nombre del grupo</span>
+                                      <input type="text" value={item.option_group_name || ""} disabled={!canEdit} placeholder="Ej. Platillos formales" onChange={(e) => updateItem(index, "option_group_name", e.target.value)} />
+                                    </label>
+                                    <label>
+                                      <span>Nombre de opcion</span>
+                                      <input type="text" value={item.option_label || ""} disabled={!canEdit} placeholder="Ej. Opcion Res" onChange={(e) => updateItem(index, "option_label", e.target.value)} />
+                                    </label>
+                                    <label className="catering-quote-line-card__selected">
+                                      <input type="checkbox" checked={Boolean(item.is_selected_option)} disabled={!canEdit} onChange={(e) => updateItem(index, "is_selected_option", e.target.checked)} />
+                                      <span>Opcion seleccionada</span>
+                                    </label>
+                                  </div>
+                                ) : null}
                                 <label className="catering-quote-line-card__description">
                                   <span>Descripcion</span>
                                   <input type="text" value={item.description} disabled={!canEdit} placeholder="Descripcion del servicio o producto" onChange={(e) => updateItem(index, "description", e.target.value)} />
@@ -431,7 +499,7 @@ export default function CateringQuoteModal({
                                   </label>
                                 </div>
                                 <div className="catering-quote-line-card__total">
-                                  <span>Total linea</span>
+                                  <span>{countsTowardTotal ? "Total linea" : "Referencia (no suma al total)"}</span>
                                   <div>
                                     <strong>{formatMoney(lineTotal)}</strong>
                                     <small>{formatQuantityLine(item)}</small>

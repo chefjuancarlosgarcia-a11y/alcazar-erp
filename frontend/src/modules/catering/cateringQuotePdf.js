@@ -11,11 +11,22 @@ import {
   repairSpanishText
 } from "./cateringTextEncoding"
 import { formatDate, formatMoney, formatTime } from "./cateringUtils"
-import { formatQuantityLine, itemTypeLabel, QUOTE_STATUS_LABELS } from "./cateringQuoteTemplates"
+import {
+  calculateQuoteTotals,
+  formatOptionDisplayTitle,
+  formatQuantityLine,
+  groupQuoteItemsForDisplay,
+  itemTypeLabel,
+  QUOTE_STATUS_LABELS
+} from "./cateringQuoteTemplates"
 
 const ACCENT = [20, 184, 166]
 const INK = [15, 23, 42]
 const MUTED = [100, 116, 139]
+const PAGE_BOTTOM = 280
+const MARGIN_LEFT = 14
+const MARGIN_RIGHT = 14
+const CONTENT_WIDTH = 182
 
 async function addLogo(doc, logoUrl, x, y, width = 30, height = 22) {
   const dataUrl = await loadQuoteLogoDataUrl(logoUrl)
@@ -72,14 +83,14 @@ function addSectionTitle(doc, title, y) {
   doc.setTextColor(...INK)
   setPdfFont(doc, "bold")
   doc.setFontSize(11)
-  doc.text(title, 14, y)
+  doc.text(title, MARGIN_LEFT, y)
   doc.setDrawColor(...ACCENT)
   doc.setLineWidth(0.6)
-  doc.line(14, y + 2, 196, y + 2)
+  doc.line(MARGIN_LEFT, y + 2, 196, y + 2)
   return y + 10
 }
 
-function addInfoBlock(doc, rows, startY, x = 14, width = 88) {
+function addInfoBlock(doc, rows, startY, x = MARGIN_LEFT, width = 88) {
   let y = startY
   doc.setFontSize(9)
   rows.forEach(([label, value]) => {
@@ -95,14 +106,89 @@ function addInfoBlock(doc, rows, startY, x = 14, width = 88) {
   return y
 }
 
+function ensurePageSpace(doc, y, neededHeight = 20) {
+  if (y + neededHeight <= PAGE_BOTTOM) return y
+  doc.addPage()
+  return 44
+}
+
+function measureWrappedText(doc, text, maxWidth, lineHeight = 4.2) {
+  const lines = doc.splitTextToSize(String(text || ""), maxWidth)
+  return { lines, height: Math.max(lines.length, 1) * lineHeight }
+}
+
+function addWrappedBlock(doc, {
+  title,
+  text,
+  y,
+  titleSize = 10,
+  bodySize = 9,
+  lineHeight = 4.2,
+  titleGap = 6,
+  blockGap = 10
+}) {
+  const safeText = String(text || "").trim()
+  if (!safeText) return y
+
+  setPdfFont(doc, "bold")
+  doc.setFontSize(titleSize)
+  doc.setTextColor(...INK)
+  const titleHeight = titleSize * 0.45 + 2
+  y = ensurePageSpace(doc, y, titleHeight + titleGap + lineHeight * 2)
+
+  doc.text(title, MARGIN_LEFT, y)
+  y += titleGap
+
+  setPdfFont(doc, "normal")
+  doc.setFontSize(bodySize)
+  doc.setTextColor(...INK)
+  const { lines, height } = measureWrappedText(doc, safeText, CONTENT_WIDTH, lineHeight)
+  y = ensurePageSpace(doc, y, height + 2)
+  doc.text(lines, MARGIN_LEFT, y)
+  return y + height + blockGap
+}
+
+function buildQuoteTableBody(sections) {
+  const body = []
+
+  sections.forEach((section) => {
+    if (section.type === "normal") {
+      const item = section.item
+      body.push([
+        itemTypeLabel(item.item_type),
+        item.description,
+        formatQuantityLine(item),
+        formatMoney(item.total_price ?? Number(item.quantity) * Number(item.unit_price))
+      ])
+      return
+    }
+
+    body.push([
+      { content: section.groupName.toUpperCase(), colSpan: 4, styles: { fontStyle: "bold", fillColor: [236, 253, 245], textColor: INK } }
+    ])
+
+    section.options.forEach((item) => {
+      const selectedMark = item.is_selected_option ? " ✓" : ""
+      body.push([
+        itemTypeLabel(item.item_type),
+        `${formatOptionDisplayTitle(item)}${selectedMark}`,
+        formatQuantityLine(item),
+        formatMoney(item.total_price ?? Number(item.quantity) * Number(item.unit_price))
+      ])
+    })
+  })
+
+  return body
+}
+
 function addCompanyFooter(doc, company, startY) {
   const lines = buildCompanyFooterLines(company)
   if (!lines.length) return startY
 
-  let y = startY + 8
+  let y = ensurePageSpace(doc, startY + 8, 24)
   doc.setDrawColor(...ACCENT)
   doc.setLineWidth(0.8)
-  doc.line(14, y, 196, y)
+  doc.line(MARGIN_LEFT, y, 196, y)
   y += 8
 
   setPdfFont(doc, "bold")
@@ -115,6 +201,7 @@ function addCompanyFooter(doc, company, startY) {
   doc.setFontSize(8)
   doc.setTextColor(...MUTED)
   lines.slice(1).forEach((line) => {
+    y = ensurePageSpace(doc, y, 6)
     doc.text(line, 105, y, { align: "center" })
     y += 4.5
   })
@@ -138,6 +225,17 @@ export async function downloadCateringQuotePdf({
   const logoUrl = resolveQuoteLogoUrl(companyRow, { ...branding, ...companyRow })
   const safeItems = repairCateringQuoteItems(items || [])
   const quoteNumber = repairSpanishText(quoteRow.quote_number || "cotizacion")
+  const sections = groupQuoteItemsForDisplay(safeItems)
+  const computedTotals = calculateQuoteTotals(
+    safeItems,
+    quoteRow.discount_amount ?? quoteRow.discountAmount ?? 0
+  )
+  const totalsRow = {
+    subtotal: computedTotals.subtotal,
+    discount_amount: computedTotals.discount_amount,
+    total: computedTotals.total,
+    has_unresolved_option_groups: computedTotals.has_unresolved_option_groups
+  }
 
   paintHeaderBand(doc)
   const hasLogo = await paintQuoteLogo(doc, logoUrl)
@@ -149,7 +247,7 @@ export async function downloadCateringQuotePdf({
     ["Nombre", requestRow.customer_name],
     ["Teléfono", requestRow.customer_phone],
     ["Correo", requestRow.customer_email]
-  ], y, 14, 88)
+  ], y, MARGIN_LEFT, 88)
 
   y = addSectionTitle(doc, "Evento", 44)
   const eventBottom = addInfoBlock(doc, [
@@ -166,34 +264,48 @@ export async function downloadCateringQuotePdf({
   autoTable(doc, {
     startY: y,
     head: [["Tipo", "Descripción", "Cantidad", "Total"]],
-    body: safeItems.map((item) => [
-      itemTypeLabel(item.item_type),
-      item.description,
-      formatQuantityLine(item),
-      formatMoney(item.total_price ?? Number(item.quantity) * Number(item.unit_price))
-    ]),
-    styles: { font: PDF_FONT_FAMILY, fontSize: 9, cellPadding: 3, textColor: INK },
+    body: buildQuoteTableBody(sections),
+    styles: { font: PDF_FONT_FAMILY, fontSize: 9, cellPadding: 3, textColor: INK, overflow: "linebreak" },
     headStyles: { font: PDF_FONT_FAMILY, fontStyle: "bold", fillColor: ACCENT, textColor: [255, 255, 255] },
     alternateRowStyles: { fillColor: [248, 250, 252] },
-    margin: { left: 14, right: 14 }
+    columnStyles: {
+      0: { cellWidth: 24 },
+      1: { cellWidth: 78 },
+      2: { cellWidth: 44 },
+      3: { cellWidth: 28, halign: "right" }
+    },
+    margin: { left: MARGIN_LEFT, right: MARGIN_RIGHT },
+    didDrawPage: (data) => {
+      if (data.pageNumber > 1) {
+        setPdfFont(doc, "normal")
+        doc.setFontSize(8)
+        doc.setTextColor(...MUTED)
+        doc.text(`${quoteNumber} — página ${data.pageNumber}`, 196, 12, { align: "right" })
+      }
+    }
   })
 
-  const tableEnd = doc.lastAutoTable.finalY + 10
+  let totalsY = doc.lastAutoTable.finalY + 10
+  totalsY = ensurePageSpace(doc, totalsY, 40)
   const totalsX = 130
-  let totalsY = tableEnd
 
   setPdfFont(doc, "normal")
   doc.setFontSize(10)
   doc.setTextColor(...INK)
 
+  const totalValue = totalsRow.has_unresolved_option_groups
+    ? "Según opción elegida"
+    : formatMoney(totalsRow.total)
+
   const totals = [
-    ["Subtotal", formatMoney(quoteRow.subtotal)],
-    ...(Number(quoteRow.discount_amount) > 0 ? [["Descuento", `-${formatMoney(quoteRow.discount_amount)}`]] : []),
-    ["Total", formatMoney(quoteRow.total)]
+    ["Subtotal", formatMoney(totalsRow.subtotal)],
+    ...(Number(totalsRow.discount_amount) > 0 ? [["Descuento", `-${formatMoney(totalsRow.discount_amount)}`]] : []),
+    ["Total", totalValue]
   ]
 
   totals.forEach(([label, value], index) => {
     const isTotal = index === totals.length - 1
+    totalsY = ensurePageSpace(doc, totalsY, 8)
     setPdfFont(doc, isTotal ? "bold" : "normal")
     doc.text(label, totalsX, totalsY)
     doc.text(value, 196, totalsY, { align: "right" })
@@ -203,14 +315,19 @@ export async function downloadCateringQuotePdf({
   doc.setFontSize(8)
   doc.setTextColor(...MUTED)
   doc.text("Precios incluyen IVA", totalsX, totalsY + 2)
+  if (totalsRow.has_unresolved_option_groups) {
+    doc.text("El total final depende de la opción de menú seleccionada.", totalsX, totalsY + 7)
+    totalsY += 5
+  }
 
-  totalsY += 12
+  totalsY += 14
+  totalsY = ensurePageSpace(doc, totalsY, 16)
   setPdfFont(doc, "bold")
   doc.setFontSize(10)
   doc.setTextColor(...INK)
-  doc.text("Vigencia", 14, totalsY)
+  doc.text("Vigencia", MARGIN_LEFT, totalsY)
   setPdfFont(doc, "normal")
-  doc.text(formatDate(quoteRow.valid_until), 14, totalsY + 6)
+  doc.text(formatDate(quoteRow.valid_until), MARGIN_LEFT, totalsY + 6)
 
   setPdfFont(doc, "bold")
   doc.text("Estado", 80, totalsY)
@@ -218,30 +335,33 @@ export async function downloadCateringQuotePdf({
   doc.text(QUOTE_STATUS_LABELS[quoteRow.status] || quoteRow.status || "—", 80, totalsY + 6)
 
   totalsY += 16
-  if (quoteRow.notes) {
-    setPdfFont(doc, "bold")
-    doc.text("Notas comerciales", 14, totalsY)
-    setPdfFont(doc, "normal")
-    doc.text(doc.splitTextToSize(quoteRow.notes, 182), 14, totalsY + 6)
-    totalsY += 18
-  }
+  totalsY = addWrappedBlock(doc, {
+    title: "Notas comerciales",
+    text: quoteRow.notes,
+    y: totalsY,
+    titleSize: 10,
+    bodySize: 9,
+    blockGap: 12
+  })
 
-  setPdfFont(doc, "bold")
-  doc.text("Términos y condiciones", 14, totalsY)
-  setPdfFont(doc, "normal")
-  doc.setFontSize(8)
-  const terms = quoteRow.terms || "Precios incluyen IVA."
-  const termsLines = doc.splitTextToSize(terms, 182)
-  doc.text(termsLines, 14, totalsY + 6)
-  totalsY += 6 + termsLines.length * 4
+  totalsY = addWrappedBlock(doc, {
+    title: "Términos y condiciones",
+    text: quoteRow.terms || "Precios incluyen IVA.",
+    y: totalsY,
+    titleSize: 10,
+    bodySize: 8,
+    lineHeight: 4,
+    blockGap: 12
+  })
 
+  totalsY = ensurePageSpace(doc, totalsY + 10, 28)
   const signatureY = totalsY + 10
   doc.setDrawColor(...MUTED)
-  doc.line(14, signatureY, 90, signatureY)
+  doc.line(MARGIN_LEFT, signatureY, 90, signatureY)
   doc.line(116, signatureY, 196, signatureY)
   doc.setFontSize(9)
   doc.setTextColor(...MUTED)
-  doc.text("Firma cliente", 14, signatureY + 5)
+  doc.text("Firma cliente", MARGIN_LEFT, signatureY + 5)
   doc.text(`Autorizado — ${companyRow?.commercialName || "Empresa"}`, 116, signatureY + 5)
 
   addCompanyFooter(doc, companyRow, signatureY + 14)

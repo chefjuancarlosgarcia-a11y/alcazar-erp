@@ -6,7 +6,10 @@ import {
 import QuoteLogoImage from "./QuoteLogoImage"
 import {
   calculateQuoteTotals,
+  formatOptionDisplayTitle,
   formatQuantityLine,
+  getLineTotal,
+  groupQuoteItemsForDisplay,
   itemTypeLabel,
   QUOTE_STATUS_LABELS
 } from "./cateringQuoteTemplates"
@@ -38,6 +41,7 @@ export default function CateringQuotePreview({
   const safeQuoteStatus = repairSpanishText(quoteStatus)
 
   const totals = calculateQuoteTotals(safeItems, discountAmount)
+  const sections = groupQuoteItemsForDisplay(safeItems)
   const brand = repairCateringCompanySettings(mergeQuoteSettings(company || {}, branding))
   const logoUrl = brand.logoUrl || ""
   const commercialName = brand.commercialName || "Empresa"
@@ -84,18 +88,47 @@ export default function CateringQuotePreview({
 
         <section className="catering-quote-preview__lines">
           <h4>Detalle</h4>
-          {safeItems.filter((item) => item.description).map((item, index) => (
-            <article key={`${index}-${item.description}`} className="catering-quote-preview__line">
-              <div>
-                <strong>{item.description}</strong>
-                <small>{itemTypeLabel(item.item_type)}</small>
-              </div>
-              <div className="catering-quote-preview__line-values">
-                <span>{formatQuantityLine(item)}</span>
-                <strong>{formatMoney((Number(item.quantity) || 0) * (Number(item.unit_price) || 0))}</strong>
-              </div>
-            </article>
-          ))}
+          {sections.map((section, sectionIndex) => {
+            if (section.type === "normal") {
+              const item = section.item
+              return (
+                <article key={`normal-${sectionIndex}-${item.description}`} className="catering-quote-preview__line">
+                  <div>
+                    <strong>{item.description}</strong>
+                    <small>{itemTypeLabel(item.item_type)}</small>
+                  </div>
+                  <div className="catering-quote-preview__line-values">
+                    <span>{formatQuantityLine(item)}</span>
+                    <strong>{formatMoney(getLineTotal(item))}</strong>
+                  </div>
+                </article>
+              )
+            }
+
+            return (
+              <section key={`group-${sectionIndex}-${section.groupName}`} className="catering-quote-preview__option-group">
+                <h5>{section.groupName.toUpperCase()}</h5>
+                {section.options.map((item, optionIndex) => (
+                  <article
+                    key={`option-${sectionIndex}-${optionIndex}-${item.description}`}
+                    className={`catering-quote-preview__line catering-quote-preview__line--option${item.is_selected_option ? " is-selected" : ""}`}
+                  >
+                    <div>
+                      <strong>{formatOptionDisplayTitle(item)}</strong>
+                      <small>
+                        {itemTypeLabel(item.item_type)}
+                        {item.is_selected_option ? " · Seleccionada" : ""}
+                      </small>
+                    </div>
+                    <div className="catering-quote-preview__line-values">
+                      <span>{formatQuantityLine(item)}</span>
+                      <strong>{formatMoney(getLineTotal(item))}</strong>
+                    </div>
+                  </article>
+                ))}
+              </section>
+            )
+          })}
         </section>
 
         <section className="catering-quote-preview__totals">
@@ -103,7 +136,17 @@ export default function CateringQuotePreview({
           {totals.discount_amount > 0 ? (
             <div><span>Descuento</span><strong>-{formatMoney(totals.discount_amount)}</strong></div>
           ) : null}
-          <div className="is-total"><span>Total</span><strong>{formatMoney(totals.total)}</strong></div>
+          <div className="is-total">
+            <span>Total</span>
+            <strong>
+              {totals.has_unresolved_option_groups ? "Según opción elegida" : formatMoney(totals.total)}
+            </strong>
+          </div>
+          {totals.has_unresolved_option_groups ? (
+            <small className="catering-quote-preview__option-note">
+              El total final depende de la opción de menú seleccionada.
+            </small>
+          ) : null}
           <small className="catering-quote-preview__vat">Precios incluyen IVA</small>
         </section>
 
@@ -137,4 +180,3 @@ export default function CateringQuotePreview({
     </aside>
   )
 }
-
