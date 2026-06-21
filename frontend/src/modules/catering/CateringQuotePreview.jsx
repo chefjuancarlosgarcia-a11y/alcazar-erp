@@ -21,6 +21,48 @@ import {
 } from "./cateringTextEncoding"
 import { formatDate, formatMoney, formatTime } from "./cateringUtils"
 
+function renderQuoteBlock(block, keyPrefix) {
+  if (block.type === "normal") {
+    const item = block.item
+    return (
+      <article key={`${keyPrefix}-normal-${item.description}`} className="catering-quote-preview__line">
+        <div>
+          <strong>{item.description}</strong>
+          <small>{itemTypeLabel(item.item_type)}</small>
+        </div>
+        <div className="catering-quote-preview__line-values">
+          <span>{formatQuantityLine(item)}</span>
+          <strong>{formatMoney(getLineTotal(item))}</strong>
+        </div>
+      </article>
+    )
+  }
+
+  return (
+    <section key={`${keyPrefix}-group-${block.groupName}`} className="catering-quote-preview__option-group">
+      <h5>{block.groupName.toUpperCase()}</h5>
+      {block.options.map((item, optionIndex) => (
+        <article
+          key={`${keyPrefix}-option-${optionIndex}-${item.description}`}
+          className={`catering-quote-preview__line catering-quote-preview__line--option${item.is_selected_option ? " is-selected" : ""}`}
+        >
+          <div>
+            <strong>{formatOptionDisplayTitle(item)}</strong>
+            <small>
+              {itemTypeLabel(item.item_type)}
+              {item.is_selected_option ? " · Seleccionada" : ""}
+            </small>
+          </div>
+          <div className="catering-quote-preview__line-values">
+            <span>{formatQuantityLine(item)}</span>
+            <strong>{formatMoney(getLineTotal(item))}</strong>
+          </div>
+        </article>
+      ))}
+    </section>
+  )
+}
+
 export default function CateringQuotePreview({
   quoteNumber,
   quoteStatus,
@@ -88,47 +130,17 @@ export default function CateringQuotePreview({
 
         <section className="catering-quote-preview__lines">
           <h4>Detalle</h4>
-          {sections.map((section, sectionIndex) => {
-            if (section.type === "normal") {
-              const item = section.item
-              return (
-                <article key={`normal-${sectionIndex}-${item.description}`} className="catering-quote-preview__line">
-                  <div>
-                    <strong>{item.description}</strong>
-                    <small>{itemTypeLabel(item.item_type)}</small>
-                  </div>
-                  <div className="catering-quote-preview__line-values">
-                    <span>{formatQuantityLine(item)}</span>
-                    <strong>{formatMoney(getLineTotal(item))}</strong>
-                  </div>
-                </article>
-              )
-            }
-
-            return (
-              <section key={`group-${sectionIndex}-${section.groupName}`} className="catering-quote-preview__option-group">
-                <h5>{section.groupName.toUpperCase()}</h5>
-                {section.options.map((item, optionIndex) => (
-                  <article
-                    key={`option-${sectionIndex}-${optionIndex}-${item.description}`}
-                    className={`catering-quote-preview__line catering-quote-preview__line--option${item.is_selected_option ? " is-selected" : ""}`}
-                  >
-                    <div>
-                      <strong>{formatOptionDisplayTitle(item)}</strong>
-                      <small>
-                        {itemTypeLabel(item.item_type)}
-                        {item.is_selected_option ? " · Seleccionada" : ""}
-                      </small>
-                    </div>
-                    <div className="catering-quote-preview__line-values">
-                      <span>{formatQuantityLine(item)}</span>
-                      <strong>{formatMoney(getLineTotal(item))}</strong>
-                    </div>
-                  </article>
-                ))}
-              </section>
-            )
-          })}
+          {sections.map((section, sectionIndex) => (
+            <section
+              key={section.sectionKey || `manual-${sectionIndex}`}
+              className={section.type === "template_section" ? "catering-quote-preview__template-section" : undefined}
+            >
+              {section.type === "template_section" ? (
+                <h5 className="catering-quote-preview__template-title">{section.sectionName.toUpperCase()}</h5>
+              ) : null}
+              {section.blocks.map((block, blockIndex) => renderQuoteBlock(block, `${sectionIndex}-${blockIndex}`))}
+            </section>
+          ))}
         </section>
 
         <section className="catering-quote-preview__totals">

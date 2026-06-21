@@ -90,7 +90,9 @@ export const CATERING_QUOTE_ITEM_TEXT_FIELDS = [
   "item_type",
   "quantity_unit",
   "option_group_name",
-  "option_label"
+  "option_label",
+  "source_template_name",
+  "section_name"
 ]
 
 export const CATERING_COMPANY_TEXT_FIELDS = [

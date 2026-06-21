@@ -50,7 +50,7 @@ export function defaultValidUntil(days = 14) {
   return date.toISOString().slice(0, 10)
 }
 
-export function createEmptyQuoteItem(sortOrder = 1) {
+export function createEmptyQuoteItem(sortOrder = 1, sectionMeta = {}) {
   return {
     item_type: "food",
     description: "",
@@ -61,7 +61,11 @@ export function createEmptyQuoteItem(sortOrder = 1) {
     line_kind: "normal",
     option_group_name: "",
     option_label: "",
-    is_selected_option: false
+    is_selected_option: false,
+    source_template_id: sectionMeta.source_template_id || null,
+    source_template_name: sectionMeta.source_template_name || "",
+    section_name: sectionMeta.section_name || "",
+    section_order: sectionMeta.section_order ?? 0
   }
 }
 
@@ -71,6 +75,23 @@ export function isQuoteOptionLine(item) {
 
 export function getQuoteOptionGroupName(item) {
   return String(item?.option_group_name || "").trim() || "Opciones"
+}
+
+export function getQuoteSectionKey(item) {
+  const sectionName = String(item?.section_name || "").trim()
+  const templateId = item?.source_template_id || ""
+  const sectionOrder = Number(item?.section_order) || 0
+  if (!sectionName && !templateId) return null
+  return `${templateId}|${sectionOrder}|${sectionName}`
+}
+
+export function getQuoteSectionLabel(item) {
+  return String(item?.section_name || item?.source_template_name || "").trim()
+}
+
+export function getQuoteOptionGroupScopeKey(item) {
+  const sectionKey = getQuoteSectionKey(item) || "general"
+  return `${sectionKey}::${getQuoteOptionGroupName(item)}`
 }
 
 export function normalizeQuoteItems(items = []) {
@@ -88,7 +109,11 @@ export function normalizeQuoteItems(items = []) {
       line_kind: lineKind === "option" ? "option" : "normal",
       option_group_name: String(item.option_group_name || item.optionGroupName || "").trim(),
       option_label: String(item.option_label || item.optionLabel || "").trim(),
-      is_selected_option: Boolean(item.is_selected_option ?? item.isSelectedOption)
+      is_selected_option: Boolean(item.is_selected_option ?? item.isSelectedOption),
+      source_template_id: item.source_template_id || item.sourceTemplateId || null,
+      source_template_name: String(item.source_template_name || item.sourceTemplateName || "").trim(),
+      section_name: String(item.section_name || item.sectionName || "").trim(),
+      section_order: Number(item.section_order ?? item.sectionOrder) || 0
     }
   })
 }
@@ -107,11 +132,11 @@ export function hasUnresolvedOptionGroups(items = []) {
 
   normalizeQuoteItems(items).forEach((item) => {
     if (!isQuoteOptionLine(item)) return
-    const groupName = getQuoteOptionGroupName(item)
-    if (!groups.has(groupName)) {
-      groups.set(groupName, { hasOptions: false, hasSelected: false })
+    const scopeKey = getQuoteOptionGroupScopeKey(item)
+    if (!groups.has(scopeKey)) {
+      groups.set(scopeKey, { hasOptions: false, hasSelected: false })
     }
-    const group = groups.get(groupName)
+    const group = groups.get(scopeKey)
     group.hasOptions = true
     if (item.is_selected_option) group.hasSelected = true
   })
@@ -136,31 +161,144 @@ export function calculateQuoteTotals(items = [], discountAmount = 0) {
   }
 }
 
-export function groupQuoteItemsForDisplay(items = []) {
-  const normalized = normalizeQuoteItems(items).filter((item) => item.description)
-  const sections = []
-  const seenGroups = new Set()
+function groupItemsIntoBlocks(items = []) {
+  const blocks = []
+  const seenOptionGroups = new Set()
 
-  normalized.forEach((item) => {
+  items.forEach((item) => {
     if (!isQuoteOptionLine(item)) {
-      sections.push({ type: "normal", item })
+      blocks.push({ type: "normal", item })
       return
     }
 
-    const groupName = getQuoteOptionGroupName(item)
-    if (seenGroups.has(groupName)) return
+    const scopeKey = getQuoteOptionGroupScopeKey(item)
+    if (seenOptionGroups.has(scopeKey)) return
 
-    seenGroups.add(groupName)
-    sections.push({
+    seenOptionGroups.add(scopeKey)
+    blocks.push({
       type: "option_group",
-      groupName,
-      options: normalized.filter(
-        (candidate) => isQuoteOptionLine(candidate) && getQuoteOptionGroupName(candidate) === groupName
+      groupName: getQuoteOptionGroupName(item),
+      options: items.filter(
+        (candidate) => isQuoteOptionLine(candidate) && getQuoteOptionGroupScopeKey(candidate) === scopeKey
       )
     })
   })
 
-  return sections
+  return blocks
+}
+
+export function groupQuoteItemsForDisplay(items = []) {
+  const normalized = normalizeQuoteItems(items).filter((item) => item.description)
+  const sections = []
+  const seenSectionKeys = new Set()
+
+  normalized.forEach((item) => {
+    const sectionKey = getQuoteSectionKey(item)
+    if (!sectionKey) return
+    if (seenSectionKeys.has(sectionKey)) return
+    seenSectionKeys.add(sectionKey)
+    const sectionItems = normalized.filter((candidate) => getQuoteSectionKey(candidate) === sectionKey)
+    sections.push({
+      type: "template_section",
+      sectionKey,
+      sectionName: getQuoteSectionLabel(sectionItems[0]) || "Plantilla",
+      sectionOrder: sectionItems[0]?.section_order ?? 0,
+      blocks: groupItemsIntoBlocks(sectionItems)
+    })
+  })
+
+  const manualItems = normalized.filter((item) => !getQuoteSectionKey(item))
+  if (manualItems.length) {
+    sections.push({
+      type: "manual_section",
+      sectionKey: null,
+      sectionName: null,
+      sectionOrder: Number.MAX_SAFE_INTEGER,
+      blocks: groupItemsIntoBlocks(manualItems)
+    })
+  }
+
+  return sections.sort((a, b) => (a.sectionOrder ?? 0) - (b.sectionOrder ?? 0))
+}
+
+export function groupQuoteItemsForEditor(items = []) {
+  const normalized = normalizeQuoteItems(items)
+  const groups = []
+  const seenSectionKeys = new Set()
+
+  normalized.forEach((item, index) => {
+    const sectionKey = getQuoteSectionKey(item)
+    if (sectionKey) {
+      if (seenSectionKeys.has(sectionKey)) return
+      seenSectionKeys.add(sectionKey)
+      const sectionItems = normalized
+        .map((candidate, candidateIndex) => ({ item: candidate, index: candidateIndex }))
+        .filter(({ item: candidate }) => getQuoteSectionKey(candidate) === sectionKey)
+      groups.push({
+        type: "template_section",
+        sectionKey,
+        sectionName: getQuoteSectionLabel(sectionItems[0]?.item) || "Plantilla",
+        sectionOrder: sectionItems[0]?.item?.section_order ?? 0,
+        lines: sectionItems
+      })
+      return
+    }
+
+    groups.push({
+      type: "manual_line",
+      sectionKey: null,
+      sectionName: null,
+      sectionOrder: item.sort_order ?? index,
+      lines: [{ item, index }]
+    })
+  })
+
+  return groups.sort((a, b) => {
+    const orderA = a.type === "template_section" ? a.sectionOrder : a.lines[0]?.item?.sort_order ?? 0
+    const orderB = b.type === "template_section" ? b.sectionOrder : b.lines[0]?.item?.sort_order ?? 0
+    return orderA - orderB
+  })
+}
+
+export function getNextTemplateSectionOrder(items = [], templateId = null) {
+  const normalized = normalizeQuoteItems(items)
+  const matching = normalized.filter((item) => item.source_template_id === templateId)
+  if (!matching.length) {
+    const maxOrder = normalized.reduce((max, item) => Math.max(max, Number(item.section_order) || 0), 0)
+    return maxOrder + 1
+  }
+  return Math.max(...matching.map((item) => Number(item.section_order) || 0)) + 1
+}
+
+export function templateAlreadyAdded(items = [], templateId) {
+  if (!templateId) return false
+  return normalizeQuoteItems(items).some((item) => item.source_template_id === templateId)
+}
+
+export function stripEmptyPlaceholderItems(items = []) {
+  const normalized = normalizeQuoteItems(items)
+  const meaningful = normalized.filter((item) => item.description)
+  return meaningful.length ? meaningful : [createEmptyQuoteItem()]
+}
+
+export function appendTemplateToQuoteItems(items = [], templateItems = [], templateMeta = {}) {
+  const baseItems = stripEmptyPlaceholderItems(items)
+  const sectionOrder = templateMeta.section_order ?? getNextTemplateSectionOrder(baseItems, templateMeta.source_template_id)
+  const sectionName = templateMeta.section_name || templateMeta.source_template_name || "Plantilla"
+  const startSortOrder = baseItems.reduce((max, item) => Math.max(max, Number(item.sort_order) || 0), 0) + 1
+  const appended = mapTemplateItemsToQuoteItems(templateItems, {
+    ...templateMeta,
+    section_name: sectionName,
+    section_order: sectionOrder,
+    startSortOrder
+  })
+  return [...baseItems, ...appended]
+}
+
+export function removeQuoteSection(items = [], sectionKey) {
+  if (!sectionKey) return stripEmptyPlaceholderItems(items)
+  const next = normalizeQuoteItems(items).filter((item) => getQuoteSectionKey(item) !== sectionKey)
+  return next.length ? next : [createEmptyQuoteItem()]
 }
 
 function roundMoney(value) {
@@ -202,17 +340,22 @@ export function buildQuotePayload(items, discountAmount, validUntil, notes, term
   }
 }
 
-export function mapTemplateItemsToQuoteItems(items = []) {
+export function mapTemplateItemsToQuoteItems(items = [], sectionMeta = {}) {
+  const startSortOrder = sectionMeta.startSortOrder ?? 1
   return items.map((item, index) => ({
     item_type: item.item_type,
     description: item.description,
     quantity: item.quantity,
     quantity_unit: item.quantity_unit || "unidades",
     unit_price: item.unit_price,
-    sort_order: item.sort_order ?? index + 1,
-    line_kind: "normal",
-    option_group_name: "",
-    option_label: "",
-    is_selected_option: false
+    sort_order: item.sort_order ?? startSortOrder + index,
+    line_kind: item.line_kind || "normal",
+    option_group_name: item.option_group_name || "",
+    option_label: item.option_label || "",
+    is_selected_option: Boolean(item.is_selected_option),
+    source_template_id: sectionMeta.source_template_id || null,
+    source_template_name: sectionMeta.source_template_name || "",
+    section_name: sectionMeta.section_name || sectionMeta.source_template_name || "",
+    section_order: sectionMeta.section_order ?? 0
   }))
 }

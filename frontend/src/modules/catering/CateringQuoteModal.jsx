@@ -17,19 +17,23 @@ import CateringQuotePreview from "./CateringQuotePreview"
 import CateringQuoteSettingsPanel from "./CateringQuoteSettingsPanel"
 import CateringQuoteTemplateManager from "./CateringQuoteTemplateManager"
 import {
+  appendTemplateToQuoteItems,
   buildQuotePayload,
   calculateQuoteTotals,
   createEmptyQuoteItem,
   DEFAULT_QUOTE_TERMS,
   formatQuantityLine,
   getLineTotal,
+  getQuoteOptionGroupScopeKey,
+  groupQuoteItemsForEditor,
   isQuoteOptionLine,
-  mapTemplateItemsToQuoteItems,
   normalizeQuoteItems,
   QUOTE_ITEM_TYPES,
   QUOTE_LINE_KINDS,
   QUANTITY_UNITS,
   QUOTE_STATUS_LABELS,
+  removeQuoteSection,
+  templateAlreadyAdded,
   defaultValidUntil
 } from "./cateringQuoteTemplates"
 import { formatDate, formatMoney, formatProducts, formatTime } from "./cateringUtils"
@@ -46,7 +50,11 @@ function mapItemsFromApi(items = []) {
     line_kind: item.line_kind || "normal",
     option_group_name: item.option_group_name || "",
     option_label: item.option_label || "",
-    is_selected_option: Boolean(item.is_selected_option)
+    is_selected_option: Boolean(item.is_selected_option),
+    source_template_id: item.source_template_id || null,
+    source_template_name: item.source_template_name || "",
+    section_name: item.section_name || "",
+    section_order: Number(item.section_order) || 0
   }))
 }
 
@@ -81,6 +89,7 @@ export default function CateringQuoteModal({
   const [mobileTab, setMobileTab] = useState("edit")
 
   const totals = useMemo(() => calculateQuoteTotals(items, discountAmount), [items, discountAmount])
+  const editorGroups = useMemo(() => groupQuoteItemsForEditor(items), [items])
   const safeRequest = useMemo(() => repairCateringRequest(displayRequest || {}), [displayRequest])
   const company = useMemo(
     () => mergeQuoteSettings(companySettings || {}, branding),
@@ -146,15 +155,36 @@ export default function CateringQuoteModal({
     setTerms(quoteRow?.terms || companySettings?.defaultTerms || DEFAULT_QUOTE_TERMS)
   }
 
-  async function handleTemplateChange(templateId) {
-    setSelectedTemplate(templateId)
-    if (!templateId) return
-    const result = await getCateringQuoteTemplateDetail(templateId)
+  async function handleAddTemplate() {
+    if (!selectedTemplate) {
+      setError("Selecciona una plantilla para agregar.")
+      return
+    }
+
+    const template = templates.find((entry) => entry.id === selectedTemplate)
+    const templateName = template?.name || "Plantilla"
+    const isDuplicate = templateAlreadyAdded(items, selectedTemplate)
+    const confirmed = window.confirm(
+      isDuplicate
+        ? "Esta plantilla ya fue agregada. ¿Deseas agregarla otra vez?"
+        : "¿Deseas agregar las líneas de esta plantilla a la cotización actual?"
+    )
+    if (!confirmed) return
+
+    const result = await getCateringQuoteTemplateDetail(selectedTemplate)
     if (result.error) {
       setError(result.error)
       return
     }
-    setItems(mapTemplateItemsToQuoteItems(result.data?.items))
+
+    setItems((current) => appendTemplateToQuoteItems(current, result.data?.items || [], {
+      source_template_id: selectedTemplate,
+      source_template_name: templateName,
+      section_name: templateName
+    }))
+    setSelectedTemplate("")
+    setMessage(`Plantilla "${templateName}" agregada a la cotización.`)
+    setError("")
   }
 
   function updateItem(index, field, value) {
@@ -173,11 +203,11 @@ export default function CateringQuoteModal({
       }
 
       if (field === "is_selected_option" && value) {
-        const groupName = next[index].option_group_name?.trim()
-        if (groupName) {
+        const scopeKey = getQuoteOptionGroupScopeKey(next[index])
+        if (scopeKey) {
           next = next.map((item, itemIndex) => {
             if (itemIndex === index) return item
-            if (isQuoteOptionLine(item) && item.option_group_name?.trim() === groupName) {
+            if (isQuoteOptionLine(item) && getQuoteOptionGroupScopeKey(item) === scopeKey) {
               return { ...item, is_selected_option: false }
             }
             return item
@@ -198,6 +228,93 @@ export default function CateringQuoteModal({
       const next = current.filter((_, itemIndex) => itemIndex !== index)
       return next.length ? next : [createEmptyQuoteItem()]
     })
+  }
+
+  function removeTemplateSectionGroup(sectionKey, sectionName) {
+    const confirmed = window.confirm(`¿Quitar la sección "${sectionName}" y todas sus líneas?`)
+    if (!confirmed) return
+    setItems((current) => removeQuoteSection(current, sectionKey))
+    setMessage(`Sección "${sectionName}" eliminada.`)
+  }
+
+  function renderLineCard(item, index) {
+    const lineTotal = getLineTotal(item)
+    const isOption = isQuoteOptionLine(item)
+    const countsTowardTotal = !isOption || item.is_selected_option
+
+    return (
+      <article key={`${index}-${item.sort_order}-${item.description}`} className={`catering-quote-line-card${isOption ? " catering-quote-line-card--option" : ""}`}>
+        <div className="catering-quote-line-card__top">
+          <strong>Linea {index + 1}{isOption ? " · Opción alternativa" : ""}</strong>
+          {canEdit ? (
+            <button
+              type="button"
+              className="ghost catering-quote-line-card__remove"
+              onClick={() => removeItem(index)}
+              aria-label={`Eliminar linea ${index + 1}`}
+              title="Eliminar linea"
+            >
+              Quitar linea
+            </button>
+          ) : null}
+        </div>
+        <label className="catering-quote-line-card__kind">
+          <span>Tipo de linea</span>
+          <select value={item.line_kind || "normal"} disabled={!canEdit} onChange={(e) => updateItem(index, "line_kind", e.target.value)}>
+            {QUOTE_LINE_KINDS.map((kind) => <option key={kind.value} value={kind.value}>{kind.label}</option>)}
+          </select>
+        </label>
+        {isOption ? (
+          <div className="catering-quote-line-card__option-fields">
+            <label>
+              <span>Nombre del grupo</span>
+              <input type="text" value={item.option_group_name || ""} disabled={!canEdit} placeholder="Ej. Platillos formales" onChange={(e) => updateItem(index, "option_group_name", e.target.value)} />
+            </label>
+            <label>
+              <span>Nombre de opcion</span>
+              <input type="text" value={item.option_label || ""} disabled={!canEdit} placeholder="Ej. Opcion Res" onChange={(e) => updateItem(index, "option_label", e.target.value)} />
+            </label>
+            <label className="catering-quote-line-card__selected">
+              <input type="checkbox" checked={Boolean(item.is_selected_option)} disabled={!canEdit} onChange={(e) => updateItem(index, "is_selected_option", e.target.checked)} />
+              <span>Opcion seleccionada</span>
+            </label>
+          </div>
+        ) : null}
+        <label className="catering-quote-line-card__description">
+          <span>Descripcion</span>
+          <input type="text" value={item.description} disabled={!canEdit} placeholder="Descripcion del servicio o producto" onChange={(e) => updateItem(index, "description", e.target.value)} />
+        </label>
+        <div className="catering-quote-line-card__grid">
+          <label>
+            <span>Tipo</span>
+            <select value={item.item_type} disabled={!canEdit} onChange={(e) => updateItem(index, "item_type", e.target.value)}>
+              {QUOTE_ITEM_TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
+            </select>
+          </label>
+          <label>
+            <span>Cantidad</span>
+            <input type="number" min="0.01" step="0.01" value={item.quantity} disabled={!canEdit} onChange={(e) => updateItem(index, "quantity", e.target.value)} />
+          </label>
+          <label>
+            <span>Unidad</span>
+            <select value={item.quantity_unit} disabled={!canEdit} onChange={(e) => updateItem(index, "quantity_unit", e.target.value)}>
+              {QUANTITY_UNITS.map((unit) => <option key={unit.value} value={unit.value}>{unit.label}</option>)}
+            </select>
+          </label>
+          <label>
+            <span>Precio unit.</span>
+            <input type="number" min="0" step="0.01" value={item.unit_price} disabled={!canEdit} onChange={(e) => updateItem(index, "unit_price", e.target.value)} />
+          </label>
+        </div>
+        <div className="catering-quote-line-card__total">
+          <span>{countsTowardTotal ? "Total linea" : "Referencia (no suma al total)"}</span>
+          <div>
+            <strong>{formatMoney(lineTotal)}</strong>
+            <small>{formatQuantityLine(item)}</small>
+          </div>
+        </div>
+      </article>
+    )
   }
 
   function handleLeadUpdated({ request: updatedRequest }) {
@@ -398,15 +515,20 @@ export default function CateringQuoteModal({
                   <section className="catering-quote-section" aria-labelledby="catering-quote-general">
                       <h3 id="catering-quote-general">Datos generales</h3>
                       <div className="catering-quote-toolbar">
-                        <label>
+                        <label className="catering-quote-toolbar__template">
                           Plantilla
-                          <select value={selectedTemplate} disabled={!canEdit} onChange={(e) => handleTemplateChange(e.target.value)}>
+                          <select value={selectedTemplate} disabled={!canEdit} onChange={(e) => setSelectedTemplate(e.target.value)}>
                             <option value="">Seleccionar plantilla</option>
                             {templates.map((template) => (
                               <option key={template.id} value={template.id}>{template.name}</option>
                             ))}
                           </select>
                         </label>
+                        {canEdit ? (
+                          <button type="button" className="ghost catering-quote-toolbar__add-template" onClick={handleAddTemplate}>
+                            + Agregar plantilla
+                          </button>
+                        ) : null}
                         <label>
                           Vigencia
                           <input type="date" value={validUntil} disabled={!canEdit} onChange={(e) => setValidUntil(e.target.value)} />
@@ -430,85 +552,35 @@ export default function CateringQuoteModal({
                         ) : null}
                       </div>
                       <div className="catering-quote-lines-stack">
-                          {items.map((item, index) => {
-                            const lineTotal = getLineTotal(item)
-                            const isOption = isQuoteOptionLine(item)
-                            const countsTowardTotal = !isOption || item.is_selected_option
+                        {editorGroups.map((group) => {
+                          if (group.type === "template_section") {
                             return (
-                              <article key={`${index}-${item.sort_order}`} className={`catering-quote-line-card${isOption ? " catering-quote-line-card--option" : ""}`}>
-                                <div className="catering-quote-line-card__top">
-                                  <strong>Linea {index + 1}{isOption ? " · Opción alternativa" : ""}</strong>
+                              <section key={group.sectionKey} className="catering-quote-template-section">
+                                <div className="catering-quote-template-section__head">
+                                  <div>
+                                    <span className="catering-quote-template-section__label">Plantilla</span>
+                                    <strong>{group.sectionName}</strong>
+                                  </div>
                                   {canEdit ? (
                                     <button
                                       type="button"
-                                      className="ghost catering-quote-line-card__remove"
-                                      onClick={() => removeItem(index)}
-                                      aria-label={`Eliminar linea ${index + 1}`}
-                                      title="Eliminar linea"
+                                      className="ghost catering-quote-template-section__remove"
+                                      onClick={() => removeTemplateSectionGroup(group.sectionKey, group.sectionName)}
                                     >
-                                      Quitar linea
+                                      Quitar sección
                                     </button>
                                   ) : null}
                                 </div>
-                                <label className="catering-quote-line-card__kind">
-                                  <span>Tipo de linea</span>
-                                  <select value={item.line_kind || "normal"} disabled={!canEdit} onChange={(e) => updateItem(index, "line_kind", e.target.value)}>
-                                    {QUOTE_LINE_KINDS.map((kind) => <option key={kind.value} value={kind.value}>{kind.label}</option>)}
-                                  </select>
-                                </label>
-                                {isOption ? (
-                                  <div className="catering-quote-line-card__option-fields">
-                                    <label>
-                                      <span>Nombre del grupo</span>
-                                      <input type="text" value={item.option_group_name || ""} disabled={!canEdit} placeholder="Ej. Platillos formales" onChange={(e) => updateItem(index, "option_group_name", e.target.value)} />
-                                    </label>
-                                    <label>
-                                      <span>Nombre de opcion</span>
-                                      <input type="text" value={item.option_label || ""} disabled={!canEdit} placeholder="Ej. Opcion Res" onChange={(e) => updateItem(index, "option_label", e.target.value)} />
-                                    </label>
-                                    <label className="catering-quote-line-card__selected">
-                                      <input type="checkbox" checked={Boolean(item.is_selected_option)} disabled={!canEdit} onChange={(e) => updateItem(index, "is_selected_option", e.target.checked)} />
-                                      <span>Opcion seleccionada</span>
-                                    </label>
-                                  </div>
-                                ) : null}
-                                <label className="catering-quote-line-card__description">
-                                  <span>Descripcion</span>
-                                  <input type="text" value={item.description} disabled={!canEdit} placeholder="Descripcion del servicio o producto" onChange={(e) => updateItem(index, "description", e.target.value)} />
-                                </label>
-                                <div className="catering-quote-line-card__grid">
-                                  <label>
-                                    <span>Tipo</span>
-                                    <select value={item.item_type} disabled={!canEdit} onChange={(e) => updateItem(index, "item_type", e.target.value)}>
-                                      {QUOTE_ITEM_TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
-                                    </select>
-                                  </label>
-                                  <label>
-                                    <span>Cantidad</span>
-                                    <input type="number" min="0.01" step="0.01" value={item.quantity} disabled={!canEdit} onChange={(e) => updateItem(index, "quantity", e.target.value)} />
-                                  </label>
-                                  <label>
-                                    <span>Unidad</span>
-                                    <select value={item.quantity_unit} disabled={!canEdit} onChange={(e) => updateItem(index, "quantity_unit", e.target.value)}>
-                                      {QUANTITY_UNITS.map((unit) => <option key={unit.value} value={unit.value}>{unit.label}</option>)}
-                                    </select>
-                                  </label>
-                                  <label>
-                                    <span>Precio unit.</span>
-                                    <input type="number" min="0" step="0.01" value={item.unit_price} disabled={!canEdit} onChange={(e) => updateItem(index, "unit_price", e.target.value)} />
-                                  </label>
+                                <div className="catering-quote-template-section__lines">
+                                  {group.lines.map(({ item, index }) => renderLineCard(item, index))}
                                 </div>
-                                <div className="catering-quote-line-card__total">
-                                  <span>{countsTowardTotal ? "Total linea" : "Referencia (no suma al total)"}</span>
-                                  <div>
-                                    <strong>{formatMoney(lineTotal)}</strong>
-                                    <small>{formatQuantityLine(item)}</small>
-                                  </div>
-                                </div>
-                              </article>
+                              </section>
                             )
-                          })}
-                        </div>
+                          }
+
+                          return group.lines.map(({ item, index }) => renderLineCard(item, index))
+                        })}
+                      </div>
                     </section>
 
                     <section className="catering-quote-section" aria-labelledby="catering-quote-notes">

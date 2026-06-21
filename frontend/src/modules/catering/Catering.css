@@ -881,6 +881,64 @@
   font-size: 12px;
 }
 
+.catering-quote-preview__template-section {
+  margin-top: 14px;
+}
+
+.catering-quote-preview__template-title {
+  margin: 0 0 10px;
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  color: #0369a1;
+}
+
+.catering-quote-template-section {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(14, 165, 233, 0.22);
+  background: rgba(224, 242, 254, 0.35);
+}
+
+.catering-quote-template-section__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.catering-quote-template-section__label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #0369a1;
+}
+
+.catering-quote-template-section__head strong {
+  font-size: 16px;
+}
+
+.catering-quote-template-section__remove {
+  color: #b91c1c;
+}
+
+.catering-quote-template-section__lines {
+  display: grid;
+  gap: 12px;
+}
+
+.catering-quote-toolbar__template {
+  min-width: 220px;
+}
+
+.catering-quote-toolbar__add-template {
+  align-self: end;
+  white-space: nowrap;
+}
+
 .catering-quote-editor {
   min-width: 0;
 }

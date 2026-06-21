@@ -152,29 +152,45 @@ function buildQuoteTableBody(sections) {
   const body = []
 
   sections.forEach((section) => {
-    if (section.type === "normal") {
-      const item = section.item
+    if (section.type === "template_section") {
       body.push([
-        itemTypeLabel(item.item_type),
-        item.description,
-        formatQuantityLine(item),
-        formatMoney(item.total_price ?? Number(item.quantity) * Number(item.unit_price))
+        {
+          content: section.sectionName.toUpperCase(),
+          colSpan: 4,
+          styles: { fontStyle: "bold", fillColor: [224, 242, 254], textColor: INK }
+        }
       ])
-      return
     }
 
-    body.push([
-      { content: section.groupName.toUpperCase(), colSpan: 4, styles: { fontStyle: "bold", fillColor: [236, 253, 245], textColor: INK } }
-    ])
+    section.blocks.forEach((block) => {
+      if (block.type === "normal") {
+        const item = block.item
+        body.push([
+          itemTypeLabel(item.item_type),
+          item.description,
+          formatQuantityLine(item),
+          formatMoney(item.total_price ?? Number(item.quantity) * Number(item.unit_price))
+        ])
+        return
+      }
 
-    section.options.forEach((item) => {
-      const selectedMark = item.is_selected_option ? " ✓" : ""
       body.push([
-        itemTypeLabel(item.item_type),
-        `${formatOptionDisplayTitle(item)}${selectedMark}`,
-        formatQuantityLine(item),
-        formatMoney(item.total_price ?? Number(item.quantity) * Number(item.unit_price))
+        {
+          content: block.groupName.toUpperCase(),
+          colSpan: 4,
+          styles: { fontStyle: "bold", fillColor: [236, 253, 245], textColor: INK }
+        }
       ])
+
+      block.options.forEach((item) => {
+        const selectedMark = item.is_selected_option ? " ✓" : ""
+        body.push([
+          itemTypeLabel(item.item_type),
+          `${formatOptionDisplayTitle(item)}${selectedMark}`,
+          formatQuantityLine(item),
+          formatMoney(item.total_price ?? Number(item.quantity) * Number(item.unit_price))
+        ])
+      })
     })
   })
 
