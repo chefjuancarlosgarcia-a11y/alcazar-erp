@@ -7,10 +7,15 @@ import { getProfilesTaskUnavailability, getTaskAssignableProfiles } from "../ser
 import { createNotification } from "../services/notificationsService"
 import {
   approveChecklistChangeRequest,
+  approveChecklistAssignmentChangeRequest,
   assignChecklistRunReplacement,
   completeChecklistRun,
   checkTemplateHasRuns,
   createChecklistRunFromTemplate,
+  cancelTodayChecklistRunByAdmin,
+  executeChecklistAssignmentResolution,
+  getChecklistRunSessionAudit,
+  reassignTodayChecklistRun,
   createChecklistChangeRequest,
   createChecklistManagementAlert,
   createChecklistTemplate,
@@ -35,6 +40,7 @@ import {
   rejectChecklistChangeRequest,
   startChecklistRun,
   submitChecklistChangeRequest,
+  submitChecklistAssignmentChangeRequest,
   updateChecklistRunItem,
   updateChecklistIncidentStatus,
   updateChecklistManagementAlertStatus,
@@ -94,6 +100,14 @@ import {
   canSeeChecklistRun,
   dedupeChecklistRunsById
 } from "../utils/checklistRunDisplay"
+import {
+  findChecklistAssignmentConflicts,
+  formatChecklistAssigneeSummary,
+  parseChecklistAssignmentChangeRequest,
+  CHECKLIST_TODAY_CANCEL_REASONS,
+  formatChecklistCancelReason,
+  canForceCancelCompletedTodayRun
+} from "../utils/checklistAssignment"
 import {
   buildChecklistCoverageMap,
   getChecklistAvailabilityLabel,
@@ -1544,7 +1558,8 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
     isSupervisorOnly,
     canProposeEdits,
     canDeleteTemplates,
-    isLibraryAdmin
+    isLibraryAdmin,
+    canManageChecklistAssignment
   } = checklistPerms
   const canCreateChecklists = canCreateDirectly
   const canEditChecklistsDirectly = canEditDirectly
@@ -1562,6 +1577,8 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   const [ensuringToday, setEnsuringToday] = useState(false)
   const [checklistAudit, setChecklistAudit] = useState(null)
   const [checklistPipelineAudit, setChecklistPipelineAudit] = useState(null)
+  const [assignmentConflict, setAssignmentConflict] = useState(null)
+  const [todayAdminAction, setTodayAdminAction] = useState(null)
   const [message, setMessage] = useState("")
   const [editingTemplate, setEditingTemplate] = useState(null)
   const [selectedRunId, setSelectedRunId] = useState("")
@@ -1857,6 +1874,17 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       setChecklistPipelineAudit(canViewChecklistLibrary ? pipelineAudit : null)
       if (canViewChecklistLibrary) {
         console.info("[checklists] pipeline audit", pipelineAudit.counts, pipelineAudit.loadDiagnostics)
+        if (pipelineAudit.duplicateTemplateGroups?.length) {
+          console.info("[checklists] duplicate template groups", pipelineAudit.duplicateTemplateGroups)
+        }
+        console.table(pipelineAudit.dedupeDetails?.filter((row) => row.displayed).map((row) => ({
+          run_id: row.run_id,
+          template_name: row.template_name,
+          assigned_user_name: row.assigned_user_name,
+          assigned_role: row.assigned_role,
+          assigned_area: row.assigned_area,
+          rowDiagnosis: row.rowDiagnosis
+        })))
       }
       if (!silent && generationWarning && todayCount === 0) {
         setMessage(`${generationWarning} Aplica la migracion 112 en Supabase si aun no lo hiciste, luego recarga con Ctrl+Shift+R.`)
@@ -2119,7 +2147,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
     }
   }
 
-  async function assignTemplate(payload) {
+  async function assignTemplate(payload, resolution = null) {
     if (!payload.template_id) return setMessage("Selecciona una plantilla.")
     const template = templates.find((item) => item.id === payload.template_id)
     const pendingRequest = template ? getTemplatePendingRequest(template, changeRequests) : null
@@ -2129,9 +2157,63 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
     if (template?.status !== "active") {
       return setMessage("Esta checklist aun no esta activa. Espera la aprobacion antes de asignarla.")
     }
+
+    if (resolution?.mode === "cancel") {
+      setAssignmentConflict(null)
+      return { ok: false, cancelled: true }
+    }
+
+    if (!resolution) {
+      const { conflicts } = findChecklistAssignmentConflicts(payload, runs)
+      if (conflicts.length) {
+        setAssignmentConflict({
+          payload,
+          conflicts,
+          templateTitle: template?.title || ""
+        })
+        return { ok: false, needsConflictResolution: true }
+      }
+    }
+
     setLoading(true)
     try {
-      const result = await createChecklistRunFromTemplate(payload.template_id, payload)
+      let result
+      if (resolution?.mode === "request") {
+        if (!resolution.reason?.trim()) {
+          setMessage("Indica el motivo del cambio de responsable.")
+          return { ok: false, error: new Error("missing_reason") }
+        }
+        result = await submitChecklistAssignmentChangeRequest({
+          payload,
+          conflictingRuns: resolution.conflicts || assignmentConflict?.conflicts || [],
+          reason: resolution.reason.trim(),
+          templateTitle: template?.title || assignmentConflict?.templateTitle || "",
+          submittedByProfileId: user?.id
+        })
+        if (result.error) {
+          console.error("Checklist assignment request error:", result.error)
+          setMessage(result.error.message || "No se pudo enviar la solicitud de cambio.")
+          return { ok: false, error: result.error }
+        }
+        setAssignmentConflict(null)
+        setMessage("Solicitud de cambio de responsable enviada a gerencia para aprobacion.")
+        await refresh()
+        return { ok: true, pendingApproval: true, message: "Solicitud enviada." }
+      }
+
+      if (resolution?.mode === "replace" || resolution?.mode === "additional") {
+        result = await executeChecklistAssignmentResolution({
+          payload,
+          conflictingRuns: resolution.conflicts || assignmentConflict?.conflicts || [],
+          mode: resolution.mode,
+          reason: resolution.reason?.trim() || "",
+          requestedByProfileId: user?.id
+        })
+        setAssignmentConflict(null)
+      } else {
+        result = await createChecklistRunFromTemplate(payload.template_id, payload)
+      }
+
       if (result.error) {
         console.error("Checklist assignment error:", result.error)
         setMessage("No se pudo asignar la checklist.")
@@ -2154,7 +2236,13 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       let successMessage = ""
       if (runDate === operationalToday) {
         setSection("today")
-        successMessage = assignedRun.existedAlready ? "Esta checklist ya está asignada para hoy." : "Checklist asignada correctamente."
+        if (resolution?.mode === "replace") {
+          successMessage = "Responsable reemplazado correctamente."
+        } else if (resolution?.mode === "additional") {
+          successMessage = "Asignacion adicional creada correctamente."
+        } else {
+          successMessage = assignedRun.existedAlready ? "Esta checklist ya está asignada para hoy." : "Checklist asignada correctamente."
+        }
       } else {
         setSection("templates")
         successMessage = `Checklist asignada para ${formatChecklistRunDateLabel(runDate)}.`
@@ -2169,6 +2257,50 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       setLoading(false)
     }
   }
+
+  const handleCancelTodayRun = useCallback(async ({ run, cancelReason, forceCompletedCancel = false }) => {
+    const result = await cancelTodayChecklistRunByAdmin({
+      runId: run.id,
+      cancelReason,
+      userRole,
+      forceCompletedCancel,
+      run,
+      actorProfileId: user?.id
+    })
+    if (result.error?.code === "CONFIRM_COMPLETED_CANCEL" || result.error?.message === "CONFIRM_COMPLETED_CANCEL") {
+      return { ok: false, needsCompletedConfirm: true, error: result.error }
+    }
+    if (result.error) {
+      setMessage(result.error.message || "No se pudo cancelar la checklist.")
+      return { ok: false, error: result.error }
+    }
+    setRuns((current) => current.map((item) => (
+      item.id === run.id ? { ...item, ...(result.data || {}), status: "cancelled" } : item
+    )))
+    setMessage("Checklist cancelada para hoy.")
+    return { ok: true }
+  }, [user?.id, userRole])
+
+  const handleReassignTodayRun = useCallback(async ({ run, assignmentPayload, reason }) => {
+    setLoading(true)
+    try {
+      const result = await reassignTodayChecklistRun({
+        run,
+        assignmentPayload,
+        reason,
+        requestedByProfileId: user?.id
+      })
+      if (result.error) {
+        setMessage(result.error.message || "No se pudo reasignar la checklist.")
+        return { ok: false, error: result.error }
+      }
+      await refresh({ silent: true })
+      setMessage("Responsable reemplazado correctamente.")
+      return { ok: true, data: result.data }
+    } finally {
+      setLoading(false)
+    }
+  }, [refresh, user?.id])
 
   async function duplicateTemplate(template) {
     if (!canCreateDirectly) return setMessage("No tienes permiso para duplicar plantillas.")
@@ -2352,7 +2484,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
         {loading && runs.length === 0 && <span className="tasks-access-chip">Cargando</span>}
       </article>
 
-      {message && <p className={message.includes("correctamente") || message.includes("asignada") || message.includes("guardad") || message.includes("enviad") || message.includes("actualizad") ? "tasks-success" : "tasks-warning"} role="status">{message}</p>}
+      {message && <p className={message.includes("correctamente") || message.includes("asignada") || message.includes("cancelada") || message.includes("guardad") || message.includes("enviad") || message.includes("actualizad") || message.includes("reemplazado") ? "tasks-success" : "tasks-warning"} role="status">{message}</p>}
 
       <nav className="checklists-main-tabs" aria-label="Checklists">
         {sections.map(([id, label]) => (
@@ -2391,6 +2523,9 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
           checklistAudit={checklistAudit}
           checklistPipelineAudit={checklistPipelineAudit}
           onGoToOverdue={() => setSection("overdue")}
+          canManageTodayAdminActions={canManageChecklistAssignment}
+          canForceCancelCompleted={canForceCancelCompletedTodayRun(userRole)}
+          onTodayAdminAction={setTodayAdminAction}
         />
       )}
       {section === "overdue" && (
@@ -2513,6 +2648,18 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
           profiles={profiles}
           initialRequestId={initialChecklistView === "approvals" ? initialRunId : ""}
           onApprove={async (request, notes) => {
+            const assignmentChange = parseChecklistAssignmentChangeRequest(request)
+            if (assignmentChange) {
+              const result = await approveChecklistAssignmentChangeRequest(request, {
+                reviewNotes: notes,
+                approvedByProfileId: user?.id,
+                runs
+              })
+              if (result.error) return setMessage(result.error.message || "No se pudo aprobar el cambio de responsable.")
+              setMessage("Cambio de responsable aprobado y aplicado.")
+              refresh()
+              return
+            }
             const result = await approveChecklistChangeRequest(request.id, notes)
             if (result.error) return setMessage(result.error.message || "No se pudo aprobar la solicitud.")
             setMessage(
@@ -2570,6 +2717,28 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
         />
       )}
       {section === "reports" && canViewChecklistLibrary && <ChecklistReports runs={visibleRuns} templates={templates} profiles={profiles} />}
+      {todayAdminAction ? (
+        <ChecklistTodayAdminActionHost
+          action={todayAdminAction}
+          profiles={profiles}
+          currentUser={user}
+          userRole={userRole}
+          canForceCancelCompleted={canForceCancelCompletedTodayRun(userRole)}
+          onClose={() => setTodayAdminAction(null)}
+          onCancelTodayRun={handleCancelTodayRun}
+          onReassignTodayRun={handleReassignTodayRun}
+        />
+      ) : null}
+      {assignmentConflict ? (
+        <ChecklistAssignmentConflictModal
+          conflict={assignmentConflict}
+          profiles={profiles}
+          canManageAssignment={canManageChecklistAssignment}
+          isSupervisorOnly={isSupervisorOnly}
+          onClose={() => setAssignmentConflict(null)}
+          onResolve={(resolution) => assignTemplate(assignmentConflict.payload, resolution)}
+        />
+      ) : null}
     </div>
   )
 }
@@ -2633,7 +2802,9 @@ function ChecklistToday({
   onEnsureToday,
   checklistAudit = null,
   checklistPipelineAudit = null,
-  onGoToOverdue
+  onGoToOverdue,
+  canManageTodayAdminActions = false,
+  onTodayAdminAction
 }) {
   const operationalToday = getChecklistOperationalDate()
   const todayRuns = useMemo(
@@ -2703,6 +2874,8 @@ function ChecklistToday({
                 coverage={coverageByRunId?.[run.id]}
                 canAssignReplacement={canAssignReplacement?.(run)}
                 onAssignReplacement={onAssignReplacement}
+                canManageTodayAdminActions={canManageTodayAdminActions}
+                onTodayAdminAction={onTodayAdminAction}
                 onOpen={() => (run.status === "pending" ? onStart(run.id) : onSelect(run.id))}
               />
             ))}
@@ -3018,8 +3191,19 @@ function ChecklistTodayContextBadges({ run, variant = "today" }) {
   )
 }
 
-function ChecklistTodayCard({ run, profiles, coverage, canAssignReplacement, onAssignReplacement, onOpen, variant = "today" }) {
+function ChecklistTodayCard({
+  run,
+  profiles,
+  coverage,
+  canAssignReplacement,
+  onAssignReplacement,
+  canManageTodayAdminActions = false,
+  onTodayAdminAction,
+  onOpen,
+  variant = "today"
+}) {
   const [replacementOpen, setReplacementOpen] = useState(false)
+  const [actionsOpen, setActionsOpen] = useState(false)
   const progress = checklistRunProgress(run)
   const completedItems = (run.checklist_run_items || []).filter(itemHasAnswer).length
   const totalItems = run.checklist_run_items?.length || 0
@@ -3043,7 +3227,29 @@ function ChecklistTodayCard({ run, profiles, coverage, canAssignReplacement, onA
           <p>{run.area || "Sin area"}</p>
           <ChecklistResponsibleInfo run={run} profiles={profiles} compact />
         </div>
-        <ChecklistTodayContextBadges run={run} variant={variant} />
+        <div className="checklist-card-top-actions">
+          <ChecklistTodayContextBadges run={run} variant={variant} />
+          {variant === "today" && canManageTodayAdminActions && onTodayAdminAction ? (
+            <div className="checklist-card-actions-menu">
+              <button
+                type="button"
+                className="checklist-card-actions-trigger"
+                aria-haspopup="menu"
+                aria-expanded={actionsOpen}
+                onClick={() => setActionsOpen((current) => !current)}
+              >
+                ⋯ Acciones
+              </button>
+              {actionsOpen ? (
+                <div className="checklist-card-actions-dropdown" role="menu">
+                  <button type="button" role="menuitem" onClick={() => { setActionsOpen(false); onTodayAdminAction({ type: "reassign", run }) }}>Reasignar responsable</button>
+                  <button type="button" role="menuitem" onClick={() => { setActionsOpen(false); onTodayAdminAction({ type: "cancel", run }) }}>Desasignar / cancelar de hoy</button>
+                  <button type="button" role="menuitem" onClick={() => { setActionsOpen(false); onTodayAdminAction({ type: "audit", run }) }}>Ver auditoría</button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
       </div>
       <div className="checklist-today-schedule">
         <p className={`checklist-today-schedule__primary${isChecklistOperationallyExpired(run) || displayStatus === CHECKLIST_OPERATIONAL_STATUS.PENDIENTE_ATRASADA ? " is-overdue" : ""}`}>{scheduleLabel}</p>
@@ -3087,6 +3293,249 @@ function ChecklistTodayCard({ run, profiles, coverage, canAssignReplacement, onA
         </div>
       ) : null}
     </article>
+  )
+}
+
+function ChecklistTodayAdminActionHost({
+  action,
+  profiles,
+  currentUser,
+  userRole,
+  canForceCancelCompleted,
+  onClose,
+  onCancelTodayRun,
+  onReassignTodayRun
+}) {
+  if (!action?.run) return null
+  if (action.type === "cancel") {
+    return (
+      <ChecklistTodayCancelModal
+        run={action.run}
+        canForceCancelCompleted={canForceCancelCompleted}
+        onClose={onClose}
+        onConfirm={onCancelTodayRun}
+      />
+    )
+  }
+  if (action.type === "reassign") {
+    return (
+      <ChecklistTodayReassignModal
+        run={action.run}
+        profiles={profiles}
+        currentUser={currentUser}
+        userRole={userRole}
+        onClose={onClose}
+        onConfirm={onReassignTodayRun}
+      />
+    )
+  }
+  if (action.type === "audit") {
+    return (
+      <ChecklistRunAuditModal
+        run={action.run}
+        profiles={profiles}
+        onClose={onClose}
+      />
+    )
+  }
+  return null
+}
+
+function ChecklistTodayCancelModal({ run, canForceCancelCompleted, onClose, onConfirm }) {
+  const [reasonKey, setReasonKey] = useState("duplicate_error")
+  const [customReason, setCustomReason] = useState("")
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState("")
+  const [confirmCompleted, setConfirmCompleted] = useState(false)
+  const isCompleted = run.status === "completed"
+  const cancelReason = reasonKey === "other" ? customReason.trim() : formatChecklistCancelReason(reasonKey)
+
+  async function submit(forceCompletedCancel = false) {
+    setError("")
+    if (!cancelReason) {
+      setError("Indica el motivo de la cancelación.")
+      return
+    }
+    if (isCompleted && !canForceCancelCompleted) {
+      setError("No se puede cancelar una checklist completada.")
+      return
+    }
+    if (isCompleted && canForceCancelCompleted && !confirmCompleted && !forceCompletedCancel) {
+      setError("CONFIRM_COMPLETED")
+      return
+    }
+    setSaving(true)
+    const result = await onConfirm({
+      run,
+      cancelReason,
+      forceCompletedCancel: Boolean(forceCompletedCancel || (isCompleted && confirmCompleted))
+    })
+    setSaving(false)
+    if (result?.needsCompletedConfirm && canForceCancelCompleted) {
+      setError("CONFIRM_COMPLETED")
+      return
+    }
+    if (result?.ok) {
+      onClose()
+      return
+    }
+    if (!result?.needsCompletedConfirm) {
+      setError("No se pudo cancelar la checklist.")
+    }
+  }
+
+  return (
+    <div className="tasks-modal-backdrop" role="presentation" onClick={(event) => { if (event.target === event.currentTarget && !saving) onClose() }}>
+      <article className="tasks-panel checklist-assign-panel checklist-conflict-panel" role="dialog" aria-modal="true">
+        <div className="tasks-panel-title">
+          <div>
+            <h2>Cancelar checklist de hoy</h2>
+            <p className="tasks-muted">{run.checklist_templates?.title || "Checklist"}</p>
+          </div>
+          <button type="button" disabled={saving} onClick={onClose}>Cerrar</button>
+        </div>
+        <p>La corrida se marcará como <strong>cancelada</strong> y desaparecerá del tablero de Hoy. El historial se conserva en BD.</p>
+        {isCompleted && canForceCancelCompleted ? (
+          <p className="tasks-warning">Esta checklist ya fue completada. Solo admin puede cancelarla de todos modos.</p>
+        ) : null}
+        <Field label="Motivo">
+          <select value={reasonKey} onChange={(event) => setReasonKey(event.target.value)}>
+            {CHECKLIST_TODAY_CANCEL_REASONS.map(([id, label]) => (
+              <option key={id} value={id}>{label}</option>
+            ))}
+          </select>
+        </Field>
+        {reasonKey === "other" ? (
+          <Field label="Describe el motivo">
+            <textarea value={customReason} onChange={(event) => setCustomReason(event.target.value)} />
+          </Field>
+        ) : null}
+        {error === "CONFIRM_COMPLETED" ? (
+          <div className="checklists-empty-actions">
+            <p className="tasks-warning">Esta checklist ya fue completada. ¿Deseas cancelar de todos modos?</p>
+            <button type="button" className="tasks-primary" disabled={saving} onClick={() => submit(true)}>Sí, cancelar completada</button>
+          </div>
+        ) : null}
+        {error && error !== "CONFIRM_COMPLETED" ? <p className="tasks-warning" role="alert">{error}</p> : null}
+        <div className="checklists-empty-actions">
+          <button type="button" className="tasks-primary" disabled={saving} onClick={() => submit(false)}>
+            {saving ? "Cancelando..." : "Confirmar cancelación"}
+          </button>
+          <button type="button" className="tasks-secondary" disabled={saving} onClick={onClose}>Volver</button>
+        </div>
+      </article>
+    </div>
+  )
+}
+
+function ChecklistTodayReassignModal({ run, profiles, currentUser, userRole, onClose, onConfirm }) {
+  const isSupervisorOnly = normalizeRole(userRole) === "supervisor"
+  const supervisorArea = currentUser?.area_name || ""
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState("")
+  const [reason, setReason] = useState("")
+  const [form, setForm] = useState({
+    area: run.area || "",
+    assigned_role: run.assigned_role || "",
+    assigned_profile_id: run.assigned_profile_id || "",
+    due_time: run.due_time || ""
+  })
+  const assignableProfiles = useMemo(
+    () => getChecklistAssignableProfiles(currentUser, profiles, { templateArea: form.area || run.area || "" }),
+    [currentUser, profiles, form.area, run.area]
+  )
+
+  async function submit() {
+    setError("")
+    if (!reason.trim()) {
+      setError("Indica el motivo del cambio de responsable.")
+      return
+    }
+    setSaving(true)
+    const result = await onConfirm({ run, assignmentPayload: form, reason: reason.trim() })
+    setSaving(false)
+    if (result?.ok) onClose()
+    else setError("No se pudo reasignar la checklist.")
+  }
+
+  return (
+    <div className="tasks-modal-backdrop" role="presentation" onClick={(event) => { if (event.target === event.currentTarget && !saving) onClose() }}>
+      <article className="tasks-panel checklist-assign-panel checklist-conflict-panel" role="dialog" aria-modal="true">
+        <div className="tasks-panel-title">
+          <div>
+            <h2>Reasignar responsable</h2>
+            <p className="tasks-muted">{run.checklist_templates?.title || "Checklist"}</p>
+          </div>
+          <button type="button" disabled={saving} onClick={onClose}>Cerrar</button>
+        </div>
+        <p>Responsable actual: <strong>{formatChecklistAssigneeSummary(run, profiles)}</strong></p>
+        <div className="tasks-form-grid">
+          <Field label="Area"><input value={form.area} disabled={isSupervisorOnly && supervisorArea} onChange={(event) => setForm((current) => ({ ...current, area: event.target.value }))} /></Field>
+          <Field label="Rol/Puesto"><select value={form.assigned_role} onChange={(event) => setForm((current) => ({ ...current, assigned_role: event.target.value }))}><option value="">Rol libre</option>{CHECKLIST_ROLES.map((role) => <option key={role}>{role}</option>)}</select></Field>
+          <Field label="Colaborador"><select value={form.assigned_profile_id} onChange={(event) => setForm((current) => ({ ...current, assigned_profile_id: event.target.value }))}><option value="">Sin colaborador especifico</option>{assignableProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.full_name || profile.username}</option>)}</select></Field>
+          <Field label="Hora limite"><input type="time" value={form.due_time || ""} onChange={(event) => setForm((current) => ({ ...current, due_time: event.target.value }))} /></Field>
+        </div>
+        <Field label="Motivo del cambio"><textarea value={reason} onChange={(event) => setReason(event.target.value)} /></Field>
+        {error ? <p className="tasks-warning" role="alert">{error}</p> : null}
+        <button type="button" className="tasks-primary" disabled={saving} onClick={submit}>{saving ? "Reasignando..." : "Reemplazar responsable"}</button>
+      </article>
+    </div>
+  )
+}
+
+function ChecklistRunAuditModal({ run, profiles, onClose }) {
+  const [loading, setLoading] = useState(true)
+  const [events, setEvents] = useState([])
+  const [error, setError] = useState("")
+
+  useEffect(() => {
+    let active = true
+    setLoading(true)
+    getChecklistRunSessionAudit(run.id).then((result) => {
+      if (!active) return
+      if (result.error) {
+        setError(result.error.message || "No se pudo cargar la auditoría.")
+        setEvents([])
+      } else {
+        setEvents(result.data || [])
+      }
+      setLoading(false)
+    })
+    return () => { active = false }
+  }, [run.id])
+
+  return (
+    <div className="tasks-modal-backdrop" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) onClose() }}>
+      <article className="tasks-panel checklist-assign-panel checklist-conflict-panel" role="dialog" aria-modal="true">
+        <div className="tasks-panel-title">
+          <div>
+            <h2>Auditoría de corrida</h2>
+            <p className="tasks-muted">{run.checklist_templates?.title || "Checklist"} · {run.id}</p>
+          </div>
+          <button type="button" onClick={onClose}>Cerrar</button>
+        </div>
+        {loading ? <p className="tasks-muted">Cargando eventos...</p> : null}
+        {error ? <p className="tasks-warning" role="alert">{error}</p> : null}
+        {!loading && !error ? (
+          <div className="checklist-audit-events">
+            {!events.length ? <p className="tasks-muted">Sin eventos registrados para esta corrida.</p> : null}
+            {events.map((event) => (
+              <article key={event.id} className="checklist-audit-event">
+                <header>
+                  <strong>{event.event_type}</strong>
+                  <span>{new Date(event.created_at).toLocaleString("es-GT")}</span>
+                </header>
+                <p>{profileDisplayName(profiles, event.profile_id, "Sistema")}</p>
+                {event.details?.cancel_reason ? <p>Motivo: {event.details.cancel_reason}</p> : null}
+                {event.details?.reason ? <p>Motivo: {event.details.reason}</p> : null}
+                {event.details?.previous_status ? <p>Estado anterior: {event.details.previous_status}</p> : null}
+                {event.details?.mode ? <p>Modo: {event.details.mode}</p> : null}
+              </article>
+            ))}
+          </div>
+        ) : null}
+      </article>
+    </div>
   )
 }
 
@@ -3295,6 +3744,11 @@ function ChecklistTemplatesView({ templates, changeRequests = [], profiles, curr
             onAssign={async (payload) => {
               setFeedback("Asignando checklist...")
               const result = await onAssign(payload)
+              if (result?.needsConflictResolution) {
+                setAssigning(null)
+                setFeedback("")
+                return result
+              }
               if (result?.ok) {
                 setFeedback(result.message || "Checklist asignada correctamente.")
                 setAssigning(null)
@@ -3345,7 +3799,9 @@ function ChecklistAssignPanel({ template, profiles, currentUser, userRole, onClo
       run_date: getChecklistOperationalDate()
     })
     if (!result?.ok) {
-      setError("No se pudo asignar la checklist.")
+      if (!result?.needsConflictResolution) {
+        setError("No se pudo asignar la checklist.")
+      }
       setSaving(false)
     }
   }
@@ -3364,6 +3820,99 @@ function ChecklistAssignPanel({ template, profiles, currentUser, userRole, onClo
       <Field label="Observacion"><textarea value={form.notes} onChange={(event) => update("notes", event.target.value)} /></Field>
       <button type="button" className="tasks-primary" disabled={saving} onClick={submit}>{saving ? "Asignando..." : "Asignar"}</button>
     </article>
+  )
+}
+
+function ChecklistAssignmentConflictModal({
+  conflict,
+  profiles,
+  canManageAssignment,
+  isSupervisorOnly,
+  onClose,
+  onResolve
+}) {
+  const [reason, setReason] = useState("")
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState("")
+  const currentAssignees = conflict.conflicts.map((run) => formatChecklistAssigneeSummary(run, profiles))
+  const newAssignee = formatChecklistAssigneeSummary({
+    assigned_profile_id: conflict.payload.assigned_profile_id,
+    assigned_role: conflict.payload.assigned_role,
+    area: conflict.payload.area
+  }, profiles)
+
+  async function resolve(mode) {
+    setError("")
+    if ((mode === "request" || mode === "replace") && !reason.trim()) {
+      setError("Indica el motivo del cambio.")
+      return
+    }
+    setSaving(true)
+    const result = await onResolve({
+      mode,
+      reason: reason.trim(),
+      conflicts: conflict.conflicts
+    })
+    setSaving(false)
+    if (result?.ok || result?.pendingApproval) {
+      onClose()
+      return
+    }
+    if (result?.cancelled) {
+      onClose()
+      return
+    }
+    if (!result?.needsConflictResolution) {
+      setError("No se pudo completar la operacion.")
+    }
+  }
+
+  return (
+    <div className="tasks-modal-backdrop" role="presentation" onClick={(event) => { if (event.target === event.currentTarget && !saving) onClose() }}>
+      <article className="tasks-panel checklist-assign-panel checklist-conflict-panel" role="dialog" aria-modal="true" aria-labelledby="checklist-conflict-title">
+        <div className="tasks-panel-title">
+          <div>
+            <h2 id="checklist-conflict-title">Asignacion existente</h2>
+            <p className="tasks-muted">{conflict.templateTitle}</p>
+          </div>
+          <button type="button" disabled={saving} onClick={onClose}>Cerrar</button>
+        </div>
+        <p>
+          Esta checklist ya esta asignada a <strong>{currentAssignees.join(", ")}</strong>.
+          {" "}Deseas reemplazar el responsable por <strong>{newAssignee}</strong> o crear una asignacion adicional?
+        </p>
+        <ul className="checklists-audit-list">
+          {conflict.conflicts.map((run) => (
+            <li key={run.id}>
+              run_id: {run.id} · {formatChecklistAssigneeSummary(run, profiles)}
+              {run.assigned_role ? ` · rol:${run.assigned_role}` : ""}
+              {run.area ? ` · area:${run.area}` : ""}
+            </li>
+          ))}
+        </ul>
+        <Field label="Motivo del cambio" hint={isSupervisorOnly ? "Obligatorio para enviar la solicitud a gerencia." : undefined}>
+          <textarea value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Ej. cambio de turno, permiso, cobertura..." />
+        </Field>
+        {error ? <p className="tasks-warning" role="alert">{error}</p> : null}
+        <div className="checklists-empty-actions">
+          {canManageAssignment ? (
+            <>
+              <button type="button" className="tasks-primary" disabled={saving} onClick={() => resolve("replace")}>
+                {saving ? "Procesando..." : "Reemplazar responsable"}
+              </button>
+              <button type="button" className="tasks-secondary" disabled={saving} onClick={() => resolve("additional")}>
+                Crear asignacion adicional
+              </button>
+            </>
+          ) : isSupervisorOnly ? (
+            <button type="button" className="tasks-primary" disabled={saving} onClick={() => resolve("request")}>
+              {saving ? "Enviando..." : "Solicitar cambio a gerencia"}
+            </button>
+          ) : null}
+          <button type="button" className="tasks-secondary" disabled={saving} onClick={() => resolve("cancel")}>Cancelar</button>
+        </div>
+      </article>
+    </div>
   )
 }
 
@@ -4558,6 +5107,7 @@ function ChecklistApprovals({ requests, templates, profiles, initialRequestId = 
   const [notes, setNotes] = useState("")
   const visible = (requests || []).filter((request) => canApprove || request.submitted_by)
   const selected = visible.find((request) => request.id === selectedId) || visible.find((request) => request.status === "pending_review")
+  const selectedAssignmentChange = selected ? parseChecklistAssignmentChangeRequest(selected) : null
   const currentTemplate = selected?.template_id ? templates.find((template) => template.id === selected.template_id) : null
 
   useEffect(() => {
@@ -4573,7 +5123,7 @@ function ChecklistApprovals({ requests, templates, profiles, initialRequestId = 
             <button type="button" className={selected?.id === request.id ? "checklist-approval-card selected" : "checklist-approval-card"} key={request.id} onClick={() => { setSelectedId(request.id); setNotes("") }}>
               <span className="tasks-badge">{approvalStatusLabel(request.status)}</span>
               <strong>{request.title}</strong>
-              <small>{request.request_type === "create" ? "Nueva plantilla" : "Cambio de plantilla"} · {profileDisplayName(profiles, request.submitted_by)} · {new Date(request.submitted_at || request.created_at).toLocaleDateString("es-GT")}</small>
+              <small>{selectedAssignmentChange ? "Cambio de responsable" : (request.request_type === "create" ? "Nueva plantilla" : "Cambio de plantilla")} · {profileDisplayName(profiles, request.submitted_by)} · {new Date(request.submitted_at || request.created_at).toLocaleDateString("es-GT")}</small>
             </button>
           ))}
           {!visible.length && <FriendlyEmpty title="No hay solicitudes pendientes." text="Cuando un supervisor envie una plantilla a aprobacion aparecera aqui." />}
@@ -4582,19 +5132,43 @@ function ChecklistApprovals({ requests, templates, profiles, initialRequestId = 
 
       {selected && (
         <article className="tasks-panel checklist-approval-detail">
-          <div className="tasks-panel-title"><div><h2>{selected.title}</h2><p className="tasks-muted">{approvalStatusLabel(selected.status)} · {selected.request_type === "create" ? "Nueva plantilla" : "Cambio de plantilla"}</p></div><span className="tasks-badge">{selected.area || "Sin area"}</span></div>
+          <div className="tasks-panel-title"><div><h2>{selected.title}</h2><p className="tasks-muted">{approvalStatusLabel(selected.status)} · {selectedAssignmentChange ? "Cambio de responsable" : (selected.request_type === "create" ? "Nueva plantilla" : "Cambio de plantilla")}</p></div><span className="tasks-badge">{selected.area || "Sin area"}</span></div>
           <div className="checklist-review-summary">
             <div><span>Creador</span><strong>{profileDisplayName(profiles, selected.submitted_by)}</strong></div>
             <div><span>Fecha</span><strong>{new Date(selected.submitted_at || selected.created_at).toLocaleString("es-GT")}</strong></div>
-            <div><span>Items</span><strong>{(selected.items_snapshot || []).length}</strong></div>
+            <div><span>{selectedAssignmentChange ? "Tipo" : "Items"}</span><strong>{selectedAssignmentChange ? "Reasignacion" : (selected.items_snapshot || []).length}</strong></div>
           </div>
-          <div className="checklist-compare-grid">
-            <ChecklistVersionSummary title="Version actual" template={currentTemplate} />
-            <ChecklistRequestSummary title="Version propuesta" request={selected} />
-          </div>
-          <div className="checklist-preview-items">
-            {(selected.items_snapshot || []).map((item, index) => <div key={`${selected.id}-${index}`}><strong>{index + 1}. {item.title}</strong><span>{friendlyResponseType(item.response_type)}{item.requires_photo ? " · foto" : ""}{item.requires_comment ? " · comentario" : ""}</span></div>)}
-          </div>
+          {selectedAssignmentChange ? (
+            <div className="checklist-compare-grid">
+              <div className="checklist-version-box">
+                <strong>Responsable(s) actual(es)</strong>
+                <ul className="checklists-audit-list">
+                  {(selectedAssignmentChange.previous_assignments || []).map((item) => (
+                    <li key={item.run_id}>
+                      {profileDisplayName(profiles, item.assigned_profile_id) || item.assigned_role || item.area || "Sin asignar"}
+                      {" "}· run_id {item.run_id}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="checklist-version-box proposed">
+                <strong>Nuevo responsable</strong>
+                <span>{profileDisplayName(profiles, selectedAssignmentChange.new_assignment?.assigned_profile_id) || selectedAssignmentChange.new_assignment?.assigned_role || selectedAssignmentChange.new_assignment?.area || "Sin asignar"}</span>
+                <small>Fecha operativa: {selectedAssignmentChange.run_date || selectedAssignmentChange.new_assignment?.run_date || "—"}</small>
+                <small>Motivo: {selectedAssignmentChange.reason || selected.description || "—"}</small>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="checklist-compare-grid">
+                <ChecklistVersionSummary title="Version actual" template={currentTemplate} />
+                <ChecklistRequestSummary title="Version propuesta" request={selected} />
+              </div>
+              <div className="checklist-preview-items">
+                {(selected.items_snapshot || []).map((item, index) => <div key={`${selected.id}-${index}`}><strong>{index + 1}. {item.title}</strong><span>{friendlyResponseType(item.response_type)}{item.requires_photo ? " · foto" : ""}{item.requires_comment ? " · comentario" : ""}</span></div>)}
+              </div>
+            </>
+          )}
           {selected.review_notes && <p className="tasks-warning">{selected.review_notes}</p>}
           {canApprove && selected.status === "pending_review" && (
             <>
@@ -5114,6 +5688,7 @@ function ChecklistModuleAuditPanel({ audit, pipelineAudit = null, compact = fals
           <li>Trabajo de hoy (candidatas amplias): <strong>{counts.todayWorkRunsBroad ?? counts.todayWorkRuns}</strong></li>
           <li>Removidas por dedupe (mismo id): <strong>{counts.removedByDedupe}</strong></li>
           <li>Cards finales en Hoy: <strong>{counts.finalTodayCards}</strong></li>
+          <li>Nombres repetidos en Hoy: <strong>{counts.duplicateTemplateNameCount ?? 0}</strong></li>
           {pipelineAudit.seeAllModuleRuns != null ? (
             <li>Modo ver-todas: <strong>{pipelineAudit.seeAllModuleRuns ? "sí" : "no"}</strong> ({pipelineAudit.userRole})</li>
           ) : null}
@@ -5132,25 +5707,77 @@ function ChecklistModuleAuditPanel({ audit, pipelineAudit = null, compact = fals
           </ul>
         </div>
       ) : null}
+      {pipelineAudit?.duplicateTemplateGroups?.length ? (
+        <div className="checklists-audit-group">
+          <strong>Duplicados por nombre de plantilla (auditoría)</strong>
+          <div className="checklists-audit-template-groups">
+            {pipelineAudit.duplicateTemplateGroups.map((group) => (
+              <article key={group.template_id || group.template_name} className="checklists-audit-template-group duplicate">
+                <header>
+                  <strong>{group.template_name}</strong>
+                  <span>{group.runCount} card(s) · {group.uniqueRunIdCount} run_id(s) distinto(s)</span>
+                </header>
+                <p className="checklists-audit-diagnosis">{group.groupDiagnosis}</p>
+                <p><span className="tasks-muted">template_id:</span> {group.template_id || "—"}</p>
+                <p><span className="tasks-muted">run_ids:</span> {group.run_ids.join(", ")}</p>
+                <p><span className="tasks-muted">Responsables:</span> {group.responsibles.join(" · ")}</p>
+                <ul>
+                  {group.assigneeDetails.map((item) => (
+                    <li key={item.run_id}>
+                      {item.run_id} · {item.assigned_user_name || item.assigned_user_id || "sin usuario"}
+                      {item.assigned_role ? ` · rol:${item.assigned_role}` : ""}
+                      {item.assigned_area ? ` · área:${item.assigned_area}` : ""}
+                      {item.status ? ` · ${item.status}` : ""}
+                    </li>
+                  ))}
+                </ul>
+              </article>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      {pipelineAudit?.templateGroups?.length ? (
+        <div className="checklists-audit-group">
+          <strong>Resumen por plantilla (todas las cards visibles en Hoy)</strong>
+          <div className="checklists-audit-dedupe-table grouped">
+            <header>
+              <span>Plantilla</span><span>Corridas</span><span>run_ids</span><span>Responsables</span><span>Diagnóstico</span>
+            </header>
+            {pipelineAudit.templateGroups.map((group) => (
+              <div key={group.template_id || group.template_name} className={group.isDuplicateName ? "duplicate" : ""}>
+                <span>{group.template_name}</span>
+                <span>{group.runCount}</span>
+                <span title={group.run_ids.join(", ")}>{group.run_ids.map((id) => String(id).slice(0, 8)).join(", ")}</span>
+                <span>{group.responsibles.join(" · ")}</span>
+                <span>{group.groupDiagnosis}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
       {pipelineAudit?.dedupeDetails?.length ? (
         <div className="checklists-audit-group">
-          <strong>Corridas del día operativo ({pipelineAudit.operationalToday || "—"})</strong>
-          <div className="checklists-audit-dedupe-table">
-            <header><span>ID</span><span>Checklist</span><span>Fecha</span><span>Asignado</span><span>Estado</span><span>Card</span></header>
+          <strong>Detalle corrida por corrida ({pipelineAudit.operationalToday || "—"})</strong>
+          <div className="checklists-audit-dedupe-table detailed">
+            <header>
+              <span>run_id</span><span>template</span><span>template_id</span><span>usuario</span><span>rol</span><span>área</span><span>Card</span><span>Diagnóstico</span>
+            </header>
             {pipelineAudit.dedupeDetails.map((row) => (
-              <div key={row.id} className={row.removedByDedupe ? "removed" : ""}>
-                <span title={row.id}>{String(row.id).slice(0, 8)}…</span>
-                <span>{row.title}</span>
-                <span>{row.run_date}</span>
-                <span>{row.assignee}</span>
-                <span>{row.status}</span>
-                <span>{row.removedByDedupe ? "Eliminada (id dup.)" : "Mostrada"}</span>
+              <div key={`${row.run_id}-${row.removedByDedupe ? "dup" : "show"}`} className={row.removedByDedupe ? "removed" : row.logicalDuplicateIds?.length ? "logical-dup" : ""}>
+                <span title={row.run_id}>{row.run_id}</span>
+                <span>{row.template_name}</span>
+                <span title={row.template_id}>{row.template_id ? String(row.template_id).slice(0, 8) + "…" : "—"}</span>
+                <span>{row.assigned_user_name || row.assigned_user_id || "—"}</span>
+                <span>{row.assigned_role || "—"}</span>
+                <span>{row.assigned_area || "—"}</span>
+                <span>{row.removedByDedupe ? "Oculta (id dup.)" : "Visible"}</span>
+                <span>{row.rowDiagnosis}</span>
               </div>
             ))}
           </div>
           {pipelineAudit.dedupeDetails.some((row) => row.logicalDuplicateIds?.length) ? (
             <p className="tasks-muted">
-              Hay corridas con la misma clave lógica pero ids distintos; todas se muestran (no se deduplican).
+              Filas marcadas: corridas distintas en BD con la misma clave lógica (template + fecha + asignación).
             </p>
           ) : null}
         </div>
@@ -5207,6 +5834,7 @@ function resolveChecklistLibraryPermissions(userRole) {
     canApproveTemplateChanges: CHECKLIST_TEMPLATE_APPROVERS.includes(role),
     isLibraryAdmin: ["admin", "gerente_general", "gerente", "recursos_humanos", "rrhh"].includes(role),
     canAssignChecklists: ["admin", "gerente_general", "gerente", "recursos_humanos", "rrhh", "supervisor"].includes(role),
+    canManageChecklistAssignment: ["admin", "gerente_general", "gerente", "recursos_humanos", "rrhh"].includes(role),
     canDeleteTemplates: ["admin", "gerente_general"].includes(role)
   }
 }

@@ -100,6 +100,12 @@ export function buildTodayRunDedupeDetails(runs, operationalToday, profiles = []
   const operationalRuns = (runs || []).filter((run) => (
     isChecklistRunOperationalTodayWork(run, operationalToday)
   ))
+  const idOccurrences = new Map()
+  operationalRuns.forEach((run) => {
+    if (!run?.id) return
+    idOccurrences.set(run.id, (idOccurrences.get(run.id) || 0) + 1)
+  })
+
   const seenIds = new Set()
   const idsByLogicalKey = new Map()
 
@@ -109,23 +115,114 @@ export function buildTodayRunDedupeDetails(runs, operationalToday, profiles = []
     idsByLogicalKey.get(key).push(run.id)
   })
 
-  return operationalRuns.map((run) => {
+  const runDetails = operationalRuns.map((run) => {
     const duplicateIdInList = seenIds.has(run.id)
     if (!duplicateIdInList && run.id) seenIds.add(run.id)
     const logicalKey = checklistLogicalRunKey(run)
     const siblingIds = (idsByLogicalKey.get(logicalKey) || []).filter((id) => id !== run.id)
+    const assignedUserId = run.assigned_profile_id || null
+    const assignedProfile = assignedUserId
+      ? profiles.find((item) => item.id === assignedUserId)
+      : null
+    const sourceOccurrences = idOccurrences.get(run.id) || 1
+
+    let rowDiagnosis = "CORRIDA_UNICA"
+    if (sourceOccurrences > 1) {
+      rowDiagnosis = duplicateIdInList
+        ? "MISMA_CORRIDA_REPETIDA_EN_FUENTE (copia oculta por dedupe id)"
+        : "MISMA_CORRIDA_REPETIDA_EN_FUENTE (copia visible)"
+    } else if (siblingIds.length) {
+      rowDiagnosis = "CORRIDA_DISTINTA_BD (misma clave lógica, otro run_id)"
+    }
 
     return {
-      id: run.id,
-      title: run.checklist_templates?.title || "(sin título)",
+      run_id: run.id,
+      template_id: run.template_id || null,
+      template_name: run.checklist_templates?.title || "(sin título)",
+      assigned_user_id: assignedUserId,
+      assigned_user_name: assignedProfile?.full_name || assignedProfile?.username || null,
+      assigned_role: run.assigned_role || null,
+      assigned_area: run.area || null,
       run_date: normalizeChecklistRunDate(run.run_date),
-      assignee: formatChecklistRunAssignee(run, profiles),
       status: run.status,
+      sourceOccurrences,
       displayed: !duplicateIdInList,
       removedByDedupe: duplicateIdInList,
-      logicalDuplicateIds: siblingIds.length ? siblingIds : null
+      logicalDuplicateIds: siblingIds.length ? siblingIds : null,
+      rowDiagnosis,
+      // compat campos previos
+      id: run.id,
+      title: run.checklist_templates?.title || "(sin título)",
+      assignee: formatChecklistRunAssignee(run, profiles)
     }
   })
+
+  return runDetails
+}
+
+function deriveTemplateGroupDiagnosis(rows = []) {
+  const uniqueRunIds = [...new Set(rows.map((row) => row.run_id).filter(Boolean))]
+  const sourceRepeated = rows.some((row) => row.sourceOccurrences > 1)
+  if (uniqueRunIds.length <= 1) {
+    return sourceRepeated
+      ? "MISMA_CORRIDA_REPETIDA_EN_FUENTE (mismo run_id cargado más de una vez)"
+      : "UNA_SOLA_CORRIDA"
+  }
+
+  const assigneeKeys = new Set(rows.map((row) => (
+    [row.assigned_user_id || "", row.assigned_role || "", row.assigned_area || ""].join("|")
+  )))
+  if (assigneeKeys.size > 1) {
+    return "CORRIDAS_DISTINTAS_BD — distintos colaboradores / roles / áreas"
+  }
+  return "CORRIDAS_DISTINTAS_BD — mismo responsable, run_ids distintos (posible generación duplicada)"
+}
+
+export function buildTodayRunsGroupedByTemplate(runDetails = []) {
+  const groups = new Map()
+  ;(runDetails || []).forEach((row) => {
+    const key = row.template_name || "(sin título)"
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key).push(row)
+  })
+
+  return Array.from(groups.entries())
+    .map(([template_name, rows]) => {
+      const uniqueRunIds = [...new Set(rows.map((row) => row.run_id).filter(Boolean))]
+      const responsibles = rows.map((row) => {
+        const parts = []
+        if (row.assigned_user_name) parts.push(row.assigned_user_name)
+        else if (row.assigned_user_id) parts.push(row.assigned_user_id)
+        if (row.assigned_role) parts.push(`rol:${row.assigned_role}`)
+        if (row.assigned_area) parts.push(`área:${row.assigned_area}`)
+        return parts.join(" · ") || "Sin asignar"
+      })
+
+      return {
+        template_name,
+        template_id: rows[0]?.template_id || null,
+        runCount: rows.length,
+        uniqueRunIdCount: uniqueRunIds.length,
+        run_ids: uniqueRunIds,
+        responsibles: [...new Set(responsibles)],
+        assigneeDetails: rows.map((row) => ({
+          run_id: row.run_id,
+          assigned_user_id: row.assigned_user_id,
+          assigned_user_name: row.assigned_user_name,
+          assigned_role: row.assigned_role,
+          assigned_area: row.assigned_area,
+          status: row.status,
+          rowDiagnosis: row.rowDiagnosis
+        })),
+        groupDiagnosis: deriveTemplateGroupDiagnosis(rows),
+        isDuplicateName: rows.length > 1 || uniqueRunIds.length > 1
+      }
+    })
+    .sort((left, right) => (
+      Number(right.isDuplicateName) - Number(left.isDuplicateName)
+      || right.runCount - left.runCount
+      || left.template_name.localeCompare(right.template_name)
+    ))
 }
 
 export function buildChecklistDisplayPipelineAudit({
@@ -154,6 +251,8 @@ export function buildChecklistDisplayPipelineAudit({
   const dedupedTodayRuns = dedupeChecklistRunsById(todayOperationalRuns)
   const removedByDedupe = todayOperationalRuns.length - dedupedTodayRuns.length
   const dedupeDetails = buildTodayRunDedupeDetails(visibleRuns, today, profiles)
+  const templateGroups = buildTodayRunsGroupedByTemplate(dedupeDetails.filter((row) => row.displayed))
+  const duplicateTemplateGroups = templateGroups.filter((group) => group.isDuplicateName)
 
   return {
     userRole: normalizeRole(user?.role) || "(sin rol)",
@@ -175,9 +274,12 @@ export function buildChecklistDisplayPipelineAudit({
       hiddenByTodayWorkFilter: hiddenByTodayWork.length,
       removedByDedupe,
       finalTodayCards: dedupedTodayRuns.length,
-      historicPending: visibleRuns.filter((run) => isChecklistRunHistoricPending(run)).length
+      historicPending: visibleRuns.filter((run) => isChecklistRunHistoricPending(run)).length,
+      duplicateTemplateNameCount: duplicateTemplateGroups.length
     },
     dedupeDetails,
+    templateGroups,
+    duplicateTemplateGroups,
     samples: {
       hiddenByVisibility: hiddenByVisibility.slice(0, 3).map((run) => ({
         id: run.id,

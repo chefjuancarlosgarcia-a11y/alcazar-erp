@@ -4,8 +4,13 @@ import {
   getChecklistTodayDateCandidates,
   isChecklistTemplateDueOnDate,
   normalizeChecklistRunDate,
+  normalizeChecklistRunStatus,
   shouldEnsureChecklistRunForOperationalDate
 } from "../utils/checklistOperationalStatus"
+import {
+  canForceCancelCompletedTodayRun,
+  canManageChecklistAssignmentDirectly
+} from "../utils/checklistAssignment"
 import { buildChecklistModuleAudit } from "../utils/checklistModuleAudit"
 
 const TEMPLATE_SELECT = "*, checklist_template_items(*)"
@@ -626,6 +631,302 @@ export async function createChecklistRunFromTemplate(templateId, assignmentPaylo
     return { data: { ...(result.data.find((item) => item.id === run.id) || run), existedAlready }, error: result.error }
   }
   return { data: { ...run, existedAlready }, error: null }
+}
+
+export async function cancelChecklistRun(runId) {
+  const { data, error } = await supabase
+    .from("checklist_runs")
+    .update({ status: "cancelled" })
+    .eq("id", runId)
+    .select("id, status, template_id, run_date, assigned_profile_id, assigned_role, area")
+    .single()
+  return { data, error }
+}
+
+export async function cancelTodayChecklistRunByAdmin({
+  runId,
+  cancelReason,
+  userRole,
+  forceCompletedCancel = false,
+  run = null,
+  actorProfileId = null
+}) {
+  if (!canManageChecklistAssignmentDirectly(userRole)) {
+    return { data: null, error: { message: "No tienes permiso para cancelar checklists de hoy." } }
+  }
+
+  const reason = String(cancelReason || "").trim()
+  if (!reason) {
+    return { data: null, error: { message: "El motivo de cancelación es obligatorio." } }
+  }
+
+  const previousStatus = normalizeChecklistRunStatus(run?.status)
+  if (previousStatus === "completed" && !canForceCancelCompletedTodayRun(userRole)) {
+    return { data: null, error: { message: "No se puede cancelar una checklist completada." } }
+  }
+  if (previousStatus === "completed" && !forceCompletedCancel) {
+    return { data: null, error: { message: "CONFIRM_COMPLETED_CANCEL", code: "CONFIRM_COMPLETED_CANCEL" } }
+  }
+
+  const rpcResult = await supabase.rpc("cancel_checklist_run_for_today", {
+    p_run_id: runId,
+    p_cancel_reason: reason,
+    p_force_completed: Boolean(forceCompletedCancel)
+  })
+
+  if (!rpcResult.error) {
+    return { data: orderRun(rpcResult.data), error: null }
+  }
+
+  if (rpcResult.error.code !== "PGRST202" && !/function.*does not exist/i.test(rpcResult.error.message || "")) {
+    return { data: null, error: rpcResult.error }
+  }
+
+  const updatePayload = {
+    status: "cancelled",
+    cancelled_by: actorProfileId || null,
+    cancelled_at: new Date().toISOString(),
+    cancel_reason: reason
+  }
+  const { data, error } = await supabase
+    .from("checklist_runs")
+    .update(updatePayload)
+    .eq("id", runId)
+    .select("*, checklist_templates(title, description, frequency, shift_context, backup_profile_id), checklist_run_items(*)")
+    .single()
+
+  if (error) return { data: null, error }
+
+  await logChecklistSessionAudit({
+    profileId: actorProfileId,
+    runId,
+    eventType: "today_run_cancelled_by_admin",
+    details: {
+      run_id: runId,
+      template_id: data?.template_id || run?.template_id || null,
+      template_name: data?.checklist_templates?.title || run?.checklist_templates?.title || "",
+      cancelled_by: actorProfileId || null,
+      previous_status: previousStatus || run?.status || null,
+      cancel_reason: reason,
+      timestamp: new Date().toISOString(),
+      fallback_update: true
+    }
+  })
+
+  return { data: orderRun(data), error: null }
+}
+
+export async function getChecklistRunSessionAudit(runId) {
+  const rpcResult = await supabase.rpc("get_checklist_run_session_audit", { p_run_id: runId })
+  if (!rpcResult.error) {
+    return { data: rpcResult.data || [], error: null }
+  }
+
+  const { data, error } = await supabase
+    .from("checklist_session_audit")
+    .select("id, profile_id, checklist_run_id, event_type, details, created_at")
+    .eq("checklist_run_id", runId)
+    .order("created_at", { ascending: false })
+
+  return { data: data || [], error }
+}
+
+export async function reassignTodayChecklistRun({
+  run,
+  assignmentPayload,
+  reason = "",
+  requestedByProfileId = null
+}) {
+  if (!run?.id || !run?.template_id) {
+    return { data: null, error: { message: "Corrida invalida para reasignar." } }
+  }
+  const payload = {
+    template_id: run.template_id,
+    run_date: normalizeChecklistRunDate(run.run_date),
+    area: assignmentPayload.area ?? run.area ?? "",
+    assigned_role: assignmentPayload.assigned_role ?? run.assigned_role ?? "",
+    assigned_profile_id: assignmentPayload.assigned_profile_id ?? run.assigned_profile_id ?? "",
+    due_time: assignmentPayload.due_time ?? run.due_time ?? "",
+    notes: assignmentPayload.notes ?? ""
+  }
+  return executeChecklistAssignmentResolution({
+    payload,
+    conflictingRuns: [run],
+    mode: "replace",
+    reason,
+    requestedByProfileId
+  })
+}
+
+export async function executeChecklistAssignmentResolution({
+  payload,
+  conflictingRuns = [],
+  mode = "replace",
+  reason = "",
+  requestedByProfileId = null,
+  approvedByProfileId = null
+}) {
+  const actorId = approvedByProfileId || requestedByProfileId
+  const auditBase = {
+    reason: reason || null,
+    requested_by: requestedByProfileId || null,
+    approved_by: approvedByProfileId || null,
+    mode
+  }
+
+  if (mode === "replace") {
+    for (const run of conflictingRuns) {
+      const cancelResult = await cancelChecklistRun(run.id)
+      if (cancelResult.error) return { data: null, error: cancelResult.error }
+      await logChecklistSessionAudit({
+        profileId: actorId,
+        runId: run.id,
+        eventType: "assignment_replaced_cancelled",
+        details: {
+          ...auditBase,
+          previous_assigned_profile_id: run.assigned_profile_id || null,
+          previous_assigned_role: run.assigned_role || null,
+          previous_area: run.area || null,
+          new_assigned_profile_id: payload.assigned_profile_id || null,
+          new_assigned_role: payload.assigned_role || null,
+          new_area: payload.area || null
+        }
+      })
+    }
+  }
+
+  const createResult = await createChecklistRunFromTemplate(payload.template_id, {
+    ...payload,
+    assignment_source: mode === "additional" ? "manual_additional" : "reassignment"
+  })
+  if (createResult.error) return createResult
+
+  await logChecklistSessionAudit({
+    profileId: actorId,
+    runId: createResult.data?.id || null,
+    eventType: mode === "additional" ? "assignment_additional_created" : "assignment_replacement_created",
+    details: {
+      ...auditBase,
+      conflicting_run_ids: conflictingRuns.map((run) => run.id),
+      assigned_profile_id: payload.assigned_profile_id || null,
+      assigned_role: payload.assigned_role || null,
+      area: payload.area || null,
+      run_date: payload.run_date || null
+    }
+  })
+
+  return createResult
+}
+
+export async function submitChecklistAssignmentChangeRequest({
+  payload,
+  conflictingRuns = [],
+  reason = "",
+  templateTitle = "",
+  submittedByProfileId = null
+}) {
+  const snapshot = [{
+    assignment_change: true,
+    action: "replace",
+    run_date: payload.run_date,
+    conflicting_run_ids: conflictingRuns.map((run) => run.id),
+    previous_assignments: conflictingRuns.map((run) => ({
+      run_id: run.id,
+      assigned_profile_id: run.assigned_profile_id || null,
+      assigned_role: run.assigned_role || null,
+      area: run.area || null
+    })),
+    new_assignment: payload,
+    reason
+  }]
+
+  const { data, error } = await supabase
+    .from("checklist_template_change_requests")
+    .insert({
+      template_id: payload.template_id,
+      request_type: "update",
+      status: "draft",
+      title: `Cambio de responsable: ${templateTitle || "Checklist"}`,
+      description: reason,
+      area: payload.area || null,
+      assigned_role: payload.assigned_role || null,
+      assigned_profile_id: payload.assigned_profile_id || null,
+      frequency: "manual",
+      shift_context: "general",
+      status_after_approval: "active",
+      items_snapshot: snapshot
+    })
+    .select("*")
+    .single()
+  if (error) return { data: null, error }
+
+  const submitResult = await submitChecklistChangeRequest(data.id)
+  if (submitResult.error) return { data: null, error: submitResult.error }
+
+  await logChecklistSessionAudit({
+    profileId: submittedByProfileId,
+    runId: null,
+    eventType: "assignment_change_requested",
+    details: {
+      request_id: data.id,
+      reason,
+      conflicting_run_ids: conflictingRuns.map((run) => run.id),
+      new_assignment: payload,
+      previous_assignments: snapshot[0].previous_assignments
+    }
+  })
+
+  return { data, error: null }
+}
+
+export async function approveChecklistAssignmentChangeRequest(request, {
+  reviewNotes = "",
+  approvedByProfileId = null,
+  runs = []
+} = {}) {
+  const meta = Array.isArray(request?.items_snapshot) ? request.items_snapshot[0] : request?.items_snapshot
+  if (!meta?.assignment_change) {
+    return { data: null, error: { message: "La solicitud no es un cambio de responsable." } }
+  }
+
+  const payload = meta.new_assignment
+  let conflictingRuns = (meta.conflicting_run_ids || [])
+    .map((runId) => (runs || []).find((run) => run.id === runId))
+    .filter(Boolean)
+
+  if (!conflictingRuns.length && meta.conflicting_run_ids?.length) {
+    const runDate = payload?.run_date || meta.run_date
+    const fetched = await getChecklistRuns({ date: runDate })
+    if (!fetched.error) {
+      conflictingRuns = meta.conflicting_run_ids
+        .map((runId) => (fetched.data || []).find((run) => run.id === runId))
+        .filter(Boolean)
+    }
+  }
+
+  const resolution = await executeChecklistAssignmentResolution({
+    payload,
+    conflictingRuns,
+    mode: meta.action || "replace",
+    reason: meta.reason || reviewNotes,
+    requestedByProfileId: request.submitted_by || null,
+    approvedByProfileId
+  })
+  if (resolution.error) return resolution
+
+  const { error } = await supabase
+    .from("checklist_template_change_requests")
+    .update({
+      status: "approved",
+      reviewed_by: approvedByProfileId || null,
+      reviewed_at: new Date().toISOString(),
+      review_notes: reviewNotes?.trim() || null
+    })
+    .eq("id", request.id)
+  if (error) return { data: null, error }
+
+  window.dispatchEvent(new CustomEvent("notifications-updated"))
+  return resolution
 }
 
 export async function generateDueChecklistRuns(date = getChecklistOperationalDate()) {
