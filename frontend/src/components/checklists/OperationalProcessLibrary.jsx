@@ -28,6 +28,16 @@ const EMPTY_FORM = {
   supervisor_profile_id: ""
 }
 
+function ProcessField({ label, hint, className = "", children }) {
+  return (
+    <label className={`tasks-field ${className}`.trim()}>
+      <span className="tasks-field-label">{label}</span>
+      {children}
+      {hint ? <small className="tasks-field-hint">{hint}</small> : null}
+    </label>
+  )
+}
+
 export default function OperationalProcessLibrary({
   checklistTemplates = [],
   profiles = [],
@@ -159,149 +169,188 @@ export default function OperationalProcessLibrary({
 
   if (editing) {
     return (
-      <form className="operational-process-editor" onSubmit={handleSave}>
-        <header className="operational-process-editor__head">
+      <article className="tasks-panel operational-process-editor">
+        <div className="tasks-panel-title">
           <div>
             <p className="tasks-eyebrow">Proceso operativo</p>
-            <h3>{form.id ? "Editar proceso" : "Nuevo proceso"}</h3>
+            <h2>{form.id ? "Editar proceso" : "Nuevo proceso"}</h2>
+            <p className="tasks-muted">Agrupa checklists hijas bajo un proceso padre sin modificar las plantillas existentes.</p>
           </div>
-          <button type="button" className="ghost" onClick={resetEditor}>Volver al listado</button>
-        </header>
-
-        <div className="operational-process-editor__grid">
-          <label>
-            Titulo
-            <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} required />
-          </label>
-          <label>
-            Area
-            <input value={form.area} onChange={(e) => setForm({ ...form, area: e.target.value })} />
-          </label>
-          <label>
-            Tipo
-            <select value={form.process_type} onChange={(e) => setForm({ ...form, process_type: e.target.value })}>
-              {OPERATIONAL_PROCESS_TYPES.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-            </select>
-          </label>
-          <label>
-            Modo de completado
-            <select value={form.completion_mode} onChange={(e) => setForm({ ...form, completion_mode: e.target.value })}>
-              {OPERATIONAL_COMPLETION_MODES.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-            </select>
-          </label>
-          <label className="operational-process-editor__checkbox">
-            <input
-              type="checkbox"
-              checked={form.allow_parallel_execution}
-              onChange={(e) => setForm({ ...form, allow_parallel_execution: e.target.checked })}
-            />
-            Permitir ejecucion paralela
-          </label>
-          <label>
-            Supervisor
-            <select value={form.supervisor_profile_id} onChange={(e) => setForm({ ...form, supervisor_profile_id: e.target.value })}>
-              <option value="">Sin supervisor</option>
-              {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.full_name || profile.username}</option>)}
-            </select>
-          </label>
         </div>
 
-        <label>
-          Descripcion
-          <textarea rows={3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
-        </label>
-
-        <section className="operational-process-editor__steps">
-          <div className="operational-process-editor__steps-head">
-            <h4>Checklists hijas</h4>
-            <button type="button" className="ghost" onClick={addStep}>+ Agregar checklist</button>
-          </div>
-
-          {steps.map((step, index) => (
-            <article key={step.client_key} className="operational-process-step-editor">
-              <div className="operational-process-step-editor__head">
-                <strong>Paso {index + 1}</strong>
-                <div className="operational-process-step-editor__actions">
-                  {index > 0 ? (
-                    <button type="button" className="ghost" onClick={() => setSteps(moveProcessStep(steps, index, index - 1))}>↑</button>
-                  ) : null}
-                  {index < steps.length - 1 ? (
-                    <button type="button" className="ghost" onClick={() => setSteps(moveProcessStep(steps, index, index + 1))}>↓</button>
-                  ) : null}
-                  <button type="button" className="ghost" onClick={() => removeStep(index)}>Quitar</button>
-                </div>
+        <form className="operational-process-editor__form" onSubmit={handleSave}>
+          <section className="operational-process-section-card">
+            <header className="operational-process-section-card__head">
+              <div>
+                <strong>Información General</strong>
+                <p className="tasks-muted">Datos básicos del proceso operativo.</p>
               </div>
-              <div className="operational-process-step-editor__grid">
-                <label>
-                  Checklist plantilla
-                  <select
-                    value={step.child_template_id}
-                    onChange={(e) => {
-                      const template = checklistTemplates.find((item) => item.id === e.target.value)
-                      updateStep(index, "child_template_id", e.target.value)
-                      if (template && !step.step_label) updateStep(index, "step_label", template.title)
-                    }}
-                  >
-                    <option value="">Seleccionar...</option>
-                    {checklistTemplates.filter((item) => item.status === "active").map((template) => (
-                      <option key={template.id} value={template.id}>{template.title}</option>
+            </header>
+
+            <div className="operational-process-editor__stack">
+              <ProcessField label="Título" className="operational-process-field--full">
+                <input
+                  value={form.title}
+                  onChange={(e) => setForm({ ...form, title: e.target.value })}
+                  placeholder="Ej. Apertura completa FOH"
+                  required
+                />
+              </ProcessField>
+
+              <ProcessField label="Descripción" className="operational-process-field--full">
+                <textarea
+                  rows={3}
+                  value={form.description}
+                  onChange={(e) => setForm({ ...form, description: e.target.value })}
+                  placeholder="Contexto opcional para supervisores y colaboradores."
+                />
+              </ProcessField>
+
+              <div className="operational-process-meta-grid">
+                <ProcessField label="Área">
+                  <input
+                    value={form.area}
+                    onChange={(e) => setForm({ ...form, area: e.target.value })}
+                    placeholder="Ej. Cocina, Salón"
+                  />
+                </ProcessField>
+                <ProcessField label="Tipo">
+                  <select value={form.process_type} onChange={(e) => setForm({ ...form, process_type: e.target.value })}>
+                    {OPERATIONAL_PROCESS_TYPES.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
                     ))}
                   </select>
-                </label>
-                <label>
-                  Etiqueta del paso
-                  <input value={step.step_label} onChange={(e) => updateStep(index, "step_label", e.target.value)} />
-                </label>
-                <label>
-                  Colaborador
-                  <select value={step.assigned_profile_id} onChange={(e) => updateStep(index, "assigned_profile_id", e.target.value)}>
-                    <option value="">Heredar de plantilla</option>
-                    {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.full_name || profile.username}</option>)}
-                  </select>
-                </label>
-                <label>
-                  Rol
-                  <input value={step.assigned_role} onChange={(e) => updateStep(index, "assigned_role", e.target.value)} placeholder="Opcional" />
-                </label>
-                <label>
-                  Area
-                  <input value={step.area} onChange={(e) => updateStep(index, "area", e.target.value)} placeholder="Opcional" />
-                </label>
-                <label>
-                  Depende de
-                  <select value={step.depends_on_client_key} onChange={(e) => updateStep(index, "depends_on_client_key", e.target.value)}>
-                    <option value="">Ninguno</option>
-                    {steps.filter((candidate) => candidate.client_key !== step.client_key).map((candidate, candidateIndex) => (
-                      <option key={candidate.client_key} value={candidate.client_key}>
-                        Paso {candidateIndex + 1}: {candidate.step_label || "Sin etiqueta"}
-                      </option>
+                </ProcessField>
+                <ProcessField label="Supervisor">
+                  <select value={form.supervisor_profile_id} onChange={(e) => setForm({ ...form, supervisor_profile_id: e.target.value })}>
+                    <option value="">Sin supervisor</option>
+                    {profiles.map((profile) => (
+                      <option key={profile.id} value={profile.id}>{profile.full_name || profile.username}</option>
                     ))}
                   </select>
-                </label>
-                <label className="operational-process-editor__checkbox">
-                  <input type="checkbox" checked={step.is_required} onChange={(e) => updateStep(index, "is_required", e.target.checked)} />
-                  Requerida para completar proceso
-                </label>
+                </ProcessField>
+                <ProcessField label="Modo de completado">
+                  <select value={form.completion_mode} onChange={(e) => setForm({ ...form, completion_mode: e.target.value })}>
+                    {OPERATIONAL_COMPLETION_MODES.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </ProcessField>
               </div>
-            </article>
-          ))}
-        </section>
 
-        <footer className="operational-process-editor__foot">
-          <button type="submit" className="tasks-primary" disabled={saving || !canManage}>
-            {saving ? "Guardando..." : "Guardar proceso"}
-          </button>
-        </footer>
-      </form>
+              <label className="tasks-checkbox checklist-flag-chip operational-process-parallel-flag">
+                <input
+                  type="checkbox"
+                  checked={form.allow_parallel_execution}
+                  onChange={(e) => setForm({ ...form, allow_parallel_execution: e.target.checked })}
+                />
+                <span>Permitir ejecución paralela</span>
+              </label>
+            </div>
+          </section>
+
+          <section className="operational-process-section-card">
+            <header className="operational-process-section-card__head operational-process-section-card__head--split">
+              <div>
+                <strong>Checklists hijas</strong>
+                <p className="tasks-muted">Cada paso genera una checklist independiente al ejecutar el proceso.</p>
+              </div>
+              <button type="button" className="tasks-secondary operational-process-add-step" onClick={addStep}>
+                + Agregar checklist
+              </button>
+            </header>
+
+            <div className="operational-process-steps-list">
+              {steps.map((step, index) => (
+                <article key={step.client_key} className="operational-process-step-card">
+                  <header className="operational-process-step-card__head">
+                    <div className="operational-process-step-card__title">
+                      <span className="operational-process-step-card__badge">Paso {index + 1}</span>
+                      <strong>{step.step_label?.trim() || "Checklist sin etiqueta"}</strong>
+                    </div>
+                    <div className="operational-process-step-card__actions">
+                      {index > 0 ? (
+                        <button type="button" className="tasks-link" onClick={() => setSteps(moveProcessStep(steps, index, index - 1))}>Subir</button>
+                      ) : null}
+                      {index < steps.length - 1 ? (
+                        <button type="button" className="tasks-link" onClick={() => setSteps(moveProcessStep(steps, index, index + 1))}>Bajar</button>
+                      ) : null}
+                      <button type="button" className="tasks-link danger" onClick={() => removeStep(index)}>Quitar</button>
+                    </div>
+                  </header>
+
+                  <div className="operational-process-step-card__body">
+                    <ProcessField label="Checklist plantilla">
+                      <select
+                        value={step.child_template_id}
+                        onChange={(e) => {
+                          const template = checklistTemplates.find((item) => item.id === e.target.value)
+                          updateStep(index, "child_template_id", e.target.value)
+                          if (template && !step.step_label) updateStep(index, "step_label", template.title)
+                        }}
+                      >
+                        <option value="">Seleccionar...</option>
+                        {checklistTemplates.filter((item) => item.status === "active").map((template) => (
+                          <option key={template.id} value={template.id}>{template.title}</option>
+                        ))}
+                      </select>
+                    </ProcessField>
+                    <ProcessField label="Etiqueta del paso">
+                      <input value={step.step_label} onChange={(e) => updateStep(index, "step_label", e.target.value)} />
+                    </ProcessField>
+                    <ProcessField label="Colaborador">
+                      <select value={step.assigned_profile_id} onChange={(e) => updateStep(index, "assigned_profile_id", e.target.value)}>
+                        <option value="">Heredar de plantilla</option>
+                        {profiles.map((profile) => (
+                          <option key={profile.id} value={profile.id}>{profile.full_name || profile.username}</option>
+                        ))}
+                      </select>
+                    </ProcessField>
+                    <ProcessField label="Rol">
+                      <input value={step.assigned_role} onChange={(e) => updateStep(index, "assigned_role", e.target.value)} placeholder="Opcional" />
+                    </ProcessField>
+                    <ProcessField label="Área">
+                      <input value={step.area} onChange={(e) => updateStep(index, "area", e.target.value)} placeholder="Opcional" />
+                    </ProcessField>
+                    <ProcessField label="Depende de">
+                      <select value={step.depends_on_client_key} onChange={(e) => updateStep(index, "depends_on_client_key", e.target.value)}>
+                        <option value="">Ninguno</option>
+                        {steps.filter((candidate) => candidate.client_key !== step.client_key).map((candidate, candidateIndex) => (
+                          <option key={candidate.client_key} value={candidate.client_key}>
+                            Paso {candidateIndex + 1}: {candidate.step_label || "Sin etiqueta"}
+                          </option>
+                        ))}
+                      </select>
+                    </ProcessField>
+                    <label className="tasks-checkbox checklist-flag-chip operational-process-step-required">
+                      <input type="checkbox" checked={step.is_required} onChange={(e) => updateStep(index, "is_required", e.target.checked)} />
+                      <span>Requerida para completar proceso</span>
+                    </label>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+
+          <footer className="operational-process-editor__foot">
+            <button type="button" className="tasks-secondary" onClick={resetEditor} disabled={saving}>
+              Cancelar
+            </button>
+            <button type="submit" className="tasks-primary" disabled={saving || !canManage}>
+              {saving ? "Guardando..." : "Guardar Proceso"}
+            </button>
+          </footer>
+        </form>
+      </article>
     )
   }
 
   return (
-    <section className="operational-process-library">
+    <article className="tasks-panel operational-process-library">
       <header className="operational-process-library__head">
         <div>
           <p className="tasks-eyebrow">Procesos operativos</p>
-          <h3>Plantillas de proceso</h3>
+          <h2>Plantillas de proceso</h2>
           <p className="tasks-muted">Agrupa checklists hijas bajo un proceso padre sin modificar las checklists existentes.</p>
         </div>
         {canManage ? (
@@ -311,27 +360,29 @@ export default function OperationalProcessLibrary({
 
       {loading ? <p className="tasks-muted">Cargando procesos...</p> : null}
       {!loading && !items.length ? (
-        <p className="tasks-muted">Aun no hay procesos operativos configurados.</p>
+        <p className="tasks-empty">Aún no hay procesos operativos configurados.</p>
       ) : null}
 
       <div className="operational-process-library__grid">
         {items.map((item) => (
           <article key={item.id} className="operational-process-card">
-            <header>
+            <header className="operational-process-card__head">
               <strong>{item.title}</strong>
               <span className={`operational-process-card__status operational-process-card__status--${item.status}`}>{item.status}</span>
             </header>
-            <p className="tasks-muted">{item.description || "Sin descripcion"}</p>
-            <small>{item.step_count || 0} checklist(s) · {item.completion_mode} · {item.allow_parallel_execution ? "Paralelo" : "Secuencial"}</small>
-            <footer>
+            <p className="tasks-muted">{item.description || "Sin descripción"}</p>
+            <small className="operational-process-card__meta">
+              {item.step_count || 0} checklist(s) · {item.completion_mode} · {item.allow_parallel_execution ? "Paralelo" : "Secuencial"}
+            </small>
+            <footer className="operational-process-card__foot">
               <button type="button" className="tasks-secondary" disabled={runningId === item.id} onClick={() => handleRunToday(item)}>
                 {runningId === item.id ? "Iniciando..." : "Ejecutar hoy"}
               </button>
               {canManage ? (
                 <>
-                  <button type="button" className="ghost" onClick={() => openEditor(item)}>Editar</button>
+                  <button type="button" className="tasks-link" onClick={() => openEditor(item)}>Editar</button>
                   {item.status === "active" ? (
-                    <button type="button" className="ghost" onClick={() => handleDeactivate(item.id)}>Desactivar</button>
+                    <button type="button" className="tasks-link danger" onClick={() => handleDeactivate(item.id)}>Desactivar</button>
                   ) : null}
                 </>
               ) : null}
@@ -339,6 +390,6 @@ export default function OperationalProcessLibrary({
           </article>
         ))}
       </div>
-    </section>
+    </article>
   )
 }

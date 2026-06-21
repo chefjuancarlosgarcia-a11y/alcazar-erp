@@ -2587,56 +2587,205 @@
   border-color: #991b1b;
 }
 
-.operational-process-library__head,
-.operational-process-editor__head {
+.operational-process-library__head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 20px;
 }
 
-.operational-process-library__grid,
-.operational-process-editor__grid {
+.operational-process-library__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
 }
 
 .operational-process-card,
 .operational-process-group {
-  border: 1px solid rgba(148, 163, 184, 0.24);
-  border-radius: 16px;
-  background: rgba(15, 23, 42, 0.35);
+  border: 1px solid #26384e;
+  border-radius: 12px;
+  background: #101c30;
   padding: 16px;
 }
 
-.operational-process-library__grid {
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+.operational-process-card {
+  display: grid;
+  gap: 10px;
 }
 
-.operational-process-card footer,
-.operational-process-editor__foot {
+.operational-process-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.operational-process-card__head strong {
+  color: #f8fafc;
+  font-size: 16px;
+}
+
+.operational-process-card__meta {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.operational-process-card__foot {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 14px;
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid #25364d;
 }
 
 .operational-process-card__status {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  color: #94a3b8;
 }
 
-.operational-process-editor__steps,
+.operational-process-card__status--active {
+  color: #5eead4;
+}
+
+.operational-process-editor__form {
+  display: grid;
+  gap: 20px;
+}
+
+.operational-process-section-card {
+  display: grid;
+  gap: 18px;
+  padding: 18px;
+  border: 1px solid #26384e;
+  border-radius: 12px;
+  background: #101c30;
+}
+
+.operational-process-section-card__head strong {
+  display: block;
+  color: #f8fafc;
+  font-size: 16px;
+}
+
+.operational-process-section-card__head p {
+  margin: 4px 0 0;
+}
+
+.operational-process-section-card__head--split {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.operational-process-editor__stack {
+  display: grid;
+  gap: 16px;
+}
+
+.operational-process-field--full {
+  grid-column: 1 / -1;
+}
+
+.operational-process-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.operational-process-parallel-flag {
+  align-self: start;
+  width: fit-content;
+}
+
+.operational-process-steps-list {
+  display: grid;
+  gap: 16px;
+}
+
+.operational-process-step-card {
+  display: grid;
+  gap: 0;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  background: #0f172a;
+  overflow: hidden;
+}
+
+.operational-process-step-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #25364d;
+  background: linear-gradient(180deg, rgba(20, 184, 166, 0.08), rgba(15, 23, 42, 0));
+}
+
+.operational-process-step-card__title {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.operational-process-step-card__title strong {
+  color: #f8fafc;
+  font-size: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.operational-process-step-card__badge {
+  color: #2dd4bf;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.operational-process-step-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.operational-process-step-card__body {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 16px;
+}
+
+.operational-process-step-required {
+  grid-column: 1 / -1;
+  width: fit-content;
+}
+
+.operational-process-editor__foot {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
+  padding-top: 18px;
+  border-top: 1px solid #25364d;
+}
+
+.operational-process-add-step {
+  flex-shrink: 0;
+}
+
 .operational-process-group__steps {
   display: grid;
   gap: 12px;
   margin-top: 16px;
 }
 
-.operational-process-step-editor,
 .operational-process-step {
   border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 12px;
@@ -2648,13 +2797,6 @@
   opacity: 0.72;
 }
 
-.operational-process-step-editor__grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 10px;
-}
-
-.operational-process-step-editor__head,
 .operational-process-step__label,
 .operational-process-group__head {
   display: flex;
@@ -2698,10 +2840,45 @@
 .operational-process-step__icon.is-late { color: #f59e0b; }
 .operational-process-step__icon.is-cancelled { color: #ef4444; }
 
-.operational-process-editor__checkbox {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+@media (min-width: 900px) {
+  .operational-process-meta-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .operational-process-step-card__body {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .operational-process-library__head,
+  .operational-process-section-card__head--split {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .operational-process-meta-grid,
+  .operational-process-step-card__body {
+    grid-template-columns: 1fr;
+  }
+
+  .operational-process-step-card__head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .operational-process-step-card__actions {
+    justify-content: flex-start;
+  }
+
+  .operational-process-editor__foot {
+    flex-direction: column-reverse;
+  }
+
+  .operational-process-editor__foot .tasks-primary,
+  .operational-process-editor__foot .tasks-secondary {
+    width: 100%;
+  }
 }
 
 .checklist-today-card--compact {
