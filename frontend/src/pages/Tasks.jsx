@@ -49,6 +49,9 @@ import {
   updateChecklistTemplateSuggestionStatus,
   logChecklistSessionAudit
 } from "../services/checklistsService"
+import { getOperationalProcessRunsForDate } from "../services/operationalProcessService"
+import OperationalProcessLibrary from "../components/checklists/OperationalProcessLibrary"
+import OperationalProcessTodayGroup from "../components/checklists/OperationalProcessTodayGroup"
 import {
   appendLocalChecklistAudit,
   clearActiveChecklistSession,
@@ -100,6 +103,7 @@ import {
   canSeeChecklistRun,
   dedupeChecklistRunsById
 } from "../utils/checklistRunDisplay"
+import { partitionTodayRunsForProcesses } from "../utils/operationalProcessProgress"
 import {
   findChecklistAssignmentConflicts,
   formatChecklistAssigneeSummary,
@@ -1565,9 +1569,12 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   const canEditChecklistsDirectly = canEditDirectly
   const canManageManagementAlerts = ["admin", "gerente_general"].includes(userRole)
   const canManageCoverage = ["admin", "gerente_general", "gerente", "supervisor", "recursos_humanos", "rrhh"].includes(userRole)
+  const canManageOperationalProcesses = isLibraryAdmin
+  const canViewOperationalProcessGroups = canViewChecklistLibrary
   const [section, setSection] = useState(initialChecklistView === "incidents" ? "incidents" : initialChecklistView === "alerts" ? "alerts" : "today")
   const [templates, setTemplates] = useState([])
   const [runs, setRuns] = useState([])
+  const [processRunDetails, setProcessRunDetails] = useState([])
   const [incidents, setIncidents] = useState([])
   const [managementAlerts, setManagementAlerts] = useState([])
   const [changeRequests, setChangeRequests] = useState([])
@@ -1729,6 +1736,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       ["overdue", overdueCount ? `Vencidas (${overdueCount})` : "Vencidas"],
       ["completed", completedCount ? `Completadas (${completedCount})` : "Completadas"],
       ...(canViewChecklistLibrary ? [["templates", "Checklists"]] : []),
+      ...(canViewOperationalProcessGroups ? [["processes", "Procesos operativos"]] : []),
       ...(canCreateDirectly || canProposeEdits || editingTemplate ? [["create", editingTemplate ? "Editar checklist" : "Crear checklist"]] : []),
       ...(canManageManagementAlerts ? [["alerts", "Avisos a Gerencia"]] : []),
       ...(canViewChecklistLibrary ? [
@@ -1744,7 +1752,8 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
     canProposeEdits,
     editingTemplate,
     canManageManagementAlerts,
-    canApproveTemplateChanges
+    canApproveTemplateChanges,
+    canViewOperationalProcessGroups
   ])
 
   const refresh = useCallback(async ({ silent = false } = {}) => {
@@ -1768,6 +1777,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
         : []
       const requests = [...libraryRequests, loadModuleChecklistRuns(), getChecklistProfiles()]
       if (canManageManagementAlerts) requests.push(getChecklistManagementAlerts())
+      if (canViewOperationalProcessGroups) requests.push(getOperationalProcessRunsForDate(operationalToday))
       const results = await Promise.all(requests)
       const templateResult = libraryRequests.length ? results[0] : { data: [], error: null }
       const incidentResult = libraryRequests.length ? results[1] : { data: [], error: null }
@@ -1776,6 +1786,9 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       let runResult = results[libraryRequests.length]
       const profileResult = results[libraryRequests.length + 1]
       const alertResult = canManageManagementAlerts ? results[libraryRequests.length + 2] : null
+      const processResult = canViewOperationalProcessGroups
+        ? results[libraryRequests.length + (canManageManagementAlerts ? 3 : 2)]
+        : null
       const profileRows = profileResult.data || []
 
       try {
@@ -1826,16 +1839,17 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
         })
       }
 
-      if (templateResult.error || runResult.error || incidentResult.error || requestResult.error || suggestionResult.error || alertResult?.error) {
+      if (templateResult.error || runResult.error || incidentResult.error || requestResult.error || suggestionResult.error || alertResult?.error || processResult?.error) {
         if (!silent) {
-          setMessage(templateResult.error?.message || runResult.error?.message || incidentResult.error?.message || requestResult.error?.message || suggestionResult.error?.message || alertResult?.error?.message || "No se pudieron cargar checklists.")
+          setMessage(templateResult.error?.message || runResult.error?.message || incidentResult.error?.message || requestResult.error?.message || suggestionResult.error?.message || alertResult?.error?.message || processResult?.error || "No se pudieron cargar checklists.")
         }
-        return { runs: [], error: templateResult.error || runResult.error || incidentResult.error || requestResult.error || suggestionResult.error || alertResult?.error }
+        return { runs: [], error: templateResult.error || runResult.error || incidentResult.error || requestResult.error || suggestionResult.error || alertResult?.error || processResult?.error }
       }
 
       setTemplates(templateResult.data || [])
       const syncedRuns = await replayPendingChecklistDrafts(runResult.data || [])
       setRuns(syncedRuns)
+      setProcessRunDetails(processResult?.data || [])
       const actor = user || stableUserRef.current
       const seeAll = canSeeAllChecklistModuleRuns(actor, canViewChecklistLibrary)
       const canSeeRun = (run) => canSeeChecklistRun(run, actor, profileRows, { seeAll })
@@ -1897,7 +1911,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       refreshInFlightRef.current = false
       if (showLoading) setLoading(false)
     }
-  }, [canManageCoverage, canManageManagementAlerts, canViewChecklistLibrary, replayPendingChecklistDrafts, runs.length, user])
+  }, [canManageCoverage, canManageManagementAlerts, canViewChecklistLibrary, canViewOperationalProcessGroups, replayPendingChecklistDrafts, runs.length, user])
 
   const ensureTodayRuns = useCallback(async () => {
     setEnsuringToday(true)
@@ -2506,6 +2520,8 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       {section === "today" && (
         <ChecklistToday
           runs={visibleRuns}
+          processRunDetails={processRunDetails}
+          canGroupOperationalProcesses={canViewOperationalProcessGroups}
           profiles={profiles}
           loading={(loading || ensuringToday) && runs.length === 0}
           selectedRun={selectedRun && isChecklistRunOperationalTodayWork(selectedRun) ? selectedRun : null}
@@ -2605,6 +2621,19 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
             if (result.error) return setMessage(result.error.message || "No se pudo enviar la sugerencia.")
             setMessage("Sugerencia enviada a aprobacion.")
             refresh()
+          }}
+        />
+      )}
+      {section === "processes" && canViewOperationalProcessGroups && (
+        <OperationalProcessLibrary
+          checklistTemplates={activeTemplates}
+          profiles={profiles}
+          canManage={canManageOperationalProcesses}
+          onMessage={(text, tone = "info") => setMessage(text)}
+          onChanged={({ goToday } = {}) => {
+            refresh({ silent: true }).then(() => {
+              if (goToday) setSection("today")
+            })
           }}
         />
       )}
@@ -2786,6 +2815,8 @@ function ChecklistRunDetailShell({
 
 function ChecklistToday({
   runs,
+  processRunDetails = [],
+  canGroupOperationalProcesses = false,
   profiles,
   loading = false,
   selectedRun,
@@ -2825,6 +2856,10 @@ function ChecklistToday({
         return String(a.checklist_templates?.title || "").localeCompare(String(b.checklist_templates?.title || ""))
       }),
     [runs, operationalToday]
+  )
+  const { processGroups, orphanRuns } = useMemo(
+    () => partitionTodayRunsForProcesses(todayRuns, processRunDetails, { groupProcesses: canGroupOperationalProcesses }),
+    [todayRuns, processRunDetails, canGroupOperationalProcesses]
   )
 
   const activeNonTodayRuns = useMemo(
@@ -2866,7 +2901,29 @@ function ChecklistToday({
         )}
         {!selectedRun && (
           <div className="checklists-card-grid">
-            {todayRuns.map((run) => (
+            {processGroups.map((processDetail) => (
+              <OperationalProcessTodayGroup
+                key={processDetail?.process_run?.id || processDetail?.template?.id}
+                processDetail={processDetail}
+                profiles={profiles}
+                onOpenRun={onSelect}
+                onStartRun={onStart}
+                renderRunCard={({ run, disabled, onOpen }) => (
+                  <ChecklistTodayCard
+                    run={run}
+                    profiles={profiles}
+                    coverage={coverageByRunId?.[run.id]}
+                    canAssignReplacement={!disabled && canAssignReplacement?.(run)}
+                    onAssignReplacement={onAssignReplacement}
+                    canManageTodayAdminActions={canManageTodayAdminActions}
+                    onTodayAdminAction={onTodayAdminAction}
+                    onOpen={disabled ? undefined : onOpen}
+                    compact
+                  />
+                )}
+              />
+            ))}
+            {orphanRuns.map((run) => (
               <ChecklistTodayCard
                 key={run.id}
                 run={run}
@@ -3200,7 +3257,8 @@ function ChecklistTodayCard({
   canManageTodayAdminActions = false,
   onTodayAdminAction,
   onOpen,
-  variant = "today"
+  variant = "today",
+  compact = false
 }) {
   const [replacementOpen, setReplacementOpen] = useState(false)
   const [actionsOpen, setActionsOpen] = useState(false)
@@ -3214,6 +3272,7 @@ function ChecklistTodayCard({
   const dueLabel = formatChecklistDueDeadline(run)
   const cardClassName = [
     "checklist-today-card",
+    compact ? "checklist-today-card--compact" : "",
     variant === "overdue" ? "checklist-today-card--past-date" : "",
     variant === "completed" ? "checklist-today-card--completed" : "",
     displayStatus === CHECKLIST_OPERATIONAL_STATUS.PENDIENTE_ATRASADA ? "checklist-today-card--late-pending" : ""
