@@ -7,6 +7,8 @@ import {
   CANDIDATE_SOURCES,
   emptyCandidateForm,
   labelFor,
+  ONBOARDING_STATUSES,
+  onboardingStatusTone,
   PIPELINE_COLUMNS
 } from "./recruitmentUtils"
 import CandidateDetailPanel from "./CandidateDetailPanel"
@@ -123,6 +125,11 @@ export default function RecruitmentKanbanTab({
                   <strong>{row.full_name}</strong>
                   <span>{row.vacancy_title || "Sin vacante"}</span>
                   <small>{labelFor(CANDIDATE_SOURCES, row.source)} · {row.applied_at}</small>
+                  {row.onboarding_status && row.onboarding_status !== "none" ? (
+                    <span className={`recruitment-badge recruitment-badge--${onboardingStatusTone(row.onboarding_status)}`}>
+                      {labelFor(ONBOARDING_STATUSES, row.onboarding_status)}
+                    </span>
+                  ) : null}
                   <div className="recruitment-candidate-card__actions" onClick={(e) => e.stopPropagation()}>
                     <select
                       value={row.pipeline_status}

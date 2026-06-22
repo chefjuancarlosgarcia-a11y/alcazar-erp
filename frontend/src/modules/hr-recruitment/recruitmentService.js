@@ -8,7 +8,7 @@ function result(data, error = null) {
   return { data, error: error ? message(error) : "" }
 }
 
-const MIGRATION_HINT = "Aplica la migración 117_hr_recruitment.sql en Supabase."
+const MIGRATION_HINT = "Aplica las migraciones 117 y 118 de reclutamiento en Supabase."
 
 function migrationHint(error) {
   const text = message(error)
@@ -126,4 +126,60 @@ export async function getRecruitmentWeeklyReport(weeks = 8) {
 export async function listRecruitmentProfiles() {
   const { data, error } = await supabase.rpc("list_recruitment_profiles")
   return result(Array.isArray(data) ? data : [], error ? migrationHint(error) : null)
+}
+
+export async function convertRecruitmentCandidateToEmployee(candidateId, profileId, payload = {}) {
+  const { data, error } = await supabase.rpc("convert_recruitment_candidate_to_employee", {
+    p_candidate_id: candidateId,
+    p_profile_id: profileId,
+    p_payload: payload
+  })
+  return result(data, error ? migrationHint(error) : null)
+}
+
+export async function listRecruitmentOnboardings(status = null) {
+  const { data, error } = await supabase.rpc("list_recruitment_onboardings", {
+    p_status: status || null
+  })
+  return result(Array.isArray(data) ? data : [], error ? migrationHint(error) : null)
+}
+
+export async function updateRecruitmentOnboardingTaskStatus(taskId, status, notes = null) {
+  const { data, error } = await supabase.rpc("update_recruitment_onboarding_task_status", {
+    p_task_id: taskId,
+    p_status: status,
+    p_notes: notes
+  })
+  return result(data, error ? migrationHint(error) : null)
+}
+
+export async function listRecruitmentRetentionCases() {
+  const { data, error } = await supabase.rpc("list_recruitment_retention_cases")
+  return result(Array.isArray(data) ? data : [], error ? migrationHint(error) : null)
+}
+
+export async function recordRecruitmentRetentionReview(candidateId, reviewDay, activeStatus, evaluationNotes = null, exitReason = null) {
+  const { data, error } = await supabase.rpc("record_recruitment_retention_review", {
+    p_candidate_id: candidateId,
+    p_review_day: reviewDay,
+    p_active_status: activeStatus,
+    p_evaluation_notes: evaluationNotes,
+    p_exit_reason: exitReason
+  })
+  return result(data, error ? migrationHint(error) : null)
+}
+
+export async function getRecruitmentPhase2Dashboard(filters = {}) {
+  const { data, error } = await supabase.rpc("get_recruitment_phase2_dashboard", {
+    p_date_from: filters.dateFrom || null,
+    p_date_to: filters.dateTo || null
+  })
+  return result(data, error ? migrationHint(error) : null)
+}
+
+export async function getRecruitmentOriginForProfile(profileId) {
+  const { data, error } = await supabase.rpc("get_recruitment_origin_for_profile", {
+    p_profile_id: profileId
+  })
+  return result(data, error ? migrationHint(error) : null)
 }

@@ -156,6 +156,66 @@ export function emptyVacancyForm(userId = "") {
   }
 }
 
+export const ONBOARDING_STATUSES = [
+  { value: "none", label: "Sin proceso" },
+  { value: "pending_conversion", label: "Contratado — pendiente convertir" },
+  { value: "employee_created", label: "Colaborador creado" },
+  { value: "expediente_created", label: "Expediente creado" },
+  { value: "onboarding_active", label: "Onboarding activo" },
+  { value: "onboarding_completed", label: "Onboarding completado" }
+]
+
+export const CONTRACT_TYPES = [
+  { value: "indefinido", label: "Indefinido" },
+  { value: "temporal", label: "Temporal" },
+  { value: "medio_tiempo", label: "Medio tiempo" },
+  { value: "por_servicios", label: "Por servicios" }
+]
+
+export const RETENTION_STATUS_OPTIONS = [
+  { value: "pending", label: "Pendiente" },
+  { value: "yes", label: "Sigue activo" },
+  { value: "no", label: "No sigue activo" }
+]
+
+export function canViewRecruitmentOnboarding(role) {
+  const normalized = normalizeRecruitmentRole(role)
+  return canManageRecruitment(role) || normalized === "supervisor"
+}
+
+export function onboardingStatusTone(status) {
+  if (status === "onboarding_completed") return "success"
+  if (status === "pending_conversion") return "warning"
+  if (status === "onboarding_active") return "default"
+  return "muted"
+}
+
+export function emptyConversionForm(detail = {}, profiles = []) {
+  const candidate = detail?.candidate || {}
+  const vacancy = detail?.vacancy || {}
+  return {
+    hire_date: new Date().toISOString().slice(0, 10),
+    area: vacancy.area || candidate.final_area || "",
+    area_id: "",
+    final_position: candidate.position_applied || vacancy.position_title || "",
+    erp_role: "colaborador",
+    contract_type: "indefinido",
+    agreed_salary: candidate.salary_expectation || "",
+    initial_schedule: candidate.schedule_availability || "",
+    supervisor_profile_id: "",
+    create_erp_user: true,
+    create_expediente: true,
+    create_onboarding: true,
+    existing_profile_id: "",
+    email: "",
+    username: "",
+    password: "",
+    employee_id: "",
+    profile_status: "active",
+    hire_reason: vacancy.reason || "replacement"
+  }
+}
+
 export function emptyCandidateForm(vacancyId = "") {
   return {
     id: "",

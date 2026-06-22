@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react"
+import ConvertCandidateModal from "./ConvertCandidateModal"
 import {
   discardRecruitmentCandidate,
   getRecruitmentCandidateDetail,
-  hireRecruitmentCandidate,
   registerRecruitmentContact,
   saveRecruitmentInterviewEvaluation,
   scheduleRecruitmentInterview,
@@ -17,6 +17,8 @@ import {
   EVAL_RECOMMENDATIONS,
   INTERVIEW_RESULTS,
   labelFor,
+  ONBOARDING_STATUSES,
+  onboardingStatusTone,
   PIPELINE_COLUMNS,
   VACANCY_PRIORITIES
 } from "./recruitmentUtils"
@@ -66,6 +68,7 @@ export default function CandidateDetailPanel({
     recommendation: "second_interview"
   })
   const [discardForm, setDiscardForm] = useState({ reason: "profile_mismatch", notes: "" })
+  const [convertOpen, setConvertOpen] = useState(false)
 
   async function loadDetail() {
     setLoading(true)
@@ -195,21 +198,32 @@ export default function CandidateDetailPanel({
     }
   }
 
-  async function handleHire() {
-    if (!window.confirm("¿Marcar candidato como contratado?")) return
-    setSaving(true)
-    const result = await hireRecruitmentCandidate(candidateId)
-    setSaving(false)
-    if (result.error) onMessage?.(result.error, "error")
-    else {
-      let message = "Candidato marcado como contratado."
-      if (result.data?.suggest_close_vacancy) {
-        message += " La vacante quedó cubierta; considera cerrarla formalmente."
-      }
-      onMessage?.(message, "success")
-      await loadDetail()
-      onChanged?.()
-    }
+  async function handleConverted() {
+    await loadDetail()
+    onChanged?.()
+  }
+
+  function renderConversionStatus() {
+    const status = candidate.onboarding_status
+    if (!status || status === "none") return null
+    return (
+      <section className="recruitment-section">
+        <h3>Incorporación</h3>
+        <span className={`recruitment-badge recruitment-badge--${onboardingStatusTone(status)}`}>
+          {labelFor(ONBOARDING_STATUSES, status)}
+        </span>
+        {candidate.profile_id && detail?.employee_profile ? (
+          <p className="tasks-muted">
+            Colaborador: {detail.employee_profile.full_name || detail.employee_profile.username}
+            {detail.employee_profile.area_name ? ` · ${detail.employee_profile.area_name}` : ""}
+          </p>
+        ) : null}
+        {candidate.hire_date ? <p className="tasks-muted">Fecha de ingreso: {candidate.hire_date}</p> : null}
+        {candidate.converted_at ? (
+          <p className="tasks-muted">Convertido: {new Date(candidate.converted_at).toLocaleString("es-GT")}</p>
+        ) : null}
+      </section>
+    )
   }
 
   function updateCandidate(field, value) {
@@ -228,6 +242,11 @@ export default function CandidateDetailPanel({
           <p className="tasks-muted">
             {labelFor(PIPELINE_COLUMNS, candidate.pipeline_status)} · {vacancy.position_title || "Sin vacante"}
           </p>
+          {candidate.onboarding_status && candidate.onboarding_status !== "none" ? (
+            <span className={`recruitment-badge recruitment-badge--${onboardingStatusTone(candidate.onboarding_status)}`}>
+              {labelFor(ONBOARDING_STATUSES, candidate.onboarding_status)}
+            </span>
+          ) : null}
         </header>
 
         <div className="recruitment-drawer__body">
@@ -282,6 +301,8 @@ export default function CandidateDetailPanel({
                   <p className="tasks-muted">{candidate.discard_notes || "Sin notas"}</p>
                 </section>
               ) : null}
+
+              {renderConversionStatus()}
 
               <section className="recruitment-section">
                 <h3>Historial de contactos</h3>
@@ -459,11 +480,29 @@ export default function CandidateDetailPanel({
             <button type="button" className="tasks-secondary" disabled={saving} onClick={() => setPanel("contact")}>Registrar contacto</button>
             <button type="button" className="tasks-secondary" disabled={saving} onClick={() => setPanel("interview")}>Programar entrevista</button>
             <button type="button" className="tasks-secondary" disabled={saving} onClick={() => setPanel("evaluation")}>Evaluar entrevista</button>
-            <button type="button" className="tasks-primary" disabled={saving} onClick={handleHire}>Marcar contratado</button>
+            <button type="button" className="tasks-primary" disabled={saving} onClick={() => setConvertOpen(true)}>Contratar</button>
             <button type="button" className="tasks-link danger" disabled={saving} onClick={() => setPanel("discard")}>Descartar</button>
           </footer>
         ) : null}
+
+        {panel === "profile" && candidate.pipeline_status === "hired" && !candidate.profile_id ? (
+          <footer className="recruitment-drawer__foot">
+            <button type="button" className="tasks-primary" disabled={saving} onClick={() => setConvertOpen(true)}>
+              Convertir en colaborador
+            </button>
+          </footer>
+        ) : null}
       </aside>
+
+      <ConvertCandidateModal
+        open={convertOpen}
+        onClose={() => setConvertOpen(false)}
+        candidateId={candidateId}
+        detail={detail}
+        profiles={profiles}
+        onSuccess={handleConverted}
+        onMessage={onMessage}
+      />
     </div>
   )
 }

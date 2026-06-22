@@ -403,6 +403,82 @@
   background: #0f172a;
 }
 
+.recruitment-modal--wide {
+  width: min(920px, 100%);
+}
+
+.recruitment-conversion-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 12px 14px;
+  border: 1px solid #223348;
+  border-radius: 10px;
+  background: #091324;
+}
+
+.recruitment-conversion-flags label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #e2e8f0;
+  font-size: 14px;
+}
+
+.recruitment-onboarding-list {
+  display: grid;
+  gap: 12px;
+}
+
+.recruitment-onboarding-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #223348;
+  border-radius: 12px;
+  background: #091324;
+}
+
+.recruitment-onboarding-card__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.recruitment-onboarding-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.recruitment-onboarding-tasks {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.recruitment-onboarding-task {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid #1e293b;
+  border-radius: 10px;
+  background: #0f172a;
+}
+
+.recruitment-onboarding-task--completed {
+  opacity: 0.75;
+}
+
 .recruitment-modal__actions {
   display: flex;
   justify-content: flex-end;

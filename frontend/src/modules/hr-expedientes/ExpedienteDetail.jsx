@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
+import { getRecruitmentOriginForProfile } from "../hr-recruitment/recruitmentService"
+import { CANDIDATE_SOURCES, EVAL_RECOMMENDATIONS, labelFor } from "../hr-recruitment/recruitmentUtils"
 import CompletenessBar from "./CompletenessBar"
 import DisciplineTab from "./DisciplineTab"
 import DocumentCard from "./DocumentCard"
@@ -33,6 +35,7 @@ export default function ExpedienteDetail({ profileId, canWrite, onClose, onUpdat
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
+  const [recruitmentOrigin, setRecruitmentOrigin] = useState(null)
 
   useEffect(() => {
     loadDetail()
@@ -57,6 +60,9 @@ export default function ExpedienteDetail({ profileId, canWrite, onClose, onUpdat
       birth_date: extraData.birth_date ? String(extraData.birth_date).slice(0, 10) : "",
       hire_date: extraData.hire_date ? String(extraData.hire_date).slice(0, 10) : ""
     })
+
+    const originResult = await getRecruitmentOriginForProfile(profileId)
+    setRecruitmentOrigin(originResult.error ? null : originResult.data)
   }
 
   const typesByCode = useMemo(
@@ -162,6 +168,43 @@ export default function ExpedienteDetail({ profileId, canWrite, onClose, onUpdat
         <article><span>Vencidos</span><strong>{detail.summary?.expired_count ?? 0}</strong></article>
         <article><span>Faltantes</span><strong>{detail.summary?.missing_count ?? 0}</strong></article>
       </section>
+
+      {recruitmentOrigin?.origin ? (
+        <section className="expediente-section expediente-recruitment-origin">
+          <h3>Origen de Reclutamiento</h3>
+          <p className="tasks-muted">Este colaborador fue contratado desde el módulo de Reclutamiento.</p>
+          <div className="expediente-form-grid">
+            <label>Vacante<input value={recruitmentOrigin.origin.vacancy_title || recruitmentOrigin.vacancy?.position_title || "—"} disabled /></label>
+            <label>Fuente<input value={labelFor(CANDIDATE_SOURCES, recruitmentOrigin.origin.source)} disabled /></label>
+            <label>Motivo de contratación<input value={recruitmentOrigin.origin.hire_reason || "—"} disabled /></label>
+          </div>
+          {Array.isArray(recruitmentOrigin.origin.evaluation_summary) && recruitmentOrigin.origin.evaluation_summary.length ? (
+            <div className="expediente-history-list">
+              <h4>Evaluación final</h4>
+              {recruitmentOrigin.origin.evaluation_summary.map((item, index) => (
+                <article key={item.id || index} className="expediente-history-card">
+                  <strong>{labelFor(EVAL_RECOMMENDATIONS, item.recommendation)}</strong>
+                  <p>{item.comments || "Sin comentarios"}</p>
+                </article>
+              ))}
+            </div>
+          ) : null}
+          {Array.isArray(recruitmentOrigin.origin.interview_summary) && recruitmentOrigin.origin.interview_summary.length ? (
+            <div className="expediente-history-list">
+              <h4>Historial de entrevistas</h4>
+              {recruitmentOrigin.origin.interview_summary.map((item, index) => (
+                <article key={index} className="expediente-history-card">
+                  <strong>{item.scheduled_date} {item.scheduled_time || ""}</strong>
+                  <p>{item.result || "Pendiente"} · {item.notes || "—"}</p>
+                </article>
+              ))}
+            </div>
+          ) : null}
+          {recruitmentOrigin.origin.recruitment_notes ? (
+            <p className="expediente-empty">{recruitmentOrigin.origin.recruitment_notes}</p>
+          ) : null}
+        </section>
+      ) : null}
 
       <nav className="expediente-tabs" aria-label="Secciones del expediente">
         {TAB_ITEMS.map((item) => (

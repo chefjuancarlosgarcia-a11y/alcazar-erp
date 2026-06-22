@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { useLocation } from "react-router-dom"
 import { useAuth } from "../../context/AuthContext"
 import RecruitmentKanbanTab from "./RecruitmentKanbanTab"
+import RecruitmentOnboardingTab from "./RecruitmentOnboardingTab"
+import RecruitmentRetentionTab from "./RecruitmentRetentionTab"
 import RecruitmentVacanciesTab from "./RecruitmentVacanciesTab"
 import {
   getRecruitmentKpis,
+  getRecruitmentPhase2Dashboard,
   getRecruitmentWeeklyReport,
   listRecruitmentCandidates,
   listRecruitmentProfiles,
@@ -13,7 +17,9 @@ import {
   CANDIDATE_SOURCES,
   canManageRecruitment,
   canRequestRecruitmentVacancy,
+  canViewRecruitmentOnboarding,
   defaultMonthRange,
+  labelFor,
   RECRUITMENT_ACCESS_DENIED
 } from "./recruitmentUtils"
 import "./Recruitment.css"
@@ -28,18 +34,26 @@ function KpiCard({ label, value, suffix = "" }) {
 }
 
 export default function RecruitmentDashboard() {
+  const location = useLocation()
   const { user } = useAuth()
   const canManage = canManageRecruitment(user?.role)
   const canRequest = canRequestRecruitmentVacancy(user?.role)
+  const canViewOnboarding = canViewRecruitmentOnboarding(user?.role)
   const defaultRange = useMemo(() => defaultMonthRange(), [])
+  const urlTab = new URLSearchParams(location.search).get("tab")
 
-  const [tab, setTab] = useState(canManage ? "dashboard" : "vacancies")
+  const [tab, setTab] = useState(() => {
+    if (urlTab === "onboarding" && canViewOnboarding) return "onboarding"
+    if (urlTab && canManage) return urlTab
+    return canManage ? "dashboard" : "vacancies"
+  })
   const [message, setMessage] = useState({ text: "", tone: "info" })
 
   const [vacancies, setVacancies] = useState([])
   const [candidates, setCandidates] = useState([])
   const [profiles, setProfiles] = useState([])
   const [kpis, setKpis] = useState(null)
+  const [phase2Kpis, setPhase2Kpis] = useState(null)
   const [weekly, setWeekly] = useState([])
 
   const [loadingVacancies, setLoadingVacancies] = useState(true)
@@ -83,13 +97,16 @@ export default function RecruitmentDashboard() {
   const loadKpis = useCallback(async () => {
     if (!canManage) return
     setLoadingKpis(true)
-    const [kpiResult, weeklyResult, profileResult] = await Promise.all([
+    const [kpiResult, weeklyResult, profileResult, phase2Result] = await Promise.all([
       getRecruitmentKpis(filters),
       getRecruitmentWeeklyReport(8),
-      listRecruitmentProfiles()
+      listRecruitmentProfiles(),
+      getRecruitmentPhase2Dashboard(filters)
     ])
     if (kpiResult.error) notify(kpiResult.error, "error")
     else setKpis(kpiResult.data)
+    if (phase2Result.error) notify(phase2Result.error, "error")
+    else setPhase2Kpis(phase2Result.data)
     if (weeklyResult.error) notify(weeklyResult.error, "error")
     else setWeekly(weeklyResult.data)
     if (!profileResult.error) setProfiles(profileResult.data)
@@ -126,16 +143,20 @@ export default function RecruitmentDashboard() {
     ? [
       ["dashboard", "Dashboard"],
       ["vacancies", "Vacantes"],
-      ["pipeline", "Pipeline"]
+      ["pipeline", "Pipeline"],
+      ["onboarding", "Onboarding"],
+      ["retention", "Retención"]
     ]
-    : [["vacancies", "Solicitudes"]]
+    : canViewOnboarding
+      ? [["onboarding", "Onboarding"]]
+      : [["vacancies", "Solicitudes"]]
 
   return (
     <section className="recruitment-page erp-page-shell">
       <header className="erp-module-header">
         <p className="tasks-eyebrow">Recursos Humanos</p>
         <h1>Reclutamiento</h1>
-        <p className="tasks-muted">Pipeline medible de vacantes, candidatos, entrevistas y KPIs.</p>
+        <p className="tasks-muted">Pipeline medible de vacantes, candidatos, onboarding, retención y KPIs.</p>
       </header>
 
       {message.text ? (
@@ -198,6 +219,33 @@ export default function RecruitmentDashboard() {
               </div>
             ) : null}
           </article>
+
+          {phase2Kpis ? (
+            <article className="recruitment-panel">
+              <div className="recruitment-panel__head">
+                <div>
+                  <h2>KPIs de incorporación y retención</h2>
+                  <p className="tasks-muted">Fase 2: conversión, onboarding y retención 30/60/90 días.</p>
+                </div>
+              </div>
+              <div className="recruitment-kpi-grid">
+                <KpiCard label="Convertidos a empleados" value={phase2Kpis.converted_to_employees} />
+                <KpiCard label="Onboardings abiertos" value={phase2Kpis.onboardings_open} />
+                <KpiCard label="Onboardings completados" value={phase2Kpis.onboardings_completed} />
+                <KpiCard label="Onboardings vencidos" value={phase2Kpis.onboardings_overdue} />
+                <KpiCard label="Contratados sin convertir" value={phase2Kpis.hired_pending_conversion} />
+                <KpiCard label="Retención 30 días" value={phase2Kpis.retention_30_rate} suffix="%" />
+                <KpiCard label="Retención 60 días" value={phase2Kpis.retention_60_rate} suffix="%" />
+                <KpiCard label="Retención 90 días" value={phase2Kpis.retention_90_rate} suffix="%" />
+                <KpiCard label="Bajas tempranas" value={phase2Kpis.early_exits} />
+                <KpiCard
+                  label="Mejor fuente (90d)"
+                  value={phase2Kpis.best_retention_source ? labelFor(CANDIDATE_SOURCES, phase2Kpis.best_retention_source) : "—"}
+                />
+                <KpiCard label="Mayor rotación temprana" value={phase2Kpis.highest_early_turnover_position || "—"} />
+              </div>
+            </article>
+          ) : null}
 
           <article className="recruitment-panel">
             <div className="recruitment-panel__head">
@@ -265,6 +313,14 @@ export default function RecruitmentDashboard() {
           onRefresh={refreshAll}
           onMessage={notify}
         />
+      ) : null}
+
+      {tab === "onboarding" && canViewOnboarding ? (
+        <RecruitmentOnboardingTab onMessage={notify} />
+      ) : null}
+
+      {tab === "retention" && canManage ? (
+        <RecruitmentRetentionTab onMessage={notify} />
       ) : null}
     </section>
   )
