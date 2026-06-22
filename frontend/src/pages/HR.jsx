@@ -14,6 +14,7 @@ import AttendanceDevicesManagement from "./AttendanceDevicesManagement"
 import HRCatalogsManagement from "./HRCatalogsManagement"
 import AttendanceTerminal from "../components/AttendanceTerminal"
 import ExpedientesDashboard from "../modules/hr-expedientes/ExpedientesDashboard"
+import RecruitmentDashboard from "../modules/hr-recruitment/RecruitmentDashboard"
 import { Navigate, useLocation } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
 
@@ -41,6 +42,10 @@ function HR() {
 
   if (selectedSection === "expedientes") {
     return <ExpedientesDashboard />
+  }
+
+  if (selectedSection === "reclutamiento") {
+    return <RecruitmentDashboard />
   }
 
   if (selectedSection === "catalogos") {
