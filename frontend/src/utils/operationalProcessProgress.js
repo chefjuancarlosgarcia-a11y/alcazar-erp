@@ -122,6 +122,164 @@ export function getStepDisplayStatus(step, run) {
   return "pending"
 }
 
+export function getProcessTodaySummary(processDetail) {
+  const steps = processDetail?.steps || []
+  const progress = getProcessRunProgress(processDetail)
+  const template = processDetail?.template || {}
+  const processRun = processDetail?.process_run || {}
+
+  let pending = 0
+  let inProgress = 0
+  let late = 0
+  let completed = 0
+
+  steps.forEach((step) => {
+    const run = step.run || step.checklist_run || null
+    const status = getStepDisplayStatus(step, run)
+    if (status === "completed" || status === "pending_review") completed += 1
+    else if (status === "in_progress") inProgress += 1
+    else if (status === "overdue" || status === "late") late += 1
+    else pending += 1
+  })
+
+  const total = steps.length
+  const hasStarted = inProgress > 0 || completed > 0 || late > 0
+  let label = "Pendiente"
+  let tone = "pending"
+
+  if (late > 0) {
+    label = "Con atrasos"
+    tone = "late"
+  } else if (
+    processRun.status === "completed"
+    || (total > 0 && completed === total)
+    || progress.percent >= 100
+  ) {
+    label = "Completado"
+    tone = "completed"
+  } else if (inProgress > 0) {
+    label = "En progreso"
+    tone = "in_progress"
+  }
+
+  const buttonLabel = !hasStarted
+    ? "Abrir proceso"
+    : (tone === "completed" ? "Ver proceso" : "Continuar proceso")
+
+  return {
+    pending,
+    inProgress,
+    late,
+    completed,
+    total,
+    progress,
+    label,
+    tone,
+    buttonLabel,
+    area: template.area || processRun.area || null,
+    title: template.title || "Proceso operativo"
+  }
+}
+
+export function getProcessChildCardTone(step, run) {
+  const status = getStepDisplayStatus(step, run)
+  if (status === "completed") return "completed"
+  if (status === "pending_review") return "pending-review"
+  if (status === "in_progress") return "in-progress"
+  if (status === "overdue" || status === "late") return "overdue"
+  if (status === "cancelled") return "cancelled"
+  return "pending"
+}
+
+export function getProcessChildActionLabel(step, run, { disabled = false } = {}) {
+  if (disabled) return "Bloqueada"
+  const status = getStepDisplayStatus(step, run)
+  if (status === "pending" || status === "rejected") return "Iniciar"
+  if (status === "in_progress") return "Continuar"
+  if (status === "pending_review") return "Revisar"
+  if (status === "completed") return "Completada"
+  if (status === "overdue" || status === "late") return "Continuar"
+  return "Iniciar"
+}
+
+export function getProcessChildStatusLabel(step, run) {
+  const status = getStepDisplayStatus(step, run)
+  if (status === "completed") return "Completada"
+  if (status === "pending_review") return "Revisión"
+  if (status === "in_progress") return "En progreso"
+  if (status === "overdue" || status === "late") return "Atrasada"
+  if (status === "cancelled") return "Cancelada"
+  if (status === "rejected") return "Rechazada"
+  return "Pendiente"
+}
+
+export function getNextProcessStepToWork(processDetail) {
+  const template = processDetail?.template || {}
+  const steps = processDetail?.steps || []
+
+  const rank = (step) => {
+    const run = step.run || step.checklist_run || null
+    const status = getStepDisplayStatus(step, run)
+    if (!isProcessStepUnlocked(step, steps, template)) return 99
+    if (status === "in_progress") return 0
+    if (status === "overdue" || status === "late") return 1
+    if (status === "rejected") return 2
+    if (status === "pending") return 3
+    return 10
+  }
+
+  return steps
+    .filter((step) => {
+      const run = step.run || step.checklist_run || null
+      const status = getStepDisplayStatus(step, run)
+      return isProcessStepUnlocked(step, steps, template)
+        && !["completed", "pending_review", "cancelled"].includes(status)
+    })
+    .sort((left, right) => {
+      const rankDiff = rank(left) - rank(right)
+      if (rankDiff !== 0) return rankDiff
+      return (left.step_order ?? 0) - (right.step_order ?? 0)
+    })[0] || null
+}
+
+export function isProcessStepResolved(step, run) {
+  const status = getStepDisplayStatus(step, run)
+  return status === "completed" || status === "pending_review" || status === "cancelled"
+}
+
+export function partitionProcessStepsForDetail(steps = []) {
+  return groupProcessStepsForDisplay(steps).map((group) => ({
+    ...group,
+    activeSteps: group.steps.filter((step) => !isProcessStepResolved(step, step.run || step.checklist_run || null)),
+    completedSteps: group.steps.filter((step) => isProcessStepResolved(step, step.run || step.checklist_run || null))
+  }))
+}
+
+export function getProcessStepLabel(step, run) {
+  return step?.step_label || run?.checklist_templates?.title || "Checklist"
+}
+
+export function groupProcessStepsForDisplay(steps = []) {
+  const groups = new Map()
+
+  steps.forEach((step) => {
+    const run = step.run || step.checklist_run || null
+    const area = String(run?.area || step.area || "").trim()
+    const role = String(run?.assigned_role || step.assigned_role || "").trim()
+    const key = area || role || "General"
+    const label = area
+      ? (role ? `${area} · ${role}` : area)
+      : (role || "General")
+
+    if (!groups.has(key)) {
+      groups.set(key, { key, label, steps: [] })
+    }
+    groups.get(key).steps.push(step)
+  })
+
+  return Array.from(groups.values()).sort((a, b) => a.label.localeCompare(b.label, "es"))
+}
+
 export function partitionTodayRunsForProcesses(todayRuns, processRunDetails = [], { groupProcesses = false } = {}) {
   if (!groupProcesses || !processRunDetails.length) {
     return { processGroups: [], orphanRuns: todayRuns }

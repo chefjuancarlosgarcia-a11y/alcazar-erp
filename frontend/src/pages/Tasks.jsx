@@ -51,7 +51,8 @@ import {
 } from "../services/checklistsService"
 import { getOperationalProcessRunsForDate } from "../services/operationalProcessService"
 import OperationalProcessLibrary from "../components/checklists/OperationalProcessLibrary"
-import OperationalProcessTodayGroup from "../components/checklists/OperationalProcessTodayGroup"
+import OperationalProcessTodayCard from "../components/checklists/OperationalProcessTodayCard"
+import OperationalProcessTodayDetail from "../components/checklists/OperationalProcessTodayDetail"
 import {
   appendLocalChecklistAudit,
   clearActiveChecklistSession,
@@ -106,7 +107,12 @@ import {
   canSeeChecklistRun,
   dedupeChecklistRunsById
 } from "../utils/checklistRunDisplay"
-import { partitionTodayRunsForProcesses } from "../utils/operationalProcessProgress"
+import {
+  getProcessChildActionLabel,
+  getProcessChildCardTone,
+  getProcessChildStatusLabel,
+  partitionTodayRunsForProcesses
+} from "../utils/operationalProcessProgress"
 import {
   findChecklistAssignmentConflicts,
   formatChecklistAssigneeSummary,
@@ -2840,6 +2846,7 @@ function ChecklistToday({
   canManageTodayAdminActions = false,
   onTodayAdminAction
 }) {
+  const [selectedProcessDetail, setSelectedProcessDetail] = useState(null)
   const operationalToday = getChecklistOperationalDate()
   const todayRuns = useMemo(
     () => dedupeChecklistRunsById(
@@ -2867,6 +2874,12 @@ function ChecklistToday({
     () => partitionTodayRunsForProcesses(todayRuns, processRunDetails, { groupProcesses: canGroupOperationalProcesses }),
     [todayRuns, processRunDetails, canGroupOperationalProcesses]
   )
+  const activeProcessDetail = useMemo(() => {
+    if (!selectedProcessDetail) return null
+    const processRunId = selectedProcessDetail?.process_run?.id
+    if (!processRunId) return selectedProcessDetail
+    return processGroups.find((detail) => detail?.process_run?.id === processRunId) || selectedProcessDetail
+  }, [selectedProcessDetail, processGroups])
 
   const activeNonTodayRuns = useMemo(
     () => runs.filter((run) => (
@@ -2885,101 +2898,145 @@ function ChecklistToday({
     ["Atrasadas", latePending.length, "late"]
   ]
 
+  const renderTodayRunCard = (run, {
+    compact = false,
+    variant = "today",
+    step = null,
+    stepLabel = "",
+    disabled = false,
+    hideGroupMeta = false,
+    onOpen
+  } = {}) => (
+    <ChecklistTodayCard
+      key={run.id}
+      run={run}
+      profiles={profiles}
+      coverage={coverageByRunId?.[run.id]}
+      canAssignReplacement={!disabled && canAssignReplacement?.(run)}
+      onAssignReplacement={onAssignReplacement}
+      canManageTodayAdminActions={canManageTodayAdminActions}
+      onTodayAdminAction={onTodayAdminAction}
+      onOpen={disabled ? undefined : onOpen}
+      compact={compact}
+      variant={variant}
+      step={step}
+      stepLabel={stepLabel}
+      disabled={disabled}
+      hideGroupMeta={hideGroupMeta}
+    />
+  )
+
+  const processDetailBackLabel = selectedProcessDetail ? "← Volver al proceso" : "← Volver a checklists de hoy"
+
   return (
     <div className="checklists-today">
-      <ChecklistRunDetailShell
-        backLabel="← Volver a checklists de hoy"
-        summary={`${todayRuns.length} checklist${todayRuns.length === 1 ? "" : "s"} para hoy`}
-        selectedRun={selectedRun}
-        profiles={profiles}
-        currentUser={currentUser}
-        onSelect={onSelect}
-        onUpdateItem={onUpdateItem}
-        onComplete={onComplete}
-        onAssignReplacement={onAssignReplacement}
-        canAssignReplacement={canAssignReplacement}
-        coverageByRunId={coverageByRunId}
-      >
-        {!selectedRun && (
+      {selectedRun ? (
+        <ChecklistRunDetailShell
+          backLabel={processDetailBackLabel}
+          summary={`${todayRuns.length} checklist${todayRuns.length === 1 ? "" : "s"} para hoy`}
+          selectedRun={selectedRun}
+          profiles={profiles}
+          currentUser={currentUser}
+          onSelect={onSelect}
+          onUpdateItem={onUpdateItem}
+          onComplete={onComplete}
+          onAssignReplacement={onAssignReplacement}
+          canAssignReplacement={canAssignReplacement}
+          coverageByRunId={coverageByRunId}
+        />
+      ) : activeProcessDetail ? (
+        <OperationalProcessTodayDetail
+          processDetail={activeProcessDetail}
+          profiles={profiles}
+          onClose={() => setSelectedProcessDetail(null)}
+          onOpenRun={onSelect}
+          onStartRun={onStart}
+          renderRunCard={({ run, step, disabled, onOpen }) => renderTodayRunCard(run, {
+            variant: "process-child",
+            step,
+            stepLabel: step?.step_label || "",
+            hideGroupMeta: true,
+            disabled,
+            onOpen
+          })}
+        />
+      ) : (
+        <>
           <div className="checklists-kpis">
             {cards.map(([label, value, tone]) => <article className={`checklists-kpi ${tone}`} key={label}><span>{label}</span><strong>{value}</strong></article>)}
           </div>
-        )}
-        {!selectedRun && (
-          <div className="checklists-card-grid">
-            {processGroups.map((processDetail) => (
-              <OperationalProcessTodayGroup
-                key={processDetail?.process_run?.id || processDetail?.template?.id}
-                processDetail={processDetail}
-                profiles={profiles}
-                onOpenRun={onSelect}
-                onStartRun={onStart}
-                renderRunCard={({ run, disabled, onOpen }) => (
-                  <ChecklistTodayCard
-                    run={run}
-                    profiles={profiles}
-                    coverage={coverageByRunId?.[run.id]}
-                    canAssignReplacement={!disabled && canAssignReplacement?.(run)}
-                    onAssignReplacement={onAssignReplacement}
-                    canManageTodayAdminActions={canManageTodayAdminActions}
-                    onTodayAdminAction={onTodayAdminAction}
-                    onOpen={disabled ? undefined : onOpen}
-                    compact
+
+          {processGroups.length > 0 ? (
+            <section className="checklists-today-section">
+              <div className="checklists-today-section__head">
+                <h2>Procesos operativos</h2>
+                <p className="tasks-muted">{processGroups.length} proceso{processGroups.length === 1 ? "" : "s"} para hoy</p>
+              </div>
+              <div className="checklists-today-processes-grid">
+                {processGroups.map((processDetail) => (
+                  <OperationalProcessTodayCard
+                    key={processDetail?.process_run?.id || processDetail?.template?.id}
+                    processDetail={processDetail}
+                    onOpen={() => setSelectedProcessDetail(processDetail)}
+                  />
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          {(orphanRuns.length > 0 || !todayRuns.length) ? (
+            <section className="checklists-today-section">
+              {processGroups.length > 0 ? (
+                <div className="checklists-today-section__head">
+                  <h2>Checklists individuales</h2>
+                  <p className="tasks-muted">{orphanRuns.length} checklist{orphanRuns.length === 1 ? "" : "s"} suelta{orphanRuns.length === 1 ? "" : "s"}</p>
+                </div>
+              ) : null}
+              <div className="checklists-card-grid">
+                {orphanRuns.map((run) => renderTodayRunCard(run, {
+                  onOpen: () => (run.status === "pending" ? onStart(run.id) : onSelect(run.id))
+                }))}
+                {!todayRuns.length && loading && (
+                  <FriendlyEmpty
+                    title="Preparando checklists de hoy..."
+                    text="Generando o cargando las asignaciones del dia operativo actual."
                   />
                 )}
-              />
-            ))}
-            {orphanRuns.map((run) => (
-              <ChecklistTodayCard
-                key={run.id}
-                run={run}
-                profiles={profiles}
-                coverage={coverageByRunId?.[run.id]}
-                canAssignReplacement={canAssignReplacement?.(run)}
-                onAssignReplacement={onAssignReplacement}
-                canManageTodayAdminActions={canManageTodayAdminActions}
-                onTodayAdminAction={onTodayAdminAction}
-                onOpen={() => (run.status === "pending" ? onStart(run.id) : onSelect(run.id))}
-              />
-            ))}
-            {!todayRuns.length && loading && (
-              <FriendlyEmpty
-                title="Preparando checklists de hoy..."
-                text="Generando o cargando las asignaciones del dia operativo actual."
-              />
-            )}
-            {!todayRuns.length && !loading && (
-              <FriendlyEmpty
-                title="No hay checklists para ejecutar hoy."
-                text={activeNonTodayRuns.length
-                  ? `Hay ${activeNonTodayRuns.length} checklist(s) activa(s) con otras fechas (${[...new Set(activeNonTodayRuns.map((run) => normalizeChecklistRunDate(run.run_date)))].slice(0, 3).join(", ")}). Día operativo actual: ${todayDateLabel}.`
-                  : "Las asignaciones del día aparecerán aquí."}
-                action={(
-                  <div className="checklists-empty-actions">
-                    {checklistAudit?.historicPendingCount > 0 ? (
-                      <button type="button" className="tasks-secondary" onClick={onGoToOverdue}>
-                        Ver vencidas ({checklistAudit.historicPendingCount})
-                      </button>
-                    ) : null}
-                    {canEnsureToday ? (
-                      <button type="button" className="tasks-primary" disabled={ensuringToday} onClick={onEnsureToday}>
-                        {ensuringToday ? "Generando..." : "Generar checklists de hoy"}
-                      </button>
-                    ) : null}
-                  </div>
+                {!todayRuns.length && !loading && (
+                  <FriendlyEmpty
+                    title="No hay checklists para ejecutar hoy."
+                    text={activeNonTodayRuns.length
+                      ? `Hay ${activeNonTodayRuns.length} checklist(s) activa(s) con otras fechas (${[...new Set(activeNonTodayRuns.map((run) => normalizeChecklistRunDate(run.run_date)))].slice(0, 3).join(", ")}). Día operativo actual: ${todayDateLabel}.`
+                      : "Las asignaciones del día aparecerán aquí."}
+                    action={(
+                      <div className="checklists-empty-actions">
+                        {checklistAudit?.historicPendingCount > 0 ? (
+                          <button type="button" className="tasks-secondary" onClick={onGoToOverdue}>
+                            Ver vencidas ({checklistAudit.historicPendingCount})
+                          </button>
+                        ) : null}
+                        {canEnsureToday ? (
+                          <button type="button" className="tasks-primary" disabled={ensuringToday} onClick={onEnsureToday}>
+                            {ensuringToday ? "Generando..." : "Generar checklists de hoy"}
+                          </button>
+                        ) : null}
+                      </div>
+                    )}
+                  />
                 )}
-              />
-            )}
-            {(checklistAudit || checklistPipelineAudit) && canEnsureToday ? (
-              <ChecklistModuleAuditPanel
-                audit={checklistAudit}
-                pipelineAudit={checklistPipelineAudit}
-                compact={todayRuns.length > 0}
-              />
-            ) : null}
-          </div>
-        )}
-      </ChecklistRunDetailShell>
+              </div>
+            </section>
+          ) : null}
+
+          {(checklistAudit || checklistPipelineAudit) && canEnsureToday ? (
+            <ChecklistModuleAuditPanel
+              audit={checklistAudit}
+              pipelineAudit={checklistPipelineAudit}
+              compact={todayRuns.length > 0}
+            />
+          ) : null}
+        </>
+      )}
     </div>
   )
 }
@@ -3267,15 +3324,89 @@ function ChecklistTodayCard({
   onTodayAdminAction,
   onOpen,
   variant = "today",
-  compact = false
+  compact = false,
+  disabled = false,
+  step = null,
+  stepLabel = "",
+  hideGroupMeta = false
 }) {
   const [replacementOpen, setReplacementOpen] = useState(false)
   const [actionsOpen, setActionsOpen] = useState(false)
-  const progress = checklistRunProgress(run)
   const completedItems = (run.checklist_run_items || []).filter(itemHasAnswer).length
   const totalItems = run.checklist_run_items?.length || 0
   const status = normalizeChecklistRunStatus(run?.status)
   const displayStatus = getChecklistOperationalDisplayStatus(run)
+
+  if (variant === "process-child") {
+    const tone = getProcessChildCardTone(step, run)
+    const statusLabel = getProcessChildStatusLabel(step, run)
+    const actionLabel = getProcessChildActionLabel(step, run, { disabled })
+    const title = stepLabel || run.checklist_templates?.title || "Checklist"
+    const assigneeProfile = profiles.find((item) => item.id === run.assigned_profile_id)
+    const assigneeName = assigneeProfile?.full_name || assigneeProfile?.username || ""
+    const showCoverage = needsChecklistCoverageAlert(coverage)
+
+    return (
+      <article className={`process-child-card process-child-card--${tone}${disabled ? " is-locked" : ""}`}>
+        <div className="process-child-card__body">
+          <h3 title={title}>{title}</h3>
+          <p className={`process-child-card__status-line process-child-card__status-line--${tone}`}>{statusLabel}</p>
+          <p className="process-child-card__items">{completedItems}/{totalItems} ítems</p>
+          {!hideGroupMeta && (run.area || run.assigned_role) ? (
+            <p className="process-child-card__meta">{[run.area, run.assigned_role].filter(Boolean).join(" · ")}</p>
+          ) : null}
+          <p className={`process-child-card__assignee${assigneeName ? "" : " is-muted"}`}>
+            {assigneeName || "Sin asignar"}
+          </p>
+          {showCoverage ? (
+            <p className="process-child-card__coverage" title={getChecklistCoverageAlertMessage(coverage)}>Cobertura pendiente</p>
+          ) : null}
+        </div>
+        <div className="process-child-card__actions">
+          <button
+            type="button"
+            className="checklist-primary-action process-child-card__primary"
+            disabled={disabled || !onOpen}
+            onClick={onOpen}
+          >
+            {actionLabel}
+          </button>
+          {canManageTodayAdminActions && onTodayAdminAction ? (
+            <div className="checklist-card-actions-menu process-child-card__actions-menu">
+              <button
+                type="button"
+                className="checklist-card-actions-trigger process-child-card__actions-trigger"
+                aria-haspopup="menu"
+                aria-expanded={actionsOpen}
+                aria-label="Acciones"
+                onClick={() => setActionsOpen((current) => !current)}
+              >
+                ⋯
+              </button>
+              {actionsOpen ? (
+                <div className="checklist-card-actions-dropdown" role="menu">
+                  <button type="button" role="menuitem" onClick={() => { setActionsOpen(false); onTodayAdminAction({ type: "reassign", run }) }}>Reasignar</button>
+                  <button type="button" role="menuitem" onClick={() => { setActionsOpen(false); onTodayAdminAction({ type: "cancel", run }) }}>Cancelar</button>
+                  <button type="button" role="menuitem" onClick={() => { setActionsOpen(false); onTodayAdminAction({ type: "audit", run }) }}>Auditoría</button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+        {replacementOpen ? (
+          <ChecklistReplacementModal
+            run={run}
+            profiles={profiles}
+            coverage={coverage}
+            onClose={() => setReplacementOpen(false)}
+            onSubmit={onAssignReplacement}
+          />
+        ) : null}
+      </article>
+    )
+  }
+
+  const progress = checklistRunProgress(run)
   const scheduleLabel = variant === "completed"
     ? `${getChecklistOperationalStatusLabel(displayStatus)} · ${formatChecklistRunDateLabel(run.run_date)}`
     : checklistRunScheduleLabel(run)
