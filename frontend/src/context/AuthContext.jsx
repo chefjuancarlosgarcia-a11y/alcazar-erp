@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import { supabase } from "../lib/supabase"
+import { normalizeRole as normalizeProfileRoleKey } from "../utils/profilePermissions"
 
 const isSupabaseConfigured = Boolean(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY)
 
@@ -33,7 +34,7 @@ const ROLE_PERMISSIONS = {
   mesero: ["pos", "hr"],
   cocinero: ["inventory", "production", "hr"],
   cocina: ["inventory", "production", "hr"],
-  encargado_area: ["inventory", "production", "hr"],
+  encargado_area: ["inventory", "production", "hr", "tasks"],
   barista: ["production", "hr"],
   bartender: ["production", "hr"],
   pizzero: ["production", "hr"],
@@ -97,36 +98,14 @@ function cleanupLegacyUserStorage() {
   LEGACY_USER_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key))
 }
 
-function normalizeRole(role) {
-  const normalized = String(role || "colaborador")
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/\s+/g, "_")
-  const aliases = {
-    "rr.hh.": "recursos_humanos",
-    "rr._hh.": "recursos_humanos",
-    rrhh: "recursos_humanos",
-    recursos_humanos: "recursos_humanos",
-    "gerente_general": "gerente_general",
-    encargado_almacen: "encargado_almacen",
-    encargado_de_almacen: "encargado_almacen",
-    cajero: "caja",
-    caja: "caja",
-    cocinero: "cocina",
-    cocina: "cocina",
-    pizzero: "pizzeria",
-    pizzeria: "pizzeria",
-    gerente_operaciones: "gerente_operaciones"
-  }
-  const roleKey = aliases[normalized] || normalized
-  return ROLE_PERMISSIONS[roleKey] ? roleKey : "colaborador"
+function resolveAuthRole(role) {
+  const normalized = normalizeProfileRoleKey(role)
+  return ROLE_PERMISSIONS[normalized] ? normalized : "colaborador"
 }
 
 export function normalizeProfileToCurrentUser(profile, sessionUser) {
   if (!profile || !sessionUser) return null
-  const role = normalizeRole(profile.role)
+  const role = resolveAuthRole(profile.role)
   return {
     id: profile.id,
     username: profile.username || sessionUser.email?.split("@")[0] || "",
@@ -176,13 +155,18 @@ function friendlyAuthError(error) {
   return "No se pudo iniciar sesión. Intenta nuevamente."
 }
 
+const CHECKLIST_MODULE_ROLES = new Set(["supervisor", "encargado_area"])
+
 async function probeChecklistModuleAccess(currentUser) {
   if (!currentUser?.id) return false
   if (currentUser.permissions?.includes("tasks")) return true
+  const role = normalizeProfileRoleKey(currentUser.role)
+  if (CHECKLIST_MODULE_ROLES.has(role)) return true
   const { data, error } = await supabase
     .from("checklist_runs")
     .select("id")
     .neq("status", "cancelled")
+    .or(`assigned_profile_id.eq.${currentUser.id},supervisor_profile_id.eq.${currentUser.id}`)
     .limit(1)
   if (error) {
     console.warn("[Auth] No se pudo evaluar acceso a checklists.", error)

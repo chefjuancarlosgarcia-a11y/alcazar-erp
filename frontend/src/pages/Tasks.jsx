@@ -180,6 +180,11 @@ const TODAY = guatemalaDateString()
 /** Vista temporal: activar solo durante validación de corridas duplicadas. */
 const SHOW_CHECKLIST_RUN_DIAGNOSTIC = false
 const MANAGEMENT_ROLES = ["admin", "gerente", "gerente_general", "recursos_humanos", "supervisor"]
+const CHECKLIST_SUPERVISOR_ROLES = new Set(["supervisor", "encargado_area"])
+
+function isChecklistAreaSupervisorRole(role) {
+  return CHECKLIST_SUPERVISOR_ROLES.has(normalizeRole(role))
+}
 const OPERATIONAL_TASK_TABS = [
   ["checklists", "Mis checklists"],
   ["mine", "Mis tareas"],
@@ -187,12 +192,12 @@ const OPERATIONAL_TASK_TABS = [
 ]
 const ADMIN_TABS = [
   ["dashboard", "Dashboard"],
-  ["bank", "Banco de tareas"],
-  ["create", "Crear tarea nueva"],
-  ["assign", "Asignar tareas"],
-  ["calendar", "Calendario operativo"],
   ["checklists", "Checklists"],
   ["mine", "Mis tareas"],
+  ["bank", "Banco de tareas"],
+  ["assign", "Asignar tareas"],
+  ["calendar", "Calendario operativo"],
+  ["create", "Crear tarea nueva"],
   ["yieldForm", "Formulario rendimiento"],
   ["reports", "Reportes"]
 ]
@@ -617,11 +622,13 @@ function buildChecklistWizardForm(editingTemplate) {
 }
 
 function Tasks() {
-  const { user, canAccess, refreshChecklistModuleAccess } = useAuth()
+  const { user, canAccess, checklistModuleAccess, refreshChecklistModuleAccess } = useAuth()
   const [params, setParams] = useSearchParams()
   const currentUserRole = normalizeRole(user?.role)
   const isManager = MANAGEMENT_ROLES.includes(currentUserRole)
   const canUseChecklists = canAccess("tasks")
+    || CHECKLIST_SUPERVISOR_ROLES.has(currentUserRole)
+    || checklistModuleAccess
   const [templates, setTemplates] = useState(loadTaskTemplates)
   const [editingTemplate, setEditingTemplate] = useState(null)
   const [assignedTasks, setAssignedTasks] = useState(loadAssignedTasks)
@@ -1577,7 +1584,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   const canCreateChecklists = canCreateDirectly
   const canEditChecklistsDirectly = canEditDirectly
   const canManageManagementAlerts = ["admin", "gerente_general"].includes(userRole)
-  const canManageCoverage = ["admin", "gerente_general", "gerente", "supervisor", "recursos_humanos", "rrhh"].includes(userRole)
+  const canManageCoverage = ["admin", "gerente_general", "gerente", "supervisor", "encargado_area", "recursos_humanos", "rrhh"].includes(userRole)
   const canManageOperationalProcesses = isLibraryAdmin
   const canViewOperationalProcessGroups = canViewChecklistLibrary
   const [section, setSection] = useState(initialChecklistView === "incidents" ? "incidents" : initialChecklistView === "alerts" ? "alerts" : "today")
@@ -2493,7 +2500,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
 
   const canAssignRunReplacement = useCallback((run) => {
     if (!run || ["completed", "cancelled"].includes(run.status)) return false
-    return ["admin", "gerente_general", "gerente", "supervisor", "recursos_humanos", "rrhh"].includes(userRole)
+    return ["admin", "gerente_general", "gerente", "supervisor", "encargado_area", "recursos_humanos", "rrhh"].includes(userRole)
   }, [userRole])
 
   return (
@@ -3639,7 +3646,7 @@ function ChecklistTodayCancelModal({ run, canForceCancelCompleted, onClose, onCo
 }
 
 function ChecklistTodayReassignModal({ run, profiles, currentUser, userRole, onClose, onConfirm }) {
-  const isSupervisorOnly = normalizeRole(userRole) === "supervisor"
+  const isSupervisorOnly = isChecklistAreaSupervisorRole(userRole)
   const supervisorArea = currentUser?.area_name || ""
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
@@ -3978,7 +3985,7 @@ function ChecklistTemplatesView({ templates, changeRequests = [], profiles, curr
 }
 
 function ChecklistAssignPanel({ template, profiles, currentUser, userRole, onClose, onAssign }) {
-  const isSupervisorOnly = normalizeRole(userRole) === "supervisor"
+  const isSupervisorOnly = isChecklistAreaSupervisorRole(userRole)
   const supervisorArea = currentUser?.area_name || ""
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
@@ -6028,15 +6035,16 @@ function templateToForm(template) {
 
 function resolveChecklistLibraryPermissions(userRole) {
   const role = normalizeRole(userRole)
+  const isAreaSupervisor = CHECKLIST_SUPERVISOR_ROLES.has(role)
   return {
-    canViewChecklistLibrary: ["admin", "gerente_general", "gerente", "recursos_humanos", "rrhh", "supervisor"].includes(role),
+    canViewChecklistLibrary: ["admin", "gerente_general", "gerente", "recursos_humanos", "rrhh", "supervisor", "encargado_area"].includes(role),
     canCreateDirectly: ["admin", "gerente_general", "recursos_humanos", "rrhh"].includes(role),
     canEditDirectly: ["admin", "gerente_general", "recursos_humanos", "rrhh"].includes(role),
-    isSupervisorOnly: role === "supervisor",
-    canProposeEdits: role === "supervisor",
+    isSupervisorOnly: isAreaSupervisor,
+    canProposeEdits: isAreaSupervisor,
     canApproveTemplateChanges: CHECKLIST_TEMPLATE_APPROVERS.includes(role),
     isLibraryAdmin: ["admin", "gerente_general", "gerente", "recursos_humanos", "rrhh"].includes(role),
-    canAssignChecklists: ["admin", "gerente_general", "gerente", "recursos_humanos", "rrhh", "supervisor"].includes(role),
+    canAssignChecklists: ["admin", "gerente_general", "gerente", "recursos_humanos", "rrhh", "supervisor", "encargado_area"].includes(role),
     canManageChecklistAssignment: ["admin", "gerente_general", "gerente", "recursos_humanos", "rrhh"].includes(role),
     canDeleteTemplates: ["admin", "gerente_general"].includes(role)
   }

@@ -17,7 +17,7 @@ export { filterRunsWithoutCompletedDuplicate }
 export function canSeeAllChecklistModuleRuns(user, canViewChecklistLibrary = false) {
   if (canViewChecklistLibrary) return true
   const role = normalizeRole(user?.role)
-  return ["admin", "gerente_general", "gerente", "recursos_humanos", "rrhh", "supervisor"].includes(role)
+  return ["admin", "gerente_general", "gerente", "recursos_humanos", "rrhh", "supervisor", "encargado_area"].includes(role)
 }
 
 function userChecklistArea(user) {
@@ -46,7 +46,7 @@ export function canSeeChecklistRun(run, user, profiles, { seeAll = false } = {})
 
   if (!run.assigned_profile_id && run.assigned_role && normalizeRole(run.assigned_role) === role) return true
   if (!run.assigned_profile_id && run.area && userArea && checklistAreasMatch(run.area, userArea)) return true
-  if (role === "supervisor") {
+  if (role === "supervisor" || role === "encargado_area") {
     if (run.supervisor_profile_id === user?.id) return true
     if (userArea && run.area && checklistAreasMatch(run.area, userArea)) return true
     const assigned = profiles.find((profile) => profile.id === run.assigned_profile_id)

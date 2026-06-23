@@ -53,6 +53,7 @@
 }
 
 .tasks-tabs button {
+  flex: 0 0 auto;
   padding: 10px 14px;
   border: none;
   border-radius: 9px;
@@ -61,6 +62,7 @@
   font: inherit;
   font-size: 14px;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .tasks-tabs button.active {
@@ -2436,6 +2438,28 @@
 }
 
 @media (max-width: 700px) {
+  .tasks-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x proximity;
+    scrollbar-width: thin;
+  }
+
+  .tasks-tabs button {
+    scroll-snap-align: start;
+    min-height: 44px;
+  }
+
+  .tasks-page-header {
+    gap: 10px;
+  }
+
+  .tasks-page-header h1 {
+    font-size: 28px;
+  }
+
   .tasks-metric-grid,
   .tasks-status-columns,
   .checklists-kpis,
@@ -2457,7 +2481,20 @@
   }
 
   .checklists-main-tabs {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x proximity;
+    scrollbar-width: thin;
+  }
+
+  .checklists-main-tabs button {
+    flex: 0 0 auto;
+    min-width: max(132px, 42vw);
+    scroll-snap-align: start;
+    white-space: nowrap;
   }
 
   .checklist-sticky-actions,
