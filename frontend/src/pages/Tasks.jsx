@@ -82,8 +82,11 @@ import { readChecklistEvidenceFile } from "../utils/checklistPhotoUtils"
 import {
   CHECKLIST_OPERATIONAL_STATUS,
   CHECKLIST_REPLACEMENT_REASONS,
+  filterRunsWithoutCompletedDuplicate,
   getChecklistOperationalDisplayStatus,
   getChecklistOperationalStatusLabel,
+  getChecklistRunContextBadgeLabels,
+  isChecklistRunOverdueDisplay,
   getChecklistOperationalDate,
   getChecklistTodayDateCandidates,
   isChecklistRunActive,
@@ -2840,14 +2843,17 @@ function ChecklistToday({
   const operationalToday = getChecklistOperationalDate()
   const todayRuns = useMemo(
     () => dedupeChecklistRunsById(
-      runs.filter((run) => isChecklistRunOperationalTodayWork(run, operationalToday))
+      filterRunsWithoutCompletedDuplicate(
+        runs.filter((run) => isChecklistRunOperationalTodayWork(run, operationalToday))
+      )
     )
       .sort((a, b) => {
         const statusOrder = {
           [CHECKLIST_OPERATIONAL_STATUS.VENCIDA]: 0,
           [CHECKLIST_OPERATIONAL_STATUS.PENDIENTE_ATRASADA]: 1,
-          in_progress: 2,
-          pending: 3
+          [CHECKLIST_OPERATIONAL_STATUS.PENDIENTE_REVISION]: 2,
+          in_progress: 3,
+          pending: 4
         }
         const leftStatus = getChecklistOperationalDisplayStatus(a)
         const rightStatus = getChecklistOperationalDisplayStatus(b)
@@ -2992,7 +2998,10 @@ function ChecklistOverdue({
   currentUser
 }) {
   const groupedRuns = useMemo(
-    () => groupHistoricOverdueRuns(runs.filter(isChecklistRunHistoricPending), profiles),
+    () => groupHistoricOverdueRuns(
+      filterRunsWithoutCompletedDuplicate(runs.filter(isChecklistRunHistoricPending)),
+      profiles
+    ),
     [runs, profiles]
   )
   const totalRuns = useMemo(
@@ -3237,7 +3246,7 @@ function ChecklistCompleted({
 }
 
 function ChecklistTodayContextBadges({ run, variant = "today" }) {
-  const badges = getChecklistRunContextBadges(run, variant)
+  const badges = getChecklistRunContextBadgeLabels(run, { variant })
   if (!badges.length) return null
   return (
     <div className="checklist-today-badges">
@@ -3265,17 +3274,28 @@ function ChecklistTodayCard({
   const progress = checklistRunProgress(run)
   const completedItems = (run.checklist_run_items || []).filter(itemHasAnswer).length
   const totalItems = run.checklist_run_items?.length || 0
+  const status = normalizeChecklistRunStatus(run?.status)
   const displayStatus = getChecklistOperationalDisplayStatus(run)
   const scheduleLabel = variant === "completed"
     ? `${getChecklistOperationalStatusLabel(displayStatus)} · ${formatChecklistRunDateLabel(run.run_date)}`
     : checklistRunScheduleLabel(run)
-  const dueLabel = formatChecklistDueDeadline(run)
+  const dueLine = formatChecklistDueDeadline(run)
+  const dueLabel = (
+    status === "completed"
+    || status === "pending_review"
+    || status === "cancelled"
+    || displayStatus === CHECKLIST_OPERATIONAL_STATUS.PENDIENTE_ATRASADA
+    || displayStatus === CHECKLIST_OPERATIONAL_STATUS.PENDIENTE_REVISION
+    || scheduleLabel === dueLine
+  ) ? null : dueLine
+  const showOverdueStyle = isChecklistRunOverdueDisplay(run)
   const cardClassName = [
     "checklist-today-card",
     compact ? "checklist-today-card--compact" : "",
     variant === "overdue" ? "checklist-today-card--past-date" : "",
     variant === "completed" ? "checklist-today-card--completed" : "",
-    displayStatus === CHECKLIST_OPERATIONAL_STATUS.PENDIENTE_ATRASADA ? "checklist-today-card--late-pending" : ""
+    displayStatus === CHECKLIST_OPERATIONAL_STATUS.PENDIENTE_ATRASADA ? "checklist-today-card--late-pending" : "",
+    displayStatus === CHECKLIST_OPERATIONAL_STATUS.PENDIENTE_REVISION ? "checklist-today-card--pending-review" : ""
   ].filter(Boolean).join(" ")
 
   return (
@@ -3311,8 +3331,8 @@ function ChecklistTodayCard({
         </div>
       </div>
       <div className="checklist-today-schedule">
-        <p className={`checklist-today-schedule__primary${isChecklistOperationallyExpired(run) || displayStatus === CHECKLIST_OPERATIONAL_STATUS.PENDIENTE_ATRASADA ? " is-overdue" : ""}`}>{scheduleLabel}</p>
-        <p className="checklist-today-schedule__due">{dueLabel}</p>
+        <p className={`checklist-today-schedule__primary${showOverdueStyle ? " is-overdue" : ""}`}>{scheduleLabel}</p>
+        {dueLabel ? <p className="checklist-today-schedule__due">{dueLabel}</p> : null}
       </div>
       {needsChecklistCoverageAlert(coverage) ? (
         <div className="checklist-coverage-alert checklist-coverage-alert--compact">
@@ -5465,7 +5485,7 @@ function daysPastRunDate(runDate) {
 }
 
 function isChecklistRunOverdue(run) {
-  return isChecklistOperationallyExpired(run)
+  return isChecklistRunOverdueDisplay(run)
 }
 
 function checklistRunScheduleLabel(run) {
@@ -5476,7 +5496,16 @@ function checklistRunScheduleLabel(run) {
     return `Vencida hace ${days} días`
   }
   if (displayStatus === CHECKLIST_OPERATIONAL_STATUS.PENDIENTE_ATRASADA) {
-    return `Esperada: ${formatChecklistDueDeadline(run).replace("Límite: ", "")}`
+    return formatChecklistDueDeadline(run)
+  }
+  if (displayStatus === CHECKLIST_OPERATIONAL_STATUS.PENDIENTE_REVISION) {
+    return "Enviada · pendiente de aprobación"
+  }
+  if (displayStatus === CHECKLIST_OPERATIONAL_STATUS.CANCELADA) {
+    return "Checklist cancelada"
+  }
+  if (displayStatus === CHECKLIST_OPERATIONAL_STATUS.COMPLETADA_TARDE || displayStatus === CHECKLIST_OPERATIONAL_STATUS.COMPLETADA_A_TIEMPO) {
+    return `${getChecklistOperationalStatusLabel(displayStatus)} · ${formatChecklistRunDateLabel(run.run_date)}`
   }
   return `Programada: ${formatChecklistRunDateLabel(run.run_date)}`
 }
@@ -5488,21 +5517,25 @@ function formatChecklistDueDeadline(run) {
   return `Esperada: ${datePart} · ${time}`
 }
 
-function getChecklistRunContextBadges(run, variant = "today") {
-  const badges = []
-  const displayStatus = getChecklistOperationalDisplayStatus(run)
-  if (run.status === "rejected") return ["RECHAZADA"]
-  if (run.status === "completed") {
-    if (displayStatus === CHECKLIST_OPERATIONAL_STATUS.COMPLETADA_TARDE) return ["COMPLETADA TARDE"]
-    if (hasChecklistReplacement(run)) return ["REASIGNADA", "COMPLETADA"]
-    return ["COMPLETADA"]
-  }
-  if (variant === "today" && isChecklistRunTodayWork(run)) badges.push("HOY")
-  if (displayStatus === CHECKLIST_OPERATIONAL_STATUS.VENCIDA) badges.push("VENCIDA")
-  if (displayStatus === CHECKLIST_OPERATIONAL_STATUS.PENDIENTE_ATRASADA) badges.push("ATRASADA")
-  if (displayStatus === CHECKLIST_OPERATIONAL_STATUS.PENDIENTE) badges.push("PENDIENTE")
-  if (hasChecklistReplacement(run) && run.status !== "completed") badges.push("REASIGNADA")
-  return badges
+function groupChecklistCompliance(runs, getter) {
+  const grouped = {}
+  runs.forEach((run) => {
+    const label = getter(run)
+    if (!grouped[label]) grouped[label] = { label, assigned: 0, completed: 0, late: 0, onTime: 0, points: 0 }
+    grouped[label].assigned += 1
+    const displayStatus = getChecklistOperationalDisplayStatus(run)
+    if (displayStatus === CHECKLIST_OPERATIONAL_STATUS.COMPLETADA_A_TIEMPO) {
+      grouped[label].completed += 1
+      grouped[label].onTime += 1
+    } else if (displayStatus === CHECKLIST_OPERATIONAL_STATUS.COMPLETADA_TARDE) {
+      grouped[label].completed += 1
+      grouped[label].late += 1
+    } else if (displayStatus === CHECKLIST_OPERATIONAL_STATUS.VENCIDA || displayStatus === CHECKLIST_OPERATIONAL_STATUS.PENDIENTE_ATRASADA) {
+      grouped[label].late += 1
+    }
+    grouped[label].points += Number(run.earned_points || 0)
+  })
+  return Object.values(grouped).map((row) => ({ ...row, rate: row.assigned ? Math.round((row.completed / row.assigned) * 100) : 0 })).sort((a, b) => b.assigned - a.assigned)
 }
 
 function checklistRunProgress(run) {
@@ -5606,26 +5639,6 @@ function validateChecklistAssignmentResult(run, payload, { existing = false } = 
   if (!existing && run?.status !== "pending") errors.push("status is not pending")
   if (!Array.isArray(run?.checklist_run_items) || run.checklist_run_items.length === 0) errors.push("missing checklist run items")
   return errors
-}
-
-function groupChecklistCompliance(runs, getter) {
-  const grouped = {}
-  runs.forEach((run) => {
-    const label = getter(run)
-    if (!grouped[label]) grouped[label] = { label, assigned: 0, completed: 0, late: 0, onTime: 0, points: 0 }
-    grouped[label].assigned += 1
-    if (run.status === "completed") {
-      grouped[label].completed += 1
-      const displayStatus = getChecklistOperationalDisplayStatus(run)
-      if (displayStatus === CHECKLIST_OPERATIONAL_STATUS.COMPLETADA_TARDE) grouped[label].late += 1
-      if (displayStatus === CHECKLIST_OPERATIONAL_STATUS.COMPLETADA_A_TIEMPO) grouped[label].onTime += 1
-    }
-    if (run.status === "overdue" || getChecklistOperationalDisplayStatus(run) === CHECKLIST_OPERATIONAL_STATUS.VENCIDA) {
-      grouped[label].late += 1
-    }
-    grouped[label].points += Number(run.earned_points || 0)
-  })
-  return Object.values(grouped).map((row) => ({ ...row, rate: row.assigned ? Math.round((row.completed / row.assigned) * 100) : 0 })).sort((a, b) => b.assigned - a.assigned)
 }
 
 function TaskReports({ tasks, employees, areas }) {

@@ -1,5 +1,6 @@
 import { normalizeRole } from "./profilePermissions"
 import {
+  filterRunsWithoutCompletedDuplicate,
   getChecklistOperationalDate,
   isChecklistRunActive,
   isChecklistRunDateToday,
@@ -10,6 +11,8 @@ import {
   normalizeChecklistRunStatus,
   hasChecklistReplacement
 } from "./checklistOperationalStatus"
+
+export { filterRunsWithoutCompletedDuplicate }
 
 export function canSeeAllChecklistModuleRuns(user, canViewChecklistLibrary = false) {
   if (canViewChecklistLibrary) return true

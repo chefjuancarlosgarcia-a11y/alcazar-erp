@@ -6,6 +6,7 @@ import {
 
 function StepStatusIcon({ status }) {
   if (status === "completed") return <span className="operational-process-step__icon is-done">✓</span>
+  if (status === "pending_review") return <span className="operational-process-step__icon is-review">◷</span>
   if (status === "in_progress") return <span className="operational-process-step__icon is-active">●</span>
   if (status === "cancelled") return <span className="operational-process-step__icon is-cancelled">✕</span>
   if (status === "overdue" || status === "late") return <span className="operational-process-step__icon is-late">!</span>

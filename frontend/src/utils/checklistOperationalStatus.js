@@ -5,17 +5,39 @@ export const DEFAULT_CHECKLIST_OPERATIONAL_DAY_END = "04:00"
 export const CHECKLIST_OPERATIONAL_STATUS = {
   PENDIENTE: "pendiente",
   PENDIENTE_ATRASADA: "pendiente_atrasada",
+  PENDIENTE_REVISION: "pendiente_revision",
   COMPLETADA_A_TIEMPO: "completada_a_tiempo",
   COMPLETADA_TARDE: "completada_tarde",
-  VENCIDA: "vencida"
+  VENCIDA: "vencida",
+  CANCELADA: "cancelada"
 }
 
 export const CHECKLIST_OPERATIONAL_STATUS_LABELS = {
   pendiente: "Pendiente",
   pendiente_atrasada: "Pendiente atrasada",
+  pendiente_revision: "Pendiente de revisión",
   completada_a_tiempo: "Completada a tiempo",
   completada_tarde: "Completada tarde",
-  vencida: "Vencida"
+  vencida: "Vencida",
+  cancelada: "Cancelada"
+}
+
+/** Estados DB que no deben evaluarse como overdue/atrasada. */
+export const CHECKLIST_NON_OVERDUE_DB_STATUSES = new Set([
+  "completed",
+  "cancelled",
+  "pending_review"
+])
+
+/** Prioridad al colapsar corridas duplicadas (misma plantilla/fecha/asignación). */
+const CHECKLIST_RUN_STATUS_PRIORITY = {
+  completed: 0,
+  pending_review: 1,
+  in_progress: 2,
+  pending: 3,
+  overdue: 4,
+  rejected: 5,
+  cancelled: 99
 }
 
 export const CHECKLIST_REPLACEMENT_REASONS = [
@@ -119,13 +141,26 @@ export function isChecklistOperationalWindowOpen(
   return parseTimeToMinutes(getGuatemalaTimeString(now)) < parseTimeToMinutes(dayEndTime)
 }
 
-export function isPastChecklistExpectedDue(run, now = new Date()) {
+function isPastChecklistExpectedDueAt(run, at = new Date()) {
   if (!run?.run_date || !run?.due_time) return false
-  const calendarDate = getGuatemalaDateString(now)
+  const calendarDate = getGuatemalaDateString(at)
   const dueTime = String(run.due_time).slice(0, 5)
   if (calendarDate > run.run_date) return true
   if (calendarDate < run.run_date) return false
-  return parseTimeToMinutes(getGuatemalaTimeString(now)) > parseTimeToMinutes(dueTime)
+  return parseTimeToMinutes(getGuatemalaTimeString(at)) > parseTimeToMinutes(dueTime)
+}
+
+export function isPastChecklistExpectedDue(run, now = new Date()) {
+  const status = normalizeChecklistRunStatus(run?.status)
+  if (CHECKLIST_NON_OVERDUE_DB_STATUSES.has(status)) return false
+  return isPastChecklistExpectedDueAt(run, now)
+}
+
+export function checklistTemplateDateKey(run) {
+  return [
+    run?.template_id || "NO_TEMPLATE",
+    normalizeChecklistRunDate(run?.run_date) || "NO_DATE"
+  ].join("|")
 }
 
 export function hasChecklistReplacement(run) {
@@ -139,18 +174,28 @@ export function hasChecklistReplacement(run) {
 export function getChecklistOperationalDisplayStatus(run, now = new Date()) {
   if (!run) return CHECKLIST_OPERATIONAL_STATUS.PENDIENTE
 
-  if (run.status === "completed") {
+  const status = normalizeChecklistRunStatus(run.status)
+
+  if (status === "cancelled") {
+    return CHECKLIST_OPERATIONAL_STATUS.CANCELADA
+  }
+
+  if (status === "completed") {
     if (run.completion_timing === "late") return CHECKLIST_OPERATIONAL_STATUS.COMPLETADA_TARDE
     if (run.completion_timing === "on_time") return CHECKLIST_OPERATIONAL_STATUS.COMPLETADA_A_TIEMPO
-    if (isPastChecklistExpectedDue({ ...run, due_time: run.due_time, run_date: run.run_date }, run.completed_at ? new Date(run.completed_at) : now)) {
+    if (isPastChecklistExpectedDueAt({ ...run, due_time: run.due_time, run_date: run.run_date }, run.completed_at ? new Date(run.completed_at) : now)) {
       return CHECKLIST_OPERATIONAL_STATUS.COMPLETADA_TARDE
     }
     return CHECKLIST_OPERATIONAL_STATUS.COMPLETADA_A_TIEMPO
   }
 
+  if (status === "pending_review") {
+    return CHECKLIST_OPERATIONAL_STATUS.PENDIENTE_REVISION
+  }
+
   if (
-    run.status === "overdue"
-    || (["pending", "in_progress", "rejected"].includes(run.status) && !isChecklistOperationalWindowOpen(run.run_date, now))
+    status === "overdue"
+    || (["pending", "in_progress", "rejected"].includes(status) && !isChecklistOperationalWindowOpen(run.run_date, now))
   ) {
     return CHECKLIST_OPERATIONAL_STATUS.VENCIDA
   }
@@ -160,6 +205,76 @@ export function getChecklistOperationalDisplayStatus(run, now = new Date()) {
   }
 
   return CHECKLIST_OPERATIONAL_STATUS.PENDIENTE
+}
+
+/** Fuente única: ¿esta corrida cuenta como vencida/atrasada operativamente? */
+export function isChecklistRunOverdueDisplay(run, now = new Date()) {
+  const status = normalizeChecklistRunStatus(run?.status)
+  if (CHECKLIST_NON_OVERDUE_DB_STATUSES.has(status) || status === "cancelled") return false
+  const displayStatus = getChecklistOperationalDisplayStatus(run, now)
+  return displayStatus === CHECKLIST_OPERATIONAL_STATUS.VENCIDA
+    || displayStatus === CHECKLIST_OPERATIONAL_STATUS.PENDIENTE_ATRASADA
+}
+
+export function getChecklistRunContextBadgeLabels(run, { variant = "today", now = new Date() } = {}) {
+  const status = normalizeChecklistRunStatus(run?.status)
+  if (status === "cancelled") return ["CANCELADA"]
+  if (status === "rejected") return ["RECHAZADA"]
+
+  const displayStatus = getChecklistOperationalDisplayStatus(run, now)
+  if (displayStatus === CHECKLIST_OPERATIONAL_STATUS.COMPLETADA_TARDE) {
+    return hasChecklistReplacement(run) ? ["REASIGNADA", "COMPLETADA TARDE"] : ["COMPLETADA TARDE"]
+  }
+  if (displayStatus === CHECKLIST_OPERATIONAL_STATUS.COMPLETADA_A_TIEMPO) {
+    return hasChecklistReplacement(run) ? ["REASIGNADA", "COMPLETADA"] : ["COMPLETADA"]
+  }
+  if (displayStatus === CHECKLIST_OPERATIONAL_STATUS.PENDIENTE_REVISION) return ["PENDIENTE REVISION"]
+
+  const badges = []
+  if (variant === "today" && isChecklistRunTodayWork(run, now)) badges.push("HOY")
+  if (displayStatus === CHECKLIST_OPERATIONAL_STATUS.VENCIDA) badges.push("VENCIDA")
+  else if (displayStatus === CHECKLIST_OPERATIONAL_STATUS.PENDIENTE_ATRASADA) badges.push("ATRASADA")
+  else if (displayStatus === CHECKLIST_OPERATIONAL_STATUS.PENDIENTE) badges.push("PENDIENTE")
+  if (hasChecklistReplacement(run) && !["COMPLETADA TARDE", "COMPLETADA"].some((item) => badges.includes(item))) {
+    badges.push("REASIGNADA")
+  }
+  return badges
+}
+
+export function getChecklistRunStatusPriority(run) {
+  const status = normalizeChecklistRunStatus(run?.status)
+  return CHECKLIST_RUN_STATUS_PRIORITY[status] ?? 50
+}
+
+/**
+ * Oculta corridas activas duplicadas cuando ya existe una cerrada (completed/pending_review)
+ * para la misma plantilla y fecha operativa.
+ */
+export function filterRunsWithoutCompletedDuplicate(runs = []) {
+  const list = Array.isArray(runs) ? runs : []
+  const resolvedKeys = new Set(
+    list
+      .filter((run) => ["completed", "pending_review"].includes(normalizeChecklistRunStatus(run?.status)))
+      .map((run) => checklistTemplateDateKey(run))
+  )
+
+  if (!resolvedKeys.size) return list
+
+  return list.filter((run) => {
+    const status = normalizeChecklistRunStatus(run?.status)
+    if (status === "completed" || status === "pending_review") return true
+    return !resolvedKeys.has(checklistTemplateDateKey(run))
+  })
+}
+
+/** Devuelve el bucket exclusivo de UI para una corrida (sin solapamiento). */
+export function getChecklistRunPipelineBucket(run, now = new Date()) {
+  const status = normalizeChecklistRunStatus(run?.status)
+  if (!run || status === "cancelled") return null
+  if (status === "completed") return "completed"
+  if (isChecklistRunHistoricPending(run, now)) return "overdue"
+  if (isChecklistRunOperationalTodayWork(run, getChecklistOperationalDate(now), now)) return "today"
+  return null
 }
 
 export function getChecklistOperationalStatusLabel(status) {

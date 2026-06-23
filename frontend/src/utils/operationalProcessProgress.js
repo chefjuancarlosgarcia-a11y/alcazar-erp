@@ -110,10 +110,13 @@ export function isProcessStepUnlocked(step, allSteps, template) {
 
 export function getStepDisplayStatus(step, run) {
   if (!run) return "pending"
-  if (run.status === "completed") return "completed"
-  if (run.status === "in_progress") return "in_progress"
-  if (run.status === "cancelled") return "cancelled"
-  const operational = getChecklistOperationalDisplayStatus({ ...run, checklist_templates: { title: step.step_label } })
+  const status = String(run.status || "").toLowerCase()
+  if (status === "cancelled") return "cancelled"
+  if (status === "completed") return "completed"
+  if (status === "pending_review") return "pending_review"
+  if (status === "in_progress") return "in_progress"
+  if (status === "rejected") return "rejected"
+  const operational = getChecklistOperationalDisplayStatus(run)
   if (operational === CHECKLIST_OPERATIONAL_STATUS.VENCIDA) return "overdue"
   if (operational === CHECKLIST_OPERATIONAL_STATUS.PENDIENTE_ATRASADA) return "late"
   return "pending"
