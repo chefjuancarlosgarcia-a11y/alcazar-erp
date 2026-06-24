@@ -931,11 +931,105 @@
 .checklists-kpi.in_progress strong { color: #7dd3fc; }
 .checklists-kpi.pending_review strong { color: #fde68a; }
 
+.checklists-dashboard-kpis {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.checklists-dashboard-kpi {
+  display: grid;
+  gap: 8px;
+  min-height: 76px;
+  padding: 13px 16px;
+  border: 1px solid #25364d;
+  border-radius: 13px;
+  background: #101c30;
+}
+
+.checklists-dashboard-kpi span {
+  color: #9cacc1;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.checklists-dashboard-kpi strong {
+  color: #f8fafc;
+  font-size: 28px;
+  line-height: 1;
+}
+
+.checklists-dashboard-kpi--processes strong { color: #5eead4; }
+.checklists-dashboard-kpi--individuals strong { color: #93c5fd; }
+
+.checklists-split-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid #223348;
+  border-radius: 15px;
+  background: #0f172a;
+}
+
+.checklists-split-tabs button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 46px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  background: #101c30;
+  color: #cbd5e1;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.checklists-split-tabs button em {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.16);
+  color: #e2e8f0;
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.checklists-split-tabs button.active {
+  border-color: #14b8a6;
+  background: #0f766e;
+  color: #f0fdfa;
+}
+
+.checklists-split-tabs button.active em {
+  background: rgba(240, 253, 250, 0.18);
+  color: #f0fdfa;
+}
+
 .checklists-card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 16px;
   align-items: stretch;
+}
+
+.checklists-card-grid--compact {
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.checklists-card-grid--compact .checklist-today-card {
+  padding: 14px;
+  gap: 10px;
 }
 
 .checklist-today-card {
@@ -1105,7 +1199,160 @@
 .checklists-overdue,
 .checklists-completed {
   display: grid;
-  gap: 16px;
+  gap: 12px;
+}
+
+.overdue-checklists-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.overdue-checklists-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.overdue-checklists-summary__kpi {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid #25364d;
+  border-radius: 10px;
+  background: #101c30;
+}
+
+.overdue-checklists-summary__kpi span {
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.overdue-checklists-summary__kpi strong {
+  color: #f8fafc;
+  font-size: 18px;
+  line-height: 1.1;
+}
+
+.overdue-checklists-date-group {
+  display: grid;
+  gap: 0;
+  border: 1px solid #223348;
+  border-radius: 10px;
+  background: #0f172a;
+  overflow: hidden;
+}
+
+.overdue-checklists-date-group__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #223348;
+  background: #101c30;
+}
+
+.overdue-checklists-date-group__head strong {
+  color: #e2e8f0;
+  font-size: 13px;
+}
+
+.overdue-checklists-date-group__head span {
+  color: #fca5a5;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.overdue-checklists-date-group__head em {
+  margin-left: auto;
+  color: #94a3b8;
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.overdue-checklists-table-wrap {
+  overflow-x: auto;
+}
+
+.overdue-checklists-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.overdue-checklists-table th,
+.overdue-checklists-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid #1e293b;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.overdue-checklists-table th {
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  background: rgba(15, 23, 42, 0.65);
+}
+
+.overdue-checklists-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.overdue-checklist-row:hover {
+  background: rgba(15, 118, 110, 0.1);
+}
+
+.overdue-checklist-row__title strong {
+  color: #f8fafc;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.overdue-checklist-row__date {
+  color: #cbd5e1;
+  white-space: nowrap;
+}
+
+.overdue-checklist-row__status {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  background: rgba(148, 163, 184, 0.14);
+  color: #e2e8f0;
+}
+
+.overdue-checklist-row__status.is-overdue,
+.overdue-checklist-row__status.is-pending,
+.overdue-checklist-row__status.is-rejected {
+  background: rgba(248, 113, 113, 0.16);
+  color: #fecaca;
+}
+
+.overdue-checklist-row__status.is-in_progress {
+  background: rgba(56, 189, 248, 0.14);
+  color: #bae6fd;
+}
+
+.overdue-checklist-row__action {
+  width: 72px;
+  text-align: right;
+}
+
+.overdue-checklist-row__btn {
+  min-height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .checklist-completed-toolbar {
@@ -1125,65 +1372,6 @@
 .checklists-completed .inventory-modal-actions span {
   color: #94a3b8;
   font-size: 14px;
-}
-
-.checklist-overdue-template {
-  display: grid;
-  gap: 14px;
-  padding: 16px;
-  border: 1px solid #223348;
-  border-radius: 15px;
-  background: #0f172a;
-}
-
-.checklist-overdue-template__head h3 {
-  margin: 0 0 4px;
-  color: #f8fafc;
-  font-size: 18px;
-}
-
-.checklist-overdue-template__head p {
-  margin: 0;
-}
-
-.checklist-overdue-date {
-  display: grid;
-  gap: 12px;
-  padding: 12px;
-  border-radius: 12px;
-  background: #101c30;
-  border: 1px solid #25364d;
-}
-
-.checklist-overdue-date__head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 12px;
-  padding-bottom: 4px;
-  border-bottom: 1px solid #223348;
-}
-
-.checklist-overdue-date__head strong {
-  color: #e2e8f0;
-  font-size: 14px;
-}
-
-.checklist-overdue-date__head span {
-  color: #fca5a5;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.checklist-overdue-date__count {
-  margin-left: auto;
-  color: #94a3b8 !important;
-  font-size: 12px !important;
-  font-weight: 600 !important;
-}
-
-.checklist-overdue-date__grid {
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
 }
 
 .checklist-today-card--completed {
@@ -2425,6 +2613,10 @@
     grid-template-columns: repeat(2, minmax(155px, 1fr));
   }
 
+  .overdue-checklists-summary {
+    grid-template-columns: repeat(2, minmax(140px, 1fr));
+  }
+
   .tasks-assignment,
   .tasks-dashboard-columns,
   .checklist-approvals-layout {
@@ -2463,9 +2655,27 @@
   .tasks-metric-grid,
   .tasks-status-columns,
   .checklists-kpis,
+  .checklists-dashboard-kpis,
   .checklists-card-grid,
   .checklist-stepper {
     grid-template-columns: 1fr;
+  }
+
+  .checklists-split-tabs {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x proximity;
+    scrollbar-width: thin;
+  }
+
+  .checklists-split-tabs button {
+    flex: 0 0 auto;
+    min-width: max(168px, 46vw);
+    scroll-snap-align: start;
+    white-space: nowrap;
   }
 
   .tasks-timeline-row {
@@ -2674,6 +2884,50 @@
   margin-top: 4px;
   padding-top: 12px;
   border-top: 1px solid #25364d;
+}
+
+.operational-process-card__auto-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(20, 184, 166, 0.14);
+  border: 1px solid rgba(20, 184, 166, 0.35);
+  color: #99f6e4;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.operational-process-weekdays {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.operational-process-weekday {
+  min-width: 44px;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: #101c30;
+  color: #cbd5e1;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.operational-process-weekday.is-selected {
+  border-color: #14b8a6;
+  background: #0f766e;
+  color: #f0fdfa;
+}
+
+.operational-process-schedule-hint {
+  margin: 0;
+  font-size: 13px;
 }
 
 .operational-process-card__status {
@@ -3029,6 +3283,13 @@
   line-height: 1.45;
 }
 
+.operational-process-today-card__meta-line {
+  margin: 0;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 .operational-process-today-card__progress {
   display: grid;
   gap: 8px;
@@ -3105,6 +3366,14 @@
   margin: 4px 0 0;
   font-size: 18px;
   line-height: 1.15;
+}
+
+.operational-process-today-detail__head-sub,
+.operational-process-today-detail__head-meta {
+  margin: 6px 0 0;
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .operational-process-today-detail__head-metrics {
@@ -3225,6 +3494,51 @@
 .process-detail-checklist-grid__item {
   min-width: 0;
   display: flex;
+}
+
+.process-detail-step-list {
+  display: grid;
+  gap: 10px;
+}
+
+.process-detail-step-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: #101c30;
+}
+
+.process-detail-step-row--completed {
+  border-color: rgba(34, 197, 94, 0.35);
+}
+
+.process-detail-step-row__main {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.process-detail-step-row__main h4 {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.3;
+  color: #f8fafc;
+}
+
+.process-detail-step-row__items {
+  margin: 0;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.process-detail-step-row__action {
+  flex: 0 0 auto;
+  min-height: 38px;
+  white-space: nowrap;
 }
 
 .process-child-card {

@@ -36,6 +36,11 @@ export async function deactivateOperationalProcessTemplate(processTemplateId) {
   return { data, error: null }
 }
 
+export async function generateDueOperationalProcessRuns(date = getChecklistOperationalDate()) {
+  const result = await supabase.rpc("generate_due_operational_process_runs", { p_target_date: date })
+  return result
+}
+
 export async function createOperationalProcessRun(processTemplateId, {
   runDate = getChecklistOperationalDate(),
   area = null,
@@ -65,4 +70,22 @@ export async function getOperationalProcessRunsForDate(runDate = getChecklistOpe
   })
   if (error) return { data: [], error: rpcError(error) }
   return { data: data || [], error: null }
+}
+
+export async function loadOperationalProcessDetailsForDates(dates = []) {
+  const uniqueDates = [...new Set((dates || []).filter(Boolean))].slice(0, 20)
+  if (!uniqueDates.length) return { data: [], error: null }
+
+  const results = await Promise.all(uniqueDates.map((runDate) => getOperationalProcessRunsForDate(runDate)))
+  const failed = results.find((result) => result.error)
+  if (failed?.error) return { data: [], error: failed.error }
+
+  const merged = new Map()
+  results.forEach((result) => {
+    ;(result.data || []).forEach((detail) => {
+      const id = detail?.process_run?.id
+      if (id) merged.set(id, detail)
+    })
+  })
+  return { data: Array.from(merged.values()), error: null }
 }

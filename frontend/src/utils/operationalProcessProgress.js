@@ -9,6 +9,48 @@ export const OPERATIONAL_COMPLETION_MODES = [
   { value: "sequential", label: "Secuencial" }
 ]
 
+export const OPERATIONAL_FREQUENCY_TYPES = [
+  { value: "manual", label: "Manual (Ejecutar hoy)" },
+  { value: "daily", label: "Diaria" },
+  { value: "weekly", label: "Semanal" },
+  { value: "monthly", label: "Mensual" }
+]
+
+export const OPERATIONAL_WEEKDAYS = [
+  [1, "Lun"],
+  [2, "Mar"],
+  [3, "Mie"],
+  [4, "Jue"],
+  [5, "Vie"],
+  [6, "Sab"],
+  [7, "Dom"]
+]
+
+export function isOperationalProcessManual(template) {
+  return (template?.frequency_type || "manual") === "manual"
+}
+
+export function normalizeOperationalRecurrenceDays(days) {
+  return [...new Set((Array.isArray(days) ? days : []).map((day) => Number(day)).filter((day) => day >= 1 && day <= 7))].sort((a, b) => a - b)
+}
+
+export function formatOperationalProcessFrequency(template) {
+  const type = template?.frequency_type || "manual"
+  if (type === "manual") return "Manual"
+  if (type === "daily") return "Diaria"
+  if (type === "weekly") {
+    const days = normalizeOperationalRecurrenceDays(template?.recurrence_days)
+    if (!days.length) return "Semanal"
+    const labels = days.map((day) => OPERATIONAL_WEEKDAYS.find(([id]) => id === day)?.[1] || day)
+    return `Semanal (${labels.join(", ")})`
+  }
+  if (type === "monthly") {
+    const day = Number(template?.recurrence_month_day || 1)
+    return `Mensual (día ${day})`
+  }
+  return type
+}
+
 export function createEmptyProcessStep(clientKey = `step-${Date.now()}`) {
   return {
     client_key: clientKey,
@@ -50,7 +92,14 @@ export function buildProcessTemplatePayload(form, steps) {
       completion_mode: form.completion_mode || "all_required",
       allow_parallel_execution: form.allow_parallel_execution !== false,
       status: form.status || "active",
-      supervisor_profile_id: form.supervisor_profile_id || null
+      supervisor_profile_id: form.supervisor_profile_id || null,
+      frequency_type: form.frequency_type || "manual",
+      recurrence_days: form.frequency_type === "weekly"
+        ? normalizeOperationalRecurrenceDays(form.recurrence_days)
+        : [],
+      recurrence_month_day: form.frequency_type === "monthly"
+        ? Number(form.recurrence_month_day || 1)
+        : null
     },
     steps: normalizeProcessSteps(steps).map((step, index) => ({
       client_key: step.client_key,
@@ -96,6 +145,71 @@ export function getProcessRunProgress(processRunDetail) {
   }
 }
 
+function stepRunRef(step) {
+  return step?.run || step?.checklist_run || null
+}
+
+function countAnsweredItems(items = []) {
+  return items.filter((item) => (
+    Boolean(
+      item?.checked
+      || item?.response_text
+      || item?.response_number != null
+      || item?.response_date
+      || item?.response_time
+      || item?.photo_url
+      || item?.completed_at
+      || (item?.response_json && Object.keys(item.response_json).length > 0)
+    )
+  )).length
+}
+
+export function getProcessItemTotals(processDetail) {
+  const steps = processDetail?.steps || []
+  let completedItems = 0
+  let totalItems = 0
+
+  steps.forEach((step) => {
+    const run = stepRunRef(step)
+    if (run?.checklist_run_items?.length) {
+      totalItems += run.checklist_run_items.length
+      completedItems += countAnsweredItems(run.checklist_run_items)
+      return
+    }
+    if (run?.item_count != null || run?.completed_items != null) {
+      totalItems += Number(run.item_count) || 0
+      completedItems += Number(run.completed_items) || 0
+      return
+    }
+    const embedded = step.checklist_run
+    if (embedded) {
+      totalItems += Number(embedded.item_count) || 0
+      completedItems += Number(embedded.completed_items) || 0
+    }
+  })
+
+  return { completedItems, totalItems }
+}
+
+export function getProcessAssigneeCount(processDetail) {
+  const assignees = new Set()
+  ;(processDetail?.steps || []).forEach((step) => {
+    const run = stepRunRef(step)
+    if (run?.assigned_profile_id) assignees.add(String(run.assigned_profile_id))
+  })
+  return assignees.size
+}
+
+export function mergeOperationalProcessDetails(existing = [], incoming = []) {
+  const merged = new Map()
+  ;[...(existing || []), ...(incoming || [])].forEach((detail) => {
+    const id = detail?.process_run?.id
+    if (!id) return
+    merged.set(id, detail)
+  })
+  return Array.from(merged.values())
+}
+
 export function isProcessStepUnlocked(step, allSteps, template) {
   if (!step.depends_on_run_step_id) return true
   const dependency = allSteps.find((candidate) => candidate.id === step.depends_on_run_step_id)
@@ -125,6 +239,8 @@ export function getStepDisplayStatus(step, run) {
 export function getProcessTodaySummary(processDetail) {
   const steps = processDetail?.steps || []
   const progress = getProcessRunProgress(processDetail)
+  const itemTotals = getProcessItemTotals(processDetail)
+  const assigneeCount = getProcessAssigneeCount(processDetail)
   const template = processDetail?.template || {}
   const processRun = processDetail?.process_run || {}
 
@@ -163,7 +279,7 @@ export function getProcessTodaySummary(processDetail) {
   }
 
   const buttonLabel = !hasStarted
-    ? "Abrir proceso"
+    ? "Ver proceso"
     : (tone === "completed" ? "Ver proceso" : "Continuar proceso")
 
   return {
@@ -173,6 +289,9 @@ export function getProcessTodaySummary(processDetail) {
     completed,
     total,
     progress,
+    itemTotals,
+    assigneeCount,
+    runDate: processRun.run_date || null,
     label,
     tone,
     buttonLabel,
@@ -280,29 +399,47 @@ export function groupProcessStepsForDisplay(steps = []) {
   return Array.from(groups.values()).sort((a, b) => a.label.localeCompare(b.label, "es"))
 }
 
-export function partitionTodayRunsForProcesses(todayRuns, processRunDetails = [], { groupProcesses = false } = {}) {
+export function partitionRunsForProcesses(runs, processRunDetails = [], { groupProcesses = false } = {}) {
   if (!groupProcesses || !processRunDetails.length) {
-    return { processGroups: [], orphanRuns: todayRuns }
+    return { processGroups: [], orphanRuns: runs }
   }
 
   const groupedRunIds = new Set()
+  const runsById = new Map((runs || []).map((run) => [run.id, run]))
   const processGroups = processRunDetails.map((detail) => {
     const steps = detail?.steps || []
     steps.forEach((step) => {
       if (step.checklist_run_id) groupedRunIds.add(step.checklist_run_id)
     })
-    const runsById = new Map(todayRuns.map((run) => [run.id, run]))
     return {
       ...detail,
       steps: steps.map((step) => ({
         ...step,
-        run: runsById.get(step.checklist_run_id) || null
+        run: runsById.get(step.checklist_run_id) || step.run || null,
+        checklist_run: step.checklist_run || runsById.get(step.checklist_run_id) || null
       }))
     }
   })
 
-  const orphanRuns = todayRuns.filter((run) => !groupedRunIds.has(run.id))
+  const orphanRuns = (runs || []).filter((run) => !groupedRunIds.has(run.id))
   return { processGroups, orphanRuns }
+}
+
+export function partitionTodayRunsForProcesses(todayRuns, processRunDetails = [], options = {}) {
+  return partitionRunsForProcesses(todayRuns, processRunDetails, options)
+}
+
+export function filterProcessGroupsWithRuns(processGroups = [], runs = []) {
+  const runIds = new Set((runs || []).map((run) => run.id))
+  return (processGroups || []).filter((detail) => (
+    (detail?.steps || []).some((step) => runIds.has(step.checklist_run_id))
+  )).map((detail) => ({
+    ...detail,
+    steps: (detail.steps || []).map((step) => ({
+      ...step,
+      run: (runs || []).find((run) => run.id === step.checklist_run_id) || step.run || null
+    }))
+  }))
 }
 
 export function moveProcessStep(steps, fromIndex, toIndex) {

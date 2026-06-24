@@ -1,63 +1,99 @@
 import {
   getNextProcessStepToWork,
+  getProcessItemTotals,
   getProcessRunProgress,
   getProcessStepLabel,
   getProcessTodaySummary,
-  isProcessStepUnlocked,
-  partitionProcessStepsForDetail
+  getProcessAssigneeCount,
+  getStepDisplayStatus,
+  isProcessStepUnlocked
 } from "../../utils/operationalProcessProgress"
 
-function ProcessStepGrid({ steps, allSteps, template, renderRunCard, onOpenStep }) {
-  if (!steps.length) return null
+function formatProcessRunDate(value) {
+  if (!value) return "Sin fecha"
+  const [year, month, day] = String(value).slice(0, 10).split("-")
+  if (!year || !month || !day) return String(value)
+  return `${day}/${month}/${year}`
+}
+
+function stepItemTotals(step) {
+  const run = step.run || step.checklist_run || null
+  if (run?.checklist_run_items?.length) {
+    const total = run.checklist_run_items.length
+    const completed = run.checklist_run_items.filter((item) => (
+      Boolean(
+        item?.checked
+        || item?.response_text
+        || item?.response_number != null
+        || item?.response_date
+        || item?.response_time
+        || item?.photo_url
+        || item?.completed_at
+        || (item?.response_json && Object.keys(item.response_json).length > 0)
+      )
+    )).length
+    return { completed, total }
+  }
+  if (run?.item_count != null || run?.completed_items != null) {
+    return {
+      completed: Number(run.completed_items) || 0,
+      total: Number(run.item_count) || 0
+    }
+  }
+  if (step.checklist_run) {
+    return {
+      completed: Number(step.checklist_run.completed_items) || 0,
+      total: Number(step.checklist_run.item_count) || 0
+    }
+  }
+  return { completed: 0, total: 0 }
+}
+
+function ProcessStepRow({ step, allSteps, template, onOpenStep }) {
+  const run = step.run || step.checklist_run || null
+  const unlocked = isProcessStepUnlocked(step, allSteps, template)
+  const status = getStepDisplayStatus(step, run)
+  const title = getProcessStepLabel(step, run)
+  const { completed, total } = stepItemTotals(step)
+  const isDone = status === "completed" || status === "pending_review"
 
   return (
-    <div className="process-detail-checklist-grid">
-      {steps.map((step) => {
-        const run = step.run || null
-        const unlocked = isProcessStepUnlocked(step, allSteps, template)
-
-        return (
-          <div key={step.id || step.checklist_run_id} className="process-detail-checklist-grid__item">
-            {run && renderRunCard ? (
-              renderRunCard({
-                run,
-                step,
-                disabled: !unlocked,
-                onOpen: () => unlocked && onOpenStep(step, run)
-              })
-            ) : step.checklist_run_id ? (
-              <article className="process-child-card process-child-card--pending is-locked">
-                <div className="process-child-card__body">
-                  <h3>{step.step_label}</h3>
-                  <p className="process-child-card__status-line">Pendiente</p>
-                  <p className="process-child-card__items">Sin corrida</p>
-                </div>
-                <div className="process-child-card__actions">
-                  <button type="button" className="checklist-primary-action" disabled>Bloqueada</button>
-                </div>
-              </article>
-            ) : null}
-          </div>
-        )
-      })}
-    </div>
+    <article className={`process-detail-step-row process-detail-step-row--${isDone ? "completed" : status}`}>
+      <div className="process-detail-step-row__main">
+        <h4>
+          {isDone ? "✅ " : null}
+          {title}
+        </h4>
+        <p className="process-detail-step-row__items">
+          {total > 0 ? `${completed}/${total} tareas completadas` : "Sin ítems cargados"}
+        </p>
+      </div>
+      <button
+        type="button"
+        className="tasks-secondary process-detail-step-row__action"
+        disabled={!unlocked || !run}
+        onClick={() => unlocked && run && onOpenStep(step, run)}
+      >
+        Ver detalle
+      </button>
+    </article>
   )
 }
 
 export default function OperationalProcessTodayDetail({
   processDetail,
-  profiles = [],
+  backLabel = "← Volver a Hoy",
   onClose,
   onOpenRun,
   onStartRun,
-  onOpenNextStep,
-  renderRunCard
+  onOpenNextStep
 }) {
   const template = processDetail?.template || {}
   const summary = getProcessTodaySummary(processDetail)
   const progress = getProcessRunProgress(processDetail)
+  const itemTotals = getProcessItemTotals(processDetail)
+  const assigneeCount = getProcessAssigneeCount(processDetail)
   const steps = processDetail?.steps || []
-  const stepGroups = partitionProcessStepsForDetail(steps)
   const nextStep = getNextProcessStepToWork(processDetail)
   const nextStepLabel = nextStep ? getProcessStepLabel(nextStep, nextStep.run || null) : ""
 
@@ -78,11 +114,15 @@ export default function OperationalProcessTodayDetail({
     onOpenNextStep?.(nextStep)
   }
 
+  const orderedSteps = steps
+    .slice()
+    .sort((left, right) => (left.step_order ?? 0) - (right.step_order ?? 0))
+
   return (
     <div className="operational-process-today-detail">
       <div className="checklist-today-toolbar operational-process-today-detail__toolbar">
         <button type="button" className="checklist-back-button" onClick={onClose}>
-          ← Volver a checklists de hoy
+          {backLabel}
         </button>
       </div>
 
@@ -90,11 +130,19 @@ export default function OperationalProcessTodayDetail({
         <div className="operational-process-today-detail__head-main">
           <span className="operational-process-today-card__eyebrow">Proceso operativo</span>
           <h2>{summary.title}</h2>
+          <p className="operational-process-today-detail__head-sub">
+            {progress.percent}% completado · {summary.completed} de {summary.total} checklists completadas
+            {itemTotals.totalItems > 0 ? ` · ${itemTotals.completedItems} de ${itemTotals.totalItems} tareas completadas` : ""}
+          </p>
+          <p className="operational-process-today-detail__head-meta">
+            Fecha operativa: {formatProcessRunDate(summary.runDate)}
+            {assigneeCount > 0 ? ` · Responsables: ${assigneeCount}` : ""}
+          </p>
         </div>
         <div className="operational-process-today-detail__head-metrics">
           <div className="operational-process-today-detail__metric">
             <strong>{summary.completed}/{summary.total}</strong>
-            <span>completadas</span>
+            <span>checklists</span>
           </div>
           <span className={`operational-process-today-card__status operational-process-today-card__status--${summary.tone}`}>
             {summary.label}
@@ -118,32 +166,20 @@ export default function OperationalProcessTodayDetail({
       ) : null}
 
       <div className="operational-process-today-detail__body">
-        {stepGroups.map((group) => (
-          <section key={group.key} className="operational-process-today-detail__group">
-            <h3 className="operational-process-today-detail__group-title">{group.label}</h3>
-
-            <ProcessStepGrid
-              steps={group.activeSteps}
-              allSteps={steps}
-              template={template}
-              renderRunCard={renderRunCard}
-              onOpenStep={handleOpenStep}
-            />
-
-            {group.completedSteps.length > 0 ? (
-              <details className="process-detail-completed-block">
-                <summary>Completadas ({group.completedSteps.length})</summary>
-                <ProcessStepGrid
-                  steps={group.completedSteps}
-                  allSteps={steps}
-                  template={template}
-                  renderRunCard={renderRunCard}
-                  onOpenStep={handleOpenStep}
-                />
-              </details>
-            ) : null}
-          </section>
-        ))}
+        <section className="operational-process-today-detail__group">
+          <h3 className="operational-process-today-detail__group-title">Checklists del proceso</h3>
+          <div className="process-detail-step-list">
+            {orderedSteps.map((step) => (
+              <ProcessStepRow
+                key={step.id || step.checklist_run_id}
+                step={step}
+                allSteps={steps}
+                template={template}
+                onOpenStep={handleOpenStep}
+              />
+            ))}
+          </div>
+        </section>
       </div>
     </div>
   )

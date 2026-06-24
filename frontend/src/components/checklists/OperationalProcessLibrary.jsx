@@ -9,10 +9,15 @@ import {
 import {
   buildProcessTemplatePayload,
   createEmptyProcessStep,
+  formatOperationalProcessFrequency,
+  isOperationalProcessManual,
   mapProcessDetailSteps,
   moveProcessStep,
+  normalizeOperationalRecurrenceDays,
   OPERATIONAL_COMPLETION_MODES,
-  OPERATIONAL_PROCESS_TYPES
+  OPERATIONAL_FREQUENCY_TYPES,
+  OPERATIONAL_PROCESS_TYPES,
+  OPERATIONAL_WEEKDAYS
 } from "../../utils/operationalProcessProgress"
 import { getChecklistOperationalDate } from "../../utils/checklistOperationalStatus"
 
@@ -25,7 +30,10 @@ const EMPTY_FORM = {
   completion_mode: "all_required",
   allow_parallel_execution: true,
   status: "active",
-  supervisor_profile_id: ""
+  supervisor_profile_id: "",
+  frequency_type: "manual",
+  recurrence_days: [],
+  recurrence_month_day: 1
 }
 
 function ProcessField({ label, hint, className = "", children }) {
@@ -92,7 +100,10 @@ export default function OperationalProcessLibrary({
       completion_mode: template.completion_mode || "all_required",
       allow_parallel_execution: template.allow_parallel_execution !== false,
       status: template.status || "active",
-      supervisor_profile_id: template.supervisor_profile_id || ""
+      supervisor_profile_id: template.supervisor_profile_id || "",
+      frequency_type: template.frequency_type || "manual",
+      recurrence_days: normalizeOperationalRecurrenceDays(template.recurrence_days),
+      recurrence_month_day: Number(template.recurrence_month_day || 1)
     })
     const mapped = mapProcessDetailSteps(result.data)
     setSteps(mapped.length ? mapped : [createEmptyProcessStep()])
@@ -130,6 +141,10 @@ export default function OperationalProcessLibrary({
       onMessage?.("Agrega al menos una checklist hija con etiqueta.", "error")
       return
     }
+    if (form.frequency_type === "weekly" && !normalizeOperationalRecurrenceDays(form.recurrence_days).length) {
+      onMessage?.("Selecciona al menos un dia de la semana para la programacion semanal.", "error")
+      return
+    }
 
     setSaving(true)
     const { payload, steps: stepPayload } = buildProcessTemplatePayload(form, validSteps)
@@ -143,6 +158,16 @@ export default function OperationalProcessLibrary({
     resetEditor()
     await loadLibrary()
     onChanged?.()
+  }
+
+  function toggleRecurrenceDay(day) {
+    setForm((current) => {
+      const normalized = normalizeOperationalRecurrenceDays(current.recurrence_days)
+      const next = normalized.includes(day)
+        ? normalized.filter((item) => item !== day)
+        : [...normalized, day]
+      return { ...current, recurrence_days: next.sort((a, b) => a - b) }
+    })
   }
 
   async function handleDeactivate(id) {
@@ -250,10 +275,75 @@ export default function OperationalProcessLibrary({
           </section>
 
           <section className="operational-process-section-card">
+            <header className="operational-process-section-card__head">
+              <div>
+                <strong>Programación</strong>
+                <p className="tasks-muted">Los procesos automáticos se generan al cargar Checklists, igual que las checklists recurrentes.</p>
+              </div>
+            </header>
+
+            <div className="operational-process-editor__stack">
+              <ProcessField label="Frecuencia" className="operational-process-field--full">
+                <select
+                  value={form.frequency_type}
+                  onChange={(e) => setForm({
+                    ...form,
+                    frequency_type: e.target.value,
+                    recurrence_days: e.target.value === "weekly" ? form.recurrence_days : [],
+                    recurrence_month_day: e.target.value === "monthly" ? (form.recurrence_month_day || 1) : 1
+                  })}
+                >
+                  {OPERATIONAL_FREQUENCY_TYPES.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </ProcessField>
+
+              {form.frequency_type === "weekly" ? (
+                <ProcessField label="Días de la semana" className="operational-process-field--full">
+                  <div className="operational-process-weekdays">
+                    {OPERATIONAL_WEEKDAYS.map(([day, label]) => {
+                      const selected = normalizeOperationalRecurrenceDays(form.recurrence_days).includes(day)
+                      return (
+                        <button
+                          key={day}
+                          type="button"
+                          className={`operational-process-weekday${selected ? " is-selected" : ""}`}
+                          onClick={() => toggleRecurrenceDay(day)}
+                        >
+                          {label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </ProcessField>
+              ) : null}
+
+              {form.frequency_type === "monthly" ? (
+                <ProcessField label="Día del mes">
+                  <input
+                    type="number"
+                    min={1}
+                    max={31}
+                    value={form.recurrence_month_day}
+                    onChange={(e) => setForm({ ...form, recurrence_month_day: Number(e.target.value || 1) })}
+                  />
+                </ProcessField>
+              ) : null}
+
+              {form.frequency_type !== "manual" ? (
+                <p className="tasks-muted operational-process-schedule-hint">
+                  Este proceso se creará automáticamente en el día operativo correspondiente. No requiere «Ejecutar hoy».
+                </p>
+              ) : null}
+            </div>
+          </section>
+
+          <section className="operational-process-section-card">
             <header className="operational-process-section-card__head operational-process-section-card__head--split">
               <div>
                 <strong>Checklists hijas</strong>
-                <p className="tasks-muted">Cada paso genera una checklist independiente al ejecutar el proceso.</p>
+                <p className="tasks-muted">Cada paso genera una checklist independiente al ejecutar o programar el proceso.</p>
               </div>
               <button type="button" className="tasks-secondary operational-process-add-step" onClick={addStep}>
                 + Agregar checklist
@@ -372,12 +462,16 @@ export default function OperationalProcessLibrary({
             </header>
             <p className="tasks-muted">{item.description || "Sin descripción"}</p>
             <small className="operational-process-card__meta">
-              {item.step_count || 0} checklist(s) · {item.completion_mode} · {item.allow_parallel_execution ? "Paralelo" : "Secuencial"}
+              {item.step_count || 0} checklist(s) · {formatOperationalProcessFrequency(item)} · {item.completion_mode} · {item.allow_parallel_execution ? "Paralelo" : "Secuencial"}
             </small>
             <footer className="operational-process-card__foot">
-              <button type="button" className="tasks-secondary" disabled={runningId === item.id} onClick={() => handleRunToday(item)}>
-                {runningId === item.id ? "Iniciando..." : "Ejecutar hoy"}
-              </button>
+              {isOperationalProcessManual(item) ? (
+                <button type="button" className="tasks-secondary" disabled={runningId === item.id} onClick={() => handleRunToday(item)}>
+                  {runningId === item.id ? "Iniciando..." : "Ejecutar hoy"}
+                </button>
+              ) : (
+                <span className="operational-process-card__auto-badge">Programado</span>
+              )}
               {canManage ? (
                 <>
                   <button type="button" className="tasks-link" onClick={() => openEditor(item)}>Editar</button>

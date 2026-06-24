@@ -3,9 +3,14 @@
  */
 import {
   CHECKLIST_OPERATIONAL_STATUS,
+  getChecklistOperationalDate,
   getChecklistOperationalDisplayStatus,
   getChecklistRunContextBadgeLabels,
+  isChecklistRunHistoricPending,
+  isChecklistRunOperationalTodayWork,
+  isChecklistRunOverdueBucket,
   isChecklistRunOverdueDisplay,
+  isChecklistRunTodayWork,
   filterRunsWithoutCompletedDuplicate
 } from "../src/utils/checklistOperationalStatus.js"
 
@@ -78,6 +83,56 @@ const filtered = filterRunsWithoutCompletedDuplicate([completedRun, duplicateAct
 assert(
   "oculta duplicado activo si existe completed misma plantilla/fecha",
   filtered.length === 1 && filtered[0].id === "a"
+)
+
+const overdueYesterday = {
+  id: "overdue-yesterday",
+  template_id: "t2",
+  run_date: "2026-06-08",
+  status: "overdue"
+}
+const nowAfterWindow = new Date("2026-06-09T10:00:00-06:00")
+assert(
+  "operationalToday-1 overdue → bucket Vencidas",
+  getChecklistOperationalDate(nowAfterWindow) === "2026-06-09"
+    && isChecklistRunOverdueBucket(overdueYesterday, nowAfterWindow)
+)
+assert(
+  "operationalToday-1 overdue no es today work operativo",
+  !isChecklistRunOperationalTodayWork(overdueYesterday, "2026-06-09", nowAfterWindow)
+)
+assert(
+  "operationalToday-1 overdue excluido por historic pending antiguo",
+  !isChecklistRunHistoricPending(overdueYesterday, nowAfterWindow)
+)
+
+const completedOverdue = { ...overdueYesterday, status: "completed", completion_timing: "late" }
+assert(
+  "completed no entra en bucket Vencidas",
+  !isChecklistRunOverdueBucket(completedOverdue, nowAfterWindow)
+)
+
+const cancelledOverdue = { ...overdueYesterday, status: "cancelled" }
+assert(
+  "cancelled no entra en bucket Vencidas",
+  !isChecklistRunOverdueBucket(cancelledOverdue, nowAfterWindow)
+)
+
+const pendingReviewOverdue = { ...overdueYesterday, status: "pending_review" }
+assert(
+  "pending_review no entra en bucket Vencidas",
+  !isChecklistRunOverdueBucket(pendingReviewOverdue, nowAfterWindow)
+)
+
+const pendingWindowClosed = {
+  id: "pending-closed",
+  template_id: "t3",
+  run_date: "2026-06-08",
+  status: "pending"
+}
+assert(
+  "pending con ventana cerrada → bucket Vencidas",
+  isChecklistRunOverdueBucket(pendingWindowClosed, nowAfterWindow)
 )
 
 if (!process.exitCode) console.log("\nAll checklist operational status self-tests passed.")

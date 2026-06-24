@@ -267,12 +267,23 @@ export function filterRunsWithoutCompletedDuplicate(runs = []) {
   })
 }
 
+/**
+ * Bucket UI "Vencidas": alineado con notify_overdue_checklist_runs y
+ * getChecklistOperationalDisplayStatus (vencida). No excluye por candidatos de "hoy".
+ */
+export function isChecklistRunOverdueBucket(run, now = new Date()) {
+  if (!run) return false
+  const status = normalizeChecklistRunStatus(run?.status)
+  if (CHECKLIST_NON_OVERDUE_DB_STATUSES.has(status) || status === "cancelled") return false
+  return getChecklistOperationalDisplayStatus(run, now) === CHECKLIST_OPERATIONAL_STATUS.VENCIDA
+}
+
 /** Devuelve el bucket exclusivo de UI para una corrida (sin solapamiento). */
 export function getChecklistRunPipelineBucket(run, now = new Date()) {
   const status = normalizeChecklistRunStatus(run?.status)
   if (!run || status === "cancelled") return null
   if (status === "completed") return "completed"
-  if (isChecklistRunHistoricPending(run, now)) return "overdue"
+  if (isChecklistRunOverdueBucket(run, now)) return "overdue"
   if (isChecklistRunOperationalTodayWork(run, getChecklistOperationalDate(now), now)) return "today"
   return null
 }
@@ -300,6 +311,7 @@ export function isChecklistRunOperationalTodayWork(
   return normalizeChecklistRunDate(run?.run_date) === today
 }
 
+/** Histórico estricto (fecha anterior al día operativo). No usar para la pestaña Vencidas. */
 export function isChecklistRunHistoricPending(run, now = new Date()) {
   if (!isChecklistRunActive(run)) return false
   if (isChecklistRunTodayWork(run, now)) return false
@@ -363,5 +375,5 @@ export function shouldEnsureChecklistRunForOperationalDate(template, dateStr = g
 }
 
 export function isChecklistOperationallyExpired(run, now = new Date()) {
-  return getChecklistOperationalDisplayStatus(run, now) === CHECKLIST_OPERATIONAL_STATUS.VENCIDA
+  return isChecklistRunOverdueBucket(run, now)
 }

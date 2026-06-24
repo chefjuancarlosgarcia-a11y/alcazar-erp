@@ -4,7 +4,7 @@ import {
   getChecklistOperationalDate,
   isChecklistRunActive,
   isChecklistRunDateToday,
-  isChecklistRunHistoricPending,
+  isChecklistRunOverdueBucket,
   isChecklistRunOperationalTodayWork,
   isChecklistRunTodayWork,
   normalizeChecklistRunDate,
@@ -277,7 +277,7 @@ export function buildChecklistDisplayPipelineAudit({
       hiddenByTodayWorkFilter: hiddenByTodayWork.length,
       removedByDedupe,
       finalTodayCards: dedupedTodayRuns.length,
-      historicPending: visibleRuns.filter((run) => isChecklistRunHistoricPending(run)).length,
+      overdueBucket: visibleRuns.filter((run) => isChecklistRunOverdueBucket(run)).length,
       duplicateTemplateNameCount: duplicateTemplateGroups.length
     },
     dedupeDetails,

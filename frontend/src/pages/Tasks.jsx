@@ -49,10 +49,12 @@ import {
   updateChecklistTemplateSuggestionStatus,
   logChecklistSessionAudit
 } from "../services/checklistsService"
-import { getOperationalProcessRunsForDate } from "../services/operationalProcessService"
+import { generateDueOperationalProcessRuns, getOperationalProcessRunsForDate, loadOperationalProcessDetailsForDates } from "../services/operationalProcessService"
 import OperationalProcessLibrary from "../components/checklists/OperationalProcessLibrary"
 import OperationalProcessTodayCard from "../components/checklists/OperationalProcessTodayCard"
 import OperationalProcessTodayDetail from "../components/checklists/OperationalProcessTodayDetail"
+import OverdueChecklistsPanel from "../components/checklists/OverdueChecklistsPanel"
+import { formatOverdueDaysLabel } from "../utils/overdueChecklistsView"
 import {
   appendLocalChecklistAudit,
   clearActiveChecklistSession,
@@ -96,8 +98,7 @@ import {
   normalizeChecklistRunStatus,
   getChecklistReplacementReasonLabel,
   hasChecklistReplacement,
-  isChecklistOperationallyExpired,
-  isChecklistRunHistoricPending,
+  isChecklistRunOverdueBucket,
   isChecklistRunOperationalTodayWork,
   isChecklistRunTodayWork
 } from "../utils/checklistOperationalStatus"
@@ -111,7 +112,10 @@ import {
   getProcessChildActionLabel,
   getProcessChildCardTone,
   getProcessChildStatusLabel,
-  partitionTodayRunsForProcesses
+  partitionTodayRunsForProcesses,
+  partitionRunsForProcesses,
+  filterProcessGroupsWithRuns,
+  mergeOperationalProcessDetails
 } from "../utils/operationalProcessProgress"
 import {
   findChecklistAssignmentConflicts,
@@ -1745,7 +1749,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
     const todayCount = dedupeChecklistRunsById(
       visibleRuns.filter((run) => isChecklistRunOperationalTodayWork(run, operationalToday))
     ).length
-    const overdueCount = visibleRuns.filter(isChecklistRunHistoricPending).length
+    const overdueCount = visibleRuns.filter(isChecklistRunOverdueBucket).length
     const completedCount = visibleRuns.filter(isChecklistRunCompleted).length
     return [
       ["today", todayCount ? `Hoy (${todayCount})` : "Hoy"],
@@ -1791,9 +1795,8 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
           getChecklistTemplateSuggestions()
         ]
         : []
-      const requests = [...libraryRequests, loadModuleChecklistRuns(), getChecklistProfiles()]
+      const requests = [...libraryRequests, loadModuleChecklistRuns(), getChecklistProfiles(), getOperationalProcessRunsForDate(operationalToday)]
       if (canManageManagementAlerts) requests.push(getChecklistManagementAlerts())
-      if (canViewOperationalProcessGroups) requests.push(getOperationalProcessRunsForDate(operationalToday))
       const results = await Promise.all(requests)
       const templateResult = libraryRequests.length ? results[0] : { data: [], error: null }
       const incidentResult = libraryRequests.length ? results[1] : { data: [], error: null }
@@ -1801,10 +1804,8 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       const suggestionResult = libraryRequests.length ? results[3] : { data: [], error: null }
       let runResult = results[libraryRequests.length]
       const profileResult = results[libraryRequests.length + 1]
-      const alertResult = canManageManagementAlerts ? results[libraryRequests.length + 2] : null
-      const processResult = canViewOperationalProcessGroups
-        ? results[libraryRequests.length + (canManageManagementAlerts ? 3 : 2)]
-        : null
+      let processResult = results[libraryRequests.length + 2]
+      const alertResult = canManageManagementAlerts ? results[libraryRequests.length + 3] : null
       const profileRows = profileResult.data || []
 
       try {
@@ -1843,6 +1844,22 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
         generationWarning = generationError?.message || "No se pudieron generar checklists recurrentes."
       }
 
+      try {
+        const processGenResult = await generateDueOperationalProcessRuns(operationalToday)
+        if (processGenResult.error) {
+          console.warn("generateDueOperationalProcessRuns failed:", processGenResult.error)
+        } else if (Number(processGenResult.data || 0) > 0) {
+          const [processReload, runReload] = await Promise.all([
+            getOperationalProcessRunsForDate(operationalToday),
+            loadModuleChecklistRuns()
+          ])
+          if (!processReload.error) processResult = processReload
+          if (!runReload.error) runResult = runReload
+        }
+      } catch (processGenerationError) {
+        console.warn("Operational process generation error:", processGenerationError)
+      }
+
       if (canManageManagementAlerts) {
         notifyOverdueChecklistRuns().catch((error) => {
           console.warn("notifyOverdueChecklistRuns failed:", error)
@@ -1871,7 +1888,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       const canSeeRun = (run) => canSeeChecklistRun(run, actor, profileRows, { seeAll })
       const activeRunIds = syncedRuns
         .filter((run) => run.status !== "cancelled" && canSeeRun(run))
-        .filter((run) => isChecklistRunTodayWork(run) || isChecklistRunHistoricPending(run))
+        .filter((run) => isChecklistRunTodayWork(run) || isChecklistRunOverdueBucket(run))
         .map((run) => run.id)
       getChecklistCoverageForRuns(activeRunIds).then((coverageResult) => {
         if (!coverageResult.error) {
@@ -1927,7 +1944,13 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       refreshInFlightRef.current = false
       if (showLoading) setLoading(false)
     }
-  }, [canManageCoverage, canManageManagementAlerts, canViewChecklistLibrary, canViewOperationalProcessGroups, replayPendingChecklistDrafts, runs.length, user])
+  }, [canManageCoverage, canManageManagementAlerts, canViewChecklistLibrary, replayPendingChecklistDrafts, runs.length, user])
+
+  const ensureProcessDetailsForDates = useCallback(async (dates = []) => {
+    const result = await loadOperationalProcessDetailsForDates(dates)
+    if (result.error || !result.data?.length) return
+    setProcessRunDetails((current) => mergeOperationalProcessDetails(current, result.data))
+  }, [])
 
   const ensureTodayRuns = useCallback(async () => {
     setEnsuringToday(true)
@@ -1985,7 +2008,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
     const run = runs.find((item) => item.id === activeSession.runId)
     if (!run) return
     sessionRestoreHandledRef.current = true
-    if (isChecklistRunHistoricPending(run)) {
+    if (isChecklistRunOverdueBucket(run)) {
       setSection("overdue")
       setDetailReturnSection("overdue")
     } else if (isChecklistRunCompleted(run)) {
@@ -2004,7 +2027,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
     const run = runs.find((item) => item.id === initialRunId)
     if (!run) return
     deepLinkRunHandledRef.current = true
-    if (isChecklistRunHistoricPending(run)) {
+    if (isChecklistRunOverdueBucket(run)) {
       setSection("overdue")
       setDetailReturnSection("overdue")
     } else if (isChecklistRunCompleted(run)) {
@@ -2537,7 +2560,6 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
         <ChecklistToday
           runs={visibleRuns}
           processRunDetails={processRunDetails}
-          canGroupOperationalProcesses={canViewOperationalProcessGroups}
           profiles={profiles}
           loading={(loading || ensuringToday) && runs.length === 0}
           selectedRun={selectedRun && isChecklistRunOperationalTodayWork(selectedRun) ? selectedRun : null}
@@ -2564,7 +2586,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
         <ChecklistOverdue
           runs={visibleRuns}
           profiles={profiles}
-          selectedRun={selectedRun && isChecklistRunHistoricPending(selectedRun) ? selectedRun : null}
+          selectedRun={selectedRun && isChecklistRunOverdueBucket(selectedRun) ? selectedRun : null}
           onSelect={(runId) => (runId ? selectRun(runId, "overdue") : closeRunDetail())}
           onStart={startRun}
           onUpdateItem={updateRunItem}
@@ -2578,6 +2600,8 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       {section === "completed" && (
         <ChecklistCompleted
           runs={visibleRuns}
+          processRunDetails={processRunDetails}
+          onEnsureProcessDetailsForDates={ensureProcessDetailsForDates}
           profiles={profiles}
           selectedRun={selectedRun && isChecklistRunCompleted(selectedRun) ? selectedRun : null}
           onSelect={(runId) => (runId ? selectRun(runId, "completed") : closeRunDetail())}
@@ -2829,10 +2853,46 @@ function ChecklistRunDetailShell({
   return children
 }
 
+function ChecklistDashboardScopeKpis({ processCount, individualCount }) {
+  return (
+    <div className="checklists-dashboard-kpis">
+      <article className="checklists-dashboard-kpi checklists-dashboard-kpi--processes">
+        <span>Procesos</span>
+        <strong>{processCount}</strong>
+      </article>
+      <article className="checklists-dashboard-kpi checklists-dashboard-kpi--individuals">
+        <span>Checklists individuales</span>
+        <strong>{individualCount}</strong>
+      </article>
+    </div>
+  )
+}
+
+function ChecklistSplitScopeTabs({ value, onChange, processCount = 0, individualCount = 0 }) {
+  const tabs = [
+    ["processes", "Procesos operativos", processCount],
+    ["individuals", "Checklists individuales", individualCount]
+  ]
+  return (
+    <nav className="checklists-split-tabs" aria-label="Vista de checklists">
+      {tabs.map(([id, label, count]) => (
+        <button
+          key={id}
+          type="button"
+          className={value === id ? "active" : ""}
+          onClick={() => onChange(id)}
+        >
+          <span>{label}</span>
+          {count > 0 ? <em>{count}</em> : null}
+        </button>
+      ))}
+    </nav>
+  )
+}
+
 function ChecklistToday({
   runs,
   processRunDetails = [],
-  canGroupOperationalProcesses = false,
   profiles,
   loading = false,
   selectedRun,
@@ -2854,6 +2914,7 @@ function ChecklistToday({
   onTodayAdminAction
 }) {
   const [selectedProcessDetail, setSelectedProcessDetail] = useState(null)
+  const [scopeTab, setScopeTab] = useState("processes")
   const operationalToday = getChecklistOperationalDate()
   const todayRuns = useMemo(
     () => dedupeChecklistRunsById(
@@ -2877,10 +2938,15 @@ function ChecklistToday({
       }),
     [runs, operationalToday]
   )
-  const { processGroups, orphanRuns } = useMemo(
-    () => partitionTodayRunsForProcesses(todayRuns, processRunDetails, { groupProcesses: canGroupOperationalProcesses }),
-    [todayRuns, processRunDetails, canGroupOperationalProcesses]
-  )
+  const { processGroups, orphanRuns } = useMemo(() => {
+    const partitioned = partitionTodayRunsForProcesses(todayRuns, processRunDetails, {
+      groupProcesses: processRunDetails.length > 0
+    })
+    return {
+      processGroups: filterProcessGroupsWithRuns(partitioned.processGroups, todayRuns),
+      orphanRuns: partitioned.orphanRuns
+    }
+  }, [todayRuns, processRunDetails])
   const activeProcessDetail = useMemo(() => {
     if (!selectedProcessDetail) return null
     const processRunId = selectedProcessDetail?.process_run?.id
@@ -2895,15 +2961,6 @@ function ChecklistToday({
     [runs, operationalToday]
   )
   const todayDateLabel = operationalToday
-
-  const pending = todayRuns.filter((run) => getChecklistOperationalDisplayStatus(run) === CHECKLIST_OPERATIONAL_STATUS.PENDIENTE)
-  const inProgress = todayRuns.filter((run) => run.status === "in_progress")
-  const latePending = todayRuns.filter((run) => getChecklistOperationalDisplayStatus(run) === CHECKLIST_OPERATIONAL_STATUS.PENDIENTE_ATRASADA)
-  const cards = [
-    ["Pendientes", pending.length, "pending"],
-    ["En progreso", inProgress.length, "in_progress"],
-    ["Atrasadas", latePending.length, "late"]
-  ]
 
   const renderTodayRunCard = (run, {
     compact = false,
@@ -2954,86 +3011,93 @@ function ChecklistToday({
       ) : activeProcessDetail ? (
         <OperationalProcessTodayDetail
           processDetail={activeProcessDetail}
-          profiles={profiles}
+          backLabel="← Volver a Hoy"
           onClose={() => setSelectedProcessDetail(null)}
           onOpenRun={onSelect}
           onStartRun={onStart}
-          renderRunCard={({ run, step, disabled, onOpen }) => renderTodayRunCard(run, {
-            variant: "process-child",
-            step,
-            stepLabel: step?.step_label || "",
-            hideGroupMeta: true,
-            disabled,
-            onOpen
-          })}
         />
       ) : (
         <>
-          <div className="checklists-kpis">
-            {cards.map(([label, value, tone]) => <article className={`checklists-kpi ${tone}`} key={label}><span>{label}</span><strong>{value}</strong></article>)}
-          </div>
+          <ChecklistDashboardScopeKpis
+            processCount={processGroups.length}
+            individualCount={orphanRuns.length}
+          />
+          <ChecklistSplitScopeTabs
+            value={scopeTab}
+            onChange={setScopeTab}
+            processCount={processGroups.length}
+            individualCount={orphanRuns.length}
+          />
 
-          {processGroups.length > 0 ? (
-            <section className="checklists-today-section">
-              <div className="checklists-today-section__head">
-                <h2>Procesos operativos</h2>
-                <p className="tasks-muted">{processGroups.length} proceso{processGroups.length === 1 ? "" : "s"} para hoy</p>
-              </div>
-              <div className="checklists-today-processes-grid">
-                {processGroups.map((processDetail) => (
-                  <OperationalProcessTodayCard
-                    key={processDetail?.process_run?.id || processDetail?.template?.id}
-                    processDetail={processDetail}
-                    onOpen={() => setSelectedProcessDetail(processDetail)}
-                  />
-                ))}
-              </div>
-            </section>
-          ) : null}
-
-          {(orphanRuns.length > 0 || !todayRuns.length) ? (
+          {scopeTab === "processes" ? (
             <section className="checklists-today-section">
               {processGroups.length > 0 ? (
-                <div className="checklists-today-section__head">
-                  <h2>Checklists individuales</h2>
-                  <p className="tasks-muted">{orphanRuns.length} checklist{orphanRuns.length === 1 ? "" : "s"} suelta{orphanRuns.length === 1 ? "" : "s"}</p>
+                <div className="checklists-today-processes-grid">
+                  {processGroups.map((processDetail) => (
+                    <OperationalProcessTodayCard
+                      key={processDetail?.process_run?.id || processDetail?.template?.id}
+                      processDetail={processDetail}
+                      onOpen={() => setSelectedProcessDetail(processDetail)}
+                    />
+                  ))}
                 </div>
-              ) : null}
-              <div className="checklists-card-grid">
+              ) : (
+                <FriendlyEmpty
+                  title="No hay procesos operativos para hoy."
+                  text={orphanRuns.length
+                    ? `Hay ${orphanRuns.length} checklist${orphanRuns.length === 1 ? "" : "s"} individual${orphanRuns.length === 1 ? "" : "es"} en la otra pestaña.`
+                    : loading
+                      ? "Generando o cargando procesos del día operativo actual."
+                      : "Los procesos del día aparecerán aquí cuando estén programados."}
+                  action={!todayRuns.length && !loading && canEnsureToday ? (
+                    <div className="checklists-empty-actions">
+                      {checklistAudit?.historicPendingCount > 0 ? (
+                        <button type="button" className="tasks-secondary" onClick={onGoToOverdue}>
+                          Ver vencidas ({checklistAudit.historicPendingCount})
+                        </button>
+                      ) : null}
+                      <button type="button" className="tasks-primary" disabled={ensuringToday} onClick={onEnsureToday}>
+                        {ensuringToday ? "Generando..." : "Generar checklists de hoy"}
+                      </button>
+                    </div>
+                  ) : null}
+                />
+              )}
+            </section>
+          ) : (
+            <section className="checklists-today-section">
+              <div className="checklists-card-grid checklists-card-grid--compact">
                 {orphanRuns.map((run) => renderTodayRunCard(run, {
+                  compact: true,
                   onOpen: () => (run.status === "pending" ? onStart(run.id) : onSelect(run.id))
                 }))}
-                {!todayRuns.length && loading && (
+                {!orphanRuns.length && (
                   <FriendlyEmpty
-                    title="Preparando checklists de hoy..."
-                    text="Generando o cargando las asignaciones del dia operativo actual."
-                  />
-                )}
-                {!todayRuns.length && !loading && (
-                  <FriendlyEmpty
-                    title="No hay checklists para ejecutar hoy."
-                    text={activeNonTodayRuns.length
-                      ? `Hay ${activeNonTodayRuns.length} checklist(s) activa(s) con otras fechas (${[...new Set(activeNonTodayRuns.map((run) => normalizeChecklistRunDate(run.run_date)))].slice(0, 3).join(", ")}). Día operativo actual: ${todayDateLabel}.`
-                      : "Las asignaciones del día aparecerán aquí."}
-                    action={(
+                    title={!todayRuns.length && loading ? "Preparando checklists de hoy..." : "No hay checklists individuales para hoy."}
+                    text={!todayRuns.length && loading
+                      ? "Generando o cargando las asignaciones del dia operativo actual."
+                      : processGroups.length
+                        ? "Las checklists de este día están agrupadas dentro de sus procesos operativos."
+                        : activeNonTodayRuns.length
+                          ? `Hay ${activeNonTodayRuns.length} checklist(s) activa(s) con otras fechas (${[...new Set(activeNonTodayRuns.map((run) => normalizeChecklistRunDate(run.run_date)))].slice(0, 3).join(", ")}). Día operativo actual: ${todayDateLabel}.`
+                          : "Las checklists sueltas del día aparecerán aquí."}
+                    action={!todayRuns.length && !loading && canEnsureToday ? (
                       <div className="checklists-empty-actions">
                         {checklistAudit?.historicPendingCount > 0 ? (
                           <button type="button" className="tasks-secondary" onClick={onGoToOverdue}>
                             Ver vencidas ({checklistAudit.historicPendingCount})
                           </button>
                         ) : null}
-                        {canEnsureToday ? (
-                          <button type="button" className="tasks-primary" disabled={ensuringToday} onClick={onEnsureToday}>
-                            {ensuringToday ? "Generando..." : "Generar checklists de hoy"}
-                          </button>
-                        ) : null}
+                        <button type="button" className="tasks-primary" disabled={ensuringToday} onClick={onEnsureToday}>
+                          {ensuringToday ? "Generando..." : "Generar checklists de hoy"}
+                        </button>
                       </div>
-                    )}
+                    ) : null}
                   />
                 )}
               </div>
             </section>
-          ) : null}
+          )}
 
           {(checklistAudit || checklistPipelineAudit) && canEnsureToday ? (
             <ChecklistModuleAuditPanel
@@ -3061,23 +3125,21 @@ function ChecklistOverdue({
   coverageByRunId,
   currentUser
 }) {
-  const groupedRuns = useMemo(
-    () => groupHistoricOverdueRuns(
-      filterRunsWithoutCompletedDuplicate(runs.filter(isChecklistRunHistoricPending)),
-      profiles
-    ),
-    [runs, profiles]
+  const overdueRuns = useMemo(
+    () => filterRunsWithoutCompletedDuplicate(runs.filter(isChecklistRunOverdueBucket)),
+    [runs]
   )
-  const totalRuns = useMemo(
-    () => groupedRuns.reduce((sum, group) => sum + group.dateGroups.reduce((inner, dateGroup) => inner + dateGroup.runs.length, 0), 0),
-    [groupedRuns]
-  )
+
+  function openOverdueRun(run) {
+    if (["pending", "rejected"].includes(run.status)) onStart(run.id)
+    else onSelect(run.id)
+  }
 
   return (
     <div className="checklists-overdue">
       <ChecklistRunDetailShell
         backLabel="← Volver a vencidas"
-        summary={`${totalRuns} corrida${totalRuns === 1 ? "" : "s"} histórica${totalRuns === 1 ? "" : "s"} pendientes`}
+        summary={`${overdueRuns.length} corrida${overdueRuns.length === 1 ? "" : "s"} vencida${overdueRuns.length === 1 ? "" : "s"} pendientes`}
         selectedRun={selectedRun}
         profiles={profiles}
         currentUser={currentUser}
@@ -3088,46 +3150,19 @@ function ChecklistOverdue({
         canAssignReplacement={canAssignReplacement}
         coverageByRunId={coverageByRunId}
       >
-        {!selectedRun && !groupedRuns.length ? (
+        {!selectedRun && !overdueRuns.length ? (
           <FriendlyEmpty
             title="No hay checklists vencidas pendientes."
             text="Las corridas anteriores sin cerrar aparecerán aquí para seguimiento gerencial."
           />
         ) : null}
-        {!selectedRun && groupedRuns.map((templateGroup) => (
-          <section key={templateGroup.templateId} className="checklist-overdue-template">
-            <header className="checklist-overdue-template__head">
-              <div>
-                <h3>{templateGroup.title}</h3>
-                <p className="tasks-muted">
-                  {templateGroup.dateGroups.length} fecha{templateGroup.dateGroups.length === 1 ? "" : "s"} · {templateGroup.totalRuns} corrida{templateGroup.totalRuns === 1 ? "" : "s"}
-                </p>
-              </div>
-            </header>
-            {templateGroup.dateGroups.map((dateGroup) => (
-              <div key={`${templateGroup.templateId}-${dateGroup.runDate}`} className="checklist-overdue-date">
-                <div className="checklist-overdue-date__head">
-                  <strong>{formatChecklistRunDateLabel(dateGroup.runDate)}</strong>
-                  <span>{historicOverdueDaysLabel(dateGroup.runDate)}</span>
-                  <span className="checklist-overdue-date__count">
-                    {dateGroup.runs.length} corrida{dateGroup.runs.length === 1 ? "" : "s"}
-                  </span>
-                </div>
-                <div className="checklists-card-grid checklist-overdue-date__grid">
-                  {dateGroup.runs.map((run) => (
-                    <ChecklistTodayCard
-                      key={run.id}
-                      run={run}
-                      profiles={profiles}
-                      variant="overdue"
-                      onOpen={() => (["pending", "rejected"].includes(run.status) ? onStart(run.id) : onSelect(run.id))}
-                    />
-                  ))}
-                </div>
-              </div>
-            ))}
-          </section>
-        ))}
+        {!selectedRun && overdueRuns.length > 0 ? (
+          <OverdueChecklistsPanel
+            runs={overdueRuns}
+            profiles={profiles}
+            onOpenRun={openOverdueRun}
+          />
+        ) : null}
       </ChecklistRunDetailShell>
     </div>
   )
@@ -3135,6 +3170,8 @@ function ChecklistOverdue({
 
 function ChecklistCompleted({
   runs,
+  processRunDetails = [],
+  onEnsureProcessDetailsForDates,
   profiles,
   selectedRun,
   onSelect,
@@ -3145,6 +3182,8 @@ function ChecklistCompleted({
   coverageByRunId,
   currentUser
 }) {
+  const [selectedProcessDetail, setSelectedProcessDetail] = useState(null)
+  const [scopeTab, setScopeTab] = useState("processes")
   const [filters, setFilters] = useState({
     search: "",
     area: "",
@@ -3181,10 +3220,33 @@ function ChecklistCompleted({
       ))
   }, [runs, profiles, filters])
 
-  const pagedRuns = useMemo(
-    () => pageItems(completedRuns, page, completedPageSize),
-    [completedRuns, page]
+  useEffect(() => {
+    if (!onEnsureProcessDetailsForDates || !completedRuns.length) return
+    const dates = [...new Set(completedRuns.map((run) => normalizeChecklistRunDate(run.run_date)).filter(Boolean))]
+    onEnsureProcessDetailsForDates(dates)
+  }, [completedRuns, onEnsureProcessDetailsForDates])
+
+  const { processGroups, orphanRuns } = useMemo(() => {
+    const partitioned = partitionRunsForProcesses(completedRuns, processRunDetails, {
+      groupProcesses: processRunDetails.length > 0
+    })
+    return {
+      processGroups: filterProcessGroupsWithRuns(partitioned.processGroups, completedRuns),
+      orphanRuns: partitioned.orphanRuns
+    }
+  }, [completedRuns, processRunDetails])
+
+  const pagedOrphanRuns = useMemo(
+    () => pageItems(orphanRuns, page, completedPageSize),
+    [orphanRuns, page]
   )
+
+  const activeProcessDetail = useMemo(() => {
+    if (!selectedProcessDetail) return null
+    const processRunId = selectedProcessDetail?.process_run?.id
+    if (!processRunId) return selectedProcessDetail
+    return processGroups.find((detail) => detail?.process_run?.id === processRunId) || selectedProcessDetail
+  }, [selectedProcessDetail, processGroups])
 
   const hasActiveFilters = Boolean(
     filters.search || filters.area || filters.role || filters.dateFrom || filters.dateTo
@@ -3192,12 +3254,12 @@ function ChecklistCompleted({
 
   useEffect(() => {
     setPage(1)
-  }, [filters.search, filters.area, filters.role, filters.dateFrom, filters.dateTo])
+  }, [filters.search, filters.area, filters.role, filters.dateFrom, filters.dateTo, scopeTab])
 
   useEffect(() => {
-    const totalPages = Math.max(1, Math.ceil(completedRuns.length / completedPageSize))
+    const totalPages = Math.max(1, Math.ceil(orphanRuns.length / completedPageSize))
     if (page > totalPages) setPage(totalPages)
-  }, [completedRuns.length, page])
+  }, [orphanRuns.length, page])
 
   function updateFilter(field, value) {
     setFilters((current) => ({ ...current, [field]: value }))
@@ -3209,102 +3271,155 @@ function ChecklistCompleted({
 
   return (
     <div className="checklists-completed">
-      <ChecklistRunDetailShell
-        backLabel="← Volver a completadas"
-        summary={`${completedRuns.length} checklist${completedRuns.length === 1 ? "" : "s"} completada${completedRuns.length === 1 ? "" : "s"}`}
-        selectedRun={selectedRun}
-        profiles={profiles}
-        currentUser={currentUser}
-        onSelect={onSelect}
-        onUpdateItem={onUpdateItem}
-        onComplete={onComplete}
-        onAssignReplacement={onAssignReplacement}
-        canAssignReplacement={canAssignReplacement}
-        coverageByRunId={coverageByRunId}
-      >
-        {!selectedRun && (
-          <>
-            <article className="tasks-panel checklist-completed-toolbar">
-              <div className="tasks-panel-title">
-                <div>
-                  <h2>Buscar completadas</h2>
-                  <p className="tasks-muted">
-                    Mostrando {pagedRuns.length} de {completedRuns.length} en esta página
-                  </p>
-                </div>
-                {hasActiveFilters ? (
-                  <button type="button" className="tasks-secondary" onClick={clearFilters}>
-                    Limpiar filtros
-                  </button>
-                ) : null}
+      {selectedRun ? (
+        <ChecklistRunDetailShell
+          backLabel={activeProcessDetail ? "← Volver al proceso" : "← Volver a completadas"}
+          summary={`${completedRuns.length} checklist${completedRuns.length === 1 ? "" : "s"} completada${completedRuns.length === 1 ? "" : "s"}`}
+          selectedRun={selectedRun}
+          profiles={profiles}
+          currentUser={currentUser}
+          onSelect={onSelect}
+          onUpdateItem={onUpdateItem}
+          onComplete={onComplete}
+          onAssignReplacement={onAssignReplacement}
+          canAssignReplacement={canAssignReplacement}
+          coverageByRunId={coverageByRunId}
+        />
+      ) : activeProcessDetail ? (
+        <OperationalProcessTodayDetail
+          processDetail={activeProcessDetail}
+          backLabel="← Volver a completadas"
+          onClose={() => setSelectedProcessDetail(null)}
+          onOpenRun={onSelect}
+        />
+      ) : (
+        <>
+          <article className="tasks-panel checklist-completed-toolbar">
+            <div className="tasks-panel-title">
+              <div>
+                <h2>Buscar completadas</h2>
+                <p className="tasks-muted">
+                  {scopeTab === "individuals" && orphanRuns.length > 0
+                    ? `Mostrando ${pagedOrphanRuns.length} de ${orphanRuns.length} en esta página`
+                    : `${completedRuns.length} checklist${completedRuns.length === 1 ? "" : "s"} completada${completedRuns.length === 1 ? "" : "s"} en total`}
+                </p>
               </div>
-              <div className="tasks-filters checklist-completed-filters">
-                <input
-                  type="search"
-                  value={filters.search}
-                  onChange={(event) => updateFilter("search", event.target.value)}
-                  placeholder="Checklist, colaborador o area..."
-                />
-                <select value={filters.area} onChange={(event) => updateFilter("area", event.target.value)}>
-                  <option value="">Todas las areas</option>
-                  {CHECKLIST_AREAS.map((area) => (
-                    <option key={area} value={area}>{checklistAreaLabel(area)}</option>
-                  ))}
-                </select>
-                {roleOptions.length > 0 ? (
-                  <select value={filters.role} onChange={(event) => updateFilter("role", event.target.value)}>
-                    <option value="">Todos los roles</option>
-                    {roleOptions.map((role) => (
-                      <option key={role} value={role}>{formatChecklistRole(role)}</option>
-                    ))}
-                  </select>
-                ) : null}
-                <input
-                  type="date"
-                  value={filters.dateFrom}
-                  onChange={(event) => updateFilter("dateFrom", event.target.value)}
-                  aria-label="Fecha desde"
-                />
-                <input
-                  type="date"
-                  value={filters.dateTo}
-                  onChange={(event) => updateFilter("dateTo", event.target.value)}
-                  aria-label="Fecha hasta"
-                />
-              </div>
-            </article>
-
-            <div className="checklists-card-grid">
-              {pagedRuns.map((run) => (
-                <ChecklistTodayCard
-                  key={run.id}
-                  run={run}
-                  profiles={profiles}
-                  variant="completed"
-                  onOpen={() => onSelect(run.id)}
-                />
-              ))}
-              {!completedRuns.length ? (
-                <FriendlyEmpty
-                  title={hasActiveFilters
-                    ? "No encontramos checklists completadas con esos filtros."
-                    : "No hay checklists completadas."}
-                  text={hasActiveFilters
-                    ? "Prueba otro texto de búsqueda o ajusta las fechas y filtros."
-                    : "Cuando cierres una corrida, aparecerá aquí para consulta."}
-                />
+              {hasActiveFilters ? (
+                <button type="button" className="tasks-secondary" onClick={clearFilters}>
+                  Limpiar filtros
+                </button>
               ) : null}
             </div>
+            <div className="tasks-filters checklist-completed-filters">
+              <input
+                type="search"
+                value={filters.search}
+                onChange={(event) => updateFilter("search", event.target.value)}
+                placeholder="Checklist, colaborador o area..."
+              />
+              <select value={filters.area} onChange={(event) => updateFilter("area", event.target.value)}>
+                <option value="">Todas las areas</option>
+                {CHECKLIST_AREAS.map((area) => (
+                  <option key={area} value={area}>{checklistAreaLabel(area)}</option>
+                ))}
+              </select>
+              {roleOptions.length > 0 ? (
+                <select value={filters.role} onChange={(event) => updateFilter("role", event.target.value)}>
+                  <option value="">Todos los roles</option>
+                  {roleOptions.map((role) => (
+                    <option key={role} value={role}>{formatChecklistRole(role)}</option>
+                  ))}
+                </select>
+              ) : null}
+              <input
+                type="date"
+                value={filters.dateFrom}
+                onChange={(event) => updateFilter("dateFrom", event.target.value)}
+                aria-label="Fecha desde"
+              />
+              <input
+                type="date"
+                value={filters.dateTo}
+                onChange={(event) => updateFilter("dateTo", event.target.value)}
+                aria-label="Fecha hasta"
+              />
+            </div>
+          </article>
 
-            <PaginationControls
-              page={page}
-              total={completedRuns.length}
-              pageSize={completedPageSize}
-              onChange={setPage}
-            />
-          </>
-        )}
-      </ChecklistRunDetailShell>
+          <ChecklistDashboardScopeKpis
+            processCount={processGroups.length}
+            individualCount={orphanRuns.length}
+          />
+          <ChecklistSplitScopeTabs
+            value={scopeTab}
+            onChange={setScopeTab}
+            processCount={processGroups.length}
+            individualCount={orphanRuns.length}
+          />
+
+          {scopeTab === "processes" ? (
+            <section className="checklists-today-section">
+              {processGroups.length > 0 ? (
+                <div className="checklists-today-processes-grid">
+                  {processGroups.map((processDetail) => (
+                    <OperationalProcessTodayCard
+                      key={processDetail?.process_run?.id || processDetail?.template?.id}
+                      processDetail={processDetail}
+                      variant="completed"
+                      onOpen={() => setSelectedProcessDetail(processDetail)}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <FriendlyEmpty
+                  title={hasActiveFilters
+                    ? "No encontramos procesos completados con esos filtros."
+                    : "No hay procesos operativos completados."}
+                  text={hasActiveFilters
+                    ? "Prueba otro texto de búsqueda o ajusta las fechas y filtros."
+                    : orphanRuns.length
+                      ? `Hay ${orphanRuns.length} checklist${orphanRuns.length === 1 ? "" : "s"} individual${orphanRuns.length === 1 ? "" : "es"} en la otra pestaña.`
+                      : "Cuando cierres un proceso operativo, aparecerá aquí para consulta."}
+                />
+              )}
+            </section>
+          ) : (
+            <>
+              <div className="checklists-card-grid checklists-card-grid--compact">
+                {pagedOrphanRuns.map((run) => (
+                  <ChecklistTodayCard
+                    key={run.id}
+                    run={run}
+                    profiles={profiles}
+                    variant="completed"
+                    compact
+                    onOpen={() => onSelect(run.id)}
+                  />
+                ))}
+                {!orphanRuns.length ? (
+                  <FriendlyEmpty
+                    title={hasActiveFilters
+                      ? "No encontramos checklists completadas con esos filtros."
+                      : "No hay checklists individuales completadas."}
+                    text={hasActiveFilters
+                      ? "Prueba otro texto de búsqueda o ajusta las fechas y filtros."
+                      : processGroups.length
+                        ? "Las checklists de este filtro están agrupadas dentro de sus procesos operativos."
+                        : "Cuando cierres una corrida suelta, aparecerá aquí para consulta."}
+                  />
+                ) : null}
+              </div>
+
+              <PaginationControls
+                page={page}
+                total={orphanRuns.length}
+                pageSize={completedPageSize}
+                onChange={setPage}
+              />
+            </>
+          )}
+        </>
+      )}
     </div>
   )
 }
@@ -5563,45 +5678,6 @@ function matchesCompletedChecklistSearch(run, profiles, search) {
   return haystack.includes(search)
 }
 
-function historicOverdueDaysLabel(runDate) {
-  const days = daysPastRunDate(runDate)
-  if (days === 1) return "Vencida hace 1 día"
-  return `Vencida hace ${days} días`
-}
-
-function groupHistoricOverdueRuns(runs, profiles = []) {
-  const byTemplate = new Map()
-  runs.forEach((run) => {
-    const templateId = run.template_id || run.id
-    if (!byTemplate.has(templateId)) {
-      byTemplate.set(templateId, {
-        templateId,
-        title: run.checklist_templates?.title || "Checklist",
-        dateGroups: new Map(),
-        totalRuns: 0
-      })
-    }
-    const templateGroup = byTemplate.get(templateId)
-    const runDate = run.run_date || "sin-fecha"
-    if (!templateGroup.dateGroups.has(runDate)) templateGroup.dateGroups.set(runDate, [])
-    templateGroup.dateGroups.get(runDate).push(run)
-    templateGroup.totalRuns += 1
-  })
-
-  return [...byTemplate.values()]
-    .map((templateGroup) => ({
-      ...templateGroup,
-      dateGroups: [...templateGroup.dateGroups.entries()]
-        .sort((a, b) => String(b[0]).localeCompare(String(a[0])))
-        .map(([runDate, dateRuns]) => ({
-          runDate,
-          daysOverdue: daysPastRunDate(runDate),
-          runs: [...dateRuns].sort((a, b) => String(responsibleLabel(a, profiles)).localeCompare(String(responsibleLabel(b, profiles))))
-        }))
-    }))
-    .sort((a, b) => a.title.localeCompare(b.title))
-}
-
 function parseChecklistLocalDate(dateStr) {
   if (!dateStr) return null
   const [year, month, day] = String(dateStr).split("-").map(Number)
@@ -5615,13 +5691,6 @@ function formatChecklistRunDateLabel(dateStr) {
   return date.toLocaleDateString("es-GT", { day: "2-digit", month: "2-digit", year: "numeric" })
 }
 
-function daysPastRunDate(runDate) {
-  const run = parseChecklistLocalDate(runDate)
-  const today = parseChecklistLocalDate(getChecklistOperationalDate())
-  if (!run || !today) return 0
-  return Math.round((today.getTime() - run.getTime()) / 86400000)
-}
-
 function isChecklistRunOverdue(run) {
   return isChecklistRunOverdueDisplay(run)
 }
@@ -5629,9 +5698,7 @@ function isChecklistRunOverdue(run) {
 function checklistRunScheduleLabel(run) {
   const displayStatus = getChecklistOperationalDisplayStatus(run)
   if (displayStatus === CHECKLIST_OPERATIONAL_STATUS.VENCIDA) {
-    const days = daysPastRunDate(run.run_date)
-    if (days === 1) return "Vencida hace 1 día"
-    return `Vencida hace ${days} días`
+    return formatOverdueDaysLabel(run.run_date)
   }
   if (displayStatus === CHECKLIST_OPERATIONAL_STATUS.PENDIENTE_ATRASADA) {
     return formatChecklistDueDeadline(run)

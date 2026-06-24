@@ -3,7 +3,7 @@ import {
   getChecklistTodayDateCandidates,
   isChecklistRunActive,
   isChecklistRunDateToday,
-  isChecklistRunHistoricPending,
+  isChecklistRunOverdueBucket,
   isChecklistRunTodayWork,
   isChecklistTemplateDueOnDate,
   normalizeChecklistRunDate
@@ -49,7 +49,7 @@ export function buildChecklistModuleAudit({
   ))
   const todayCompletedRuns = todayAnyRuns.filter((run) => run?.status === "completed")
   const todayInactiveRuns = todayAnyRuns.filter((run) => !isChecklistRunActive(run) && run?.status !== "completed")
-  const historicPendingRuns = visibleRuns.filter((run) => isChecklistRunHistoricPending(run))
+  const overdueBucketRuns = visibleRuns.filter((run) => isChecklistRunOverdueBucket(run))
   const staleActiveRuns = visibleRuns.filter((run) => isChecklistRunActive(run) && !isChecklistRunTodayWork(run))
 
   const templatesDueToday = activeTemplates.filter((template) => isChecklistTemplateDueOnDate(template, operationalToday))
@@ -65,8 +65,8 @@ export function buildChecklistModuleAudit({
     userMessage = `Hay ${todayCompletedRuns.length} checklist(s) de hoy ya completadas. Revisa la pestaña Completadas.`
   } else if (fallback?.created > 0) {
     userMessage = `Se generaron ${fallback.created} checklist(s) para el día operativo ${operationalToday}.`
-  } else if (historicPendingRuns.length) {
-    userMessage = `Hoy no hay checklists nuevas (${weekdayLabel}). Hay ${historicPendingRuns.length} vencida(s) pendientes de días anteriores — abre la pestaña Vencidas.`
+  } else if (overdueBucketRuns.length) {
+    userMessage = `Hoy no hay checklists nuevas (${weekdayLabel}). Hay ${overdueBucketRuns.length} vencida(s) pendientes — abre la pestaña Vencidas.`
   } else if (templatesDueToday.length === 0 && activeTemplates.length) {
     userMessage = `Ninguna de las ${activeTemplates.length} plantillas activas está programada para hoy (${weekdayLabel}).`
   } else if (fallback?.error) {
@@ -85,7 +85,7 @@ export function buildChecklistModuleAudit({
     todayAnyCount: todayAnyRuns.length,
     todayCompletedCount: todayCompletedRuns.length,
     todayInactiveCount: todayInactiveRuns.length,
-    historicPendingCount: historicPendingRuns.length,
+    historicPendingCount: overdueBucketRuns.length,
     staleActiveCount: staleActiveRuns.length,
     activeTemplateCount: activeTemplates.length,
     templatesDueTodayCount: templatesDueToday.length,
