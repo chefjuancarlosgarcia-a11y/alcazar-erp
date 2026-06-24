@@ -118,6 +118,10 @@ import {
   mergeOperationalProcessDetails
 } from "../utils/operationalProcessProgress"
 import {
+  canManageOperationalProcesses as userCanManageOperationalProcesses,
+  canViewOperationalProcessGroups as userCanViewOperationalProcessGroups
+} from "../utils/operationalProcessPermissions"
+import {
   findChecklistAssignmentConflicts,
   formatChecklistAssigneeSummary,
   parseChecklistAssignmentChangeRequest,
@@ -1589,9 +1593,17 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   const canEditChecklistsDirectly = canEditDirectly
   const canManageManagementAlerts = ["admin", "gerente_general"].includes(userRole)
   const canManageCoverage = ["admin", "gerente_general", "gerente", "supervisor", "encargado_area", "recursos_humanos", "rrhh"].includes(userRole)
-  const canManageOperationalProcesses = isLibraryAdmin
-  const canViewOperationalProcessGroups = canViewChecklistLibrary
-  const [section, setSection] = useState(initialChecklistView === "incidents" ? "incidents" : initialChecklistView === "alerts" ? "alerts" : "today")
+  const canManageOperationalProcesses = userCanManageOperationalProcesses(user)
+  const canViewOperationalProcessGroups = userCanViewOperationalProcessGroups(user)
+  const [section, setSection] = useState(
+    initialChecklistView === "incidents"
+      ? "incidents"
+      : initialChecklistView === "alerts"
+        ? "alerts"
+        : initialChecklistView === "processes"
+          ? "processes"
+          : "today"
+  )
   const [templates, setTemplates] = useState([])
   const [runs, setRuns] = useState([])
   const [processRunDetails, setProcessRunDetails] = useState([])
@@ -1622,6 +1634,12 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   const refreshInFlightRef = useRef(false)
   const suppressRealtimeRefreshRef = useRef(false)
   sectionRef.current = section
+  useEffect(() => {
+    if (section === "processes" && !canViewOperationalProcessGroups) {
+      setSection("today")
+      setMessage("No tienes permiso para ver procesos operativos.")
+    }
+  }, [section, canViewOperationalProcessGroups])
   const stableUserRef = useRef(user)
   useEffect(() => {
     if (user) stableUserRef.current = user
@@ -1795,17 +1813,22 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
           getChecklistTemplateSuggestions()
         ]
         : []
-      const requests = [...libraryRequests, loadModuleChecklistRuns(), getChecklistProfiles(), getOperationalProcessRunsForDate(operationalToday)]
-      if (canManageManagementAlerts) requests.push(getChecklistManagementAlerts())
+      const coreRequests = [loadModuleChecklistRuns(), getChecklistProfiles()]
+      const processRequests = canViewOperationalProcessGroups
+        ? [getOperationalProcessRunsForDate(operationalToday)]
+        : []
+      const alertRequests = canManageManagementAlerts ? [getChecklistManagementAlerts()] : []
+      const requests = [...libraryRequests, ...coreRequests, ...processRequests, ...alertRequests]
       const results = await Promise.all(requests)
-      const templateResult = libraryRequests.length ? results[0] : { data: [], error: null }
-      const incidentResult = libraryRequests.length ? results[1] : { data: [], error: null }
-      const requestResult = libraryRequests.length ? results[2] : { data: [], error: null }
-      const suggestionResult = libraryRequests.length ? results[3] : { data: [], error: null }
-      let runResult = results[libraryRequests.length]
-      const profileResult = results[libraryRequests.length + 1]
-      let processResult = results[libraryRequests.length + 2]
-      const alertResult = canManageManagementAlerts ? results[libraryRequests.length + 3] : null
+      let resultIndex = 0
+      const templateResult = libraryRequests.length ? results[resultIndex++] : { data: [], error: null }
+      const incidentResult = libraryRequests.length ? results[resultIndex++] : { data: [], error: null }
+      const requestResult = libraryRequests.length ? results[resultIndex++] : { data: [], error: null }
+      const suggestionResult = libraryRequests.length ? results[resultIndex++] : { data: [], error: null }
+      let runResult = results[resultIndex++]
+      const profileResult = results[resultIndex++]
+      let processResult = processRequests.length ? results[resultIndex++] : { data: [], error: null }
+      const alertResult = alertRequests.length ? results[resultIndex++] : null
       const profileRows = profileResult.data || []
 
       try {
@@ -1844,20 +1867,22 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
         generationWarning = generationError?.message || "No se pudieron generar checklists recurrentes."
       }
 
-      try {
-        const processGenResult = await generateDueOperationalProcessRuns(operationalToday)
-        if (processGenResult.error) {
-          console.warn("generateDueOperationalProcessRuns failed:", processGenResult.error)
-        } else if (Number(processGenResult.data || 0) > 0) {
-          const [processReload, runReload] = await Promise.all([
-            getOperationalProcessRunsForDate(operationalToday),
-            loadModuleChecklistRuns()
-          ])
-          if (!processReload.error) processResult = processReload
-          if (!runReload.error) runResult = runReload
+      if (canViewOperationalProcessGroups) {
+        try {
+          const processGenResult = await generateDueOperationalProcessRuns(operationalToday)
+          if (processGenResult.error) {
+            console.warn("generateDueOperationalProcessRuns failed:", processGenResult.error)
+          } else if (Number(processGenResult.data || 0) > 0) {
+            const [processReload, runReload] = await Promise.all([
+              getOperationalProcessRunsForDate(operationalToday),
+              loadModuleChecklistRuns()
+            ])
+            if (!processReload.error) processResult = processReload
+            if (!runReload.error) runResult = runReload
+          }
+        } catch (processGenerationError) {
+          console.warn("Operational process generation error:", processGenerationError)
         }
-      } catch (processGenerationError) {
-        console.warn("Operational process generation error:", processGenerationError)
       }
 
       if (canManageManagementAlerts) {
@@ -1882,7 +1907,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       setTemplates(templateResult.data || [])
       const syncedRuns = await replayPendingChecklistDrafts(runResult.data || [])
       setRuns(syncedRuns)
-      setProcessRunDetails(processResult?.data || [])
+      setProcessRunDetails(canViewOperationalProcessGroups ? (processResult?.data || []) : [])
       const actor = user || stableUserRef.current
       const seeAll = canSeeAllChecklistModuleRuns(actor, canViewChecklistLibrary)
       const canSeeRun = (run) => canSeeChecklistRun(run, actor, profileRows, { seeAll })
@@ -1944,13 +1969,14 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       refreshInFlightRef.current = false
       if (showLoading) setLoading(false)
     }
-  }, [canManageCoverage, canManageManagementAlerts, canViewChecklistLibrary, replayPendingChecklistDrafts, runs.length, user])
+  }, [canManageCoverage, canManageManagementAlerts, canViewChecklistLibrary, canViewOperationalProcessGroups, replayPendingChecklistDrafts, runs.length, user])
 
   const ensureProcessDetailsForDates = useCallback(async (dates = []) => {
+    if (!canViewOperationalProcessGroups) return
     const result = await loadOperationalProcessDetailsForDates(dates)
     if (result.error || !result.data?.length) return
     setProcessRunDetails((current) => mergeOperationalProcessDetails(current, result.data))
-  }, [])
+  }, [canViewOperationalProcessGroups])
 
   const ensureTodayRuns = useCallback(async () => {
     setEnsuringToday(true)
@@ -2560,6 +2586,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
         <ChecklistToday
           runs={visibleRuns}
           processRunDetails={processRunDetails}
+          canViewProcessGroups={canViewOperationalProcessGroups}
           profiles={profiles}
           loading={(loading || ensuringToday) && runs.length === 0}
           selectedRun={selectedRun && isChecklistRunOperationalTodayWork(selectedRun) ? selectedRun : null}
@@ -2601,6 +2628,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
         <ChecklistCompleted
           runs={visibleRuns}
           processRunDetails={processRunDetails}
+          canViewProcessGroups={canViewOperationalProcessGroups}
           onEnsureProcessDetailsForDates={ensureProcessDetailsForDates}
           profiles={profiles}
           selectedRun={selectedRun && isChecklistRunCompleted(selectedRun) ? selectedRun : null}
@@ -2853,7 +2881,18 @@ function ChecklistRunDetailShell({
   return children
 }
 
-function ChecklistDashboardScopeKpis({ processCount, individualCount }) {
+function ChecklistDashboardScopeKpis({ processCount, individualCount, showProcessKpi = true }) {
+  if (!showProcessKpi) {
+    if (individualCount <= 0) return null
+    return (
+      <div className="checklists-dashboard-kpis checklists-dashboard-kpis--individual-only">
+        <article className="checklists-dashboard-kpi checklists-dashboard-kpi--individuals">
+          <span>Checklists</span>
+          <strong>{individualCount}</strong>
+        </article>
+      </div>
+    )
+  }
   return (
     <div className="checklists-dashboard-kpis">
       <article className="checklists-dashboard-kpi checklists-dashboard-kpi--processes">
@@ -2868,7 +2907,8 @@ function ChecklistDashboardScopeKpis({ processCount, individualCount }) {
   )
 }
 
-function ChecklistSplitScopeTabs({ value, onChange, processCount = 0, individualCount = 0 }) {
+function ChecklistSplitScopeTabs({ value, onChange, processCount = 0, individualCount = 0, showProcessTab = true }) {
+  if (!showProcessTab) return null
   const tabs = [
     ["processes", "Procesos operativos", processCount],
     ["individuals", "Checklists individuales", individualCount]
@@ -2893,6 +2933,7 @@ function ChecklistSplitScopeTabs({ value, onChange, processCount = 0, individual
 function ChecklistToday({
   runs,
   processRunDetails = [],
+  canViewProcessGroups = false,
   profiles,
   loading = false,
   selectedRun,
@@ -2914,8 +2955,15 @@ function ChecklistToday({
   onTodayAdminAction
 }) {
   const [selectedProcessDetail, setSelectedProcessDetail] = useState(null)
-  const [scopeTab, setScopeTab] = useState("processes")
+  const [scopeTab, setScopeTab] = useState(() => (canViewProcessGroups ? "processes" : "individuals"))
   const operationalToday = getChecklistOperationalDate()
+
+  useEffect(() => {
+    if (!canViewProcessGroups) {
+      setScopeTab("individuals")
+      setSelectedProcessDetail(null)
+    }
+  }, [canViewProcessGroups])
   const todayRuns = useMemo(
     () => dedupeChecklistRunsById(
       filterRunsWithoutCompletedDuplicate(
@@ -2940,19 +2988,19 @@ function ChecklistToday({
   )
   const { processGroups, orphanRuns } = useMemo(() => {
     const partitioned = partitionTodayRunsForProcesses(todayRuns, processRunDetails, {
-      groupProcesses: processRunDetails.length > 0
+      groupProcesses: canViewProcessGroups && processRunDetails.length > 0
     })
     return {
       processGroups: filterProcessGroupsWithRuns(partitioned.processGroups, todayRuns),
       orphanRuns: partitioned.orphanRuns
     }
-  }, [todayRuns, processRunDetails])
+  }, [todayRuns, processRunDetails, canViewProcessGroups])
   const activeProcessDetail = useMemo(() => {
-    if (!selectedProcessDetail) return null
+    if (!canViewProcessGroups || !selectedProcessDetail) return null
     const processRunId = selectedProcessDetail?.process_run?.id
     if (!processRunId) return selectedProcessDetail
     return processGroups.find((detail) => detail?.process_run?.id === processRunId) || selectedProcessDetail
-  }, [selectedProcessDetail, processGroups])
+  }, [canViewProcessGroups, selectedProcessDetail, processGroups])
 
   const activeNonTodayRuns = useMemo(
     () => runs.filter((run) => (
@@ -2990,7 +3038,9 @@ function ChecklistToday({
     />
   )
 
-  const processDetailBackLabel = selectedProcessDetail ? "← Volver al proceso" : "← Volver a checklists de hoy"
+  const processDetailBackLabel = canViewProcessGroups && selectedProcessDetail
+    ? "← Volver al proceso"
+    : "← Volver a checklists de hoy"
 
   return (
     <div className="checklists-today">
@@ -3021,15 +3071,17 @@ function ChecklistToday({
           <ChecklistDashboardScopeKpis
             processCount={processGroups.length}
             individualCount={orphanRuns.length}
+            showProcessKpi={canViewProcessGroups}
           />
           <ChecklistSplitScopeTabs
             value={scopeTab}
             onChange={setScopeTab}
             processCount={processGroups.length}
             individualCount={orphanRuns.length}
+            showProcessTab={canViewProcessGroups}
           />
 
-          {scopeTab === "processes" ? (
+          {canViewProcessGroups && scopeTab === "processes" ? (
             <section className="checklists-today-section">
               {processGroups.length > 0 ? (
                 <div className="checklists-today-processes-grid">
@@ -3076,7 +3128,7 @@ function ChecklistToday({
                     title={!todayRuns.length && loading ? "Preparando checklists de hoy..." : "No hay checklists individuales para hoy."}
                     text={!todayRuns.length && loading
                       ? "Generando o cargando las asignaciones del dia operativo actual."
-                      : processGroups.length
+                      : canViewProcessGroups && processGroups.length
                         ? "Las checklists de este día están agrupadas dentro de sus procesos operativos."
                         : activeNonTodayRuns.length
                           ? `Hay ${activeNonTodayRuns.length} checklist(s) activa(s) con otras fechas (${[...new Set(activeNonTodayRuns.map((run) => normalizeChecklistRunDate(run.run_date)))].slice(0, 3).join(", ")}). Día operativo actual: ${todayDateLabel}.`
@@ -3171,6 +3223,7 @@ function ChecklistOverdue({
 function ChecklistCompleted({
   runs,
   processRunDetails = [],
+  canViewProcessGroups = false,
   onEnsureProcessDetailsForDates,
   profiles,
   selectedRun,
@@ -3183,7 +3236,7 @@ function ChecklistCompleted({
   currentUser
 }) {
   const [selectedProcessDetail, setSelectedProcessDetail] = useState(null)
-  const [scopeTab, setScopeTab] = useState("processes")
+  const [scopeTab, setScopeTab] = useState(() => (canViewProcessGroups ? "processes" : "individuals"))
   const [filters, setFilters] = useState({
     search: "",
     area: "",
@@ -3193,6 +3246,13 @@ function ChecklistCompleted({
   })
   const [page, setPage] = useState(1)
   const completedPageSize = 24
+
+  useEffect(() => {
+    if (!canViewProcessGroups) {
+      setScopeTab("individuals")
+      setSelectedProcessDetail(null)
+    }
+  }, [canViewProcessGroups])
 
   const roleOptions = useMemo(() => {
     const roles = new Set()
@@ -3228,13 +3288,13 @@ function ChecklistCompleted({
 
   const { processGroups, orphanRuns } = useMemo(() => {
     const partitioned = partitionRunsForProcesses(completedRuns, processRunDetails, {
-      groupProcesses: processRunDetails.length > 0
+      groupProcesses: canViewProcessGroups && processRunDetails.length > 0
     })
     return {
       processGroups: filterProcessGroupsWithRuns(partitioned.processGroups, completedRuns),
       orphanRuns: partitioned.orphanRuns
     }
-  }, [completedRuns, processRunDetails])
+  }, [completedRuns, processRunDetails, canViewProcessGroups])
 
   const pagedOrphanRuns = useMemo(
     () => pageItems(orphanRuns, page, completedPageSize),
@@ -3242,11 +3302,11 @@ function ChecklistCompleted({
   )
 
   const activeProcessDetail = useMemo(() => {
-    if (!selectedProcessDetail) return null
+    if (!canViewProcessGroups || !selectedProcessDetail) return null
     const processRunId = selectedProcessDetail?.process_run?.id
     if (!processRunId) return selectedProcessDetail
     return processGroups.find((detail) => detail?.process_run?.id === processRunId) || selectedProcessDetail
-  }, [selectedProcessDetail, processGroups])
+  }, [canViewProcessGroups, selectedProcessDetail, processGroups])
 
   const hasActiveFilters = Boolean(
     filters.search || filters.area || filters.role || filters.dateFrom || filters.dateTo
@@ -3349,15 +3409,17 @@ function ChecklistCompleted({
           <ChecklistDashboardScopeKpis
             processCount={processGroups.length}
             individualCount={orphanRuns.length}
+            showProcessKpi={canViewProcessGroups}
           />
           <ChecklistSplitScopeTabs
             value={scopeTab}
             onChange={setScopeTab}
             processCount={processGroups.length}
             individualCount={orphanRuns.length}
+            showProcessTab={canViewProcessGroups}
           />
 
-          {scopeTab === "processes" ? (
+          {canViewProcessGroups && scopeTab === "processes" ? (
             <section className="checklists-today-section">
               {processGroups.length > 0 ? (
                 <div className="checklists-today-processes-grid">
@@ -3403,7 +3465,7 @@ function ChecklistCompleted({
                       : "No hay checklists individuales completadas."}
                     text={hasActiveFilters
                       ? "Prueba otro texto de búsqueda o ajusta las fechas y filtros."
-                      : processGroups.length
+                      : canViewProcessGroups && processGroups.length
                         ? "Las checklists de este filtro están agrupadas dentro de sus procesos operativos."
                         : "Cuando cierres una corrida suelta, aparecerá aquí para consulta."}
                   />
