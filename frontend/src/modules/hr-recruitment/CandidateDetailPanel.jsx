@@ -92,6 +92,72 @@ export default function CandidateDetailPanel({
 
   const candidate = detail?.candidate || {}
   const vacancy = detail?.vacancy || {}
+  const applicationPayload = candidate.application_payload && typeof candidate.application_payload === "object"
+    ? candidate.application_payload
+    : {}
+
+  function payloadValue(...keys) {
+    for (const key of keys) {
+      const fromPayload = applicationPayload?.[key]
+      if (fromPayload != null && String(fromPayload).trim() !== "") return String(fromPayload).trim()
+    }
+    return ""
+  }
+
+  function renderWebsiteApplication() {
+    const isWebsite = candidate.source === "website"
+    const hasPayload = Object.keys(applicationPayload).length > 0
+    const attachmentUrl = candidate.attachment_url || payloadValue("attachment_url", "document_url")
+    if (!isWebsite && !hasPayload && !attachmentUrl) return null
+
+    return (
+      <section className="recruitment-section">
+        <h3>Aplicación desde sitio web</h3>
+        <dl className="recruitment-detail-list">
+          {candidate.email || payloadValue("email") ? (
+            <div><dt>Correo</dt><dd>{candidate.email || payloadValue("email")}</dd></div>
+          ) : null}
+          {candidate.address || payloadValue("municipality") ? (
+            <div><dt>Municipio</dt><dd>{candidate.address || payloadValue("municipality")}</dd></div>
+          ) : null}
+          {payloadValue("education_level") ? (
+            <div><dt>Escolaridad</dt><dd>{payloadValue("education_level")}</dd></div>
+          ) : null}
+          {candidate.position_applied ? (
+            <div><dt>Puesto aplicado</dt><dd>{candidate.position_applied}</dd></div>
+          ) : null}
+          {candidate.schedule_availability || payloadValue("availability") ? (
+            <div><dt>Disponibilidad</dt><dd>{candidate.schedule_availability || payloadValue("availability")}</dd></div>
+          ) : null}
+          {payloadValue("available_start_date") ? (
+            <div><dt>Fecha disponible de inicio</dt><dd>{payloadValue("available_start_date")}</dd></div>
+          ) : null}
+          {candidate.salary_expectation ? (
+            <div><dt>Pretensión salarial</dt><dd>{candidate.salary_expectation}</dd></div>
+          ) : null}
+          {candidate.prior_experience || payloadValue("has_experience") ? (
+            <div><dt>Experiencia</dt><dd>{candidate.prior_experience || payloadValue("has_experience")}</dd></div>
+          ) : null}
+          {candidate.notes || payloadValue("motivation") ? (
+            <div><dt>Motivación</dt><dd>{candidate.notes || payloadValue("motivation")}</dd></div>
+          ) : null}
+          {attachmentUrl ? (
+            <div>
+              <dt>Archivo adjunto</dt>
+              <dd>
+                <a href={attachmentUrl} target="_blank" rel="noopener noreferrer">Abrir / descargar</a>
+              </dd>
+            </div>
+          ) : null}
+          <div><dt>Fuente</dt><dd>{labelFor(CANDIDATE_SOURCES, candidate.source || "website")}</dd></div>
+          <div>
+            <dt>Fecha de aplicación</dt>
+            <dd>{payloadValue("submitted_at") || candidate.applied_at || "—"}</dd>
+          </div>
+        </dl>
+      </section>
+    )
+  }
 
   async function saveProfile(event) {
     event.preventDefault()
@@ -287,6 +353,8 @@ export default function CandidateDetailPanel({
                 </div>
                 <button type="submit" className="tasks-primary" disabled={saving}>Guardar perfil</button>
               </form>
+
+              {renderWebsiteApplication()}
 
               <section className="recruitment-section">
                 <h3>Vacante asociada</h3>

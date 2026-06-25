@@ -97,6 +97,8 @@ function NotificationsBell({ currentUser }) {
       navigate(notification.action_url || `/tasks?tab=checklists&view=approvals&id=${encodeURIComponent(notification.entity_id || "")}`)
     } else if (notification.entity_type === "catering_request") {
       navigate(notification.action_url || `/catering?id=${encodeURIComponent(notification.entity_id || "")}`)
+    } else if (notification.entity_type === "recruitment_candidate") {
+      navigate(notification.action_url || `/hr?section=reclutamiento&tab=pipeline&candidateId=${encodeURIComponent(notification.entity_id || "")}`)
     } else if (notification.entity_type === "task") {
       navigate("/tasks?view=mine")
     }
@@ -173,7 +175,10 @@ function NotificationsBell({ currentUser }) {
                             : "Ver solicitud"}
                     </button>
                   )}
-                  {notification.action_url && !["purchase_order", "requisition", "employee_schedule", "schedule_week", "checklist_run", "checklist_template_change_request", "checklist_management_alert", "task", "catering_request"].includes(notification.entity_type) && <button type="button" onClick={() => viewEntity(notification)}>Abrir</button>}
+                  {notification.entity_type === "recruitment_candidate" && (
+                    <button type="button" onClick={() => viewEntity(notification)}>Ver candidato</button>
+                  )}
+                  {notification.action_url && !["purchase_order", "requisition", "employee_schedule", "schedule_week", "checklist_run", "checklist_template_change_request", "checklist_management_alert", "task", "catering_request", "recruitment_candidate"].includes(notification.entity_type) && <button type="button" onClick={() => viewEntity(notification)}>Abrir</button>}
                   {notification.entity_type === "purchase_order" && notification.type === "purchase_order_pending" && PURCHASE_ORDER_APPROVAL_ROLES.includes(currentUser?.role) && (
                     <>
                       <button type="button" className="approve" onClick={() => processOrder(notification, "approve")}>Aprobar</button>

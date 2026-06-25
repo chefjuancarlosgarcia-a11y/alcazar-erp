@@ -41,8 +41,10 @@ export default function RecruitmentDashboard() {
   const canViewOnboarding = canViewRecruitmentOnboarding(user?.role)
   const defaultRange = useMemo(() => defaultMonthRange(), [])
   const urlTab = new URLSearchParams(location.search).get("tab")
+  const urlCandidateId = new URLSearchParams(location.search).get("candidateId") || ""
 
   const [tab, setTab] = useState(() => {
+    if (urlCandidateId && canManage) return "pipeline"
     if (urlTab === "onboarding" && canViewOnboarding) return "onboarding"
     if (urlTab && canManage) return urlTab
     return canManage ? "dashboard" : "vacancies"
@@ -310,6 +312,7 @@ export default function RecruitmentDashboard() {
           candidates={candidates}
           profiles={profiles}
           loading={loadingCandidates}
+          initialCandidateId={urlCandidateId}
           onRefresh={refreshAll}
           onMessage={notify}
         />

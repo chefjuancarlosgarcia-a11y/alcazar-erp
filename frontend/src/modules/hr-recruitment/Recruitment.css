@@ -170,6 +170,11 @@
   border-color: #14b8a6;
 }
 
+.recruitment-candidate-card--highlight {
+  border-color: #fbbf24;
+  box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.35);
+}
+
 .recruitment-candidate-card strong {
   color: #f8fafc;
   font-size: 14px;
@@ -197,6 +202,32 @@
   background: #091324;
   color: #e2e8f0;
   font-size: 12px;
+}
+
+.recruitment-detail-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.recruitment-detail-list div {
+  display: grid;
+  gap: 4px;
+}
+
+.recruitment-detail-list dt {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.recruitment-detail-list dd {
+  margin: 0;
+  color: #f8fafc;
+  font-size: 14px;
+}
+
+.recruitment-detail-list a {
+  color: #2dd4bf;
 }
 
 .recruitment-kpi-grid {

@@ -54,6 +54,7 @@ export const CANDIDATE_SOURCES = [
   { value: "referral", label: "Referido" },
   { value: "walk_in", label: "Walk-in" },
   { value: "whatsapp", label: "WhatsApp" },
+  { value: "website", label: "Website" },
   { value: "other", label: "Otro" }
 ]
 

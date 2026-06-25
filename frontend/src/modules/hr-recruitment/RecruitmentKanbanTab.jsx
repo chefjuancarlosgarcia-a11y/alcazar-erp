@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
   updateRecruitmentCandidatePipeline,
   upsertRecruitmentCandidate
@@ -27,11 +27,13 @@ export default function RecruitmentKanbanTab({
   candidates = [],
   profiles = [],
   loading = false,
+  initialCandidateId = "",
   onRefresh,
   onMessage
 }) {
   const [filters, setFilters] = useState({ vacancyId: "", source: "", area: "", search: "" })
-  const [selectedId, setSelectedId] = useState("")
+  const [selectedId, setSelectedId] = useState(initialCandidateId || "")
+  const [highlightId, setHighlightId] = useState(initialCandidateId || "")
   const [modalOpen, setModalOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState(emptyCandidateForm())
@@ -53,6 +55,14 @@ export default function RecruitmentKanbanTab({
     })
     return map
   }, [filtered])
+
+  useEffect(() => {
+    if (!initialCandidateId) return
+    setSelectedId(initialCandidateId)
+    setHighlightId(initialCandidateId)
+    const timer = window.setTimeout(() => setHighlightId(""), 6000)
+    return () => window.clearTimeout(timer)
+  }, [initialCandidateId])
 
   function openCreate() {
     setForm(emptyCandidateForm(filters.vacancyId || vacancies[0]?.id || ""))
@@ -121,7 +131,11 @@ export default function RecruitmentKanbanTab({
                 <span>{grouped[column.value]?.length || 0}</span>
               </header>
               {(grouped[column.value] || []).map((row) => (
-                <article key={row.id} className="recruitment-candidate-card" onClick={() => setSelectedId(row.id)}>
+                <article
+                  key={row.id}
+                  className={`recruitment-candidate-card${highlightId === row.id ? " recruitment-candidate-card--highlight" : ""}`}
+                  onClick={() => setSelectedId(row.id)}
+                >
                   <strong>{row.full_name}</strong>
                   <span>{row.vacancy_title || "Sin vacante"}</span>
                   <small>{labelFor(CANDIDATE_SOURCES, row.source)} · {row.applied_at}</small>
