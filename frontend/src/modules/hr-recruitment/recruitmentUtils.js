@@ -179,6 +179,10 @@ export const RETENTION_STATUS_OPTIONS = [
   { value: "no", label: "No sigue activo" }
 ]
 
+export function canViewRecruitmentIntegrationDebug(role) {
+  return normalizeRecruitmentRole(role) === "admin"
+}
+
 export function canViewRecruitmentOnboarding(role) {
   const normalized = normalizeRecruitmentRole(role)
   return canManageRecruitment(role) || normalized === "supervisor"

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { useAuth } from "../../context/AuthContext"
 import ConvertCandidateModal from "./ConvertCandidateModal"
 import {
   discardRecruitmentCandidate,
@@ -20,8 +21,14 @@ import {
   ONBOARDING_STATUSES,
   onboardingStatusTone,
   PIPELINE_COLUMNS,
-  VACANCY_PRIORITIES
+  VACANCY_PRIORITIES,
+  canViewRecruitmentIntegrationDebug
 } from "./recruitmentUtils"
+import {
+  buildIntegrationDebugPayload,
+  buildWebsiteApplicationRows,
+  hasWebsiteApplicationData
+} from "./websiteApplicationDisplay"
 
 function Field({ label, className = "", children }) {
   return (
@@ -69,6 +76,8 @@ export default function CandidateDetailPanel({
   })
   const [discardForm, setDiscardForm] = useState({ reason: "profile_mismatch", notes: "" })
   const [convertOpen, setConvertOpen] = useState(false)
+  const { user } = useAuth()
+  const canViewIntegrationDebug = canViewRecruitmentIntegrationDebug(user?.role)
 
   async function loadDetail() {
     setLoading(true)
@@ -95,47 +104,28 @@ export default function CandidateDetailPanel({
   const applicationPayload = candidate.application_payload && typeof candidate.application_payload === "object"
     ? candidate.application_payload
     : {}
+  const isWebsiteApplication = hasWebsiteApplicationData(candidate, applicationPayload)
 
-  function payloadValue(...keys) {
-    for (const key of keys) {
-      const fromPayload = applicationPayload?.[key]
-      if (fromPayload != null && String(fromPayload).trim() !== "") return String(fromPayload).trim()
-    }
-    return ""
-  }
+  function renderWebsiteApplicationSection() {
+    if (!isWebsiteApplication) return null
 
-  function displayValue(columnValue, ...payloadKeys) {
-    if (columnValue != null && String(columnValue).trim() !== "") return String(columnValue).trim()
-    return payloadValue(...payloadKeys)
-  }
-
-  function renderFormFieldsExtra() {
-    const formFields = applicationPayload?.form_fields
-    if (!formFields || typeof formFields !== "object") return null
-
-    const entries = Object.entries(formFields).filter(([, value]) => (
-      value != null && String(value).trim() !== ""
-    ))
-    if (!entries.length) return null
-
-    const knownKeys = new Set([
-      "first_name", "last_name", "full_name", "phone", "email", "age", "municipality",
-      "education_level", "applied_position", "availability", "available_start_date",
-      "salary_expectation", "has_experience", "motivation", "attachment_url", "document_url",
-      "data_consent", "source", "submitted_at", "form_fields", "wix_raw"
-    ])
-
-    const extra = entries.filter(([key]) => !knownKeys.has(key.split(".").pop() || key))
-    if (!extra.length) return null
+    const rows = buildWebsiteApplicationRows(candidate, applicationPayload)
+    if (!rows.length) return null
 
     return (
       <section className="recruitment-section">
-        <h3>Campos adicionales del formulario</h3>
+        <h3>Aplicación desde el sitio web</h3>
         <dl className="recruitment-detail-list">
-          {extra.map(([key, value]) => (
-            <div key={key}>
-              <dt>{key.replace(/\./g, " · ")}</dt>
-              <dd>{String(value)}</dd>
+          {rows.map((row) => (
+            <div key={row.id}>
+              <dt>{row.label}</dt>
+              <dd>
+                {row.type === "link" ? (
+                  <a href={row.value} target="_blank" rel="noopener noreferrer">Abrir / descargar</a>
+                ) : (
+                  row.value
+                )}
+              </dd>
             </div>
           ))}
         </dl>
@@ -143,45 +133,73 @@ export default function CandidateDetailPanel({
     )
   }
 
-  function renderWebsiteApplication() {
-    const isWebsite = candidate.source === "website"
-    const hasPayload = Object.keys(applicationPayload).length > 0
-    const attachmentUrl = candidate.attachment_url || payloadValue("attachment_url", "document_url")
-    const missingDetails = isWebsite && !displayValue(candidate.age, "age")
-      && !displayValue(candidate.address, "municipality")
-      && !displayValue(candidate.schedule_availability, "availability")
-      && !displayValue(candidate.salary_expectation, "salary_expectation")
-      && !displayValue(candidate.prior_experience, "has_experience", "motivation")
-      && !displayValue(candidate.notes, "motivation")
+  function renderIntegrationDebugSection() {
+    if (!canViewIntegrationDebug || !isWebsiteApplication) return null
 
-    if (!isWebsite && !hasPayload && !attachmentUrl) return null
+    const debugPayload = buildIntegrationDebugPayload(applicationPayload)
+    if (!Object.keys(debugPayload).length) return null
 
     return (
-      <>
-        {missingDetails ? (
-          <section className="recruitment-section recruitment-section--hint">
-            <p className="tasks-muted">
-              Solo se recibieron datos básicos del contacto. Revisa la configuración del webhook de Wix si faltan campos del formulario.
-            </p>
-          </section>
-        ) : null}
-        {renderFormFieldsExtra()}
-      </>
+      <details className="recruitment-section recruitment-collapse recruitment-debug">
+        <summary>Datos técnicos de integración</summary>
+        <pre className="recruitment-debug-payload">{JSON.stringify(debugPayload, null, 2)}</pre>
+      </details>
     )
   }
 
-  function renderWebsiteMeta() {
-    if (candidate.source !== "website") return null
-    const attachmentUrl = candidate.attachment_url || payloadValue("attachment_url", "document_url")
-    const appliedAt = payloadValue("submitted_at") || candidate.applied_at
+  function renderProfileForm() {
+    if (isWebsiteApplication) {
+      return (
+        <form className="recruitment-section" onSubmit={saveProfile}>
+          <h3>Seguimiento RRHH</h3>
+          <p className="tasks-muted">Los datos de la aplicación web se muestran arriba. Aquí puedes registrar información interna.</p>
+          <div className="recruitment-form-grid">
+            <Field label="WhatsApp">
+              <input value={candidate.whatsapp || ""} onChange={(e) => updateCandidate("whatsapp", e.target.value)} />
+            </Field>
+            <Field label="Notas internas" className="recruitment-field--full">
+              <textarea value={candidate.internal_notes || ""} onChange={(e) => updateCandidate("internal_notes", e.target.value)} />
+            </Field>
+          </div>
+          <button type="submit" className="tasks-primary" disabled={saving}>Guardar notas</button>
+        </form>
+      )
+    }
 
     return (
-      <div className="recruitment-website-meta recruitment-field--full">
-        <span>Aplicación web · {appliedAt || "—"}</span>
-        {attachmentUrl ? (
-          <a href={attachmentUrl} target="_blank" rel="noopener noreferrer">Ver PDF adjunto</a>
-        ) : null}
-      </div>
+      <form className="recruitment-section" onSubmit={saveProfile}>
+        <h3>Datos personales</h3>
+        <div className="recruitment-form-grid recruitment-form-grid--compact">
+          <Field label="Nombre completo" className="recruitment-field--full">
+            <input value={candidate.full_name || ""} onChange={(e) => updateCandidate("full_name", e.target.value)} required />
+          </Field>
+          <Field label="Teléfono"><input value={candidate.phone || ""} onChange={(e) => updateCandidate("phone", e.target.value)} /></Field>
+          <Field label="Correo"><input type="email" value={candidate.email || ""} onChange={(e) => updateCandidate("email", e.target.value)} /></Field>
+          <Field label="WhatsApp"><input value={candidate.whatsapp || ""} onChange={(e) => updateCandidate("whatsapp", e.target.value)} /></Field>
+          <Field label="Edad"><input type="number" min="16" max="99" value={candidate.age ?? ""} onChange={(e) => updateCandidate("age", e.target.value)} /></Field>
+          <Field label="Fuente">
+            <select value={candidate.source || "other"} onChange={(e) => updateCandidate("source", e.target.value)}>
+              {CANDIDATE_SOURCES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+            </select>
+          </Field>
+          <Field label="Puesto aplicado"><input value={candidate.position_applied || ""} onChange={(e) => updateCandidate("position_applied", e.target.value)} /></Field>
+          <Field label="Dirección / municipio" className="recruitment-field--span-2">
+            <input value={candidate.address || ""} onChange={(e) => updateCandidate("address", e.target.value)} />
+          </Field>
+          <Field label="Disponibilidad"><input value={candidate.schedule_availability || ""} onChange={(e) => updateCandidate("schedule_availability", e.target.value)} /></Field>
+          <Field label="Expectativa salarial"><input value={candidate.salary_expectation || ""} onChange={(e) => updateCandidate("salary_expectation", e.target.value)} /></Field>
+          <Field label="Experiencia previa">
+            <textarea value={candidate.prior_experience || ""} onChange={(e) => updateCandidate("prior_experience", e.target.value)} />
+          </Field>
+          <Field label="Observaciones">
+            <textarea value={candidate.notes || ""} onChange={(e) => updateCandidate("notes", e.target.value)} />
+          </Field>
+          <Field label="Notas internas">
+            <textarea value={candidate.internal_notes || ""} onChange={(e) => updateCandidate("internal_notes", e.target.value)} />
+          </Field>
+        </div>
+        <button type="submit" className="tasks-primary" disabled={saving}>Guardar perfil</button>
+      </form>
     )
   }
 
@@ -193,6 +211,7 @@ export default function CandidateDetailPanel({
       vacancy_id: candidate.vacancy_id,
       full_name: candidate.full_name,
       phone: candidate.phone,
+      email: candidate.email,
       whatsapp: candidate.whatsapp,
       age: candidate.age,
       address: candidate.address,
@@ -345,52 +364,8 @@ export default function CandidateDetailPanel({
           {loading ? <p className="tasks-muted">Cargando perfil...</p> : null}
           {!loading && panel === "profile" && (
             <>
-              {renderWebsiteApplication()}
-
-              <form className="recruitment-section" onSubmit={saveProfile}>
-                <h3>Datos personales</h3>
-                <div className="recruitment-form-grid recruitment-form-grid--compact">
-                  {renderWebsiteMeta()}
-                  <Field label="Nombre completo" className="recruitment-field--full">
-                    <input value={candidate.full_name || ""} onChange={(e) => updateCandidate("full_name", e.target.value)} required />
-                  </Field>
-                  <Field label="Teléfono"><input value={displayValue(candidate.phone, "phone")} onChange={(e) => updateCandidate("phone", e.target.value)} /></Field>
-                  <Field label="Correo"><input type="email" value={displayValue(candidate.email, "email")} onChange={(e) => updateCandidate("email", e.target.value)} /></Field>
-                  <Field label="WhatsApp"><input value={candidate.whatsapp || ""} onChange={(e) => updateCandidate("whatsapp", e.target.value)} /></Field>
-                  <Field label="Edad"><input type="number" min="16" max="99" value={displayValue(candidate.age, "age")} onChange={(e) => updateCandidate("age", e.target.value)} /></Field>
-                  <Field label="Fuente">
-                    <select value={candidate.source || "other"} onChange={(e) => updateCandidate("source", e.target.value)}>
-                      {CANDIDATE_SOURCES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-                    </select>
-                  </Field>
-                  <Field label="Puesto aplicado"><input value={displayValue(candidate.position_applied, "applied_position")} onChange={(e) => updateCandidate("position_applied", e.target.value)} /></Field>
-                  <Field label="Dirección / municipio" className="recruitment-field--span-2">
-                    <input value={displayValue(candidate.address, "municipality")} onChange={(e) => updateCandidate("address", e.target.value)} />
-                  </Field>
-                  <Field label="Disponibilidad"><input value={displayValue(candidate.schedule_availability, "availability")} onChange={(e) => updateCandidate("schedule_availability", e.target.value)} /></Field>
-                  <Field label="Expectativa salarial"><input value={displayValue(candidate.salary_expectation, "salary_expectation")} onChange={(e) => updateCandidate("salary_expectation", e.target.value)} /></Field>
-                  {displayValue(null, "education_level") ? (
-                    <Field label="Escolaridad">
-                      <p className="recruitment-field__static">{displayValue(null, "education_level")}</p>
-                    </Field>
-                  ) : null}
-                  {displayValue(null, "available_start_date") ? (
-                    <Field label="Inicio disponible">
-                      <p className="recruitment-field__static">{displayValue(null, "available_start_date")}</p>
-                    </Field>
-                  ) : null}
-                  <Field label="Experiencia previa">
-                    <textarea value={displayValue(candidate.prior_experience, "has_experience")} onChange={(e) => updateCandidate("prior_experience", e.target.value)} />
-                  </Field>
-                  <Field label="Observaciones">
-                    <textarea value={displayValue(candidate.notes, "motivation")} onChange={(e) => updateCandidate("notes", e.target.value)} />
-                  </Field>
-                  <Field label="Notas internas">
-                    <textarea value={candidate.internal_notes || ""} onChange={(e) => updateCandidate("internal_notes", e.target.value)} />
-                  </Field>
-                </div>
-                <button type="submit" className="tasks-primary" disabled={saving}>Guardar perfil</button>
-              </form>
+              {renderWebsiteApplicationSection()}
+              {renderProfileForm()}
 
               <details className="recruitment-section recruitment-collapse">
                 <summary>Vacante asociada</summary>
@@ -467,6 +442,8 @@ export default function CandidateDetailPanel({
                   {!detail?.status_history?.length ? <p className="tasks-muted">Sin cambios registrados.</p> : null}
                 </div>
               </details>
+
+              {renderIntegrationDebugSection()}
             </>
           )}
 
