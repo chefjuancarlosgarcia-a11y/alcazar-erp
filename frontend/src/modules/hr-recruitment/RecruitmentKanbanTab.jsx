@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import {
+  deleteRecruitmentCandidate,
   updateRecruitmentCandidatePipeline,
   upsertRecruitmentCandidate
 } from "./recruitmentService"
@@ -75,6 +76,27 @@ export default function RecruitmentKanbanTab({
     else onRefresh?.()
   }
 
+  async function handleDeleteCandidate(event, row) {
+    event.stopPropagation()
+    const confirmed = window.confirm(
+      `¿Seguro que quieres eliminar a ${row.full_name}? Esta acción no se puede deshacer.`
+    )
+    if (!confirmed) return
+
+    setSaving(true)
+    const result = await deleteRecruitmentCandidate(row.id)
+    setSaving(false)
+
+    if (result.error) {
+      onMessage?.(result.error, "error")
+      return
+    }
+
+    if (selectedId === row.id) setSelectedId("")
+    onMessage?.("Candidato eliminado.", "success")
+    onRefresh?.()
+  }
+
   async function handleSubmit(event) {
     event.preventDefault()
     if (!form.full_name?.trim() || !form.vacancy_id) {
@@ -101,7 +123,7 @@ export default function RecruitmentKanbanTab({
         <div className="recruitment-panel__head">
           <div>
             <h2>Pipeline de candidatos</h2>
-            <p className="tasks-muted">Kanban por etapa del proceso de contratación.</p>
+            <p className="tasks-muted">Kanban por etapa del proceso de contratación. Los descartados se eliminan automáticamente después de 60 días.</p>
           </div>
           <button type="button" className="tasks-primary" onClick={openCreate}>+ Nuevo candidato</button>
         </div>
@@ -130,13 +152,28 @@ export default function RecruitmentKanbanTab({
                 <strong>{column.shortLabel || column.label}</strong>
                 <span>{grouped[column.value]?.length || 0}</span>
               </header>
+              {column.value === "discarded" ? (
+                <p className="recruitment-kanban-column__hint">Auto-eliminación a los 60 días</p>
+              ) : null}
               {(grouped[column.value] || []).map((row) => (
                 <article
                   key={row.id}
                   className={`recruitment-candidate-card${highlightId === row.id ? " recruitment-candidate-card--highlight" : ""}`}
                   onClick={() => setSelectedId(row.id)}
                 >
-                  <strong>{row.full_name}</strong>
+                  <div className="recruitment-candidate-card__top">
+                    <strong>{row.full_name}</strong>
+                    <button
+                      type="button"
+                      className="recruitment-candidate-card__delete"
+                      title="Eliminar candidato"
+                      disabled={saving}
+                      aria-label={`Eliminar ${row.full_name}`}
+                      onClick={(event) => handleDeleteCandidate(event, row)}
+                    >
+                      ×
+                    </button>
+                  </div>
                   <span>{row.vacancy_title || "Sin vacante"}</span>
                   <small>{labelFor(CANDIDATE_SOURCES, row.source)} · {row.applied_at}</small>
                   {row.onboarding_status && row.onboarding_status !== "none" ? (

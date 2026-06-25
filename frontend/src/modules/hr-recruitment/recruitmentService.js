@@ -8,7 +8,7 @@ function result(data, error = null) {
   return { data, error: error ? message(error) : "" }
 }
 
-const MIGRATION_HINT = "Aplica las migraciones 117 y 118 de reclutamiento en Supabase."
+const MIGRATION_HINT = "Aplica las migraciones 117, 118 y 126 de reclutamiento en Supabase."
 
 function migrationHint(error) {
   const text = message(error)
@@ -94,6 +94,13 @@ export async function discardRecruitmentCandidate(candidateId, reason, notes = n
     p_candidate_id: candidateId,
     p_reason: reason,
     p_notes: notes
+  })
+  return result(data, error ? migrationHint(error) : null)
+}
+
+export async function deleteRecruitmentCandidate(candidateId) {
+  const { data, error } = await supabase.rpc("delete_recruitment_candidate", {
+    p_candidate_id: candidateId
   })
   return result(data, error ? migrationHint(error) : null)
 }
