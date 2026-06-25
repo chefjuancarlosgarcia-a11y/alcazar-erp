@@ -127,7 +127,7 @@ export default function RecruitmentKanbanTab({
           {PIPELINE_COLUMNS.map((column) => (
             <section key={column.value} className="recruitment-kanban-column">
               <header className="recruitment-kanban-column__head">
-                <strong>{column.label}</strong>
+                <strong>{column.shortLabel || column.label}</strong>
                 <span>{grouped[column.value]?.length || 0}</span>
               </header>
               {(grouped[column.value] || []).map((row) => (
@@ -150,7 +150,7 @@ export default function RecruitmentKanbanTab({
                       onChange={(e) => moveCandidate(row.id, e.target.value)}
                     >
                       {PIPELINE_COLUMNS.map((item) => (
-                        <option key={item.value} value={item.value}>{item.label}</option>
+                        <option key={item.value} value={item.value}>{item.shortLabel || item.label}</option>
                       ))}
                     </select>
                   </div>

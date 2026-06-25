@@ -36,7 +36,13 @@ RPC: create_recruitment_application_from_website
    supabase functions deploy wix-recruitment-application --no-verify-jwt
    ```
 
-4. URL del endpoint:
+4. **Modo depuración (activo por defecto):** Wix siempre recibe HTTP **200** aunque falle parseo, validación o RPC. Los errores se guardan en `public.webhook_debug_logs`. Para volver al comportamiento estricto:
+
+   ```bash
+   supabase secrets set WIX_RECRUITMENT_DEBUG_ALWAYS_200=false
+   ```
+
+5. URL del endpoint:
 
    ```
    https://<PROJECT_REF>.supabase.co/functions/v1/wix-recruitment-application
@@ -44,14 +50,20 @@ RPC: create_recruitment_application_from_website
 
 ## Wix Automations (recomendado)
 
-1. Wix → **Automations** → **New Automation**
+1. Wix → **Automations** → editar automatización *Se envía una solicitud de trabajo*
 2. Trigger: **Form submitted** → formulario *Trabaja con Nosotros*
 3. Action: **Send HTTP request**
    - Method: `POST`
    - URL: endpoint de arriba
-   - Body: JSON con los campos abajo (mapeo manual de cada campo del formulario)
+   - Body: **Toda la carga útil** (no uses "Personalizar estructura")
 
-### Payload oficial (JSON)
+La Edge Function parsea el payload nativo de Wix Forms: `submitterName`, `submitterEmail`, `submitterPhone`, `submissions` (mapa o arreglo `{label,value}`), claves `field:...`, `createdEvent.entity.submissions` y datos de contacto.
+
+### No uses "Personalizar estructura"
+
+Wix suele guardar mal las variables personalizadas. Si el body trae textos `"Personalizar → ..."`, la función los ignora y registra el error en `webhook_debug_logs`.
+
+### Payload oficial (referencia de keys del ERP)
 
 ```json
 {

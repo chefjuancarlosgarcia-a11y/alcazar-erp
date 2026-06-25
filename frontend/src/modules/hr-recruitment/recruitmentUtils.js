@@ -39,13 +39,13 @@ export const VACANCY_STATUSES = [
 ]
 
 export const PIPELINE_COLUMNS = [
-  { value: "applied", label: "Aplicó" },
-  { value: "contacted", label: "Contactado" },
-  { value: "interview_scheduled", label: "Entrevista programada" },
-  { value: "interviewed", label: "Entrevistado" },
-  { value: "offer", label: "Oferta" },
-  { value: "hired", label: "Contratado" },
-  { value: "discarded", label: "Descartado" }
+  { value: "applied", label: "Aplicó", shortLabel: "Aplicó" },
+  { value: "contacted", label: "Contactado", shortLabel: "Contactado" },
+  { value: "interview_scheduled", label: "Entrevista programada", shortLabel: "Entrevista" },
+  { value: "interviewed", label: "Entrevistado", shortLabel: "Entrevistado" },
+  { value: "offer", label: "Oferta", shortLabel: "Oferta" },
+  { value: "hired", label: "Contratado", shortLabel: "Contratado" },
+  { value: "discarded", label: "Descartado", shortLabel: "Descartado" }
 ]
 
 export const CANDIDATE_SOURCES = [

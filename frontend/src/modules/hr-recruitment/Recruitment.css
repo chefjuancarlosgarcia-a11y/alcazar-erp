@@ -34,6 +34,8 @@
   border: 1px solid #223348;
   border-radius: 15px;
   background: #0f172a;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .recruitment-panel__head {
@@ -122,18 +124,18 @@
 
 .recruitment-kanban {
   display: grid;
-  grid-template-columns: repeat(7, minmax(220px, 1fr));
-  gap: 12px;
-  overflow-x: auto;
-  padding-bottom: 8px;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
 }
 
 .recruitment-kanban-column {
   display: grid;
-  gap: 10px;
+  gap: 8px;
   align-content: start;
-  min-height: 320px;
-  padding: 12px;
+  min-width: 0;
+  min-height: 240px;
+  padding: 8px;
   border: 1px solid #26384e;
   border-radius: 12px;
   background: #101c30;
@@ -148,7 +150,9 @@
 
 .recruitment-kanban-column__head strong {
   color: #f8fafc;
-  font-size: 13px;
+  font-size: 11px;
+  line-height: 1.25;
+  word-break: break-word;
 }
 
 .recruitment-kanban-column__head span {
@@ -158,12 +162,13 @@
 
 .recruitment-candidate-card {
   display: grid;
-  gap: 8px;
-  padding: 12px;
+  gap: 6px;
+  padding: 8px 9px;
   border: 1px solid #334155;
   border-radius: 10px;
   background: #0f172a;
   cursor: pointer;
+  min-width: 0;
 }
 
 .recruitment-candidate-card:hover {
@@ -177,13 +182,21 @@
 
 .recruitment-candidate-card strong {
   color: #f8fafc;
-  font-size: 14px;
+  font-size: 12px;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .recruitment-candidate-card small,
 .recruitment-candidate-card span {
   color: #94a3b8;
-  font-size: 12px;
+  font-size: 10px;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .recruitment-candidate-card__actions {
@@ -194,19 +207,21 @@
 
 .recruitment-candidate-card__actions select {
   flex: 1;
-  min-width: 120px;
-  min-height: 34px;
-  padding: 6px 8px;
+  min-width: 0;
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 6px;
   border: 1px solid #334155;
   border-radius: 8px;
   background: #091324;
   color: #e2e8f0;
-  font-size: 12px;
+  font-size: 10px;
 }
 
 .recruitment-detail-list {
   display: grid;
-  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
   margin: 0;
 }
 
@@ -228,6 +243,19 @@
 
 .recruitment-detail-list a {
   color: #2dd4bf;
+}
+
+.recruitment-section--hint {
+  border: 1px solid #fbbf24;
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: rgba(251, 191, 36, 0.08);
+}
+
+.recruitment-section--hint p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .recruitment-kpi-grid {
@@ -287,7 +315,7 @@
 .recruitment-drawer {
   display: grid;
   grid-template-rows: auto 1fr auto;
-  width: min(560px, 100vw);
+  width: min(720px, 100vw);
   height: 100%;
   border-left: 1px solid #334155;
   background: #0f172a;
@@ -310,9 +338,10 @@
 
 .recruitment-drawer__body {
   overflow: auto;
-  padding: 18px 20px;
+  padding: 14px 16px;
   display: grid;
-  gap: 18px;
+  gap: 12px;
+  align-content: start;
 }
 
 .recruitment-drawer__head h2 {
@@ -322,8 +351,8 @@
 
 .recruitment-section {
   display: grid;
-  gap: 10px;
-  padding: 14px;
+  gap: 8px;
+  padding: 10px 12px;
   border: 1px solid #26384e;
   border-radius: 12px;
   background: #101c30;
@@ -338,38 +367,105 @@
 .recruitment-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: 8px;
+}
+
+.recruitment-form-grid--compact {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .recruitment-field {
   display: grid;
-  gap: 6px;
+  gap: 4px;
   color: #b9c6d7;
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 700;
+  min-width: 0;
 }
 
 .recruitment-field--full {
   grid-column: 1 / -1;
 }
 
+.recruitment-field--span-2 {
+  grid-column: span 2;
+}
+
 .recruitment-field input,
 .recruitment-field select,
 .recruitment-field textarea {
   width: 100%;
-  padding: 10px 11px;
+  padding: 7px 9px;
   border: 1px solid #334155;
   border-radius: 9px;
   background: #091324;
   color: #f1f5f9;
   box-sizing: border-box;
   font: inherit;
+  font-size: 13px;
   font-weight: 400;
 }
 
 .recruitment-field textarea {
-  min-height: 88px;
-  resize: vertical;
+  min-height: 48px;
+  max-height: 64px;
+  resize: none;
+  line-height: 1.35;
+}
+
+.recruitment-field__static {
+  margin: 0;
+  padding: 7px 9px;
+  border: 1px solid #334155;
+  border-radius: 9px;
+  background: #091324;
+  color: #f1f5f9;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.recruitment-field__static a {
+  color: #2dd4bf;
+}
+
+.recruitment-website-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  padding: 6px 8px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #091324;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.recruitment-collapse summary {
+  cursor: pointer;
+  color: #f8fafc;
+  font-size: 14px;
+  font-weight: 700;
+  list-style: none;
+}
+
+.recruitment-collapse summary::-webkit-details-marker {
+  display: none;
+}
+
+.recruitment-collapse summary::before {
+  content: "▸ ";
+  color: #5eead4;
+}
+
+.recruitment-collapse[open] summary::before {
+  content: "▾ ";
+}
+
+.recruitment-collapse > :not(summary) {
+  margin-top: 8px;
 }
 
 .recruitment-timeline {
@@ -517,14 +613,17 @@
   gap: 8px;
 }
 
-@media (max-width: 1200px) {
-  .recruitment-kanban {
-    grid-template-columns: repeat(7, minmax(200px, 1fr));
-  }
-}
-
 @media (max-width: 768px) {
-  .recruitment-form-grid {
+  .recruitment-form-grid,
+  .recruitment-form-grid--compact {
+    grid-template-columns: 1fr;
+  }
+
+  .recruitment-field--span-2 {
+    grid-column: 1 / -1;
+  }
+
+  .recruitment-detail-list {
     grid-template-columns: 1fr;
   }
 
