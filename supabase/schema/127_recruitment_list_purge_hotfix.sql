@@ -1,28 +1,5 @@
--- Delete recruitment candidates + auto-purge discarded after 60 days
--- Apply after 125_webhook_debug_logs.sql
-
-create or replace function public.recruitment_candidate_discarded_at(p_candidate_id uuid)
-returns timestamptz
-language sql
-stable
-security definer
-set search_path = ''
-as $$
-  select coalesce(
-    (
-      select max(h.changed_at)
-      from public.recruitment_candidate_status_history h
-      where h.candidate_id = p_candidate_id
-        and h.to_status = 'discarded'
-    ),
-    (
-      select c.updated_at
-      from public.recruitment_candidates c
-      where c.id = p_candidate_id
-        and c.pipeline_status = 'discarded'
-    )
-  );
-$$;
+-- Hotfix: list_recruitment_candidates must stay read-only (STABLE).
+-- Purge moved out of list RPC; auto-purge only when discard history exists.
 
 create or replace function public.purge_stale_discarded_recruitment_candidates(
   p_retention_days integer default 60
@@ -56,51 +33,6 @@ begin
 
   get diagnostics v_deleted = row_count;
   return v_deleted;
-end;
-$$;
-
-create or replace function public.delete_recruitment_candidate(p_candidate_id uuid)
-returns jsonb
-language plpgsql
-security definer
-set search_path = ''
-as $$
-declare
-  v_candidate public.recruitment_candidates;
-begin
-  if not public.can_manage_recruitment() then
-    raise exception 'No tienes permiso para eliminar candidatos.';
-  end if;
-
-  if p_candidate_id is null then
-    raise exception 'Candidato no especificado.';
-  end if;
-
-  select *
-  into v_candidate
-  from public.recruitment_candidates
-  where id = p_candidate_id;
-
-  if v_candidate.id is null then
-    raise exception 'Candidato no encontrado.';
-  end if;
-
-  if exists (
-    select 1
-    from public.recruitment_employee_origins o
-    where o.candidate_id = p_candidate_id
-  ) then
-    raise exception 'No se puede eliminar un candidato convertido en colaborador.';
-  end if;
-
-  delete from public.recruitment_candidates
-  where id = p_candidate_id;
-
-  return jsonb_build_object(
-    'id', v_candidate.id,
-    'full_name', v_candidate.full_name,
-    'deleted', true
-  );
 end;
 $$;
 
@@ -161,10 +93,4 @@ begin
 end;
 $$;
 
-revoke all on function public.recruitment_candidate_discarded_at(uuid) from public;
-revoke all on function public.purge_stale_discarded_recruitment_candidates(integer) from public;
-revoke all on function public.delete_recruitment_candidate(uuid) from public;
-
-grant execute on function public.recruitment_candidate_discarded_at(uuid) to authenticated;
 grant execute on function public.purge_stale_discarded_recruitment_candidates(integer) to authenticated;
-grant execute on function public.delete_recruitment_candidate(uuid) to authenticated;

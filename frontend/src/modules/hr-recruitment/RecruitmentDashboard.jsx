@@ -11,7 +11,8 @@ import {
   getRecruitmentWeeklyReport,
   listRecruitmentCandidates,
   listRecruitmentProfiles,
-  listRecruitmentVacancies
+  listRecruitmentVacancies,
+  purgeStaleDiscardedRecruitmentCandidates
 } from "./recruitmentService"
 import {
   CANDIDATE_SOURCES,
@@ -85,6 +86,12 @@ export default function RecruitmentDashboard() {
   const loadCandidates = useCallback(async () => {
     if (!canManage) return
     setLoadingCandidates(true)
+
+    const purgeResult = await purgeStaleDiscardedRecruitmentCandidates(60)
+    if (purgeResult.error) {
+      console.warn("[recruitment] purge stale discarded failed:", purgeResult.error)
+    }
+
     const result = await listRecruitmentCandidates({
       dateFrom: filters.dateFrom,
       dateTo: filters.dateTo,
