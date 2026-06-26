@@ -32,6 +32,7 @@ import { getMonthlyGoalReport, getWaiterSalesRanking } from "../../services/sale
 import { getYieldDashboardMetrics } from "../../services/yieldCostingService"
 import YieldReportsSection from "./YieldReportsSection"
 import CommandCenterLayer from "../../components/commandCenter/CommandCenterLayer"
+import MigrationModeReportWarning from "../../components/inventory/MigrationModeReportWarning"
 import "./ReportsDashboard.css"
 
 const EXECUTIVE_ROLES = ["admin", "ceo", "gerente_general"]
@@ -185,6 +186,7 @@ function ReportsDashboard() {
       )}
       {!["executive", "fixedCosts", "goals"].includes(tab) && <GlobalFilters filters={filters} onChange={(field, value) => setFilters((current) => ({ ...current, [field]: value }))} showMonth={false} showDateRange={tab !== "goals"} showCategory={tab === "menu"} showCollaborator={["waiters", "comparison"].includes(tab)} />}
       {fixedCostsFeedback && tab === "fixedCosts" && <p className="reports-success-banner" role="status">{fixedCostsFeedback}</p>}
+      <MigrationModeReportWarning tab={tab} />
       <ReportTabBoundary key={`${tab}-${tabReloadKey}`} tab={tab} onRetry={retryTab}>
         {loading
           ? <div className="reports-loading">Cargando {currentTabLabel(tab).toLowerCase()}...</div>

@@ -4,6 +4,7 @@ import { useAuth } from "../context/AuthContext"
 import { canManageRoleCatalog, normalizeRole } from "../utils/profilePermissions"
 import BrandingAppearanceSettings from "../components/branding/BrandingAppearanceSettings"
 import LoginSecurityAudit from "../components/auth/LoginSecurityAudit"
+import InventoryMigrationModeSettings from "../components/inventory/InventoryMigrationModeSettings"
 import {
   PRINT_JOB_TYPES,
   buildTestPrintPayload,
@@ -33,17 +34,24 @@ function Settings() {
   const canManageRoles = canManageRoleCatalog(user)
   const canManagePrinters = ["admin", "gerente_general"].includes(normalizeRole(user?.role))
   const canManageLoginSecurity = canManagePrinters
+  const canManageMigrationMode = normalizeRole(user?.role) === "admin"
   const initialTab = searchParams.get("tab") || "branding"
   const [activeTab, setActiveTab] = useState(
-    initialTab === "login-security" && canManageLoginSecurity ? "login-security" : initialTab
+    initialTab === "login-security" && canManageLoginSecurity
+      ? "login-security"
+      : initialTab === "operacion" && canManageMigrationMode
+        ? "operacion"
+        : initialTab
   )
 
   useEffect(() => {
     const tab = searchParams.get("tab")
     if (tab === "login-security" && canManageLoginSecurity) {
       setActiveTab("login-security")
+    } else if (tab === "operacion" && canManageMigrationMode) {
+      setActiveTab("operacion")
     }
-  }, [searchParams, canManageLoginSecurity])
+  }, [searchParams, canManageLoginSecurity, canManageMigrationMode])
 
   return (
     <section className="settings-page">
@@ -69,12 +77,18 @@ function Settings() {
             Seguridad login
           </button>
         )}
+        {canManageMigrationMode && (
+          <button className={`settings-tab ${activeTab === "operacion" ? "active" : ""}`} onClick={() => setActiveTab("operacion")}>
+            Operación
+          </button>
+        )}
       </nav>
 
       <div className="settings-content settings-content-wide">
         {activeTab === "branding" && <BrandingAppearanceSettings />}
         {activeTab === "printers" && canManagePrinters && <PrinterSettings />}
         {activeTab === "login-security" && canManageLoginSecurity && <LoginSecurityAudit />}
+        {activeTab === "operacion" && canManageMigrationMode && <InventoryMigrationModeSettings />}
       </div>
     </section>
   )

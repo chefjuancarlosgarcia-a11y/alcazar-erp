@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { Outlet, useLocation } from "react-router-dom"
 import Sidebar from "../components/Sidebar"
+import MigrationModeBanner from "../components/inventory/MigrationModeBanner"
 import BrandLogo from "../components/branding/BrandLogo"
 import NotificationsBell from "../components/NotificationsBell"
 import UserProfileDropdown from "../components/UserProfileDropdown"
@@ -52,6 +53,7 @@ function MainLayout() {
             <UserProfileDropdown currentUser={user} onOpenProfile={setProfilePanelView} />
           </header>
         )}
+        <MigrationModeBanner />
         <main className={`app-main ${isLegacyModule ? "app-main-legacy" : ""}`}>
           <Outlet />
         </main>
