@@ -1,4 +1,5 @@
 import { TestFlowBadge, TestFlowWarning } from "../../components/TestFlowBadge"
+import FinanceIntegrationPanel from "../../components/FinanceIntegrationPanel"
 import { isTestRecord } from "../../utils/testFlowMode"
 import { PO_WORKFLOW_VIEWS } from "../../utils/inventoryNotificationRoutes"
 import { formatCurrency, getPurchaseOrderStatusLabel, getPurchaseOrderStatusBadgeClass } from "./purchaseOrdersHelpers"
@@ -51,6 +52,8 @@ export default function PurchaseOrderDetailModal({
   const canReceive = ["enviada_proveedor", "en tránsito"].includes(order.status)
   const showReceptionForm = workflowView === PO_WORKFLOW_VIEWS.RECEPTION && canReceive
   const proveedor = order.proveedor || {}
+  const canSendToFinance = ["aprobada", "recibida_parcial", "recibida_completa"].includes(order.status)
+    && !isTestRecord(order)
 
   return (
     <div className="po-detail-backdrop" onClick={onClose}>
@@ -220,6 +223,10 @@ export default function PurchaseOrderDetailModal({
             </div>
           </article>
         )}
+
+        {canSendToFinance ? (
+          <FinanceIntegrationPanel sourceModule="purchases" sourceId={order.id} />
+        ) : null}
 
         <footer className="po-detail-modal__actions">
           {workflowView === PO_WORKFLOW_VIEWS.PENDING_APPROVAL && puedeAprobarOrdenCompra && pending && (

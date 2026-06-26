@@ -20,6 +20,7 @@ const navigationItems = [
   { module: "hr", to: "/hr", label: "Recursos Humanos", submenu: "hr" },
   { module: "tasks", to: "/tasks", label: "Tareas" },
   { module: "reports", to: "/reports", label: "Reportes" },
+  { module: "finance", to: "/finance", label: "Finanzas", submenu: "finance" },
   { module: "catering", to: "/catering", label: "Catering" },
   { module: "settings", to: "/settings", label: "Configuración", submenu: "settings" }
 ]
@@ -57,6 +58,15 @@ const posSubmenu = [
   { roles: ["admin", "gerente", "gerente_general", "gerente_operaciones"], to: "/pos?section=croquis", label: "Plano del restaurante" }
 ]
 
+const financeSubmenu = [
+  { roles: ["admin", "gerente_general", "contador"], to: "/finance?tab=resumen", label: "Resumen" },
+  { roles: ["admin", "gerente_general", "contador"], to: "/finance?tab=bancos", label: "Bancos" },
+  { roles: ["admin", "gerente_general", "contador"], to: "/finance?tab=pagos", label: "Cuentas por pagar" },
+  { roles: ["admin", "gerente_general", "contador"], to: "/finance?tab=cobros", label: "Cuentas por cobrar" },
+  { roles: ["admin", "gerente_general", "contador"], to: "/finance?tab=flujo", label: "Flujo de caja" },
+  { roles: ["admin", "gerente_general", "contador"], to: "/finance?tab=conciliacion", label: "Conciliación" }
+]
+
 const settingsSubmenu = [
   { roles: ["admin", "gerente_general"], to: "/settings", label: "Apariencia y Marca" },
   { roles: ["admin", "gerente_general", "supervisor"], to: "/settings/tickets", label: "Diseno de Tickets" }
@@ -72,17 +82,20 @@ function Sidebar({ compact = false, mobile = false, onNavigate }) {
       ? "inventory"
       : location.pathname === "/hr"
         ? "hr"
+        : location.pathname === "/finance"
+          ? "finance"
         : location.pathname === "/pos"
           ? "pos"
           : location.pathname.startsWith("/settings")
             ? "settings"
             : null
   )
-  const visibleSubmenu = ["/inventory", "/hr", "/pos"].includes(location.pathname) || location.pathname.startsWith("/settings") ? openSubmenu : null
+  const visibleSubmenu = ["/inventory", "/hr", "/finance", "/pos"].includes(location.pathname) || location.pathname.startsWith("/settings") ? openSubmenu : null
   const allowedItems = navigationItems.filter((item) => canAccess(item.module))
   const allowedInventorySubmenu = inventorySubmenu.filter((item) => submenuAllowsRole(item.roles, user?.role))
   const allowedPosSubmenu = posSubmenu.filter((item) => submenuAllowsRole(item.roles, user?.role))
   const allowedHrSubmenu = hrSubmenu.filter((item) => submenuAllowsRole(item.roles, user?.role))
+  const allowedFinanceSubmenu = financeSubmenu.filter((item) => submenuAllowsRole(item.roles, user?.role))
   const allowedSettingsSubmenu = settingsSubmenu.filter((item) => submenuAllowsRole(item.roles, user?.role))
 
   function isMainActive(item) {
@@ -144,7 +157,7 @@ function Sidebar({ compact = false, mobile = false, onNavigate }) {
             <NavLink
               className={`erp-sidebar-link ${isMainActive(item) ? "active" : ""}`}
               to={item.to}
-              end={!["/inventory", "/production", "/pos", "/hr", "/settings"].includes(item.to)}
+              end={!["/inventory", "/production", "/pos", "/hr", "/finance", "/settings"].includes(item.to)}
               onClick={(event) => handleMainClick(item, event)}
               style={() => ({
                 ...linkStyle,
@@ -157,6 +170,7 @@ function Sidebar({ compact = false, mobile = false, onNavigate }) {
             {item.module === "inventory" && renderSubmenu("inventory", allowedInventorySubmenu)}
             {item.module === "pos" && renderSubmenu("pos", allowedPosSubmenu)}
             {item.module === "hr" && renderSubmenu("hr", allowedHrSubmenu)}
+            {item.module === "finance" && renderSubmenu("finance", allowedFinanceSubmenu)}
             {item.module === "settings" && renderSubmenu("settings", allowedSettingsSubmenu)}
           </div>
         ))}

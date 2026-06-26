@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { useSearchParams } from "react-router-dom"
+import FinanceIntegrationPanel from "../components/FinanceIntegrationPanel"
 import { useAuth } from "../context/AuthContext"
 import {
   cashSummary,
@@ -10,6 +12,7 @@ import {
   getOpenCashSession,
   openCashSession
 } from "../services/cashService"
+import { listFinanceBankAccounts } from "../services/financeService"
 import "./CashManagement.css"
 
 const CASH_ROLES = ["admin", "gerente_general", "supervisor", "cajero", "caja"]
@@ -35,6 +38,8 @@ const MOVEMENT_LABELS = {
 
 function CashManagement() {
   const { user } = useAuth()
+  const [searchParams] = useSearchParams()
+  const highlightedSessionId = searchParams.get("session") || ""
   const canAccessCash = CASH_ROLES.includes(user?.role)
   const canSuperviseCash = SUPERVISOR_ROLES.includes(user?.role)
   const [registers, setRegisters] = useState([])
@@ -42,6 +47,7 @@ function CashManagement() {
   const [session, setSession] = useState(null)
   const [sessions, setSessions] = useState([])
   const [movements, setMovements] = useState([])
+  const [bankAccounts, setBankAccounts] = useState([])
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
@@ -78,6 +84,10 @@ function CashManagement() {
 
     const movementResult = await getCashMovements(openSession?.id)
     setMovements(movementResult.data || [])
+
+    const bankResult = await listFinanceBankAccounts()
+    if (!bankResult.error) setBankAccounts(bankResult.data || [])
+
     setLoading(false)
   }, [canAccessCash, selectedRegisterId])
 
@@ -254,10 +264,18 @@ function CashManagement() {
         <h2>Ultimos cierres</h2>
         <div className="cash-session-list">
           {sessions.filter((item) => item.status !== "open").slice(0, 6).map((item) => (
-            <article key={item.id}>
+            <article key={item.id} className={highlightedSessionId === item.id ? "cash-session-card is-highlighted" : "cash-session-card"}>
               <strong>{item.register?.name || "Caja"}</strong>
               <span>{formatDate(item.opened_at)} · {item.status === "closed" ? "Cerrada" : item.status}</span>
               <b>{money(item.counted_cash || 0)} contado · diferencia {money(item.difference || 0)}</b>
+              {item.status === "closed" ? (
+                <FinanceIntegrationPanel
+                  sourceModule="cash_closing"
+                  sourceId={item.id}
+                  bankAccounts={bankAccounts}
+                  cashDepositDefaults={{ amount: item.counted_cash || 0, method: "cash" }}
+                />
+              ) : null}
             </article>
           ))}
           {!sessions.filter((item) => item.status !== "open").length && <p className="cash-empty">Aun no hay cierres registrados.</p>}

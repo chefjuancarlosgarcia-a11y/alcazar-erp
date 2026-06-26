@@ -260,13 +260,19 @@
   gap: 10px;
 }
 
-.cash-session-list article {
+.cash-session-list article,
+.cash-session-card {
   display: grid;
   gap: 5px;
   padding: 11px;
   border: 1px solid var(--erp-border);
   border-radius: 9px;
   background: var(--erp-surface-2);
+}
+
+.cash-session-card.is-highlighted {
+  border-color: #0f766e;
+  box-shadow: 0 0 0 1px rgba(15, 118, 110, 0.35);
 }
 
 .cash-session-list span {

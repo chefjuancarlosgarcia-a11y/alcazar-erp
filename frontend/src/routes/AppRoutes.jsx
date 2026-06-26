@@ -28,6 +28,7 @@ const TicketTemplateSettings = lazy(() => import("../pages/TicketTemplateSetting
 const Account = lazy(() => import("../pages/Account"))
 const Tasks = lazy(() => import("../pages/Tasks"))
 const CateringDashboard = lazy(() => import("../modules/catering/CateringDashboard"))
+const Finance = lazy(() => import("../pages/Finance"))
 
 function PageLoadingFallback() {
   return <p>Cargando módulo...</p>
@@ -70,6 +71,7 @@ function AppRoutes() {
             <Route path="/reports" element={<ProtectedRoute module="reports"><Reports /></ProtectedRoute>} />
             <Route path="/reports/goals/settings" element={<ProtectedRoute module="reports"><SalesGoalsSettings /></ProtectedRoute>} />
             <Route path="/catering" element={<ProtectedRoute module="catering"><CateringDashboard /></ProtectedRoute>} />
+            <Route path="/finance" element={<ProtectedRoute module="finance"><Finance /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute module="settings"><Settings /></ProtectedRoute>} />
             <Route path="/settings/tickets" element={<ProtectedRoute module="settings"><TicketTemplateSettings /></ProtectedRoute>} />
             <Route path="/account" element={<ProtectedRoute><Account /></ProtectedRoute>} />

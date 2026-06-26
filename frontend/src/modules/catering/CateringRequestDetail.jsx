@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import FinanceIntegrationPanel from "../../components/FinanceIntegrationPanel"
 import {
   assignCateringLead,
   getCateringActivityLog,
@@ -329,6 +330,12 @@ export default function CateringRequestDetail({
             <div><dt>Ultimo contacto</dt><dd>{formatDateTime(request.last_contact_at)}</dd></div>
           </dl>
         </section>
+
+        {["approved", "converted"].includes(request.status) || ["approved", "converted"].includes(request.conversion_status) ? (
+          <section className="catering-detail-section">
+            <FinanceIntegrationPanel sourceModule="catering" sourceId={request.id} />
+          </section>
+        ) : null}
       </div>
 
       <section className="catering-detail-section">

@@ -1,0 +1,71 @@
+.finance-integration-panel {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.02);
+  display: grid;
+  gap: 0.75rem;
+}
+
+.finance-integration-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.finance-integration-panel__head h4 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.finance-integration-badge {
+  border-radius: 999px;
+  padding: 0.2rem 0.65rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.finance-integration-badge.is-pending {
+  background: rgba(255, 193, 7, 0.15);
+  color: #ffd666;
+}
+
+.finance-integration-badge.is-linked {
+  background: rgba(46, 204, 113, 0.15);
+  color: #7ddea0;
+}
+
+.finance-integration-panel__meta,
+.finance-integration-panel__message,
+.finance-integration-panel__done {
+  margin: 0;
+  font-size: 0.88rem;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.finance-integration-panel__form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.65rem;
+}
+
+.finance-integration-panel__form label {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.82rem;
+}
+
+.finance-integration-panel__form input,
+.finance-integration-panel__form select {
+  width: 100%;
+}
+
+.finance-integration-panel__action {
+  justify-self: start;
+}
+
+.finance-integration-panel--loading {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.88rem;
+}
