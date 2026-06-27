@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import FinanceIntegrationPanel from "../components/FinanceIntegrationPanel"
 import { useAuth } from "../context/AuthContext"
+import { useActionGuard } from "../hooks/useActionGuard"
 import {
   cashSummary,
   closeCashSession,
@@ -58,42 +59,47 @@ function CashManagement() {
   const summary = useMemo(() => cashSummary(session, movements), [movements, session])
   const countedValue = Number(closeForm.counted || 0)
   const previewDifference = countedValue - summary.expected
+  const { busy: loadBusy, run: runLoad } = useActionGuard()
+  const { busy: cashBusy, run: runCashAction } = useActionGuard()
 
   const loadData = useCallback(async () => {
     if (!canAccessCash) return
-    setLoading(true)
-    setError("")
-    const registerResult = await getCashRegisters()
-    if (registerResult.error) {
-      setError("No se pudieron cargar las cajas. Verifica la migracion 045.")
+    const result = await runLoad(async () => {
+      setLoading(true)
+      setError("")
+      const registerResult = await getCashRegisters()
+      if (registerResult.error) {
+        setError("No se pudieron cargar las cajas. Verifica la migracion 045.")
+        setLoading(false)
+        return
+      }
+      const nextRegisters = registerResult.data || []
+      const registerId = selectedRegisterIdRef.current || nextRegisters[0]?.id || ""
+      setRegisters(nextRegisters)
+      if (registerId && !selectedRegisterIdRef.current) {
+        selectedRegisterIdRef.current = registerId
+        setSelectedRegisterId(registerId)
+      }
+
+      const [sessionResult, sessionsResult] = await Promise.all([
+        getOpenCashSession(registerId),
+        getCashSessions(20)
+      ])
+      if (sessionResult.error) setError(sessionResult.error.message || "No se pudo cargar la sesion abierta.")
+      const openSession = sessionResult.data || null
+      setSession(openSession)
+      setSessions(sessionsResult.data || [])
+
+      const movementResult = await getCashMovements(openSession?.id)
+      setMovements(movementResult.data || [])
+
+      const bankResult = await listFinanceBankAccounts()
+      if (!bankResult.error) setBankAccounts(bankResult.data || [])
+
       setLoading(false)
-      return
-    }
-    const nextRegisters = registerResult.data || []
-    const registerId = selectedRegisterIdRef.current || nextRegisters[0]?.id || ""
-    setRegisters(nextRegisters)
-    if (registerId && !selectedRegisterIdRef.current) {
-      selectedRegisterIdRef.current = registerId
-      setSelectedRegisterId(registerId)
-    }
-
-    const [sessionResult, sessionsResult] = await Promise.all([
-      getOpenCashSession(registerId),
-      getCashSessions(20)
-    ])
-    if (sessionResult.error) setError(sessionResult.error.message || "No se pudo cargar la sesion abierta.")
-    const openSession = sessionResult.data || null
-    setSession(openSession)
-    setSessions(sessionsResult.data || [])
-
-    const movementResult = await getCashMovements(openSession?.id)
-    setMovements(movementResult.data || [])
-
-    const bankResult = await listFinanceBankAccounts()
-    if (!bankResult.error) setBankAccounts(bankResult.data || [])
-
-    setLoading(false)
-  }, [canAccessCash])
+    })
+    if (result?.skipped) return
+  }, [canAccessCash, runLoad])
 
   useEffect(() => {
     loadData()
@@ -105,14 +111,16 @@ function CashManagement() {
 
   async function handleOpenCash(event) {
     event.preventDefault()
-    const result = await openCashSession(selectedRegisterId, openingForm.amount, openingForm.notes)
-    if (result.error) {
-      setError(result.error.message || "No se pudo abrir caja.")
-      return
-    }
-    setMessage("Caja abierta correctamente.")
-    setOpeningForm({ amount: "500", notes: "" })
-    await loadData()
+    await runCashAction(async () => {
+      const result = await openCashSession(selectedRegisterId, openingForm.amount, openingForm.notes)
+      if (result.error) {
+        setError(result.error.message || "No se pudo abrir caja.")
+        return
+      }
+      setMessage("Caja abierta correctamente.")
+      setOpeningForm({ amount: "500", notes: "" })
+      await loadData()
+    })
   }
 
   async function handleMovement(event) {
@@ -127,34 +135,38 @@ function CashManagement() {
       setError("El motivo es obligatorio.")
       return
     }
-    const result = await createCashMovement({
-      sessionId: session.id,
-      movementType: movementForm.type,
-      amount: config?.amount ? movementForm.amount : 0,
-      reason: movementForm.reason,
-      reference: movementForm.reference
+    await runCashAction(async () => {
+      const result = await createCashMovement({
+        sessionId: session.id,
+        movementType: movementForm.type,
+        amount: config?.amount ? movementForm.amount : 0,
+        reason: movementForm.reason,
+        reference: movementForm.reference
+      })
+      if (result.error) {
+        setError(result.error.message || "No se pudo registrar el movimiento.")
+        return
+      }
+      setMovementForm(null)
+      setMessage("Movimiento registrado.")
+      await loadData()
     })
-    if (result.error) {
-      setError(result.error.message || "No se pudo registrar el movimiento.")
-      return
-    }
-    setMovementForm(null)
-    setMessage("Movimiento registrado.")
-    await loadData()
   }
 
   async function handleCloseCash(event) {
     event.preventDefault()
     if (!session) return
     if (!window.confirm("Confirmar cierre de caja? Esta accion deja la sesion cerrada.")) return
-    const result = await closeCashSession(session.id, closeForm.counted, closeForm.notes)
-    if (result.error) {
-      setError(result.error.message || "No se pudo cerrar caja.")
-      return
-    }
-    setMessage("Caja cerrada correctamente.")
-    setCloseForm({ counted: "", notes: "" })
-    await loadData()
+    await runCashAction(async () => {
+      const result = await closeCashSession(session.id, closeForm.counted, closeForm.notes)
+      if (result.error) {
+        setError(result.error.message || "No se pudo cerrar caja.")
+        return
+      }
+      setMessage("Caja cerrada correctamente.")
+      setCloseForm({ counted: "", notes: "" })
+      await loadData()
+    })
   }
 
   const register = registers.find((item) => item.id === selectedRegisterId)
@@ -180,7 +192,9 @@ function CashManagement() {
           setSelectedRegisterId(event.target.value)
           loadData()
         }}>{registers.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-        <button type="button" className="cash-secondary" onClick={loadData}>Actualizar</button>
+        <button type="button" className="cash-secondary" onClick={loadData} disabled={loadBusy || cashBusy}>
+          {loadBusy ? "Actualizando..." : "Actualizar"}
+        </button>
       </div>
 
       <section className="cash-status-grid">
@@ -196,7 +210,9 @@ function CashManagement() {
           <div><h2>Abrir caja</h2><p className="cash-muted">No hay caja abierta para este registro.</p></div>
           <label>Fondo inicial<input type="number" min="0" step="0.01" value={openingForm.amount} onChange={(event) => setOpeningForm({ ...openingForm, amount: event.target.value })} required /></label>
           <label>Notas<textarea value={openingForm.notes} onChange={(event) => setOpeningForm({ ...openingForm, notes: event.target.value })} /></label>
-          <button className="cash-primary">Abrir caja</button>
+          <button className="cash-primary" disabled={cashBusy || loadBusy}>
+            {cashBusy ? "Abriendo..." : "Abrir caja"}
+          </button>
         </form>
       ) : (
         <div className="cash-main-grid">
@@ -221,7 +237,7 @@ function CashManagement() {
                 {MOVEMENT_TYPES.find((item) => item.type === movementForm.type)?.amount && <label>Monto<input type="number" min="0.01" step="0.01" value={movementForm.amount} onChange={(event) => setMovementForm({ ...movementForm, amount: event.target.value })} required /></label>}
                 <label>Motivo<textarea value={movementForm.reason} onChange={(event) => setMovementForm({ ...movementForm, reason: event.target.value })} required={MOVEMENT_TYPES.find((item) => item.type === movementForm.type)?.reason} /></label>
                 <label>Referencia<input value={movementForm.reference} onChange={(event) => setMovementForm({ ...movementForm, reference: event.target.value })} /></label>
-                <div className="cash-form-actions"><button type="button" className="cash-secondary" onClick={() => setMovementForm(null)}>Cancelar</button><button className="cash-primary">Guardar movimiento</button></div>
+                <div className="cash-form-actions"><button type="button" className="cash-secondary" onClick={() => setMovementForm(null)} disabled={cashBusy}>Cancelar</button><button className="cash-primary" disabled={cashBusy}>{cashBusy ? "Guardando..." : "Guardar movimiento"}</button></div>
               </form>
             )}
           </section>
@@ -240,7 +256,7 @@ function CashManagement() {
               <label>Efectivo contado<input type="number" min="0" step="0.01" value={closeForm.counted} onChange={(event) => setCloseForm({ ...closeForm, counted: event.target.value })} required /></label>
               <label>Notas<textarea value={closeForm.notes} onChange={(event) => setCloseForm({ ...closeForm, notes: event.target.value })} /></label>
               <div className={`cash-difference ${differenceClass(previewDifference)}`}>{differenceLabel(previewDifference)} · {money(Math.abs(previewDifference))}</div>
-              <button className="cash-danger">Cerrar caja</button>
+              <button className="cash-danger" disabled={cashBusy}>{cashBusy ? "Cerrando..." : "Cerrar caja"}</button>
             </form>
           </section>
         </div>

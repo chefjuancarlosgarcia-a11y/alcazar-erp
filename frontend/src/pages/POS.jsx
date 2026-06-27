@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useLocation } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
 import useSupabaseRealtime from "../hooks/useSupabaseRealtime"
+import { useActionGuard } from "../hooks/useActionGuard"
 import { useToast } from "../hooks/useToast"
 import { ToastContainer } from "../components/ToastContainer"
 import { createStockRequisition } from "../utils/posProduction"
@@ -739,6 +740,7 @@ function POS() {
   const [realtimeNotice, setRealtimeNotice] = useState("")
   const [productionErrors, setProductionErrors] = useState([])
   const [sendingOrder, setSendingOrder] = useState(false)
+  const { busy: billingBusy, run: runBillingAction } = useActionGuard()
   const [diagnostic, setDiagnostic] = useState(null)
   const [productDiagnostic, setProductDiagnostic] = useState(null)
   const [trasladoActivo, setTrasladoActivo] = useState(false)
@@ -3012,83 +3014,89 @@ function POS() {
   }
 
   async function solicitarCuenta(order) {
-    try {
-      if (draftItems.length) throw new Error("Envía o quita los productos nuevos antes de solicitar cobro.")
-      if (!deliveryDataReady) throw new Error("Completa los datos obligatorios de delivery antes de solicitar cobro.")
-      const result = order.status === "open" ? await requestOrderBill(order.id) : { error: null }
-      if (result.error) throw new Error(result.message || result.error.message)
-      const refreshed = await getOrderWithItems(order.id)
-      if (refreshed.error) throw new Error(refreshed.message || refreshed.error.message)
-      const preBill = createPreBillFromPOSOrder(buildCashierOrder(refreshed.data), user, { peopleCount: personasOrden })
-      if (!preBill.ok) throw new Error(preBill.message)
-      await cargarMesaDesdeSupabase(ordenMesa, order.id)
-      setOrdenMessage("Cobro solicitado. Puedes imprimir precuenta o enviar a caja.")
-      setOrdenError("")
-      showToast("Cobro solicitado.", "success", 1800)
-    } catch (error) {
-      setOrdenError(`No se pudo solicitar la cuenta: ${error.message}`)
-    }
+    await runBillingAction(async () => {
+      try {
+        if (draftItems.length) throw new Error("Envía o quita los productos nuevos antes de solicitar cobro.")
+        if (!deliveryDataReady) throw new Error("Completa los datos obligatorios de delivery antes de solicitar cobro.")
+        const result = order.status === "open" ? await requestOrderBill(order.id) : { error: null }
+        if (result.error) throw new Error(result.message || result.error.message)
+        const refreshed = await getOrderWithItems(order.id)
+        if (refreshed.error) throw new Error(refreshed.message || refreshed.error.message)
+        const preBill = createPreBillFromPOSOrder(buildCashierOrder(refreshed.data), user, { peopleCount: personasOrden })
+        if (!preBill.ok) throw new Error(preBill.message)
+        await cargarMesaDesdeSupabase(ordenMesa, order.id)
+        setOrdenMessage("Cobro solicitado. Puedes imprimir precuenta o enviar a caja.")
+        setOrdenError("")
+        showToast("Cobro solicitado.", "success", 1800)
+      } catch (error) {
+        setOrdenError(`No se pudo solicitar la cuenta: ${error.message}`)
+      }
+    })
   }
 
   async function imprimirPrecuenta(order) {
-    try {
-      const { getActivePosPrinters, pickPosPrinterForJob } = await import("../services/printingService")
-      const printersResult = await getActivePosPrinters({ jobType: "prebill" })
-      if (printersResult.error) throw new Error(printersResult.error.message)
-      const printers = printersResult.data || []
-      const selectedPrinter = pickPosPrinterForJob(printers, { jobType: "prebill", locationHint: "CAJA" })
+    await runBillingAction(async () => {
+      try {
+        const { getActivePosPrinters, pickPosPrinterForJob } = await import("../services/printingService")
+        const printersResult = await getActivePosPrinters({ jobType: "prebill" })
+        if (printersResult.error) throw new Error(printersResult.error.message)
+        const printers = printersResult.data || []
+        const selectedPrinter = pickPosPrinterForJob(printers, { jobType: "prebill", locationHint: "CAJA" })
 
-      if (!selectedPrinter) {
-        setOrdenError("No hay impresora activa configurada para precuentas (prebill).")
-        showToast("No hay impresora activa configurada para precuentas.", "error", 2600)
+        if (!selectedPrinter) {
+          setOrdenError("No hay impresora activa configurada para precuentas (prebill).")
+          showToast("No hay impresora activa configurada para precuentas.", "error", 2600)
+          return false
+        }
+
+        if (draftItems.length) throw new Error("Envía o quita los productos nuevos antes de imprimir la precuenta.")
+        if (order.status === "open") {
+          const requested = await requestOrderBill(order.id)
+          if (requested.error) throw new Error(requested.message || requested.error.message)
+        }
+        const refreshed = await getOrderWithItems(order.id)
+        if (refreshed.error) throw new Error(refreshed.message || refreshed.error.message)
+        const cashierOrder = { ...buildCashierOrder(refreshed.data), peopleCount: personasOrden }
+        const preBill = createPreBillFromPOSOrder(cashierOrder, user, { peopleCount: personasOrden })
+        if (!preBill.ok) throw new Error(preBill.message)
+        markPreBillPrinted(preBill.preBill.id, user)
+        const { buildPrebillPrintPayload, createPrintJob } = await import("../services/printingService")
+        const printJob = await createPrintJob({
+          printerId: selectedPrinter.id,
+          jobType: "prebill",
+          payload: buildPrebillPrintPayload(cashierOrder, {
+            orderId: refreshed.data.id,
+            tableId: cashierOrder.mesaId,
+            restaurantName: "EL GRAN ALCÁZAR"
+          })
+        })
+        if (printJob.error) throw new Error(printJob.error.message)
+        await cargarMesaDesdeSupabase(ordenMesa, order.id)
+        setOrdenMessage("Precuenta enviada a impresión.")
+        setOrdenError("")
+        showToast("Precuenta enviada a impresión.", "success", 1800)
+        return true
+      } catch (error) {
+        console.error("No se pudo enviar la precuenta a impresión.", error)
+        setOrdenError("No se pudo enviar la precuenta a impresión.")
+        showToast("No se pudo enviar la precuenta a impresión.", "error", 2400)
         return false
       }
-
-      if (draftItems.length) throw new Error("Envía o quita los productos nuevos antes de imprimir la precuenta.")
-      if (order.status === "open") {
-        const requested = await requestOrderBill(order.id)
-        if (requested.error) throw new Error(requested.message || requested.error.message)
-      }
-      const refreshed = await getOrderWithItems(order.id)
-      if (refreshed.error) throw new Error(refreshed.message || refreshed.error.message)
-      const cashierOrder = { ...buildCashierOrder(refreshed.data), peopleCount: personasOrden }
-      const preBill = createPreBillFromPOSOrder(cashierOrder, user, { peopleCount: personasOrden })
-      if (!preBill.ok) throw new Error(preBill.message)
-      markPreBillPrinted(preBill.preBill.id, user)
-      const { buildPrebillPrintPayload, createPrintJob } = await import("../services/printingService")
-      const printJob = await createPrintJob({
-        printerId: selectedPrinter.id,
-        jobType: "prebill",
-        payload: buildPrebillPrintPayload(cashierOrder, {
-          orderId: refreshed.data.id,
-          tableId: cashierOrder.mesaId,
-          restaurantName: "EL GRAN ALCÁZAR"
-        })
-      })
-      if (printJob.error) throw new Error(printJob.error.message)
-      await cargarMesaDesdeSupabase(ordenMesa, order.id)
-      setOrdenMessage("Precuenta enviada a impresión.")
-      setOrdenError("")
-      showToast("Precuenta enviada a impresión.", "success", 1800)
-      return true
-    } catch (error) {
-      console.error("No se pudo enviar la precuenta a impresión.", error)
-      setOrdenError("No se pudo enviar la precuenta a impresión.")
-      showToast("No se pudo enviar la precuenta a impresión.", "error", 2400)
-      return false
-    }
+    })
   }
 
   async function enviarCuentaACaja(order) {
-    try {
-      await enviarCuentaACajaInterno(order)
-      await cargarMesaDesdeSupabase(ordenMesa, order.id)
-      setOrdenMessage("Solicitud enviada a caja. Estado: cobro solicitado.")
-      setOrdenError("")
-      showToast("Solicitud enviada a caja.", "success", 1800)
-    } catch (error) {
-      setOrdenError(`No se pudo enviar a caja: ${error.message}`)
-    }
+    await runBillingAction(async () => {
+      try {
+        await enviarCuentaACajaInterno(order)
+        await cargarMesaDesdeSupabase(ordenMesa, order.id)
+        setOrdenMessage("Solicitud enviada a caja. Estado: cobro solicitado.")
+        setOrdenError("")
+        showToast("Solicitud enviada a caja.", "success", 1800)
+      } catch (error) {
+        setOrdenError(`No se pudo enviar a caja: ${error.message}`)
+      }
+    })
   }
 
   async function prepararCobroPorPersona() {
@@ -3893,6 +3901,7 @@ function POS() {
             ordenError={ordenError}
             ordenMessage={ordenMessage}
             sendingOrder={sendingOrder}
+            billingBusy={billingBusy}
             canRequestCashier={canRequestCashier}
             cashierBlockedByDrafts={cashierBlockedByDrafts}
             getOrderItemDisplayName={getOrderItemDisplayName}

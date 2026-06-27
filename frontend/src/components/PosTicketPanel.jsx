@@ -48,7 +48,8 @@ export function PosTicketPanel({
   showActivity,
   readyItemsCount,
   nextServiceAction,
-  waiterName
+  waiterName,
+  billingBusy = false
 }) {
   const mesaLabel = ordenMesa
     ? (ordenMesa.isSalesChannel ? ordenMesa.mesaNumero : `Mesa ${ordenMesa.mesaNumero}`)
@@ -271,19 +272,23 @@ export function PosTicketPanel({
             type="button"
             className="pos-action-btn pay pos-action-cobrar"
             onClick={onSendCashier}
-            disabled={!canRequestCashier}
+            disabled={!canRequestCashier || billingBusy}
             title="Envía la cuenta a Caja para procesar el pago."
           >
-            <span className="pos-action-label">Enviar a caja</span>
+            <span className="pos-action-label">{billingBusy ? "Enviando..." : "Enviar a caja"}</span>
             <span className="pos-action-meta">Q{totalOrden.toFixed(2)}</span>
           </button>
         </div>
 
         <div className="pos-ticket-actions-utilities">
           <button type="button" className="pos-action-btn utility" onClick={onSplitBill} disabled={!sentItems.length}>Separar</button>
-          <button type="button" className="pos-action-btn utility" onClick={onPrintPreBill} disabled={!orden.length}>Imprimir</button>
+          <button type="button" className="pos-action-btn utility" onClick={onPrintPreBill} disabled={!orden.length || billingBusy}>
+            {billingBusy ? "Imprimiendo..." : "Imprimir"}
+          </button>
           {canRequestCashier && (
-            <button type="button" className="pos-action-btn utility" onClick={onRequestBill}>Solicitar cobro</button>
+            <button type="button" className="pos-action-btn utility" onClick={onRequestBill} disabled={billingBusy}>
+              {billingBusy ? "Procesando..." : "Solicitar cobro"}
+            </button>
           )}
           <button type="button" className="pos-action-btn utility" onClick={onRefresh} disabled={!ordenMesa}>Actualizar</button>
           <button type="button" className="pos-action-btn utility" onClick={onToggleActivity} disabled={!ordenMesa}>

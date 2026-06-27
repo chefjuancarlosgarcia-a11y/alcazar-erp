@@ -68,6 +68,7 @@ export default function PosClassicOperation({
   ordenError,
   ordenMessage,
   sendingOrder,
+  billingBusy = false,
   canRequestCashier,
   cashierBlockedByDrafts,
   getOrderItemDisplayName,
@@ -247,6 +248,7 @@ export default function PosClassicOperation({
               ordenError={ordenError}
               ordenMessage={ordenMessage}
               sendingOrder={sendingOrder}
+              billingBusy={billingBusy}
               canRequestCashier={canRequestCashier}
               cashierBlockedByDrafts={cashierBlockedByDrafts}
               mesaBloqueadaPorCobro={mesaBloqueadaPorCobro}

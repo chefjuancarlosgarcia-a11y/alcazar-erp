@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, startTransition } fr
 import { useSearchParams } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
 import useSupabaseRealtime from "../hooks/useSupabaseRealtime"
+import { useActionGuard } from "../hooks/useActionGuard"
 import { getActiveAreas } from "../services/areasService"
 import { getProfilesTaskUnavailability, getTaskAssignableProfiles } from "../services/tasksService"
 import { createNotification } from "../services/notificationsService"
@@ -1633,6 +1634,9 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   const sessionRestoreHandledRef = useRef(false)
   const refreshInFlightRef = useRef(false)
   const processDetailsLoadedDatesRef = useRef(new Set())
+  const { busy: runActionBusy, run: runChecklistAction } = useActionGuard()
+  const { busy: templateActionBusy, run: runTemplateAction } = useActionGuard()
+  const { busy: approvalActionBusy, run: runApprovalAction } = useActionGuard()
   const suppressRealtimeRefreshRef = useRef(false)
   sectionRef.current = section
   useEffect(() => {
@@ -1909,7 +1913,8 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       const syncedRuns = await replayPendingChecklistDrafts(runResult.data || [])
       setRuns(syncedRuns)
       setProcessRunDetails(canViewOperationalProcessGroups ? (processResult?.data || []) : [])
-      ; (processResult?.data || []).forEach((detail) => {
+      const loadedProcessDetails = canViewOperationalProcessGroups ? (processResult?.data || []) : []
+      loadedProcessDetails.forEach((detail) => {
         const date = normalizeChecklistRunDate(detail?.process_run?.run_date)
         if (date) processDetailsLoadedDatesRef.current.add(date)
       })
@@ -2263,6 +2268,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       }
     }
 
+    const guarded = await runTemplateAction(async () => {
     setLoading(true)
     try {
       let result
@@ -2344,6 +2350,9 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
     } finally {
       setLoading(false)
     }
+    })
+    if (guarded?.skipped) return { ok: false, skipped: true }
+    return guarded?.value
   }
 
   const handleCancelTodayRun = useCallback(async ({ run, cancelReason, forceCompletedCancel = false }) => {
@@ -2392,13 +2401,15 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
 
   async function duplicateTemplate(template) {
     if (!canCreateDirectly) return setMessage("No tienes permiso para duplicar plantillas.")
-    const result = await createChecklistTemplate(
-      { ...template, title: `${template.title} (copia)`, status: "active" },
-      template.checklist_template_items || []
-    )
-    if (result.error) return setMessage(result.error.message || "No se pudo duplicar la plantilla.")
-    setMessage("Plantilla duplicada.")
-    refresh()
+    await runTemplateAction(async () => {
+      const result = await createChecklistTemplate(
+        { ...template, title: `${template.title} (copia)`, status: "active" },
+        template.checklist_template_items || []
+      )
+      if (result.error) return setMessage(result.error.message || "No se pudo duplicar la plantilla.")
+      setMessage("Plantilla duplicada.")
+      refresh()
+    })
   }
 
   async function deactivate(id) {
@@ -2433,10 +2444,12 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   }
 
   async function startRun(runId) {
-    const result = await startChecklistRun(runId)
-    if (result.error) return setMessage(result.error.message || "No se pudo iniciar la checklist.")
-    selectRun(runId, sectionRef.current)
-    refresh()
+    await runChecklistAction(async () => {
+      const result = await startChecklistRun(runId)
+      if (result.error) return setMessage(result.error.message || "No se pudo iniciar la checklist.")
+      selectRun(runId, sectionRef.current)
+      refresh()
+    })
   }
 
   async function removeTemplateWithArchiveUX(template) {
@@ -2526,13 +2539,15 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   }
 
   async function completeRun(runId) {
-    await flushAllChecklistPendingSaves()
-    const result = await completeChecklistRun(runId)
-    if (result.error) return setMessage(result.error.message || "Completa los items obligatorios antes de finalizar.")
-    clearActiveChecklistSession(user?.id, runId)
-    setMessage("Checklist completada correctamente.")
-    closeRunDetail()
-    refresh()
+    await runChecklistAction(async () => {
+      await flushAllChecklistPendingSaves()
+      const result = await completeChecklistRun(runId)
+      if (result.error) return setMessage(result.error.message || "Completa los items obligatorios antes de finalizar.")
+      clearActiveChecklistSession(user?.id, runId)
+      setMessage("Checklist completada correctamente.")
+      closeRunDetail()
+      refresh()
+    })
   }
 
   async function assignRunReplacement(runId, payload) {
@@ -2616,6 +2631,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
           canManageTodayAdminActions={canManageChecklistAssignment}
           canForceCancelCompleted={canForceCancelCompletedTodayRun(userRole)}
           onTodayAdminAction={setTodayAdminAction}
+          runActionBusy={runActionBusy}
         />
       )}
       {section === "overdue" && (
@@ -2631,6 +2647,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
           canAssignReplacement={canAssignRunReplacement}
           coverageByRunId={coverageByRunId}
           currentUser={user}
+          runActionBusy={runActionBusy}
         />
       )}
       {section === "completed" && (
@@ -2699,6 +2716,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
             setMessage("Sugerencia enviada a aprobacion.")
             refresh()
           }}
+          templateActionBusy={templateActionBusy}
         />
       )}
       {section === "processes" && canViewOperationalProcessGroups && (
@@ -2754,33 +2772,37 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
           profiles={profiles}
           initialRequestId={initialChecklistView === "approvals" ? initialRunId : ""}
           onApprove={async (request, notes) => {
-            const assignmentChange = parseChecklistAssignmentChangeRequest(request)
-            if (assignmentChange) {
-              const result = await approveChecklistAssignmentChangeRequest(request, {
-                reviewNotes: notes,
-                approvedByProfileId: user?.id,
-                runs
-              })
-              if (result.error) return setMessage(result.error.message || "No se pudo aprobar el cambio de responsable.")
-              setMessage("Cambio de responsable aprobado y aplicado.")
+            await runApprovalAction(async () => {
+              const assignmentChange = parseChecklistAssignmentChangeRequest(request)
+              if (assignmentChange) {
+                const result = await approveChecklistAssignmentChangeRequest(request, {
+                  reviewNotes: notes,
+                  approvedByProfileId: user?.id,
+                  runs
+                })
+                if (result.error) return setMessage(result.error.message || "No se pudo aprobar el cambio de responsable.")
+                setMessage("Cambio de responsable aprobado y aplicado.")
+                refresh()
+                return
+              }
+              const result = await approveChecklistChangeRequest(request.id, notes)
+              if (result.error) return setMessage(result.error.message || "No se pudo aprobar la solicitud.")
+              setMessage(
+                request.request_type === "update"
+                  ? "Cambios aprobados. La plantilla y las checklists activas en Hoy ya estan actualizadas."
+                  : "Checklist aprobada. El supervisor ya puede asignarla y utilizarla."
+              )
               refresh()
-              return
-            }
-            const result = await approveChecklistChangeRequest(request.id, notes)
-            if (result.error) return setMessage(result.error.message || "No se pudo aprobar la solicitud.")
-            setMessage(
-              request.request_type === "update"
-                ? "Cambios aprobados. La plantilla y las checklists activas en Hoy ya estan actualizadas."
-                : "Checklist aprobada. El supervisor ya puede asignarla y utilizarla."
-            )
-            refresh()
+            })
           }}
           onReject={async (request, notes) => {
             if (!notes.trim()) return setMessage("La nota de rechazo es obligatoria.")
-            const result = await rejectChecklistChangeRequest(request.id, notes)
-            if (result.error) return setMessage(result.error.message || "No se pudo rechazar la solicitud.")
-            setMessage("Solicitud rechazada.")
-            refresh()
+            await runApprovalAction(async () => {
+              const result = await rejectChecklistChangeRequest(request.id, notes)
+              if (result.error) return setMessage(result.error.message || "No se pudo rechazar la solicitud.")
+              setMessage("Solicitud rechazada.")
+              refresh()
+            })
           }}
           onUpdateSuggestion={async (suggestion, status, notes = "") => {
             const result = await updateChecklistTemplateSuggestionStatus(suggestion.id, status, notes)
@@ -2820,6 +2842,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
           canApprove={canApproveTemplateChanges}
           isSupervisorOnly={isSupervisorOnly}
           currentUserId={user?.id}
+          approvalActionBusy={approvalActionBusy}
         />
       )}
       {section === "reports" && canViewChecklistLibrary && <ChecklistReports runs={visibleRuns} templates={templates} profiles={profiles} />}
@@ -2861,6 +2884,7 @@ function ChecklistRunDetailShell({
   onAssignReplacement,
   canAssignReplacement,
   coverageByRunId,
+  runActionBusy = false,
   children
 }) {
   if (selectedRun) {
@@ -2883,6 +2907,7 @@ function ChecklistRunDetailShell({
           onComplete={onComplete}
           onAssignReplacement={onAssignReplacement}
           canAssignReplacement={canAssignReplacement?.(selectedRun)}
+          completeRunBusy={runActionBusy}
         />
       </>
     )
@@ -2961,7 +2986,8 @@ function ChecklistToday({
   checklistPipelineAudit = null,
   onGoToOverdue,
   canManageTodayAdminActions = false,
-  onTodayAdminAction
+  onTodayAdminAction,
+  runActionBusy = false
 }) {
   const [selectedProcessDetail, setSelectedProcessDetail] = useState(null)
   const [scopeTab, setScopeTab] = useState(() => (canViewProcessGroups ? "processes" : "individuals"))
@@ -2973,6 +2999,7 @@ function ChecklistToday({
       setSelectedProcessDetail(null)
     }
   }, [canViewProcessGroups])
+
   const todayRuns = useMemo(
     () => dedupeChecklistRunsById(
       filterRunsWithoutCompletedDuplicate(
@@ -3004,6 +3031,7 @@ function ChecklistToday({
       orphanRuns: partitioned.orphanRuns
     }
   }, [todayRuns, processRunDetails, canViewProcessGroups])
+
   const activeProcessDetail = useMemo(() => {
     if (!canViewProcessGroups || !selectedProcessDetail) return null
     const processRunId = selectedProcessDetail?.process_run?.id
@@ -3044,6 +3072,7 @@ function ChecklistToday({
       stepLabel={stepLabel}
       disabled={disabled}
       hideGroupMeta={hideGroupMeta}
+      actionBusy={runActionBusy}
     />
   )
 
@@ -3066,6 +3095,7 @@ function ChecklistToday({
           onAssignReplacement={onAssignReplacement}
           canAssignReplacement={canAssignReplacement}
           coverageByRunId={coverageByRunId}
+          runActionBusy={runActionBusy}
         />
       ) : activeProcessDetail ? (
         <OperationalProcessTodayDetail
@@ -3184,7 +3214,8 @@ function ChecklistOverdue({
   onAssignReplacement,
   canAssignReplacement,
   coverageByRunId,
-  currentUser
+  currentUser,
+  runActionBusy = false
 }) {
   const overdueRuns = useMemo(
     () => filterRunsWithoutCompletedDuplicate(runs.filter(isChecklistRunOverdueBucket)),
@@ -3210,6 +3241,7 @@ function ChecklistOverdue({
         onAssignReplacement={onAssignReplacement}
         canAssignReplacement={canAssignReplacement}
         coverageByRunId={coverageByRunId}
+        runActionBusy={runActionBusy}
       >
         {!selectedRun && !overdueRuns.length ? (
           <FriendlyEmpty
@@ -3521,7 +3553,8 @@ function ChecklistTodayCard({
   disabled = false,
   step = null,
   stepLabel = "",
-  hideGroupMeta = false
+  hideGroupMeta = false,
+  actionBusy = false
 }) {
   const [replacementOpen, setReplacementOpen] = useState(false)
   const [actionsOpen, setActionsOpen] = useState(false)
@@ -3684,8 +3717,8 @@ function ChecklistTodayCard({
         <span>Rol: {run.assigned_role || "Sin rol"}</span>
         {variant !== "today" ? <span>Corrida: {formatChecklistRunDateLabel(run.run_date)}</span> : null}
       </div>
-      <button type="button" className="checklist-primary-action" onClick={onOpen}>
-        {run.status === "pending" ? "Iniciar checklist" : run.status === "completed" ? "Ver detalle" : "Ver checklist"}
+      <button type="button" className="checklist-primary-action" onClick={onOpen} disabled={actionBusy || !onOpen}>
+        {actionBusy && run.status === "pending" ? "Iniciando..." : run.status === "pending" ? "Iniciar checklist" : run.status === "completed" ? "Ver detalle" : "Ver checklist"}
       </button>
       {SHOW_CHECKLIST_RUN_DIAGNOSTIC ? (
         <div className="checklist-today-diagnostic" aria-label="Diagnóstico temporal de corrida">
@@ -3947,7 +3980,7 @@ function formatChecklistRole(role) {
   return String(role).replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase())
 }
 
-function ChecklistTemplatesView({ templates, changeRequests = [], profiles, currentUser, userRole, isLibraryAdmin, isSupervisorOnly, onEdit, onEditRequest, onAssign, onDuplicate, onDeactivate, onReactivate, onDelete, canDelete, canEdit, canProposeEdits, canAssign, canSuggest, onSuggest }) {
+function ChecklistTemplatesView({ templates, changeRequests = [], profiles, currentUser, userRole, isLibraryAdmin, isSupervisorOnly, onEdit, onEditRequest, onAssign, onDuplicate, onDeactivate, onReactivate, onDelete, canDelete, canEdit, canProposeEdits, canAssign, canSuggest, onSuggest, templateActionBusy = false }) {
   const [filters, setFilters] = useState({ area: "", frequency: "", status: "all" })
   const [assigning, setAssigning] = useState(null)
   const [suggesting, setSuggesting] = useState(null)
@@ -4005,8 +4038,8 @@ function ChecklistTemplatesView({ templates, changeRequests = [], profiles, curr
       canEdit && { key: "edit", label: "Editar", className: "tasks-secondary", onClick: () => onEdit(template) },
       canProposeEdits && !canEdit && { key: "edit-propose", label: "Editar checklist", className: "tasks-secondary", onClick: () => onEdit(template) },
       canSuggest && { key: "suggest", label: "Sugerir cambios", className: "tasks-secondary", onClick: () => setSuggesting(template) },
-      canAssign && template.status === "active" && pendingRequest?.status !== "pending_review" && { key: "assign", label: "Asignar", className: "tasks-secondary", onClick: openAssign },
-      canEdit && { key: "duplicate", label: "Duplicar", className: "tasks-secondary", onClick: () => onDuplicate(template) },
+      canAssign && template.status === "active" && pendingRequest?.status !== "pending_review" && { key: "assign", label: templateActionBusy ? "Asignando..." : "Asignar", className: "tasks-secondary", disabled: templateActionBusy, onClick: openAssign },
+      canEdit && { key: "duplicate", label: templateActionBusy ? "Duplicando..." : "Duplicar", className: "tasks-secondary", disabled: templateActionBusy, onClick: () => onDuplicate(template) },
       canEdit && template.status !== "active" && pendingRequest?.status !== "pending_review" && { key: "reactivate", label: "Reactivar", className: "tasks-primary", onClick: () => onReactivate(template.id) }
     ].filter(Boolean)
     const secondaryActions = [
@@ -4048,7 +4081,7 @@ function ChecklistTemplatesView({ templates, changeRequests = [], profiles, curr
             {primaryActions.length > 0 && (
               <div className="checklist-template-card-actions">
                 {primaryActions.map((action) => (
-                  <button key={action.key} type="button" className={action.className} onClick={action.onClick}>{action.label}</button>
+                  <button key={action.key} type="button" className={action.className} disabled={action.disabled} onClick={action.onClick}>{action.label}</button>
                 ))}
               </div>
             )}
@@ -4977,7 +5010,7 @@ function ChecklistReplacementModal({ run, profiles, coverage, onClose, onSubmit 
   )
 }
 
-function ChecklistGuidedRun({ run, profiles, currentUser, coverage, onClose, onUpdateItem, onComplete, onAssignReplacement, canAssignReplacement }) {
+function ChecklistGuidedRun({ run, profiles, currentUser, coverage, onClose, onUpdateItem, onComplete, onAssignReplacement, canAssignReplacement, completeRunBusy = false }) {
   const progress = checklistRunProgress(run)
   const completedCount = (run.checklist_run_items || []).filter(itemHasAnswer).length
   const canEdit = run.status !== "completed"
@@ -5067,7 +5100,9 @@ function ChecklistGuidedRun({ run, profiles, currentUser, coverage, onClose, onU
       {canEdit && (
         <div className="checklist-sticky-actions">
           <button type="button" className="tasks-secondary" disabled={savingDraft} onClick={handleSaveAndContinueLater}>{savingDraft ? "Guardando..." : "Guardar y continuar despues"}</button>
-          <button type="button" className="tasks-primary" onClick={() => onComplete(run.id)}>Completar checklist</button>
+          <button type="button" className="tasks-primary" disabled={completeRunBusy || savingDraft} onClick={() => onComplete(run.id)}>
+            {completeRunBusy ? "Completando..." : "Completar checklist"}
+          </button>
         </div>
       )}
     </article>
@@ -5419,7 +5454,7 @@ function ChecklistIncidentsView({ incidents, profiles, selectedIncidentId, userR
   )
 }
 
-function ChecklistApprovalsCenter({ requests, suggestions, templates, profiles, initialRequestId = "", onApprove, onReject, onUpdateSuggestion, onEditTemplate, onEditRequest, canApprove, isSupervisorOnly, currentUserId }) {
+function ChecklistApprovalsCenter({ requests, suggestions, templates, profiles, initialRequestId = "", onApprove, onReject, onUpdateSuggestion, onEditTemplate, onEditRequest, canApprove, isSupervisorOnly, currentUserId, approvalActionBusy = false }) {
   const pendingSuggestions = (suggestions || []).filter((suggestion) => ["pending", "approved"].includes(suggestion.status))
   const formalRequests = (requests || []).filter((request) =>
     canApprove ? ["pending_review", "draft", "rejected"].includes(request.status) : request.submitted_by === currentUserId
@@ -5475,6 +5510,7 @@ function ChecklistApprovalsCenter({ requests, suggestions, templates, profiles, 
           onApprove={onApprove}
           onReject={onReject}
           canApprove={canApprove}
+          approvalActionBusy={approvalActionBusy}
         />
       ) : (
         <article className="tasks-panel">
@@ -5505,7 +5541,7 @@ function ChecklistApprovalsCenter({ requests, suggestions, templates, profiles, 
   )
 }
 
-function ChecklistApprovals({ requests, templates, profiles, initialRequestId = "", onApprove, onReject, canApprove }) {
+function ChecklistApprovals({ requests, templates, profiles, initialRequestId = "", onApprove, onReject, canApprove, approvalActionBusy = false }) {
   const [selectedId, setSelectedId] = useState(initialRequestId || "")
   const [notes, setNotes] = useState("")
   const visible = (requests || []).filter((request) => canApprove || request.submitted_by)
@@ -5577,8 +5613,10 @@ function ChecklistApprovals({ requests, templates, profiles, initialRequestId = 
             <>
               <Field label="Nota de revision"><textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Obligatoria si rechazas" /></Field>
               <div className="checklist-actions">
-                <button type="button" className="tasks-primary" onClick={() => onApprove(selected, notes)}>Aprobar</button>
-                <button type="button" className="tasks-secondary" onClick={() => onReject(selected, notes)}>Rechazar</button>
+                <button type="button" className="tasks-primary" disabled={approvalActionBusy} onClick={() => onApprove(selected, notes)}>
+                  {approvalActionBusy ? "Procesando..." : "Aprobar"}
+                </button>
+                <button type="button" className="tasks-secondary" disabled={approvalActionBusy} onClick={() => onReject(selected, notes)}>Rechazar</button>
               </div>
             </>
           )}

@@ -41,7 +41,8 @@ function OrderHistoryActions({
   onApprove,
   onReject,
   onSend,
-  onCancel
+  onCancel,
+  purchaseActionBusy = false
 }) {
   const pending = ["pendiente", "pendiente_aprobacion", "borrador"].includes(orden.status)
   const canSend = orden.status === "aprobada"
@@ -62,16 +63,16 @@ function OrderHistoryActions({
       )}
       {workflowView === PO_WORKFLOW_VIEWS.PENDING_APPROVAL && puedeAprobarOrdenCompra && pending && (
         <>
-          <button type="button" className="erp-btn erp-btn--success" onClick={() => onApprove(orden.id)}>
+          <button type="button" className="erp-btn erp-btn--success" disabled={purchaseActionBusy} onClick={() => onApprove(orden.id)}>
             Aprobar
           </button>
-          <button type="button" className="erp-btn erp-btn--danger" onClick={() => onReject(orden.id)}>
+          <button type="button" className="erp-btn erp-btn--danger" disabled={purchaseActionBusy} onClick={() => onReject(orden.id)}>
             Rechazar
           </button>
         </>
       )}
       {workflowView === PO_WORKFLOW_VIEWS.TO_SEND && puedeCrearOrdenCompra && canSend && (
-        <button type="button" className="erp-btn erp-btn--teal" onClick={() => onSend(orden.id)}>
+        <button type="button" className="erp-btn erp-btn--teal" disabled={purchaseActionBusy} onClick={() => onSend(orden.id)}>
           Enviar a proveedor
         </button>
       )}
@@ -164,7 +165,8 @@ export default function PurchaseOrdersModule({
   setTestFlowFilter = () => {},
   manualCreateTestMode = false,
   setManualCreateTestMode = () => {},
-  highlightedOrderId = null
+  highlightedOrderId = null,
+  purchaseActionBusy = false
 }) {
   const [historySearch, setHistorySearch] = useState("")
   const [historyStatus, setHistoryStatus] = useState("all")
@@ -275,6 +277,7 @@ export default function PurchaseOrdersModule({
                       onReject={rechazarOrdenManual}
                       onSend={enviarOrdenProveedor}
                       onCancel={cancelarOrdenManual}
+                      purchaseActionBusy={purchaseActionBusy}
                     />
                   </td>
                 </tr>
@@ -304,6 +307,7 @@ export default function PurchaseOrdersModule({
                 onReject={rechazarOrdenManual}
                 onSend={enviarOrdenProveedor}
                 onCancel={cancelarOrdenManual}
+                purchaseActionBusy={purchaseActionBusy}
               />
             </article>
           ))}
@@ -602,8 +606,8 @@ export default function PurchaseOrdersModule({
 
         <div className="po-footer-actions">
           {manualCreateTestMode && <TestFlowWarning className="po-test-warning" />}
-          <button type="button" className="erp-btn erp-btn--success" onClick={crearOrdenCompraManual}>
-            {manualCreateTestMode ? "Crear orden de prueba" : "Crear orden"}
+          <button type="button" className="erp-btn erp-btn--success" disabled={purchaseActionBusy} onClick={crearOrdenCompraManual}>
+            {purchaseActionBusy ? "Creando..." : (manualCreateTestMode ? "Crear orden de prueba" : "Crear orden")}
           </button>
           <button
             type="button"
@@ -878,6 +882,7 @@ export default function PurchaseOrdersModule({
           onSend={enviarOrdenProveedor}
           onCancel={cancelarOrdenManual}
           onReceive={recibirOrdenManual}
+          purchaseActionBusy={purchaseActionBusy}
         />
       )}
     </div>

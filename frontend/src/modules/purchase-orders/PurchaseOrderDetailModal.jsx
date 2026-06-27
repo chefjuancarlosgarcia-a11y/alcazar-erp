@@ -43,7 +43,8 @@ export default function PurchaseOrderDetailModal({
   onReject,
   onSend,
   onCancel,
-  onReceive
+  onReceive,
+  purchaseActionBusy = false
 }) {
   if (!order) return null
 
@@ -231,15 +232,17 @@ export default function PurchaseOrderDetailModal({
         <footer className="po-detail-modal__actions">
           {workflowView === PO_WORKFLOW_VIEWS.PENDING_APPROVAL && puedeAprobarOrdenCompra && pending && (
             <>
-              <button type="button" className="erp-btn erp-btn--success" onClick={() => onApprove(order.id)}>Aprobar</button>
-              <button type="button" className="erp-btn erp-btn--danger" onClick={() => onReject(order.id)}>Rechazar</button>
+              <button type="button" className="erp-btn erp-btn--success" disabled={purchaseActionBusy} onClick={() => onApprove(order.id)}>Aprobar</button>
+              <button type="button" className="erp-btn erp-btn--danger" disabled={purchaseActionBusy} onClick={() => onReject(order.id)}>Rechazar</button>
             </>
           )}
           {workflowView === PO_WORKFLOW_VIEWS.TO_SEND && puedeCrearOrdenCompra && canSend && (
-            <button type="button" className="erp-btn erp-btn--teal" onClick={() => onSend(order.id)}>Enviar a proveedor</button>
+            <button type="button" className="erp-btn erp-btn--teal" disabled={purchaseActionBusy} onClick={() => onSend(order.id)}>Enviar a proveedor</button>
           )}
           {showReceptionForm && puedeRecibirOrdenCompra && (
-            <button type="button" className="erp-btn erp-btn--success" onClick={onReceive}>Registrar recepción</button>
+            <button type="button" className="erp-btn erp-btn--success" disabled={purchaseActionBusy} onClick={onReceive}>
+              {purchaseActionBusy ? "Registrando..." : "Registrar recepción"}
+            </button>
           )}
           {!["cancelada", "rechazada", "recibida", "recibida_completa"].includes(order.status) && (
             <button type="button" className="erp-btn erp-btn--danger" onClick={() => onCancel(order.id)}>Cancelar orden</button>

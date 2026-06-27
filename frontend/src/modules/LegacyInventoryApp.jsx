@@ -1,5 +1,6 @@
 ﻿import { useState, useEffect, useCallback, useRef } from "react"
 import { useNavigate } from "react-router-dom"
+import { useActionGuard } from "../hooks/useActionGuard"
 import SuppliersModule from "./suppliers/SuppliersModule"
 import AttendanceReportsModule from "./attendance/AttendanceReportsModule"
 import PurchaseOrdersModule from "./purchase-orders/PurchaseOrdersModule"
@@ -333,6 +334,7 @@ function getUserAuth(user) {
 function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrderView = "", initialPurchaseOrderId = "", initialHighlightedOrder = "", initialNotificationAction = "", initialTestFlowFilter = "", hideLegacyNavigation = false }) {
   const { user: authenticatedUser, profile: authProfile } = useAuth()
   const navigate = useNavigate()
+  const { busy: purchaseActionBusy, run: runPurchaseAction } = useActionGuard()
   const [ordenCompra, setOrdenCompra] = useState([])
   const [purchaseOrderView, setPurchaseOrderView] = useState("automatic")
   const [ordenesCompraManual, setOrdenesCompraManual] = useState(() => {
@@ -1490,74 +1492,76 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
       return
     }
 
-    const estadoInicial = requiereAprobacionOrdenCompra ? "pendiente_aprobacion" : manualStatus
-    const nuevaOrden = {
-      id: Date.now(),
-      numeroOrden: generarNumeroOrdenManual(ordenesCompraManual.length),
-      fechaEmision: manualIssueDate,
-      fechaEsperadaEntrega: manualExpectedDate,
-      status: estadoInicial,
-      creadoPorId: authenticatedUser?.id || null,
-      creadoPorRol: purchaseOrderRole,
-      proveedorId: manualProveedorId,
-      proveedor: {
-        nombre: manualProveedorNombre,
-        contacto: manualProveedorContacto,
-        correo: manualProveedorCorreo,
-        whatsapp: manualProveedorWhatsApp,
-        encargado: manualProveedorEncargado
-      },
-      metodoCompra: manualMetodoCompra,
-      requester: manualRequester,
-      approver: manualApprover,
-      prioridad: manualPriority,
-      lugar: manualLocation,
-      items: manualOrdenItems,
-      creado: new Date().toLocaleString(),
-      recepcion: null,
-      is_test: manualCreateTestMode
-    }
+    await runPurchaseAction(async () => {
+      const estadoInicial = requiereAprobacionOrdenCompra ? "pendiente_aprobacion" : manualStatus
+      const nuevaOrden = {
+        id: Date.now(),
+        numeroOrden: generarNumeroOrdenManual(ordenesCompraManual.length),
+        fechaEmision: manualIssueDate,
+        fechaEsperadaEntrega: manualExpectedDate,
+        status: estadoInicial,
+        creadoPorId: authenticatedUser?.id || null,
+        creadoPorRol: purchaseOrderRole,
+        proveedorId: manualProveedorId,
+        proveedor: {
+          nombre: manualProveedorNombre,
+          contacto: manualProveedorContacto,
+          correo: manualProveedorCorreo,
+          whatsapp: manualProveedorWhatsApp,
+          encargado: manualProveedorEncargado
+        },
+        metodoCompra: manualMetodoCompra,
+        requester: manualRequester,
+        approver: manualApprover,
+        prioridad: manualPriority,
+        lugar: manualLocation,
+        items: manualOrdenItems,
+        creado: new Date().toLocaleString(),
+        recepcion: null,
+        is_test: manualCreateTestMode
+      }
 
-    const saveResult = await savePurchaseOrder(nuevaOrden)
-    if (saveResult.error) {
-      alert("No se pudo guardar la orden en Supabase. Verifica que la migración de órdenes y notificaciones esté aplicada.")
-      return
-    }
-    setOrdenesCompraManual([nuevaOrden, ...ordenesCompraManual])
-    limpiarFormularioOrdenManual()
-    setManualCreateTestMode(false)
-    setPurchaseOrderView(estadoInicial === "aprobada" ? "to_send" : "pending_approval")
-    if (estadoInicial === "pendiente_aprobacion") {
-      await publicarNotificacionOrden(["admin", "gerente_general"], {
-        type: "purchase_order_pending",
-        title: "Nueva orden pendiente de aprobación",
-        message: `${nuevaOrden.numeroOrden} fue creada por ${authenticatedUser?.name || manualRequester} y requiere aprobación.`,
-        entityType: "purchase_order",
-        entityId: nuevaOrden.id,
-        entityStatus: estadoInicial,
-        entityIsTest: nuevaOrden.is_test
-      }, nuevaOrden)
-    }
-    if (estadoInicial === "aprobada") {
-      await publicarNotificacionOrden(["encargado_almacen"], {
-        type: "purchase_order_approved",
-        title: "Orden aprobada",
-        message: `${nuevaOrden.numeroOrden} fue creada aprobada y puede enviarse al proveedor.`,
-        entityType: "purchase_order",
-        entityId: nuevaOrden.id,
-        entityStatus: estadoInicial,
-        entityIsTest: nuevaOrden.is_test
-      }, nuevaOrden)
-    }
-    if (purchaseOrderRole === "gerente") {
-      await notificarCreadorOrden(
-        nuevaOrden,
-        "Orden creada correctamente",
-        `${nuevaOrden.numeroOrden} fue registrada con estado ${getPurchaseOrderStatusLabel(estadoInicial)}.`,
-        "purchase_order_created"
-      )
-    }
-    alert(manualCreateTestMode ? "Orden de prueba creada." : "Orden de compra manual creada.")
+      const saveResult = await savePurchaseOrder(nuevaOrden)
+      if (saveResult.error) {
+        alert("No se pudo guardar la orden en Supabase. Verifica que la migración de órdenes y notificaciones esté aplicada.")
+        return
+      }
+      setOrdenesCompraManual([nuevaOrden, ...ordenesCompraManual])
+      limpiarFormularioOrdenManual()
+      setManualCreateTestMode(false)
+      setPurchaseOrderView(estadoInicial === "aprobada" ? "to_send" : "pending_approval")
+      if (estadoInicial === "pendiente_aprobacion") {
+        await publicarNotificacionOrden(["admin", "gerente_general"], {
+          type: "purchase_order_pending",
+          title: "Nueva orden pendiente de aprobación",
+          message: `${nuevaOrden.numeroOrden} fue creada por ${authenticatedUser?.name || manualRequester} y requiere aprobación.`,
+          entityType: "purchase_order",
+          entityId: nuevaOrden.id,
+          entityStatus: estadoInicial,
+          entityIsTest: nuevaOrden.is_test
+        }, nuevaOrden)
+      }
+      if (estadoInicial === "aprobada") {
+        await publicarNotificacionOrden(["encargado_almacen"], {
+          type: "purchase_order_approved",
+          title: "Orden aprobada",
+          message: `${nuevaOrden.numeroOrden} fue creada aprobada y puede enviarse al proveedor.`,
+          entityType: "purchase_order",
+          entityId: nuevaOrden.id,
+          entityStatus: estadoInicial,
+          entityIsTest: nuevaOrden.is_test
+        }, nuevaOrden)
+      }
+      if (purchaseOrderRole === "gerente") {
+        await notificarCreadorOrden(
+          nuevaOrden,
+          "Orden creada correctamente",
+          `${nuevaOrden.numeroOrden} fue registrada con estado ${getPurchaseOrderStatusLabel(estadoInicial)}.`,
+          "purchase_order_created"
+        )
+      }
+      alert(manualCreateTestMode ? "Orden de prueba creada." : "Orden de compra manual creada.")
+    })
   }
 
   function seleccionarOrdenManual(id) {
@@ -1610,29 +1614,31 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
       return
     }
     if (!["pendiente", "pendiente_aprobacion", "borrador"].includes(orden.status)) return
-    const ordenAprobada = { ...orden, status: "aprobada", aprobadoPor: authenticatedUser?.name || "Administración", aprobadoEn: new Date().toLocaleString() }
-    const saveResult = await savePurchaseOrder(ordenAprobada)
-    if (saveResult.error) {
-      alert("No se pudo aprobar la orden en Supabase.")
-      return
-    }
-    setOrdenesCompraManual((actuales) => actuales.map((item) => (
-      String(item.id) === String(id)
-        ? ordenAprobada
-        : item
-    )))
-    setPurchaseOrderView("to_send")
-    setManualPedidoSeleccionadoId(Number(id) || id)
-    await publicarNotificacionOrden(["encargado_almacen"], {
-      type: "purchase_order_approved",
-      title: "Orden aprobada",
-      message: `${orden.numeroOrden} fue aprobada y puede enviarse al proveedor.`,
-      entityType: "purchase_order",
-      entityId: orden.id,
-      entityStatus: "aprobada",
-      entityIsTest: orden.is_test
-    }, ordenAprobada)
-    await notificarCreadorOrden(ordenAprobada, "Orden aprobada", `${orden.numeroOrden} fue aprobada y está lista para enviarse al proveedor.`, "purchase_order_approved")
+    await runPurchaseAction(async () => {
+      const ordenAprobada = { ...orden, status: "aprobada", aprobadoPor: authenticatedUser?.name || "Administración", aprobadoEn: new Date().toLocaleString() }
+      const saveResult = await savePurchaseOrder(ordenAprobada)
+      if (saveResult.error) {
+        alert("No se pudo aprobar la orden en Supabase.")
+        return
+      }
+      setOrdenesCompraManual((actuales) => actuales.map((item) => (
+        String(item.id) === String(id)
+          ? ordenAprobada
+          : item
+      )))
+      setPurchaseOrderView("to_send")
+      setManualPedidoSeleccionadoId(Number(id) || id)
+      await publicarNotificacionOrden(["encargado_almacen"], {
+        type: "purchase_order_approved",
+        title: "Orden aprobada",
+        message: `${orden.numeroOrden} fue aprobada y puede enviarse al proveedor.`,
+        entityType: "purchase_order",
+        entityId: orden.id,
+        entityStatus: "aprobada",
+        entityIsTest: orden.is_test
+      }, ordenAprobada)
+      await notificarCreadorOrden(ordenAprobada, "Orden aprobada", `${orden.numeroOrden} fue aprobada y está lista para enviarse al proveedor.`, "purchase_order_approved")
+    })
   }
 
   async function rechazarOrdenManual(id) {
@@ -1642,44 +1648,48 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
       return
     }
     if (!["pendiente", "pendiente_aprobacion", "borrador"].includes(orden.status)) return
-    const ordenRechazada = { ...orden, status: "rechazada", rechazadoPor: authenticatedUser?.name || "Administración", rechazadoEn: new Date().toLocaleString() }
-    const saveResult = await savePurchaseOrder(ordenRechazada)
-    if (saveResult.error) {
-      alert("No se pudo rechazar la orden en Supabase.")
-      return
-    }
-    setOrdenesCompraManual((actuales) => actuales.map((item) => (
-      String(item.id) === String(id)
-        ? ordenRechazada
-        : item
-    )))
-    await notificarCreadorOrden(orden, "Orden rechazada", `${orden.numeroOrden} fue rechazada por administración.`, "purchase_order_rejected")
+    await runPurchaseAction(async () => {
+      const ordenRechazada = { ...orden, status: "rechazada", rechazadoPor: authenticatedUser?.name || "Administración", rechazadoEn: new Date().toLocaleString() }
+      const saveResult = await savePurchaseOrder(ordenRechazada)
+      if (saveResult.error) {
+        alert("No se pudo rechazar la orden en Supabase.")
+        return
+      }
+      setOrdenesCompraManual((actuales) => actuales.map((item) => (
+        String(item.id) === String(id)
+          ? ordenRechazada
+          : item
+      )))
+      await notificarCreadorOrden(orden, "Orden rechazada", `${orden.numeroOrden} fue rechazada por administración.`, "purchase_order_rejected")
+    })
   }
 
   async function enviarOrdenProveedor(id) {
     const orden = ordenesCompraManual.find((item) => String(item.id) === String(id))
     if (!orden || orden.status !== "aprobada") return
-    const ordenEnviada = { ...orden, status: "enviada_proveedor" }
-    const saveResult = await savePurchaseOrder(ordenEnviada)
-    if (saveResult.error) {
-      alert("No se pudo registrar el envío al proveedor.")
-      return
-    }
-    setOrdenesCompraManual((actuales) => actuales.map((item) => (
-      String(item.id) === String(id) ? ordenEnviada : item
-    )))
-    setPurchaseOrderView("reception")
-    setManualPedidoSeleccionadoId(Number(id) || id)
-    await publicarNotificacionOrden(["encargado_almacen"], {
-      type: "purchase_order_ready_to_receive",
-      title: "Orden lista para recibir",
-      message: `${orden.numeroOrden} fue enviada al proveedor y está lista para recepción.`,
-      entityType: "purchase_order",
-      entityId: orden.id,
-      entityStatus: "enviada_proveedor",
-      entityIsTest: orden.is_test
-    }, ordenEnviada)
-    await notificarCreadorOrden(ordenEnviada, "Orden lista para recibir", `${orden.numeroOrden} fue enviada al proveedor y puede recibirse en almacén.`, "purchase_order_ready_to_receive")
+    await runPurchaseAction(async () => {
+      const ordenEnviada = { ...orden, status: "enviada_proveedor" }
+      const saveResult = await savePurchaseOrder(ordenEnviada)
+      if (saveResult.error) {
+        alert("No se pudo registrar el envío al proveedor.")
+        return
+      }
+      setOrdenesCompraManual((actuales) => actuales.map((item) => (
+        String(item.id) === String(id) ? ordenEnviada : item
+      )))
+      setPurchaseOrderView("reception")
+      setManualPedidoSeleccionadoId(Number(id) || id)
+      await publicarNotificacionOrden(["encargado_almacen"], {
+        type: "purchase_order_ready_to_receive",
+        title: "Orden lista para recibir",
+        message: `${orden.numeroOrden} fue enviada al proveedor y está lista para recepción.`,
+        entityType: "purchase_order",
+        entityId: orden.id,
+        entityStatus: "enviada_proveedor",
+        entityIsTest: orden.is_test
+      }, ordenEnviada)
+      await notificarCreadorOrden(ordenEnviada, "Orden lista para recibir", `${orden.numeroOrden} fue enviada al proveedor y puede recibirse en almacén.`, "purchase_order_ready_to_receive")
+    })
   }
 
   function cargarImagenRecepcion(event) {
@@ -1723,6 +1733,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
       return
     }
 
+    await runPurchaseAction(async () => {
     const recepcionCompleta = manualRecepcionEstado === "bueno" && allEntered && allMatchOrdered
     const nuevoStatus = recepcionCompleta ? "recibida_completa" : "recibida_parcial"
     const recepcionItems = entries.map(({ item, cantidadPedida, cantidadRecibida }) => ({
@@ -1846,6 +1857,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
     setManualRecepcionEstado("bueno")
     setManualRecepcionNombre("")
     setManualRecepcionImagen("")
+    })
   }
 
   function descargarOrdenPDF() {
@@ -2068,6 +2080,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
               manualCreateTestMode={manualCreateTestMode}
               setManualCreateTestMode={setManualCreateTestMode}
               highlightedOrderId={highlightedOrderId}
+              purchaseActionBusy={purchaseActionBusy}
             />
           )}
 
