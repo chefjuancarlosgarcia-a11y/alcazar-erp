@@ -1,4 +1,6 @@
 import { supabase } from "../lib/supabase"
+import { CACHE_KEYS, CACHE_TTL } from "./cacheConfig"
+import { cachedQuery, invalidateQueryCache } from "./queryCache"
 
 const productSelect = `
   *,
@@ -158,16 +160,25 @@ async function queryProducts(filters = {}) {
   return { data: (data || []).map(mapPOSProductFromSupabase), error }
 }
 
+export function invalidatePOSProductsCache() {
+  invalidateQueryCache(CACHE_KEYS.POS_PRODUCTS_PREFIX)
+}
+
+function invalidateAfterProductMutation(result) {
+  if (!result?.error) invalidatePOSProductsCache()
+  return result
+}
+
 export function getPOSProducts() {
-  return queryProducts()
+  return cachedQuery(CACHE_KEYS.POS_PRODUCTS_ALL, () => queryProducts(), CACHE_TTL.CATALOG)
 }
 
 export function getActivePOSProducts() {
-  return queryProducts({ active: true })
+  return cachedQuery(CACHE_KEYS.POS_PRODUCTS_ACTIVE, () => queryProducts({ active: true }), CACHE_TTL.CATALOG)
 }
 
 export function getProductionReadyPOSProducts() {
-  return queryProducts({ active: true, productionReady: true })
+  return cachedQuery(CACHE_KEYS.POS_PRODUCTS_PRODUCTION, () => queryProducts({ active: true, productionReady: true }), CACHE_TTL.CATALOG)
 }
 
 export async function getPOSProductById(id) {
@@ -176,23 +187,23 @@ export async function getPOSProductById(id) {
 }
 
 export async function createPOSProduct(product) {
-  const { data, error } = await supabase.from("pos_products").insert(serializeProduct(product)).select(productSelect).single()
-  return { data: mapPOSProductFromSupabase(data), error }
+  const result = await supabase.from("pos_products").insert(serializeProduct(product)).select(productSelect).single()
+  return invalidateAfterProductMutation({ data: mapPOSProductFromSupabase(result.data), error: result.error })
 }
 
 export async function updatePOSProduct(id, updates) {
-  const { data, error } = await supabase.from("pos_products").update(serializeProduct(updates)).eq("id", id).select(productSelect).single()
-  return { data: mapPOSProductFromSupabase(data), error }
+  const result = await supabase.from("pos_products").update(serializeProduct(updates)).eq("id", id).select(productSelect).single()
+  return invalidateAfterProductMutation({ data: mapPOSProductFromSupabase(result.data), error: result.error })
 }
 
 export async function deactivatePOSProduct(id) {
-  const { data, error } = await supabase.from("pos_products").update({ active: false, production_ready: false }).eq("id", id).select(productSelect).single()
-  return { data: mapPOSProductFromSupabase(data), error }
+  const result = await supabase.from("pos_products").update({ active: false, production_ready: false }).eq("id", id).select(productSelect).single()
+  return invalidateAfterProductMutation({ data: mapPOSProductFromSupabase(result.data), error: result.error })
 }
 
 export async function activatePOSProduct(id) {
-  const { data, error } = await supabase.from("pos_products").update({ active: true }).eq("id", id).select(productSelect).single()
-  return { data: mapPOSProductFromSupabase(data), error }
+  const result = await supabase.from("pos_products").update({ active: true }).eq("id", id).select(productSelect).single()
+  return invalidateAfterProductMutation({ data: mapPOSProductFromSupabase(result.data), error: result.error })
 }
 
 export async function savePOSCatalogProduct(product, variants = [], modifiers = []) {
@@ -206,6 +217,7 @@ export async function savePOSCatalogProduct(product, variants = [], modifiers = 
     p_modifiers: modifierPayload
   })
   if (error) return { data: null, error }
+  invalidatePOSProductsCache()
   const productId = data?.id || product.id || product.productId
   if (!productId) return { data: mapPOSProductFromSupabase(data), error: null }
   return getPOSProductById(productId)
@@ -245,5 +257,5 @@ export async function createOrUpdatePOSProductFromRecipe(recipe, productId = nul
     p_recipe_id: recipe.id || recipe.recipeId,
     p_product: payload
   })
-  return { data: mapPOSProductFromSupabase(data), error }
+  return invalidateAfterProductMutation({ data: mapPOSProductFromSupabase(data), error })
 }

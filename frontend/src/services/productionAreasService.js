@@ -1,4 +1,5 @@
 import { supabase } from "../lib/supabase"
+import { CACHE_KEYS } from "./cacheConfig"
 import { invalidateQueryCache } from "./queryCache"
 import { getProductionAreas, saveOperationalArea, updateArea, deactivateArea } from "./areasService"
 
@@ -89,20 +90,20 @@ export async function saveProductionArea(payload, editingId = "") {
     isProductionArea: true,
     type: "produccion"
   }, editingId)
-  invalidateQueryCache("areas:")
+  invalidateQueryCache(CACHE_KEYS.AREAS_PREFIX)
   return result
 }
 
 export async function deactivateProductionArea(id) {
   const result = await deactivateArea(id)
-  invalidateQueryCache("areas:")
+  invalidateQueryCache(CACHE_KEYS.AREAS_PREFIX)
   return result
 }
 
 export async function activateProductionArea(id) {
   const { activateArea } = await import("./areasService")
   const result = await activateArea(id)
-  invalidateQueryCache("areas:")
+  invalidateQueryCache(CACHE_KEYS.AREAS_PREFIX)
   return result
 }
 

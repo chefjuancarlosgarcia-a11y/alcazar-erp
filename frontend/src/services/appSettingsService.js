@@ -1,6 +1,8 @@
 import { BRANDING } from "../branding"
 import { supabase } from "../lib/supabase"
 import { DEFAULT_THEME_TOKENS, normalizeBrandingDraft, PRESET_THEMES } from "../utils/brandingTheme"
+import { CACHE_KEYS, CACHE_TTL } from "./cacheConfig"
+import { cachedQuery, invalidateQueryCache } from "./queryCache"
 
 export const BRANDING_SETTINGS_KEY = "system_branding"
 const LOCAL_KEY = "app-setting:system_branding"
@@ -52,26 +54,29 @@ function readLocalBranding() {
   }
 }
 
-export async function getBrandingSettings() {
-  const fallback = readLocalBranding()
-  if (!supabase) return { data: fallback, error: null, source: "local" }
-  const { data, error } = await supabase
-    .from("app_settings")
-    .select("value")
-    .eq("key", BRANDING_SETTINGS_KEY)
-    .maybeSingle()
-  if (error) {
-    console.warn("[Settings] No se pudo leer branding desde Supabase.", error)
-    return { data: fallback, error, source: "local" }
-  }
-  const normalized = normalizeBranding(data?.value || fallback)
-  localStorage.setItem(LOCAL_KEY, JSON.stringify(normalized))
-  return { data: normalized, error: null, source: data ? "supabase" : "local" }
+export function getBrandingSettings() {
+  return cachedQuery(CACHE_KEYS.BRANDING, async () => {
+    const fallback = readLocalBranding()
+    if (!supabase) return { data: fallback, error: null, source: "local" }
+    const { data, error } = await supabase
+      .from("app_settings")
+      .select("value")
+      .eq("key", BRANDING_SETTINGS_KEY)
+      .maybeSingle()
+    if (error) {
+      console.warn("[Settings] No se pudo leer branding desde Supabase.", error)
+      return { data: fallback, error, source: "local" }
+    }
+    const normalized = normalizeBranding(data?.value || fallback)
+    localStorage.setItem(LOCAL_KEY, JSON.stringify(normalized))
+    return { data: normalized, error: null, source: data ? "supabase" : "local" }
+  }, CACHE_TTL.REFERENCE)
 }
 
 export async function saveBrandingSettings(settings) {
   const normalized = normalizeBranding(settings)
   localStorage.setItem(LOCAL_KEY, JSON.stringify(normalized))
+  invalidateQueryCache(CACHE_KEYS.BRANDING)
   window.dispatchEvent(new CustomEvent("branding-updated", { detail: normalized }))
   if (!supabase) return { data: normalized, error: null, source: "local" }
   const { error } = await supabase

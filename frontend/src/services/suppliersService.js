@@ -1,4 +1,6 @@
 import { supabase } from "../lib/supabase"
+import { CACHE_KEYS, CACHE_TTL } from "./cacheConfig"
+import { cachedQuery, invalidateQueryCache } from "./queryCache"
 
 const DAY_KEYS = ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo"]
 
@@ -83,13 +85,19 @@ export function mapSupplier(row) {
   }
 }
 
-export async function getSuppliers() {
-  const { data, error } = await supabase
-    .from("suppliers")
-    .select("*")
-    .eq("status", "active")
-    .order("name", { ascending: true })
-  return { data: (data || []).map(mapSupplier), error }
+export function getSuppliers() {
+  return cachedQuery(CACHE_KEYS.SUPPLIERS_ACTIVE, async () => {
+    const { data, error } = await supabase
+      .from("suppliers")
+      .select("*")
+      .eq("status", "active")
+      .order("name", { ascending: true })
+    return { data: (data || []).map(mapSupplier), error }
+  }, CACHE_TTL.CATALOG)
+}
+
+function invalidateSuppliersCache() {
+  invalidateQueryCache(CACHE_KEYS.SUPPLIERS_PREFIX)
 }
 
 export async function createSupplier(supplier) {
@@ -98,6 +106,7 @@ export async function createSupplier(supplier) {
     .insert(supplierPayload(supplier))
     .select("*")
     .single()
+  if (!error) invalidateSuppliersCache()
   return { data: mapSupplier(data), error }
 }
 
@@ -108,6 +117,7 @@ export async function updateSupplier(id, updates) {
     .eq("id", id)
     .select("*")
     .single()
+  if (!error) invalidateSuppliersCache()
   return { data: mapSupplier(data), error }
 }
 
@@ -118,6 +128,7 @@ export async function deactivateSupplier(id) {
     .eq("id", id)
     .select("*")
     .single()
+  if (!error) invalidateSuppliersCache()
   return { data: mapSupplier(data), error }
 }
 
@@ -143,5 +154,6 @@ export async function migrateLocalSuppliers(localSuppliers) {
     .from("suppliers")
     .insert(payload)
     .select("*")
+  if (!error) invalidateSuppliersCache()
   return { data: (data || []).map(mapSupplier), error, imported: error ? 0 : rowsToCreate.length }
 }

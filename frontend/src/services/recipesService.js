@@ -1,4 +1,6 @@
 import { supabase } from "../lib/supabase"
+import { CACHE_KEYS, CACHE_TTL } from "./cacheConfig"
+import { cachedQuery, invalidateQueryCache } from "./queryCache"
 
 const DEBUG = import.meta.env.DEV
 
@@ -69,16 +71,22 @@ function serializeIngredients(ingredients) {
   }))
 }
 
-export async function getInventoryItemUnitConversions() {
-  const { data, error } = await supabase
-    .from("inventory_item_unit_conversions")
-    .select("*, inventory_item:inventory_items(id, name, base_unit)")
-    .order("created_at", { ascending: false })
-  return { data: data || [], error }
+function invalidateUnitConversionsCache() {
+  invalidateQueryCache(CACHE_KEYS.UNITS_INVENTORY)
 }
 
-export function upsertInventoryItemUnitConversion(conversion) {
-  return supabase
+export function getInventoryItemUnitConversions() {
+  return cachedQuery(CACHE_KEYS.UNITS_INVENTORY, async () => {
+    const { data, error } = await supabase
+      .from("inventory_item_unit_conversions")
+      .select("*, inventory_item:inventory_items(id, name, base_unit)")
+      .order("created_at", { ascending: false })
+    return { data: data || [], error }
+  }, CACHE_TTL.REFERENCE)
+}
+
+export async function upsertInventoryItemUnitConversion(conversion) {
+  const result = await supabase
     .from("inventory_item_unit_conversions")
     .upsert({
       inventory_item_id: conversion.inventoryItemId || conversion.inventory_item_id,
@@ -89,10 +97,14 @@ export function upsertInventoryItemUnitConversion(conversion) {
     }, { onConflict: "inventory_item_id,from_unit,to_unit" })
     .select("*, inventory_item:inventory_items(id, name, base_unit)")
     .single()
+  if (!result.error) invalidateUnitConversionsCache()
+  return result
 }
 
-export function deleteInventoryItemUnitConversion(id) {
-  return supabase.from("inventory_item_unit_conversions").delete().eq("id", id)
+export async function deleteInventoryItemUnitConversion(id) {
+  const result = await supabase.from("inventory_item_unit_conversions").delete().eq("id", id)
+  if (!result.error) invalidateUnitConversionsCache()
+  return result
 }
 
 async function queryRecipes(activeOnly = false) {

@@ -1,4 +1,6 @@
 import { supabase } from "../lib/supabase"
+import { CACHE_KEYS, CACHE_TTL } from "./cacheConfig"
+import { cachedQuery } from "./queryCache"
 
 const requisitionSelect = `
   *,
@@ -48,12 +50,14 @@ function serializeItems(items) {
   }))
 }
 
-export async function getInventoryUnitConversions() {
-  const { data, error } = await supabase
-    .from("inventory_unit_conversions")
-    .select("*")
-    .order("from_unit", { ascending: true })
-  return { data: data || [], error }
+export function getInventoryUnitConversions() {
+  return cachedQuery(CACHE_KEYS.UNITS_INVENTORY, async () => {
+    const { data, error } = await supabase
+      .from("inventory_unit_conversions")
+      .select("*")
+      .order("from_unit", { ascending: true })
+    return { data: data || [], error }
+  }, CACHE_TTL.REFERENCE)
 }
 
 export async function getRequisitions(filters = {}) {

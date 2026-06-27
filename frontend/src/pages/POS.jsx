@@ -16,6 +16,7 @@ import {
   activatePOSProduct,
   getPOSProductById,
   getPOSProducts,
+  invalidatePOSProductsCache,
   savePOSCatalogProduct
 } from "../services/posProductsService"
 import { getProductionTickets } from "../services/productionTicketsService"
@@ -1011,6 +1012,7 @@ function POS() {
 
   useEffect(() => {
     async function refreshProducts() {
+      invalidatePOSProductsCache()
       const { data, error } = await getPOSProducts()
       if (error) {
         setOrdenError(`No se pudo actualizar el catálogo POS: ${error.message}`)
@@ -2931,6 +2933,7 @@ function POS() {
     setMigratingLocalProducts(false)
     setMigrationProgress(null)
     setCatalogFeedbackTone(failures.length ? "warning" : "success")
+    invalidatePOSProductsCache()
     const { data, error } = await getPOSProducts()
     if (error) {
       setOrdenError(`Migración terminada, pero no se pudo refrescar el catálogo: ${error.message}`)

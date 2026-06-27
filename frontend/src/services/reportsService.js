@@ -1,4 +1,7 @@
 import { supabase } from "../lib/supabase"
+import { getActiveAreas } from "./areasService"
+import { CACHE_KEYS, CACHE_TTL } from "./cacheConfig"
+import { cachedQuery } from "./queryCache"
 
 function number(value) {
   return Number(value || 0)
@@ -96,18 +99,15 @@ async function fetchOrdersByRange(range) {
 }
 
 async function fetchProducts() {
-  const { data, error } = await supabase
-    .from("pos_products")
-    .select("*, recipe:standard_recipes(id, name, estimated_cost, active, production_area_id)")
-  return { data: data || [], error }
+  return cachedQuery(CACHE_KEYS.POS_PRODUCTS_REPORT, async () => {
+    const { data, error } = await supabase
+      .from("pos_products")
+      .select("*, recipe:standard_recipes(id, name, estimated_cost, active, production_area_id)")
+    return { data: data || [], error }
+  }, CACHE_TTL.REPORT_CATALOG)
 }
 
 const ACTIVE_TABLE_STATUSES = ["open", "awaiting_bill", "sent_to_cashier"]
-
-const EXECUTIVE_DASHBOARD_TTL_MS = 2 * 60_000
-let executiveDashboardInflight = null
-let executiveDashboardCache = null
-let executiveDashboardCacheAt = 0
 
 function countActiveTables(orders = []) {
   return orders.filter((order) => ACTIVE_TABLE_STATUSES.includes(order.status)).length
@@ -182,12 +182,7 @@ export async function getExecutiveKPIs(filters = {}) {
 }
 
 export async function getExecutiveDashboardReport() {
-  if (executiveDashboardCache && Date.now() - executiveDashboardCacheAt < EXECUTIVE_DASHBOARD_TTL_MS) {
-    return executiveDashboardCache
-  }
-  if (executiveDashboardInflight) return executiveDashboardInflight
-
-  executiveDashboardInflight = (async () => {
+  return cachedQuery(CACHE_KEYS.EXECUTIVE_DASHBOARD, async () => {
     const ranges = {
       day: rangeForPreset("today"),
       week: rangeForPreset("week"),
@@ -236,16 +231,7 @@ export async function getExecutiveDashboardReport() {
       ranges,
       activeTables: countActiveTables(dayOrders.data)
     }, errors[0])
-  })()
-
-  try {
-    const result = await executiveDashboardInflight
-    executiveDashboardCache = result
-    executiveDashboardCacheAt = Date.now()
-    return result
-  } finally {
-    executiveDashboardInflight = null
-  }
+  }, CACHE_TTL.REPORT_CATALOG)
 }
 
 export async function getSalesAnalyticsReport(filters = {}) {
@@ -578,13 +564,17 @@ export async function getMenuEngineeringReport(filters = {}) {
 }
 
 export async function getAreaPerformanceReport(filters = {}) {
-  const [production, inventory, requisitions, orders, areas] = await Promise.all([
+  const [production, inventory, requisitions, orders, areasResult] = await Promise.all([
     getProductionReport(filters),
     getInventoryReport(filters),
     getRequisitionReport(filters),
     fetchOrders(filters),
-    supabase.from("areas").select("id,name").eq("active", true)
+    getActiveAreas()
   ])
+  const areas = {
+    data: (areasResult.data || []).map((area) => ({ id: area.id, name: area.name })),
+    error: areasResult.error
+  }
   const error = production.error || inventory.error || requisitions.error || (orders.error && message(orders.error)) || (areas.error && message(areas.error))
   const ticketAreas = new Map((production.data.areas || []).map((row) => [row.area, row]))
   return empty((areas.data || []).map((area) => {

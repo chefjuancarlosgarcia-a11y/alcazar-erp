@@ -1,4 +1,5 @@
 import { supabase } from "../lib/supabase"
+import { CACHE_KEYS, CACHE_TTL } from "./cacheConfig"
 import { cachedQuery, invalidateQueryCache } from "./queryCache"
 
 function normalizeArea(area) {
@@ -40,15 +41,15 @@ async function fetchAreas(query) {
 }
 
 export function getAreas() {
-  return cachedQuery("areas:all", () => fetchAreas(supabase.from("areas").select("*")), 300000)
+  return cachedQuery(`${CACHE_KEYS.AREAS_PREFIX}all`, () => fetchAreas(supabase.from("areas").select("*")), CACHE_TTL.CATALOG)
 }
 
 export function getActiveAreas() {
-  return cachedQuery("areas:active", () => fetchAreas(supabase.from("areas").select("*").eq("active", true)), 300000)
+  return cachedQuery(`${CACHE_KEYS.AREAS_PREFIX}active`, () => fetchAreas(supabase.from("areas").select("*").eq("active", true)), CACHE_TTL.CATALOG)
 }
 
 export function getProductionAreas() {
-  return cachedQuery("areas:production", () => fetchAreas(supabase.from("areas").select("*").eq("active", true).eq("is_production_area", true)), 300000)
+  return cachedQuery(`${CACHE_KEYS.AREAS_PREFIX}production`, () => fetchAreas(supabase.from("areas").select("*").eq("active", true).eq("is_production_area", true)), CACHE_TTL.CATALOG)
 }
 
 export async function createArea(area) {
@@ -57,7 +58,7 @@ export async function createArea(area) {
     .insert({ id: area.id, ...serializeArea(area) })
     .select("*")
     .single()
-  if (!error) invalidateQueryCache("areas:")
+  if (!error) invalidateQueryCache(CACHE_KEYS.AREAS_PREFIX)
   return { data: normalizeArea(data), error }
 }
 
@@ -105,7 +106,7 @@ export async function updateArea(id, updates) {
     .eq("id", id)
     .select("*")
     .single()
-  if (!error) invalidateQueryCache("areas:")
+  if (!error) invalidateQueryCache(CACHE_KEYS.AREAS_PREFIX)
   return { data: normalizeArea(data), error }
 }
 

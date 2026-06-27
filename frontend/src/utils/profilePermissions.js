@@ -1,5 +1,8 @@
 // Default roles for backward compatibility
 // These should be kept in sync with the user_roles table
+import { CACHE_KEYS } from "../services/cacheConfig"
+import { invalidateQueryCache } from "../services/queryCache"
+
 export const PROFILE_ROLES = [
   "admin",
   "gerente_general",
@@ -30,9 +33,8 @@ export const PROFILE_ROLES = [
 export const PROFILE_STATUSES = ["active", "inactive", "suspended"]
 export const PROTECTED_PROFILE_ROLES = ["admin", "gerente_general"]
 
-// Dynamic roles cache
+// Dynamic roles cache (sync accessors; populated by loadDynamicRoles)
 let cachedRoles = null
-let cachedRolesLoadingPromise = null
 
 const ROLE_ALIASES = {
   administrador: "admin",
@@ -98,54 +100,35 @@ export function normalizeRole(role) {
 export async function loadDynamicRoles() {
   if (cachedRoles) return cachedRoles
 
-  // If already loading, return the existing promise
-  if (cachedRolesLoadingPromise) return cachedRolesLoadingPromise
-
-  cachedRolesLoadingPromise = (async () => {
-    try {
-      const { supabase } = await import("../lib/supabase.js")
-      const { data, error } = await supabase
-        .from("user_roles")
-        .select("role_key, role_name, hr_assignable, is_deprecated, is_active, is_system")
-        .eq("is_active", true)
-        .order("role_key", { ascending: true })
-
-      if (error) throw error
-
-      const rows = data || []
-      cachedRoles = {
-        rows,
-        keys: rows.map((r) => r.role_key),
-        names: rows.reduce((acc, r) => {
-          acc[r.role_key] = r.role_name
-          return acc
-        }, {}),
-        meta: rows.reduce((acc, r) => {
-          acc[r.role_key] = {
-            hr_assignable: r.hr_assignable === true,
-            is_deprecated: r.is_deprecated === true,
-            is_system: r.is_system === true
-          }
-          return acc
-        }, {})
-      }
-
-      return cachedRoles
-    } catch (error) {
-      console.error("Error loading dynamic roles:", error)
-      // Fallback to default roles
-      cachedRoles = {
-        keys: PROFILE_ROLES,
-        names: {},
-        rows: []
-      }
-      return cachedRoles
-    } finally {
-      cachedRolesLoadingPromise = null
+  try {
+    const { getUserRoles } = await import("../services/userRolesService.js")
+    const rows = await getUserRoles()
+    cachedRoles = {
+      rows,
+      keys: rows.map((r) => r.role_key),
+      names: rows.reduce((acc, r) => {
+        acc[r.role_key] = r.role_name
+        return acc
+      }, {}),
+      meta: rows.reduce((acc, r) => {
+        acc[r.role_key] = {
+          hr_assignable: r.hr_assignable === true,
+          is_deprecated: r.is_deprecated === true,
+          is_system: r.is_system === true
+        }
+        return acc
+      }, {})
     }
-  })()
-
-  return cachedRolesLoadingPromise
+    return cachedRoles
+  } catch (error) {
+    console.error("Error loading dynamic roles:", error)
+    cachedRoles = {
+      keys: PROFILE_ROLES,
+      names: {},
+      rows: []
+    }
+    return cachedRoles
+  }
 }
 
 /**
@@ -153,7 +136,7 @@ export async function loadDynamicRoles() {
  */
 export function clearRolesCache() {
   cachedRoles = null
-  cachedRolesLoadingPromise = null
+  invalidateQueryCache(CACHE_KEYS.ROLES_PREFIX)
 }
 
 /**

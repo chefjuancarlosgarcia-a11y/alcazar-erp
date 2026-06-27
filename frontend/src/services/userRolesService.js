@@ -1,5 +1,7 @@
 import { supabase } from "../lib/supabase"
 import { clearRolesCache } from "../utils/profilePermissions"
+import { CACHE_KEYS, CACHE_TTL } from "./cacheConfig"
+import { cachedQuery } from "./queryCache"
 
 export const PROTECTED_ROLE_KEYS = new Set(["admin", "gerente_general"])
 export const RESERVED_CREATE_ROLE_KEYS = new Set(["admin", "gerente_general"])
@@ -48,26 +50,30 @@ function mapRoleError(error) {
 }
 
 export async function getUserRoles() {
-  const { data, error } = await supabase
-    .from("user_roles")
-    .select("*")
-    .eq("is_active", true)
-    .eq("is_deprecated", false)
-    .order("role_name", { ascending: true })
+  return cachedQuery(CACHE_KEYS.ROLES_ACTIVE, async () => {
+    const { data, error } = await supabase
+      .from("user_roles")
+      .select("*")
+      .eq("is_active", true)
+      .eq("is_deprecated", false)
+      .order("role_name", { ascending: true })
 
-  if (error) throw new Error(mapRoleError(error))
-  return data || []
+    if (error) throw new Error(mapRoleError(error))
+    return data || []
+  }, CACHE_TTL.REFERENCE)
 }
 
 export async function getAllUserRoles() {
-  const { data, error } = await supabase
-    .from("user_roles")
-    .select("*")
-    .order("is_system", { ascending: false })
-    .order("role_name", { ascending: true })
+  return cachedQuery(CACHE_KEYS.ROLES_ALL, async () => {
+    const { data, error } = await supabase
+      .from("user_roles")
+      .select("*")
+      .order("is_system", { ascending: false })
+      .order("role_name", { ascending: true })
 
-  if (error) throw new Error(mapRoleError(error))
-  return data || []
+    if (error) throw new Error(mapRoleError(error))
+    return data || []
+  }, CACHE_TTL.REFERENCE)
 }
 
 export async function getUserRole(roleId) {
@@ -157,27 +163,31 @@ export async function activateUserRole(roleId) {
 }
 
 export async function getRolesByCategory(category) {
-  const { data, error } = await supabase
-    .from("user_roles")
-    .select("*")
-    .eq("category", category)
-    .eq("is_active", true)
-    .eq("is_deprecated", false)
-    .order("role_name", { ascending: true })
+  return cachedQuery(`${CACHE_KEYS.ROLES_PREFIX}category:${category}`, async () => {
+    const { data, error } = await supabase
+      .from("user_roles")
+      .select("*")
+      .eq("category", category)
+      .eq("is_active", true)
+      .eq("is_deprecated", false)
+      .order("role_name", { ascending: true })
 
-  if (error) throw new Error(mapRoleError(error))
-  return data || []
+    if (error) throw new Error(mapRoleError(error))
+    return data || []
+  }, CACHE_TTL.REFERENCE)
 }
 
 export async function getRoleCategories() {
-  const { data, error } = await supabase
-    .from("user_roles")
-    .select("category")
-    .eq("is_active", true)
-    .order("category", { ascending: true })
+  return cachedQuery(CACHE_KEYS.ROLES_CATEGORIES, async () => {
+    const { data, error } = await supabase
+      .from("user_roles")
+      .select("category")
+      .eq("is_active", true)
+      .order("category", { ascending: true })
 
-  if (error) throw new Error(mapRoleError(error))
-  return [...new Set((data || []).map((row) => row.category))].filter(Boolean)
+    if (error) throw new Error(mapRoleError(error))
+    return [...new Set((data || []).map((row) => row.category))].filter(Boolean)
+  }, CACHE_TTL.REFERENCE)
 }
 
 export async function roleExists(roleKey) {
