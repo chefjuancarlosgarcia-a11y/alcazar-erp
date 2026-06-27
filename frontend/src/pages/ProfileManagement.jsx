@@ -235,10 +235,8 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
   async function loadRoles() {
     try {
       setRolesLoading(true)
-      const roles = await userRolesService.getUserRoles()
-      setDynamicRoles(roles || [])
-      // Also load the dynamic roles cache for profile permissions
-      await loadDynamicRoles()
+      const loaded = await loadDynamicRoles()
+      setDynamicRoles(loaded?.rows || [])
     } catch (err) {
       console.error("Error loading roles:", err)
       // Fall back to default roles
@@ -291,9 +289,7 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
         description: newRoleForm.description || ""
       })
 
-      // Update dynamic roles
-      const updatedRoles = await userRolesService.getUserRoles()
-      setDynamicRoles(updatedRoles || [])
+      await loadRoles()
 
       // Clear form and close modal
       setCreatedRoleKey(role.role_key)

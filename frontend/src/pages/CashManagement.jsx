@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import FinanceIntegrationPanel from "../components/FinanceIntegrationPanel"
 import { useAuth } from "../context/AuthContext"
@@ -44,6 +44,7 @@ function CashManagement() {
   const canSuperviseCash = SUPERVISOR_ROLES.includes(user?.role)
   const [registers, setRegisters] = useState([])
   const [selectedRegisterId, setSelectedRegisterId] = useState("")
+  const selectedRegisterIdRef = useRef("")
   const [session, setSession] = useState(null)
   const [sessions, setSessions] = useState([])
   const [movements, setMovements] = useState([])
@@ -69,9 +70,12 @@ function CashManagement() {
       return
     }
     const nextRegisters = registerResult.data || []
-    const registerId = selectedRegisterId || nextRegisters[0]?.id || ""
+    const registerId = selectedRegisterIdRef.current || nextRegisters[0]?.id || ""
     setRegisters(nextRegisters)
-    setSelectedRegisterId(registerId)
+    if (registerId && !selectedRegisterIdRef.current) {
+      selectedRegisterIdRef.current = registerId
+      setSelectedRegisterId(registerId)
+    }
 
     const [sessionResult, sessionsResult] = await Promise.all([
       getOpenCashSession(registerId),
@@ -89,7 +93,7 @@ function CashManagement() {
     if (!bankResult.error) setBankAccounts(bankResult.data || [])
 
     setLoading(false)
-  }, [canAccessCash, selectedRegisterId])
+  }, [canAccessCash])
 
   useEffect(() => {
     loadData()
@@ -171,7 +175,11 @@ function CashManagement() {
       {error && <div className="cash-error">{error}</div>}
 
       <div className="cash-toolbar">
-        <label>Caja<select value={selectedRegisterId} onChange={(event) => setSelectedRegisterId(event.target.value)}>{registers.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+        <label>Caja<select value={selectedRegisterId} onChange={(event) => {
+          selectedRegisterIdRef.current = event.target.value
+          setSelectedRegisterId(event.target.value)
+          loadData()
+        }}>{registers.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
         <button type="button" className="cash-secondary" onClick={loadData}>Actualizar</button>
       </div>
 

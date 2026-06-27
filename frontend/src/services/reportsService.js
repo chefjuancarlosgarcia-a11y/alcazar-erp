@@ -104,6 +104,11 @@ async function fetchProducts() {
 
 const ACTIVE_TABLE_STATUSES = ["open", "awaiting_bill", "sent_to_cashier"]
 
+const EXECUTIVE_DASHBOARD_TTL_MS = 2 * 60_000
+let executiveDashboardInflight = null
+let executiveDashboardCache = null
+let executiveDashboardCacheAt = 0
+
 function countActiveTables(orders = []) {
   return orders.filter((order) => ACTIVE_TABLE_STATUSES.includes(order.status)).length
 }
@@ -177,54 +182,70 @@ export async function getExecutiveKPIs(filters = {}) {
 }
 
 export async function getExecutiveDashboardReport() {
-  const ranges = {
-    day: rangeForPreset("today"),
-    week: rangeForPreset("week"),
-    month: rangeForPreset("month"),
-    year: rangeForPreset("year")
+  if (executiveDashboardCache && Date.now() - executiveDashboardCacheAt < EXECUTIVE_DASHBOARD_TTL_MS) {
+    return executiveDashboardCache
   }
-  const [
-    dayOrders,
-    weekOrders,
-    monthOrders,
-    yearOrders,
-    prevDayOrders,
-    prevWeekOrders,
-    prevMonthOrders,
-    prevYearOrders
-  ] = await Promise.all([
-    fetchOrdersByRange(ranges.day),
-    fetchOrdersByRange(ranges.week),
-    fetchOrdersByRange(ranges.month),
-    fetchOrdersByRange(ranges.year),
-    fetchOrdersByRange(previousRange(ranges.day)),
-    fetchOrdersByRange(previousRange(ranges.week)),
-    fetchOrdersByRange(previousRange(ranges.month)),
-    fetchOrdersByRange(previousRange(ranges.year))
-  ])
-  const errors = [dayOrders, weekOrders, monthOrders, yearOrders, prevDayOrders, prevWeekOrders, prevMonthOrders, prevYearOrders].map((item) => item.error).filter(Boolean)
-  const summarize = (orders) => {
-    const total = orders.reduce((sum, order) => sum + number(order.total), 0)
-    return { total, orders: orders.length, averageTicket: orders.length ? total / orders.length : 0 }
+  if (executiveDashboardInflight) return executiveDashboardInflight
+
+  executiveDashboardInflight = (async () => {
+    const ranges = {
+      day: rangeForPreset("today"),
+      week: rangeForPreset("week"),
+      month: rangeForPreset("month"),
+      year: rangeForPreset("year")
+    }
+    const [
+      dayOrders,
+      weekOrders,
+      monthOrders,
+      yearOrders,
+      prevDayOrders,
+      prevWeekOrders,
+      prevMonthOrders,
+      prevYearOrders
+    ] = await Promise.all([
+      fetchOrdersByRange(ranges.day),
+      fetchOrdersByRange(ranges.week),
+      fetchOrdersByRange(ranges.month),
+      fetchOrdersByRange(ranges.year),
+      fetchOrdersByRange(previousRange(ranges.day)),
+      fetchOrdersByRange(previousRange(ranges.week)),
+      fetchOrdersByRange(previousRange(ranges.month)),
+      fetchOrdersByRange(previousRange(ranges.year))
+    ])
+    const errors = [dayOrders, weekOrders, monthOrders, yearOrders, prevDayOrders, prevWeekOrders, prevMonthOrders, prevYearOrders].map((item) => item.error).filter(Boolean)
+    const summarize = (orders) => {
+      const total = orders.reduce((sum, order) => sum + number(order.total), 0)
+      return { total, orders: orders.length, averageTicket: orders.length ? total / orders.length : 0 }
+    }
+    const current = {
+      day: summarize(dayOrders.data),
+      week: summarize(weekOrders.data),
+      month: summarize(monthOrders.data),
+      year: summarize(yearOrders.data)
+    }
+    const previous = {
+      day: summarize(prevDayOrders.data),
+      week: summarize(prevWeekOrders.data),
+      month: summarize(prevMonthOrders.data),
+      year: summarize(prevYearOrders.data)
+    }
+    return empty({
+      current,
+      previous,
+      ranges,
+      activeTables: countActiveTables(dayOrders.data)
+    }, errors[0])
+  })()
+
+  try {
+    const result = await executiveDashboardInflight
+    executiveDashboardCache = result
+    executiveDashboardCacheAt = Date.now()
+    return result
+  } finally {
+    executiveDashboardInflight = null
   }
-  const current = {
-    day: summarize(dayOrders.data),
-    week: summarize(weekOrders.data),
-    month: summarize(monthOrders.data),
-    year: summarize(yearOrders.data)
-  }
-  const previous = {
-    day: summarize(prevDayOrders.data),
-    week: summarize(prevWeekOrders.data),
-    month: summarize(prevMonthOrders.data),
-    year: summarize(prevYearOrders.data)
-  }
-  return empty({
-    current,
-    previous,
-    ranges,
-    activeTables: countActiveTables(dayOrders.data)
-  }, errors[0])
 }
 
 export async function getSalesAnalyticsReport(filters = {}) {

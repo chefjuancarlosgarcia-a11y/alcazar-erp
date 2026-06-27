@@ -1632,6 +1632,7 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
   const runDetailDismissedRef = useRef(false)
   const sessionRestoreHandledRef = useRef(false)
   const refreshInFlightRef = useRef(false)
+  const processDetailsLoadedDatesRef = useRef(new Set())
   const suppressRealtimeRefreshRef = useRef(false)
   sectionRef.current = section
   useEffect(() => {
@@ -1908,6 +1909,10 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       const syncedRuns = await replayPendingChecklistDrafts(runResult.data || [])
       setRuns(syncedRuns)
       setProcessRunDetails(canViewOperationalProcessGroups ? (processResult?.data || []) : [])
+      ; (processResult?.data || []).forEach((detail) => {
+        const date = normalizeChecklistRunDate(detail?.process_run?.run_date)
+        if (date) processDetailsLoadedDatesRef.current.add(date)
+      })
       const actor = user || stableUserRef.current
       const seeAll = canSeeAllChecklistModuleRuns(actor, canViewChecklistLibrary)
       const canSeeRun = (run) => canSeeChecklistRun(run, actor, profileRows, { seeAll })
@@ -1973,8 +1978,12 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
 
   const ensureProcessDetailsForDates = useCallback(async (dates = []) => {
     if (!canViewOperationalProcessGroups) return
-    const result = await loadOperationalProcessDetailsForDates(dates)
-    if (result.error || !result.data?.length) return
+    const pending = [...new Set(dates.filter(Boolean))].filter((date) => !processDetailsLoadedDatesRef.current.has(date))
+    if (!pending.length) return
+    const result = await loadOperationalProcessDetailsForDates(pending)
+    if (result.error) return
+    pending.forEach((date) => processDetailsLoadedDatesRef.current.add(date))
+    if (!result.data?.length) return
     setProcessRunDetails((current) => mergeOperationalProcessDetails(current, result.data))
   }, [canViewOperationalProcessGroups])
 

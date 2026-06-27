@@ -114,6 +114,7 @@ export async function loadDynamicRoles() {
 
       const rows = data || []
       cachedRoles = {
+        rows,
         keys: rows.map((r) => r.role_key),
         names: rows.reduce((acc, r) => {
           acc[r.role_key] = r.role_name
@@ -135,7 +136,8 @@ export async function loadDynamicRoles() {
       // Fallback to default roles
       cachedRoles = {
         keys: PROFILE_ROLES,
-        names: {}
+        names: {},
+        rows: []
       }
       return cachedRoles
     } finally {

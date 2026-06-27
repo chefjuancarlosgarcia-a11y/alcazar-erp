@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { useActionGuard } from "../../hooks/useActionGuard"
 import {
   createOperationalProcessRun,
   deactivateOperationalProcessTemplate,
@@ -60,6 +61,7 @@ export default function OperationalProcessLibrary({
   const [runningId, setRunningId] = useState("")
   const [form, setForm] = useState(EMPTY_FORM)
   const [steps, setSteps] = useState([createEmptyProcessStep()])
+  const { busy: deactivating, run: runDeactivate } = useActionGuard()
 
   useEffect(() => {
     loadLibrary()
@@ -172,13 +174,15 @@ export default function OperationalProcessLibrary({
 
   async function handleDeactivate(id) {
     if (!window.confirm("¿Desactivar este proceso operativo?")) return
-    const result = await deactivateOperationalProcessTemplate(id)
-    if (result.error) onMessage?.(result.error, "error")
-    else {
-      onMessage?.("Proceso desactivado.", "success")
-      await loadLibrary()
-      onChanged?.()
-    }
+    await runDeactivate(async () => {
+      const result = await deactivateOperationalProcessTemplate(id)
+      if (result.error) onMessage?.(result.error, "error")
+      else {
+        onMessage?.("Proceso desactivado.", "success")
+        await loadLibrary()
+        onChanged?.()
+      }
+    })
   }
 
   async function handleRunToday(item) {
@@ -476,7 +480,7 @@ export default function OperationalProcessLibrary({
                 <>
                   <button type="button" className="tasks-link" onClick={() => openEditor(item)}>Editar</button>
                   {item.status === "active" ? (
-                    <button type="button" className="tasks-link danger" onClick={() => handleDeactivate(item.id)}>Desactivar</button>
+                    <button type="button" className="tasks-link danger" disabled={deactivating} onClick={() => handleDeactivate(item.id)}>Desactivar</button>
                   ) : null}
                 </>
               ) : null}

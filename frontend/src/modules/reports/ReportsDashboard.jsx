@@ -1,4 +1,5 @@
 import { Component, useEffect, useMemo, useState } from "react"
+import { useActionGuard } from "../../hooks/useActionGuard"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
@@ -70,11 +71,30 @@ function ReportsDashboard() {
   const canView = availableTabs.length > 0
   const [tab, setTab] = useState("executive")
   const [filters, setFilters] = useState({ preset: "today", start: "", end: "", collaborator: "", shift: "", category: "", month: new Date().toISOString().slice(0, 7) })
+  const [debouncedCollaborator, setDebouncedCollaborator] = useState("")
+  const [debouncedCategory, setDebouncedCategory] = useState("")
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [tabReloadKey, setTabReloadKey] = useState(0)
   const [fixedCostsFeedback, setFixedCostsFeedback] = useState("")
+  const { busy: exportBusy, run: runExport } = useActionGuard()
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedCollaborator(filters.collaborator), 400)
+    return () => window.clearTimeout(timer)
+  }, [filters.collaborator])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedCategory(filters.category), 400)
+    return () => window.clearTimeout(timer)
+  }, [filters.category])
+
+  const queryFilters = useMemo(() => ({
+    ...filters,
+    collaborator: debouncedCollaborator,
+    category: debouncedCategory
+  }), [filters, debouncedCollaborator, debouncedCategory])
 
   useEffect(() => {
     const requestedTab = searchParams.get("tab")
@@ -93,9 +113,9 @@ function ReportsDashboard() {
     const timer = window.setTimeout(async () => {
       setLoading(true)
       setError("")
-      console.info(`[DashboardEjecutivo:${tab}] Iniciando carga`, { filters })
+      console.info(`[DashboardEjecutivo:${tab}] Iniciando carga`, { filters: queryFilters })
       try {
-        const result = await loadExecutiveReport(tab, filters)
+        const result = await loadExecutiveReport(tab, queryFilters)
         if (!mounted) return
         console.info(`[DashboardEjecutivo:${tab}] Carga finalizada`, { error: result?.error || "", dataType: Array.isArray(result?.data) ? "array" : typeof result?.data })
         setData(result?.data ?? null)
@@ -113,7 +133,7 @@ function ReportsDashboard() {
       mounted = false
       window.clearTimeout(timer)
     }
-  }, [availableTabs, canView, tab, filters, tabReloadKey])
+  }, [availableTabs, canView, tab, queryFilters, tabReloadKey])
 
   const rowsToExport = useMemo(() => {
     try {
@@ -166,8 +186,8 @@ function ReportsDashboard() {
         </div>
         <div className="reports-actions">
           {["admin", "gerente_general"].includes(user?.role) && <button type="button" onClick={() => navigate("/reports/goals/settings")}>Configurar metas</button>}
-          <button type="button" disabled={!rowsToExport.length} onClick={() => exportPDF(rowsToExport, currentTabLabel(tab))}>Exportar PDF</button>
-          <button type="button" className="primary" disabled={!rowsToExport.length} onClick={() => exportExcel(rowsToExport, tab)}>Exportar Excel</button>
+          <button type="button" disabled={!rowsToExport.length || exportBusy} onClick={() => runExport(async () => exportPDF(rowsToExport, currentTabLabel(tab)))}>Exportar PDF</button>
+          <button type="button" className="primary" disabled={!rowsToExport.length || exportBusy} onClick={() => runExport(async () => exportExcel(rowsToExport, tab))}>Exportar Excel</button>
         </div>
       </header>
 
