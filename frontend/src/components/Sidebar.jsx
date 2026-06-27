@@ -69,7 +69,8 @@ const financeSubmenu = [
 
 const settingsSubmenu = [
   { roles: ["admin", "gerente_general"], to: "/settings", label: "Apariencia y Marca" },
-  { roles: ["admin", "gerente_general", "supervisor"], to: "/settings/tickets", label: "Diseno de Tickets" }
+  { roles: ["admin", "gerente_general", "supervisor"], to: "/settings/tickets", label: "Diseno de Tickets" },
+  { roles: ["admin"], to: "/operations-center", label: "Operations Center" }
 ]
 
 function Sidebar({ compact = false, mobile = false, onNavigate }) {
@@ -88,9 +89,11 @@ function Sidebar({ compact = false, mobile = false, onNavigate }) {
           ? "pos"
           : location.pathname.startsWith("/settings")
             ? "settings"
-            : null
+            : location.pathname.startsWith("/operations-center")
+              ? "settings"
+              : null
   )
-  const visibleSubmenu = ["/inventory", "/hr", "/finance", "/pos"].includes(location.pathname) || location.pathname.startsWith("/settings") ? openSubmenu : null
+  const visibleSubmenu = ["/inventory", "/hr", "/finance", "/pos"].includes(location.pathname) || location.pathname.startsWith("/settings") || location.pathname.startsWith("/operations-center") ? openSubmenu : null
   const allowedItems = navigationItems.filter((item) => canAccess(item.module))
   const allowedInventorySubmenu = inventorySubmenu.filter((item) => submenuAllowsRole(item.roles, user?.role))
   const allowedPosSubmenu = posSubmenu.filter((item) => submenuAllowsRole(item.roles, user?.role))

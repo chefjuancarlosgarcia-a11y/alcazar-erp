@@ -8,27 +8,61 @@ import ForgotUser from "../pages/ForgotUser"
 import UpdatePassword from "../pages/UpdatePassword"
 import Kiosk from "../pages/Kiosk"
 import ProtectedRoute from "./ProtectedRoute"
+import { logPerformanceEvent } from "../utils/performanceLogger"
 
-const Dashboard = lazy(() => import("../pages/Dashboard"))
-const HR = lazy(() => import("../pages/HR"))
-const Inventory = lazy(() => import("../pages/Inventory"))
-const POS = lazy(() => import("../pages/POS"))
-const Cashier = lazy(() => import("../pages/Cashier"))
-const CashManagement = lazy(() => import("../pages/CashManagement"))
-const Production = lazy(() => import("../pages/Production"))
-const ProductionHub = lazy(() => import("../pages/ProductionHub"))
-const ProductionAreasManagement = lazy(() => import("../pages/ProductionAreasManagement"))
-const ProductionProductsConfig = lazy(() => import("../pages/ProductionProductsConfig"))
-const ProductionUserAssignments = lazy(() => import("../pages/ProductionUserAssignments"))
-const ProductionLegacyRedirect = lazy(() => import("../pages/ProductionLegacyRedirect"))
-const Reports = lazy(() => import("../pages/Reports"))
-const SalesGoalsSettings = lazy(() => import("../pages/SalesGoalsSettings"))
-const Settings = lazy(() => import("../pages/Settings"))
-const TicketTemplateSettings = lazy(() => import("../pages/TicketTemplateSettings"))
-const Account = lazy(() => import("../pages/Account"))
-const Tasks = lazy(() => import("../pages/Tasks"))
-const CateringDashboard = lazy(() => import("../modules/catering/CateringDashboard"))
-const Finance = lazy(() => import("../pages/Finance"))
+function lazyWithPerformanceLogging(moduleName, factory) {
+  return lazy(() => {
+    const start = performance.now()
+    return factory()
+      .then((module) => {
+        logPerformanceEvent({
+          module: moduleName,
+          action: "load",
+          event_type: "module_load",
+          status: "ok",
+          severity: "info",
+          duration_ms: performance.now() - start,
+          message: `Module ${moduleName} loaded`
+        })
+        return module
+      })
+      .catch((error) => {
+        logPerformanceEvent({
+          module: moduleName,
+          action: "load",
+          event_type: "module_load",
+          status: "error",
+          severity: "error",
+          duration_ms: performance.now() - start,
+          error_message: error?.message || "Module load failed",
+          message: `Module ${moduleName} failed to load`
+        })
+        throw error
+      })
+  })
+}
+
+const Dashboard = lazyWithPerformanceLogging("dashboard", () => import("../pages/Dashboard"))
+const HR = lazyWithPerformanceLogging("hr", () => import("../pages/HR"))
+const Inventory = lazyWithPerformanceLogging("inventory", () => import("../pages/Inventory"))
+const POS = lazyWithPerformanceLogging("pos", () => import("../pages/POS"))
+const Cashier = lazyWithPerformanceLogging("cash", () => import("../pages/Cashier"))
+const CashManagement = lazyWithPerformanceLogging("cash_control", () => import("../pages/CashManagement"))
+const Production = lazyWithPerformanceLogging("production", () => import("../pages/Production"))
+const ProductionHub = lazyWithPerformanceLogging("production_hub", () => import("../pages/ProductionHub"))
+const ProductionAreasManagement = lazyWithPerformanceLogging("production_areas", () => import("../pages/ProductionAreasManagement"))
+const ProductionProductsConfig = lazyWithPerformanceLogging("production_products", () => import("../pages/ProductionProductsConfig"))
+const ProductionUserAssignments = lazyWithPerformanceLogging("production_assignments", () => import("../pages/ProductionUserAssignments"))
+const ProductionLegacyRedirect = lazyWithPerformanceLogging("production_legacy", () => import("../pages/ProductionLegacyRedirect"))
+const Reports = lazyWithPerformanceLogging("reports", () => import("../pages/Reports"))
+const SalesGoalsSettings = lazyWithPerformanceLogging("sales_goals", () => import("../pages/SalesGoalsSettings"))
+const Settings = lazyWithPerformanceLogging("settings", () => import("../pages/Settings"))
+const TicketTemplateSettings = lazyWithPerformanceLogging("ticket_settings", () => import("../pages/TicketTemplateSettings"))
+const Account = lazyWithPerformanceLogging("account", () => import("../pages/Account"))
+const Tasks = lazyWithPerformanceLogging("tasks", () => import("../pages/Tasks"))
+const CateringDashboard = lazyWithPerformanceLogging("catering", () => import("../modules/catering/CateringDashboard"))
+const Finance = lazyWithPerformanceLogging("finance", () => import("../pages/Finance"))
+const OperationsCenter = lazyWithPerformanceLogging("operations_center", () => import("../pages/OperationsCenter"))
 
 function PageLoadingFallback() {
   return <p>Cargando módulo...</p>
@@ -74,6 +108,7 @@ function AppRoutes() {
             <Route path="/finance" element={<ProtectedRoute module="finance"><Finance /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute module="settings"><Settings /></ProtectedRoute>} />
             <Route path="/settings/tickets" element={<ProtectedRoute module="settings"><TicketTemplateSettings /></ProtectedRoute>} />
+            <Route path="/operations-center" element={<ProtectedRoute module="operations_center"><OperationsCenter /></ProtectedRoute>} />
             <Route path="/account" element={<ProtectedRoute><Account /></ProtectedRoute>} />
             <Route path="*" element={<DefaultRedirect />} />
           </Route>

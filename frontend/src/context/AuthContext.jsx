@@ -16,11 +16,12 @@ const MODULES = {
   reports: "/reports",
   catering: "/catering",
   finance: "/finance",
-  settings: "/settings"
+  settings: "/settings",
+  operations_center: "/operations-center"
 }
 
 const ROLE_PERMISSIONS = {
-  admin: ["dashboard", "inventory", "pos", "cash", "production", "hr", "tasks", "reports", "catering", "finance", "settings"],
+  admin: ["dashboard", "inventory", "pos", "cash", "production", "hr", "tasks", "reports", "catering", "finance", "settings", "operations_center"],
   ceo: ["dashboard", "inventory", "pos", "cash", "production", "hr", "tasks", "reports", "catering", "settings"],
   gerente_general: ["dashboard", "inventory", "pos", "cash", "production", "hr", "tasks", "reports", "catering", "finance", "settings"],
   gerente: ["dashboard", "inventory", "hr", "tasks"],

@@ -1,5 +1,6 @@
 import { Component, useEffect, useMemo, useState } from "react"
 import { useActionGuard } from "../../hooks/useActionGuard"
+import { logPerformanceEvent } from "../../utils/performanceLogger"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
@@ -174,6 +175,50 @@ function ReportsDashboard() {
     setTabReloadKey((current) => current + 1)
   }
 
+  async function handleExport(format) {
+    await runExport(async () => {
+      const started = performance.now()
+      const action = format === "pdf" ? "export_pdf" : "export_excel"
+      logPerformanceEvent({
+        module: "reports",
+        action,
+        event_type: "export_start",
+        status: "info",
+        severity: "info",
+        metadata: { format, tab }
+      })
+      try {
+        if (format === "pdf") {
+          exportPDF(rowsToExport, currentTabLabel(tab))
+        } else {
+          exportExcel(rowsToExport, tab)
+        }
+        logPerformanceEvent({
+          module: "reports",
+          action,
+          event_type: "export_success",
+          status: "ok",
+          severity: "info",
+          duration_ms: performance.now() - started,
+          metadata: { format, tab }
+        })
+      } catch (error) {
+        logPerformanceEvent({
+          module: "reports",
+          action,
+          event_type: "export_error",
+          status: "error",
+          severity: "error",
+          duration_ms: performance.now() - started,
+          error_message: error?.message || "Export failed",
+          message: "Export failed",
+          metadata: { format, tab }
+        })
+        throw error
+      }
+    })
+  }
+
   return (
     <section className="reports-page executive">
       <CommandCenterLayer showHeaderActions={false} layout="split" />
@@ -186,8 +231,8 @@ function ReportsDashboard() {
         </div>
         <div className="reports-actions">
           {["admin", "gerente_general"].includes(user?.role) && <button type="button" onClick={() => navigate("/reports/goals/settings")}>Configurar metas</button>}
-          <button type="button" disabled={!rowsToExport.length || exportBusy} onClick={() => runExport(async () => exportPDF(rowsToExport, currentTabLabel(tab)))}>Exportar PDF</button>
-          <button type="button" className="primary" disabled={!rowsToExport.length || exportBusy} onClick={() => runExport(async () => exportExcel(rowsToExport, tab))}>Exportar Excel</button>
+          <button type="button" disabled={!rowsToExport.length || exportBusy} onClick={() => handleExport("pdf")}>Exportar PDF</button>
+          <button type="button" className="primary" disabled={!rowsToExport.length || exportBusy} onClick={() => handleExport("excel")}>Exportar Excel</button>
         </div>
       </header>
 
