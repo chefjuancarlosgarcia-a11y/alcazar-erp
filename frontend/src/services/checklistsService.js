@@ -23,8 +23,8 @@ function isPersistentItemId(id) {
 function activeTemplateItems(items) {
   return (items || []).filter((item) => item.is_active !== false)
 }
-const RUN_SELECT_CORE = "*, checklist_templates(title, description, frequency, shift_context, backup_profile_id), checklist_run_items(*)"
-const RUN_SELECT_EXTENDED = "*, checklist_templates(title, description, frequency, shift_context, primary_replacement_profile_id, secondary_replacement_profile_id, coverage_escalation_profile_id, backup_profile_id, auto_coverage_enabled, auto_coverage_wait_minutes), checklist_run_items(*)"
+const RUN_SELECT_CORE = "*, checklist_templates(title, description, frequency, shift_context, backup_profile_id, supervisor_profile_id), checklist_run_items(*)"
+const RUN_SELECT_EXTENDED = "*, checklist_templates(title, description, frequency, shift_context, primary_replacement_profile_id, secondary_replacement_profile_id, coverage_escalation_profile_id, backup_profile_id, auto_coverage_enabled, auto_coverage_wait_minutes, supervisor_profile_id), checklist_run_items(*)"
 const RUN_SELECT = RUN_SELECT_EXTENDED
 const INCIDENT_SELECT = "*, checklist_runs(run_date, area, checklist_templates(title)), checklist_run_items(title, response_type, checked, response_text, response_number, photo_url, comment), profiles!checklist_incidents_reported_by_fkey(full_name, username)"
 const MANAGEMENT_ALERT_SELECT = "*, checklist_runs(run_date, area, checklist_templates(title)), sender:sender_profile_id(full_name, username)"

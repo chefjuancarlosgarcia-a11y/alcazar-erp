@@ -14,14 +14,32 @@ import {
 
 export { filterRunsWithoutCompletedDuplicate }
 
-export function canSeeAllChecklistModuleRuns(user, canViewChecklistLibrary = false) {
-  if (canViewChecklistLibrary) return true
+/** Roles that bypass area/responsibility filters and see every checklist run. */
+export const CHECKLIST_SEE_ALL_ROLES = Object.freeze([
+  "admin",
+  "gerente_general",
+  "gerente",
+  "recursos_humanos",
+  "rrhh"
+])
+
+export function canSeeAllChecklistModuleRuns(user) {
   const role = normalizeRole(user?.role)
-  return ["admin", "gerente_general", "gerente", "recursos_humanos", "rrhh", "supervisor", "encargado_area"].includes(role)
+  return CHECKLIST_SEE_ALL_ROLES.includes(role)
 }
 
-function userChecklistArea(user) {
+export function userChecklistArea(user) {
   return user?.area_name || user?.areaName || ""
+}
+
+export function checklistAreasMatch(left, right) {
+  const a = normalizeChecklistAreaKey(left).toLowerCase()
+  const b = normalizeChecklistAreaKey(right).toLowerCase()
+  if (!a || !b) return false
+  if (a === b) return true
+  if (a === "cocina" && b.includes("cocina")) return true
+  if (b === "cocina" && a.includes("cocina")) return true
+  return false
 }
 
 function normalizeChecklistAreaKey(value) {
@@ -29,31 +47,123 @@ function normalizeChecklistAreaKey(value) {
   return String(value).trim()
 }
 
-function checklistAreasMatch(left, right) {
-  if (!left || !right) return false
-  return normalizeChecklistAreaKey(left).toLowerCase() === normalizeChecklistAreaKey(right).toLowerCase()
+function isSupervisorScopedRole(role) {
+  return role === "supervisor" || role === "encargado_area"
 }
 
-export function canSeeChecklistRun(run, user, profiles, { seeAll = false } = {}) {
+function runTemplateSupervisorId(run) {
+  return run?.supervisor_profile_id || run?.checklist_templates?.supervisor_profile_id || null
+}
+
+export function canSeeChecklistRun(run, user, profiles, {
+  seeAll = false,
+  processChildRunIds = null
+} = {}) {
   if (seeAll) return true
+  if (!run || !user?.id) return false
+
   const role = normalizeRole(user?.role)
   const userArea = userChecklistArea(user)
-  if (["admin", "gerente_general", "gerente", "recursos_humanos", "rrhh"].includes(role)) return true
-  if (run.assigned_profile_id === user?.id) return true
+
+  if (CHECKLIST_SEE_ALL_ROLES.includes(role)) return true
+  if (processChildRunIds?.has?.(run.id)) return true
+  if (run.assigned_profile_id === user.id) return true
 
   const replaced = hasChecklistReplacement(run)
-  if (replaced && run.original_assigned_profile_id === user?.id) return false
+  if (replaced && run.original_assigned_profile_id === user.id) return false
 
-  if (!run.assigned_profile_id && run.assigned_role && normalizeRole(run.assigned_role) === role) return true
-  if (!run.assigned_profile_id && run.area && userArea && checklistAreasMatch(run.area, userArea)) return true
-  if (role === "supervisor" || role === "encargado_area") {
-    if (run.supervisor_profile_id === user?.id) return true
-    if (userArea && run.area && checklistAreasMatch(run.area, userArea)) return true
-    const assigned = profiles.find((profile) => profile.id === run.assigned_profile_id)
-    if (assigned && String(assigned.supervisor_profile_id || "") === String(user?.id || "")) return true
-    return Boolean(userArea && assigned?.area_name && checklistAreasMatch(assigned.area_name, userArea))
+  const templateSupervisorId = runTemplateSupervisorId(run)
+  if (templateSupervisorId && String(templateSupervisorId) === String(user.id)) return true
+  if (run.supervisor_profile_id && String(run.supervisor_profile_id) === String(user.id)) return true
+
+  if (!isSupervisorScopedRole(role)) {
+    if (!run.assigned_profile_id && run.assigned_role && normalizeRole(run.assigned_role) === role) return true
+    if (!run.assigned_profile_id && run.area && userArea && checklistAreasMatch(run.area, userArea)) return true
+    return false
   }
+
+  if (userArea && run.area && checklistAreasMatch(run.area, userArea)) return true
+
+  if (
+    !run.assigned_profile_id
+    && run.assigned_role
+    && normalizeRole(run.assigned_role) === role
+    && userArea
+    && run.area
+    && checklistAreasMatch(run.area, userArea)
+  ) {
+    return true
+  }
+
+  const assigned = profiles.find((profile) => profile.id === run.assigned_profile_id)
+  if (assigned) {
+    if (String(assigned.supervisor_profile_id || "") === String(user.id)) return true
+    if (userArea && assigned.area_name && checklistAreasMatch(assigned.area_name, userArea)) return true
+  }
+
   return false
+}
+
+export function collectProcessChildRunIds(processRunDetails = []) {
+  const ids = new Set()
+  ;(processRunDetails || []).forEach((detail) => {
+    ;(detail?.steps || []).forEach((step) => {
+      if (step?.checklist_run_id) ids.add(step.checklist_run_id)
+    })
+  })
+  return ids
+}
+
+export function buildSupervisorChecklistVisibilityAudit({
+  rawRuns = [],
+  user = null,
+  profiles = [],
+  processRunDetails = [],
+  operationalToday = null
+} = {}) {
+  const role = normalizeRole(user?.role)
+  if (!isSupervisorScopedRole(role)) return null
+
+  const processChildRunIds = collectProcessChildRunIds(processRunDetails)
+  const today = operationalToday || getChecklistOperationalDate()
+  const nonCancelled = (rawRuns || []).filter((run) => run?.status !== "cancelled")
+  const visible = nonCancelled.filter((run) => (
+    canSeeChecklistRun(run, user, profiles, { seeAll: false, processChildRunIds })
+  ))
+  const hidden = nonCancelled.filter((run) => !visible.some((item) => item.id === run.id))
+
+  const countBy = (runs, predicate) => runs.filter(predicate).length
+
+  return {
+    userId: user?.id || null,
+    userName: user?.name || user?.full_name || null,
+    userRole: role,
+    userArea: userChecklistArea(user),
+    operationalToday: today,
+    processGroupsVisible: (processRunDetails || []).length,
+    processChildRunIds: processChildRunIds.size,
+    totals: {
+      rawReceived: nonCancelled.length,
+      visible: visible.length,
+      hidden: hidden.length,
+      visibleAssignedToSelf: countBy(visible, (run) => run.assigned_profile_id === user.id),
+      visibleByArea: countBy(visible, (run) => (
+        run.area && userChecklistArea(user) && checklistAreasMatch(run.area, userChecklistArea(user))
+      )),
+      visibleBySupervisorProfile: countBy(visible, (run) => (
+        String(runTemplateSupervisorId(run) || run.supervisor_profile_id || "") === String(user.id)
+      )),
+      visibleByProcessChild: countBy(visible, (run) => processChildRunIds.has(run.id)),
+      hiddenSamples: hidden.slice(0, 8).map((run) => ({
+        id: run.id,
+        title: run.checklist_templates?.title || null,
+        area: run.area || null,
+        assigned_profile_id: run.assigned_profile_id || null,
+        assigned_role: run.assigned_role || null,
+        status: run.status
+      }))
+    }
+  }
 }
 
 export function checklistLogicalRunKey(run) {
@@ -93,9 +203,9 @@ export function dedupeLogicalChecklistRuns(runs) {
   return dedupeChecklistRunsById(runs)
 }
 
-export function filterVisibleChecklistRuns(runs, user, profiles, { seeAll = false } = {}) {
+export function filterVisibleChecklistRuns(runs, user, profiles, { seeAll = false, processChildRunIds = null } = {}) {
   return (runs || []).filter((run) => (
-    run?.status !== "cancelled" && canSeeChecklistRun(run, user, profiles, { seeAll })
+    run?.status !== "cancelled" && canSeeChecklistRun(run, user, profiles, { seeAll, processChildRunIds })
   ))
 }
 
@@ -232,14 +342,15 @@ export function buildChecklistDisplayPipelineAudit({
   rawRuns = [],
   user = null,
   profiles = [],
-  canViewChecklistLibrary = false,
+  processRunDetails = [],
   operationalToday = null,
   loadDiagnostics = null
 } = {}) {
   const today = operationalToday || getChecklistOperationalDate()
-  const seeAll = canSeeAllChecklistModuleRuns(user, canViewChecklistLibrary)
+  const seeAll = canSeeAllChecklistModuleRuns(user)
+  const processChildRunIds = collectProcessChildRunIds(processRunDetails)
   const nonCancelled = (rawRuns || []).filter((run) => run?.status !== "cancelled")
-  const visibleRuns = filterVisibleChecklistRuns(rawRuns, user, profiles, { seeAll })
+  const visibleRuns = filterVisibleChecklistRuns(rawRuns, user, profiles, { seeAll, processChildRunIds })
   const hiddenByVisibility = nonCancelled.filter((run) => !visibleRuns.some((item) => item.id === run.id))
   const operationalMatches = visibleRuns.filter((run) => (
     normalizeChecklistRunDate(run?.run_date) === today

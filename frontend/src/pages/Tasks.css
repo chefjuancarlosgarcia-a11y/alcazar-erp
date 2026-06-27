@@ -1015,6 +1015,31 @@
   color: #f0fdfa;
 }
 
+.checklists-split-tabs button.checklists-split-tabs__tab--has-sibling-count em {
+  background: #2563eb;
+  color: #eff6ff;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.35);
+}
+
+.checklists-split-tabs button.checklists-split-tabs__tab--has-sibling-count:not(.active) {
+  border-color: rgba(37, 99, 235, 0.45);
+}
+
+.checklists-split-scope-hint {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border: 1px solid rgba(37, 99, 235, 0.35);
+  border-radius: 12px;
+  background: rgba(37, 99, 235, 0.08);
+  color: #bfdbfe;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.checklists-split-scope-hint .tasks-link {
+  font-weight: 800;
+}
+
 .checklists-card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));

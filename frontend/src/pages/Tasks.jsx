@@ -105,8 +105,10 @@ import {
 } from "../utils/checklistOperationalStatus"
 import {
   buildChecklistDisplayPipelineAudit,
+  buildSupervisorChecklistVisibilityAudit,
   canSeeAllChecklistModuleRuns,
   canSeeChecklistRun,
+  collectProcessChildRunIds,
   dedupeChecklistRunsById
 } from "../utils/checklistRunDisplay"
 import {
@@ -1650,11 +1652,18 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
     if (user) stableUserRef.current = user
   }, [user])
   const stableUser = user || stableUserRef.current
-  const seeAllModuleRuns = canSeeAllChecklistModuleRuns(stableUser, canViewChecklistLibrary)
+  const seeAllModuleRuns = canSeeAllChecklistModuleRuns(stableUser)
+  const processChildRunIds = useMemo(
+    () => collectProcessChildRunIds(processRunDetails),
+    [processRunDetails]
+  )
   const selectedRun = runs.find((run) => run.id === selectedRunId)
   const activeTemplates = templates.filter((template) => template.status === "active")
   const visibleRuns = runs.filter((run) => (
-    run.status !== "cancelled" && canSeeChecklistRun(run, stableUser, profiles, { seeAll: seeAllModuleRuns })
+    run.status !== "cancelled" && canSeeChecklistRun(run, stableUser, profiles, {
+      seeAll: seeAllModuleRuns,
+      processChildRunIds
+    })
   ))
   const logChecklistAudit = useCallback(async (eventType, runId, details = {}) => {
     const meta = runId ? getChecklistRunMeta(runId) : null
@@ -1919,8 +1928,9 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
         if (date) processDetailsLoadedDatesRef.current.add(date)
       })
       const actor = user || stableUserRef.current
-      const seeAll = canSeeAllChecklistModuleRuns(actor, canViewChecklistLibrary)
-      const canSeeRun = (run) => canSeeChecklistRun(run, actor, profileRows, { seeAll })
+      const childRunIds = collectProcessChildRunIds(loadedProcessDetails)
+      const seeAll = canSeeAllChecklistModuleRuns(actor)
+      const canSeeRun = (run) => canSeeChecklistRun(run, actor, profileRows, { seeAll, processChildRunIds: childRunIds })
       const activeRunIds = syncedRuns
         .filter((run) => run.status !== "cancelled" && canSeeRun(run))
         .filter((run) => isChecklistRunTodayWork(run) || isChecklistRunOverdueBucket(run))
@@ -1948,9 +1958,16 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
         rawRuns: syncedRuns,
         user: actor,
         profiles: profileRows,
-        canViewChecklistLibrary,
+        processRunDetails: loadedProcessDetails,
         operationalToday,
         loadDiagnostics: runResult.diagnostics || null
+      })
+      const supervisorVisibilityAudit = buildSupervisorChecklistVisibilityAudit({
+        rawRuns: syncedRuns,
+        user: actor,
+        profiles: profileRows,
+        processRunDetails: loadedProcessDetails,
+        operationalToday
       })
       setChecklistAudit(canViewChecklistLibrary ? audit : null)
       setChecklistPipelineAudit(canViewChecklistLibrary ? pipelineAudit : null)
@@ -1968,12 +1985,20 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
           rowDiagnosis: row.rowDiagnosis
         })))
       }
+      if (supervisorVisibilityAudit) {
+        console.info("[checklists] supervisor visibility audit", supervisorVisibilityAudit.totals, {
+          user: supervisorVisibilityAudit.userName,
+          userArea: supervisorVisibilityAudit.userArea,
+          processGroupsVisible: supervisorVisibilityAudit.processGroupsVisible,
+          processChildRunIds: supervisorVisibilityAudit.processChildRunIds
+        })
+      }
       if (!silent && generationWarning && todayCount === 0) {
         setMessage(`${generationWarning} Aplica la migracion 112 en Supabase si aun no lo hiciste, luego recarga con Ctrl+Shift+R.`)
       } else if (!silent && todayCount === 0 && audit.userMessage && !generationWarning) {
         setMessage(audit.userMessage)
       }
-      return { runs: syncedRuns, error: null, audit }
+      return { runs: syncedRuns, error: null, audit, processRunDetails: loadedProcessDetails }
     } finally {
       suppressRealtimeRefreshRef.current = false
       refreshInFlightRef.current = false
@@ -2015,10 +2040,11 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       )
       const refreshResult = await refresh({ silent: true })
       const actor = user || stableUserRef.current
-      const seeAll = canSeeAllChecklistModuleRuns(actor, canViewChecklistLibrary)
+      const seeAll = canSeeAllChecklistModuleRuns(actor)
+      const childRunIds = collectProcessChildRunIds(refreshResult?.processRunDetails || processRunDetails)
       const audit = auditLoadedChecklistModule({
         runs: (refreshResult?.runs || []).filter((run) => (
-          canSeeChecklistRun(run, actor, profiles, { seeAll })
+          canSeeChecklistRun(run, actor, profiles, { seeAll, processChildRunIds: childRunIds })
         )),
         templates: templateResult.data || [],
         fallback
@@ -2941,7 +2967,14 @@ function ChecklistDashboardScopeKpis({ processCount, individualCount, showProces
   )
 }
 
-function ChecklistSplitScopeTabs({ value, onChange, processCount = 0, individualCount = 0, showProcessTab = true }) {
+function ChecklistSplitScopeTabs({
+  value,
+  onChange,
+  processCount = 0,
+  individualCount = 0,
+  showProcessTab = true,
+  emphasizeIndividualCount = false
+}) {
   if (!showProcessTab) return null
   const tabs = [
     ["processes", "Procesos operativos", processCount],
@@ -2953,11 +2986,16 @@ function ChecklistSplitScopeTabs({ value, onChange, processCount = 0, individual
         <button
           key={id}
           type="button"
-          className={value === id ? "active" : ""}
+          className={[
+            value === id ? "active" : "",
+            emphasizeIndividualCount && id === "individuals" && count > 0 && value !== "individuals"
+              ? "checklists-split-tabs__tab--has-sibling-count"
+              : ""
+          ].filter(Boolean).join(" ")}
           onClick={() => onChange(id)}
         >
           <span>{label}</span>
-          {count > 0 ? <em>{count}</em> : null}
+          {count > 0 ? <em aria-label={`${count} pendiente${count === 1 ? "" : "s"}`}>{count}</em> : null}
         </button>
       ))}
     </nav>
@@ -3031,6 +3069,13 @@ function ChecklistToday({
       orphanRuns: partitioned.orphanRuns
     }
   }, [todayRuns, processRunDetails, canViewProcessGroups])
+
+  useEffect(() => {
+    if (!canViewProcessGroups) return
+    if (processGroups.length === 0 && orphanRuns.length > 0) {
+      setScopeTab("individuals")
+    }
+  }, [canViewProcessGroups, processGroups.length, orphanRuns.length])
 
   const activeProcessDetail = useMemo(() => {
     if (!canViewProcessGroups || !selectedProcessDetail) return null
@@ -3118,10 +3163,20 @@ function ChecklistToday({
             processCount={processGroups.length}
             individualCount={orphanRuns.length}
             showProcessTab={canViewProcessGroups}
+            emphasizeIndividualCount={canViewProcessGroups && scopeTab === "processes"}
           />
 
           {canViewProcessGroups && scopeTab === "processes" ? (
             <section className="checklists-today-section">
+              {orphanRuns.length > 0 ? (
+                <p className="checklists-split-scope-hint" role="status">
+                  Hay {orphanRuns.length} checklist{orphanRuns.length === 1 ? "" : "s"} individual{orphanRuns.length === 1 ? "" : "es"} fuera de procesos.
+                  {" "}
+                  <button type="button" className="tasks-link" onClick={() => setScopeTab("individuals")}>
+                    Ver checklists individuales ({orphanRuns.length})
+                  </button>
+                </p>
+              ) : null}
               {processGroups.length > 0 ? (
                 <div className="checklists-today-processes-grid">
                   {processGroups.map((processDetail) => (
@@ -3136,11 +3191,15 @@ function ChecklistToday({
                 <FriendlyEmpty
                   title="No hay procesos operativos para hoy."
                   text={orphanRuns.length
-                    ? `Hay ${orphanRuns.length} checklist${orphanRuns.length === 1 ? "" : "s"} individual${orphanRuns.length === 1 ? "" : "es"} en la otra pestaña.`
+                    ? `Hay ${orphanRuns.length} checklist${orphanRuns.length === 1 ? "" : "s"} individual${orphanRuns.length === 1 ? "" : "es"} para hoy.`
                     : loading
                       ? "Generando o cargando procesos del día operativo actual."
                       : "Los procesos del día aparecerán aquí cuando estén programados."}
-                  action={!todayRuns.length && !loading && canEnsureToday ? (
+                  action={orphanRuns.length ? (
+                    <button type="button" className="tasks-primary" onClick={() => setScopeTab("individuals")}>
+                      Ver checklists individuales ({orphanRuns.length})
+                    </button>
+                  ) : !todayRuns.length && !loading && canEnsureToday ? (
                     <div className="checklists-empty-actions">
                       {checklistAudit?.historicPendingCount > 0 ? (
                         <button type="button" className="tasks-secondary" onClick={onGoToOverdue}>
