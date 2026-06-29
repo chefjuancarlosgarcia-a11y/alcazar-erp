@@ -42,6 +42,37 @@ function itemPayload(item) {
   }
 }
 
+const INVENTORY_REQUEST_TIMEOUT_MS = 30000
+
+export function mapInventoryError(error) {
+  if (!error) return { message: "Operación de inventario fallida." }
+  const message = String(error.message || "").trim()
+  const lower = message.toLowerCase()
+  if (lower.includes("duplicate key") && lower.includes("sku")) {
+    return { message: "No se pudo guardar el producto porque el SKU ya existe.", code: error.code }
+  }
+  if (lower.includes("row-level security") || lower.includes("permission") || lower.includes("not authorized")) {
+    return { message: "No tienes permisos para modificar productos de inventario.", code: error.code }
+  }
+  return { message: message || "Operación de inventario fallida.", code: error.code }
+}
+
+async function withInventoryTimeout(promise, label = "inventory") {
+  let timer
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          reject(Object.assign(new Error("La solicitud tardó demasiado. Intenta de nuevo."), { code: "TIMEOUT" }))
+        }, INVENTORY_REQUEST_TIMEOUT_MS)
+      })
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 async function queryItems(activeOnly = false) {
   let query = supabase.from("inventory_items").select("*, area_inventory(*)")
   if (activeOnly) query = query.eq("active", true)
@@ -57,26 +88,37 @@ export function getActiveInventoryItems() {
   return queryItems(true)
 }
 
+export async function getInventoryItemById(id) {
+  const { data, error } = await withInventoryTimeout(
+    supabase.from("inventory_items").select("*, area_inventory(*)").eq("id", id).single()
+  )
+  if (error) return { data: null, error: mapInventoryError(error) }
+  if (!data?.id) return { data: null, error: { message: "No se encontró el producto en Supabase." } }
+  return { data: mapItem(data), error: null }
+}
+
 export async function createInventoryItem(item) {
-  const { data, error } = await supabase
-    .from("inventory_items")
-    .insert(itemPayload(item))
-    .select("*")
-    .single()
-  if (error) return { data: null, error }
+  const { data, error } = await withInventoryTimeout(
+    supabase.from("inventory_items").insert(itemPayload(item)).select("*").single()
+  )
+  if (error) return { data: null, error: mapInventoryError(error) }
+  if (!data?.id) return { data: null, error: { message: "Supabase no devolvió el producto creado." } }
+
   const rowsResult = await ensureItemAreaRows(data.id)
-  if (rowsResult.error) return { data: null, error: rowsResult.error }
-  return { data: mapItem({ ...data, area_inventory: rowsResult.data }), error: null }
+  if (rowsResult.error) return { data: null, error: mapInventoryError(rowsResult.error) }
+
+  const mapped = mapItem({ ...data, area_inventory: rowsResult.data })
+  return { data: mapped?.id ? mapped : null, error: mapped?.id ? null : { message: "No se pudo confirmar el producto creado." } }
 }
 
 export async function updateInventoryItem(id, updates) {
-  const { data, error } = await supabase
-    .from("inventory_items")
-    .update(itemPayload(updates))
-    .eq("id", id)
-    .select("*, area_inventory(*)")
-    .single()
-  return { data: mapItem(data), error }
+  const { data, error } = await withInventoryTimeout(
+    supabase.from("inventory_items").update(itemPayload(updates)).eq("id", id).select("*, area_inventory(*)").single()
+  )
+  if (error) return { data: null, error: mapInventoryError(error) }
+  if (!data?.id) return { data: null, error: { message: "Supabase no devolvió el producto actualizado." } }
+  const mapped = mapItem(data)
+  return { data: mapped?.id ? mapped : null, error: mapped?.id ? null : { message: "No se pudo confirmar el producto actualizado." } }
 }
 
 export function deactivateInventoryItem(id) {

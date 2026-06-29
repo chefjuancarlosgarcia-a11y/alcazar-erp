@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { Link } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
 import useSupabaseRealtime from "../hooks/useSupabaseRealtime"
+import { useToast } from "../hooks/useToast"
+import { ToastContainer } from "../components/ToastContainer"
 import InfoTooltip from "../components/InfoTooltip"
 import InventoryImportModal from "../components/InventoryImportModal"
 import PaginationControls from "../components/PaginationControls"
@@ -12,6 +14,7 @@ import {
   createInventoryItem,
   deactivateInventoryItem,
   deleteInventoryImage,
+  getInventoryItemById,
   getInventoryItems,
   getInventoryMovements,
   INVENTORY_IMAGE_ALLOWED_TYPES,
@@ -37,6 +40,13 @@ import { TestFlowBadge, TestFlowControls } from "../components/TestFlowBadge"
 import { TEST_FLOW_FILTER } from "../utils/testFlowMode"
 import InventoryItemYieldPanel from "../components/yield/InventoryItemYieldPanel"
 import { compressInventoryImageFile, revokeCompressedImagePreview } from "../utils/imageCompression"
+import { logPerformanceEvent } from "../utils/performanceLogger"
+import {
+  isInventoryItemVisibleInCatalog,
+  logInventorySaveDebug,
+  mapInventorySaveError,
+  validateInventoryItemForm
+} from "../utils/inventoryItemValidation"
 import "./InventoryBase.css"
 
 const DEFAULT_INVENTORY_UNIT = "Unidad/Pieza"
@@ -143,6 +153,10 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
   const [providerOptions, setProviderOptions] = useState([])
   const [inventoryCategories, setInventoryCategories] = useState([])
   const [categoriesLoading, setCategoriesLoading] = useState(true)
+  const [savingItem, setSavingItem] = useState(false)
+  const [itemFormErrors, setItemFormErrors] = useState({})
+  const [itemFormFocusField, setItemFormFocusField] = useState("")
+  const { toasts, showToast, dismissToast } = useToast()
   const [testFlowFilter, setTestFlowFilter] = useState(TEST_FLOW_FILTER.REAL)
   const realtimeTimerRef = useRef(null)
   const realtimeRefreshRef = useRef(null)
@@ -236,12 +250,16 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
   function openCreate() {
     setEditingItem(null)
     setItemForm(EMPTY_ITEM)
+    setItemFormErrors({})
+    setItemFormFocusField("")
     setShowItemForm(true)
     setError("")
   }
 
   async function openEdit(item) {
     setEditingItem(item)
+    setItemFormErrors({})
+    setItemFormFocusField("")
     setItemForm({
       ...EMPTY_ITEM,
       name: item.name || "",
@@ -278,132 +296,222 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
     }
   }
 
+  function clearItemFormError(field) {
+    setItemFormErrors((current) => {
+      if (!current[field]) return current
+      const next = { ...current }
+      delete next[field]
+      return next
+    })
+  }
+
+  function upsertItemInState(savedItem) {
+    setItems((current) => {
+      const next = current.some((item) => item.id === savedItem.id)
+        ? current.map((item) => (item.id === savedItem.id ? savedItem : item))
+        : [...current, savedItem]
+      return next.sort((left, right) => String(left.name || "").localeCompare(String(right.name || ""), "es"))
+    })
+  }
+
+  function updateItemFormField(field, value) {
+    clearItemFormError(field)
+    setItemForm((current) => ({ ...current, [field]: value }))
+  }
+
   async function saveItem(event) {
     event.preventDefault()
+    if (savingItem) return
+
+    const validation = validateInventoryItemForm(itemForm, {
+      categories: inventoryCategories,
+      providers: providerOptions,
+      items,
+      editingItemId: editingItem?.id || ""
+    })
+
+    if (!validation.valid) {
+      setItemFormErrors(validation.errors)
+      setItemFormFocusField(validation.firstErrorField || "")
+      const summary = "Faltan campos obligatorios. Revisa los campos marcados."
+      setError(summary)
+      showToast(summary, "error", 4500)
+      return
+    }
+
+    if (validation.normalized.duplicateNameItem && !window.confirm(`Ya existe el producto "${validation.normalized.duplicateNameItem.name}". ¿Deseas ingresarlo de igual manera?`)) {
+      return
+    }
+
+    setItemFormErrors({})
+    setItemFormFocusField("")
+    setSavingItem(true)
     setError("")
-    if (!itemForm.name.trim() || !itemForm.purchase_unit.trim() || !itemForm.base_unit.trim()) {
-      setError("Nombre, unidad de compra y unidad base son obligatorios.")
-      return
-    }
-    if (!itemForm.category?.trim()) {
-      setError("Selecciona una categoría.")
-      return
-    }
-    const conversionFactor = Number(itemForm.conversion_factor)
-    const purchasePrice = itemForm.purchase_price === "" ? null : Number(itemForm.purchase_price)
-    if (!Number.isFinite(conversionFactor) || conversionFactor <= 0) {
-      setError("El factor de conversión debe ser mayor a 0.")
-      return
-    }
-    if (purchasePrice !== null && (!Number.isFinite(purchasePrice) || purchasePrice < 0)) {
-      setError("El precio de compra no puede ser negativo.")
-      return
-    }
-    const canUseRecipeConversion = isPieceUnit(itemForm.base_unit)
-    const recipeWeightGrams = Number(itemForm.recipeWeightGrams)
-    if (canUseRecipeConversion && itemForm.useRecipeWeightConversion && (!Number.isFinite(recipeWeightGrams) || recipeWeightGrams <= 0)) {
-      setError("El peso promedio por unidad para recetas debe ser mayor que 0.")
-      return
-    }
-    const duplicateItem = items.find((item) => (
-      item.id !== editingItem?.id &&
-      normalizeItemName(item.name) === normalizeItemName(itemForm.name)
-    ))
-    if (duplicateItem && !window.confirm(`Ya existe el producto "${duplicateItem.name}". ¿Deseas ingresarlo de igual manera?`)) {
-      return
-    }
+
+    const isEdit = Boolean(editingItem)
+    const warnings = []
+    const startedAt = Date.now()
     const itemToSave = {
       ...itemForm,
-      category: resolveInventoryCategoryName(itemForm.category, inventoryCategories),
+      category: validation.normalized.categoryName,
       cost_per_base_unit: String(calculatedBaseCost(itemForm))
     }
-    const result = editingItem
-      ? await updateInventoryItem(editingItem.id, itemToSave)
-      : await createInventoryItem(itemToSave)
-    if (result.error) {
-      setError(result.error.message || "No se pudo guardar el producto inventariable.")
-      return
-    }
-    let conversionWarning = ""
-    if (canUseRecipeConversion && itemForm.useRecipeWeightConversion) {
-      const conversionResult = await upsertItemUnitToGramsConversion(result.data.id, itemForm.base_unit, recipeWeightGrams)
-      if (conversionResult.error) {
-        conversionWarning = "Producto guardado, pero no se pudo guardar la conversión para recetas."
-      }
-    } else if (itemForm.existingRecipeConversion) {
-      const shouldDelete = window.confirm("Este producto ya tiene una equivalencia configurada. ¿Deseas desactivarla/eliminarla?")
-      if (shouldDelete) {
-        const deleteResult = await deleteItemUnitToGramsConversion(
-          result.data.id,
-          itemForm.existingRecipeConversion.from_unit || itemForm.base_unit
-        )
-        if (deleteResult.error) {
-          conversionWarning = "Producto guardado, pero no se pudo eliminar la conversión para recetas."
-        }
-      }
-    }
-    if (itemForm.imageFile) {
-      const uploadResult = await uploadInventoryImage(itemForm.imageFile, result.data.id)
-      if (uploadResult.error) {
-        setError(`Producto guardado, pero no se pudo subir la imagen: ${uploadResult.error.message}`)
-        await refresh()
-        return
-      }
-      const imageResult = await updateInventoryItemImage(result.data.id, uploadResult.data.url)
-      if (imageResult.error) {
-        setError("La imagen se subió, pero no se pudo vincular al producto.")
-        await refresh()
-        return
-      }
-      const previousPath = storagePathFromUrl(editingItem?.image_url)
-      if (previousPath) await deleteInventoryImage(previousPath)
-    } else if (editingItem && itemForm.removeImage) {
-      const imageResult = await updateInventoryItemImage(result.data.id, null)
-      if (imageResult.error) {
-        setError("No se pudo quitar la imagen del producto.")
-        await refresh()
-        return
-      }
-      const previousPath = storagePathFromUrl(editingItem.image_url)
-      if (previousPath) await deleteInventoryImage(previousPath)
-    }
-    if (!editingItem) {
-      const initial = Number(itemForm.initialQuantity || 0)
-      const minimum = Number(itemForm.minimumQuantity || 0)
-      if (initial > 0 || minimum > 0) {
-        const stockResult = await adjustAreaInventory(
-          result.data.id,
-          "almacen",
-          initial,
-          minimum,
-          itemForm.base_unit,
-          "Stock inicial del producto"
-        )
-        if (stockResult.error) {
-          setError("Producto creado, pero no se pudo registrar su stock inicial.")
-          await refresh()
-          return
-        }
-      }
-    }
-    if (editingItem && Number(editingItem.purchase_price ?? 0) !== Number(purchasePrice ?? 0)) {
-      try {
-        await notifyRoles(["admin", "gerente_general"], {
-          type: "inventory_purchase_price_changed",
-          title: "Precio de compra modificado",
-          message: `El precio de compra de ${result.data.name} fue actualizado a Q${Number(purchasePrice || 0).toFixed(2)}.`,
-          entityType: "inventory_item",
-          entityId: result.data.id
+
+    logInventorySaveDebug(isEdit ? "update:start" : "create:start", {
+      name: itemToSave.name,
+      sku: itemToSave.sku,
+      category: itemToSave.category
+    })
+
+    try {
+      const result = isEdit
+        ? await updateInventoryItem(editingItem.id, itemToSave)
+        : await createInventoryItem(itemToSave)
+
+      if (result.error || !result.data?.id) {
+        const message = mapInventorySaveError(result.error)
+        logInventorySaveDebug("save:failed", { error: result.error })
+        logPerformanceEvent({
+          module: "inventory",
+          action: isEdit ? "update_item" : "create_item",
+          event_type: "error",
+          status: "error",
+          error_message: message
         })
-      } catch (notificationError) {
-        console.error("No se pudo registrar la notificación del precio de compra.", notificationError)
+        setError(message)
+        showToast(message, "error", 5000)
+        return
       }
+
+      let savedItem = result.data
+      const canUseRecipeConversion = isPieceUnit(itemForm.base_unit)
+      const recipeWeightGrams = validation.normalized.recipeWeightGrams
+
+      if (canUseRecipeConversion && itemForm.useRecipeWeightConversion) {
+        const conversionResult = await upsertItemUnitToGramsConversion(savedItem.id, itemForm.base_unit, recipeWeightGrams)
+        if (conversionResult.error) {
+          warnings.push("Producto guardado, pero no se pudo guardar la conversión para recetas.")
+        }
+      } else if (itemForm.existingRecipeConversion) {
+        const shouldDelete = window.confirm("Este producto ya tiene una equivalencia configurada. ¿Deseas desactivarla/eliminarla?")
+        if (shouldDelete) {
+          const deleteResult = await deleteItemUnitToGramsConversion(
+            savedItem.id,
+            itemForm.existingRecipeConversion.from_unit || itemForm.base_unit
+          )
+          if (deleteResult.error) {
+            warnings.push("Producto guardado, pero no se pudo eliminar la conversión para recetas.")
+          }
+        }
+      }
+
+      if (itemForm.imageFile) {
+        const uploadResult = await uploadInventoryImage(itemForm.imageFile, savedItem.id)
+        if (uploadResult.error) {
+          warnings.push(`Producto guardado, pero no se pudo subir la imagen: ${uploadResult.error.message}`)
+        } else {
+          const imageResult = await updateInventoryItemImage(savedItem.id, uploadResult.data.url)
+          if (imageResult.error) {
+            warnings.push("Producto guardado, pero no se pudo vincular la imagen al producto.")
+          } else {
+            savedItem = { ...savedItem, image_url: uploadResult.data.url }
+            const previousPath = storagePathFromUrl(editingItem?.image_url)
+            if (previousPath) await deleteInventoryImage(previousPath)
+          }
+        }
+      } else if (isEdit && itemForm.removeImage) {
+        const imageResult = await updateInventoryItemImage(savedItem.id, null)
+        if (imageResult.error) {
+          warnings.push("Producto guardado, pero no se pudo quitar la imagen anterior.")
+        } else {
+          savedItem = { ...savedItem, image_url: null }
+          const previousPath = storagePathFromUrl(editingItem.image_url)
+          if (previousPath) await deleteInventoryImage(previousPath)
+        }
+      }
+
+      if (!isEdit) {
+        const initial = validation.normalized.initialQuantity
+        const minimum = validation.normalized.minimumQuantity
+        if (initial > 0 || minimum > 0) {
+          const stockResult = await adjustAreaInventory(
+            savedItem.id,
+            "almacen",
+            initial,
+            minimum,
+            itemForm.base_unit,
+            "Stock inicial del producto"
+          )
+          if (stockResult.error) {
+            warnings.push("Producto creado, pero no se pudo registrar su stock inicial.")
+          }
+        }
+      }
+
+      const verified = await getInventoryItemById(savedItem.id)
+      if (verified.error || !verified.data?.id) {
+        const message = "El producto pudo haberse guardado, pero no se pudo confirmar en Supabase. Actualiza la lista e inténtalo de nuevo."
+        logInventorySaveDebug("verify:failed", { error: verified.error })
+        setError(message)
+        showToast(message, "warning", 6000)
+        await refresh()
+        return
+      }
+
+      savedItem = verified.data
+
+      if (isEdit && Number(editingItem.purchase_price ?? 0) !== Number(validation.normalized.purchasePrice ?? 0)) {
+        try {
+          await notifyRoles(["admin", "gerente_general"], {
+            type: "inventory_purchase_price_changed",
+            title: "Precio de compra modificado",
+            message: `El precio de compra de ${savedItem.name} fue actualizado a Q${Number(validation.normalized.purchasePrice || 0).toFixed(2)}.`,
+            entityType: "inventory_item",
+            entityId: savedItem.id
+          })
+        } catch (notificationError) {
+          console.error("No se pudo registrar la notificación del precio de compra.", notificationError)
+        }
+      }
+
+      upsertItemInState(savedItem)
+
+      const successMessage = isEdit ? "Cambios guardados correctamente." : "Producto guardado correctamente."
+      setShowItemForm(false)
+      setEditingItem(null)
+      setMessage(successMessage)
+      showToast(successMessage, "success", 3500)
+      warnings.forEach((warning) => showToast(warning, "warning", 6000))
+
+      if (!isInventoryItemVisibleInCatalog(savedItem, { query, areaFilter })) {
+        showToast("Producto guardado. Los filtros actuales pueden ocultarlo en la lista.", "info", 5000)
+      }
+
+      logInventorySaveDebug("save:success", { itemId: savedItem.id, warnings })
+      logPerformanceEvent({
+        module: "inventory",
+        action: isEdit ? "update_item" : "create_item",
+        event_type: "info",
+        status: "success",
+        duration_ms: Date.now() - startedAt
+      })
+
+      await refresh()
+    } catch (unexpectedError) {
+      const message = mapInventorySaveError(unexpectedError)
+      logInventorySaveDebug("save:exception", { message: unexpectedError?.message })
+      logPerformanceEvent({
+        module: "inventory",
+        action: isEdit ? "update_item" : "create_item",
+        event_type: "error",
+        status: "error",
+        error_message: message
+      })
+      setError(message)
+      showToast(message, "error", 5000)
+    } finally {
+      setSavingItem(false)
     }
-    setShowItemForm(false)
-    setEditingItem(null)
-    setMessage(conversionWarning || (editingItem ? "Producto actualizado correctamente." : "Producto creado en Supabase."))
-    if (conversionWarning) setError(conversionWarning)
-    await refresh()
   }
 
   async function deactivate(item) {
@@ -617,14 +725,26 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
         <ItemModal
           form={itemForm}
           setForm={setItemForm}
+          onUpdateField={updateItemFormField}
           editingItem={editingItem}
           providers={providerOptions}
           categories={inventoryCategories}
           categoriesLoading={categoriesLoading}
           canManageCategories={canEditCatalog}
+          formErrors={itemFormErrors}
+          focusField={itemFormFocusField}
+          saving={savingItem}
+          formError={error}
+          onClearFieldError={clearItemFormError}
           onSave={saveItem}
           onDelete={deactivate}
-          onClose={() => setShowItemForm(false)}
+          onClose={() => {
+            if (savingItem) return
+            setShowItemForm(false)
+            setEditingItem(null)
+            setItemFormErrors({})
+            setItemFormFocusField("")
+          }}
         />
       )}
       {adjustment && <AdjustmentModal adjustment={adjustment} setAdjustment={setAdjustment} items={items} areas={areas} onSave={saveAdjustment} onClose={() => setAdjustment(null)} />}
@@ -635,6 +755,7 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
           + Nuevo producto
         </button>
       )}
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </section>
   )
 }
@@ -819,18 +940,51 @@ function MovementsTable({ movements, items, areas, loading }) {
   </div>
 }
 
-function ItemModal({ form, setForm, editingItem, providers, categories, categoriesLoading, canManageCategories, onSave, onDelete, onClose }) {
+function ItemModal({
+  form,
+  setForm,
+  onUpdateField,
+  editingItem,
+  providers,
+  categories,
+  categoriesLoading,
+  canManageCategories,
+  formErrors = {},
+  focusField = "",
+  saving = false,
+  formError = "",
+  onClearFieldError,
+  onSave,
+  onDelete,
+  onClose
+}) {
   const editing = Boolean(editingItem)
   const [imageError, setImageError] = useState("")
   const [imageStatus, setImageStatus] = useState("")
   const [imageStatusMessage, setImageStatusMessage] = useState("")
+  const formGridRef = useRef(null)
   const showRecipeConversion = isPieceUnit(form.base_unit)
   const imageBusy = imageStatus === "optimizing"
-  const update = (field, value) => setForm((current) => ({ ...current, [field]: value }))
+  const hasFieldErrors = Object.keys(formErrors).length > 0
+  const update = (field, value) => onUpdateField(field, value)
   const categoryOptions = useMemo(
     () => buildInventoryCategoryOptions(categories, editingItem?.category || ""),
     [categories, editingItem?.category]
   )
+
+  useEffect(() => {
+    if (!focusField && !hasFieldErrors) return
+    const targetField = focusField || Object.keys(formErrors)[0]
+    if (!targetField) return
+    const node = formGridRef.current?.querySelector(`[data-inventory-field="${targetField}"]`)
+    node?.scrollIntoView({ behavior: "smooth", block: "center" })
+    const focusable = node?.querySelector("input:not([readonly]):not([disabled]), select:not([disabled]), textarea:not([disabled])")
+    focusable?.focus?.({ preventScroll: true })
+  }, [focusField, formErrors, hasFieldErrors])
+
+  function fieldError(field) {
+    return formErrors[field] || ""
+  }
 
   function releasePreview(previewUrl) {
     if (previewUrl?.startsWith("blob:")) revokeCompressedImagePreview(previewUrl)
@@ -881,19 +1035,28 @@ function ItemModal({ form, setForm, editingItem, providers, categories, categori
     setImageStatus("")
     setImageStatusMessage("")
   }
-  return <div className="inventory-modal-backdrop"><form className="inventory-modal" onSubmit={onSave}>
-    <header><div><p className="inventory-base-eyebrow">Producto inventariable</p><h2>{editing ? "Editar producto" : "Nuevo producto"}</h2></div><button type="button" onClick={onClose}>Cerrar</button></header>
-    <div className="inventory-form-grid">
-      <Field label="Nombre"><input required value={form.name} onChange={(event) => update("name", event.target.value)} /></Field>
-      <Field label="SKU"><input value={form.sku} onChange={(event) => update("sku", event.target.value)} /></Field>
-      <Field label="Categoría">
+  return <div className="inventory-modal-backdrop"><form className="inventory-modal" onSubmit={onSave} noValidate>
+    <header><div><p className="inventory-base-eyebrow">Producto inventariable</p><h2>{editing ? "Editar producto" : "Nuevo producto"}</h2></div><button type="button" onClick={onClose} disabled={saving}>Cerrar</button></header>
+    {(formError || hasFieldErrors) && (
+      <div className="inventory-form-banner-error" role="alert">
+        {formError || "Revisa los campos marcados antes de guardar."}
+      </div>
+    )}
+    <div className="inventory-form-grid" ref={formGridRef}>
+      <Field label="Nombre" fieldKey="name" error={fieldError("name")}>
+        <input required value={form.name} onChange={(event) => update("name", event.target.value)} disabled={saving} />
+      </Field>
+      <Field label="SKU" fieldKey="sku" error={fieldError("sku")}>
+        <input value={form.sku} onChange={(event) => update("sku", event.target.value)} disabled={saving} />
+      </Field>
+      <Field label="Categoría" fieldKey="category" error={fieldError("category")}>
         <div className="inventory-category-field">
           {categoriesLoading ? (
             <p className="inventory-base-muted">Cargando categorías...</p>
           ) : !categoryOptions.length ? (
             <p className="inventory-base-muted">No hay categorías activas configuradas.</p>
           ) : (
-            <select required value={form.category} onChange={(event) => update("category", event.target.value)}>
+            <select required value={form.category} onChange={(event) => update("category", event.target.value)} disabled={saving}>
               <option value="">Seleccionar categoría</option>
               {categoryOptions.map((category) => (
                 <option key={category.code} value={category.code}>
@@ -909,41 +1072,57 @@ function ItemModal({ form, setForm, editingItem, providers, categories, categori
           )}
         </div>
       </Field>
-      <Field label="Proveedor">
+      <Field label="Proveedor" fieldKey="supplier" error={fieldError("supplier")}>
         <div className="inventory-supplier-field">
-          <select value={form.supplier} onChange={(event) => update("supplier", event.target.value)}>
+          <select value={form.supplier} onChange={(event) => update("supplier", event.target.value)} disabled={saving}>
             <option value="">Seleccionar proveedor</option>
             {form.supplier && !providers.includes(form.supplier) && <option value={form.supplier}>Actual: {form.supplier}</option>}
             {providers.map((provider) => <option key={provider} value={provider}>{provider}</option>)}
           </select>
-          <button type="button" className="secondary" onClick={() => { window.location.href = "/inventory?section=proveedores" }}>
+          <button type="button" className="secondary" disabled={saving} onClick={() => { window.location.href = "/inventory?section=proveedores" }}>
             Crear proveedor
           </button>
         </div>
         {!providers.length && <small className="inventory-base-muted">No hay proveedores guardados todavía.</small>}
       </Field>
-      <Field label="Unidad de compra" tooltip="Cómo compras este producto al proveedor."><InventoryUnitSelect required value={form.purchase_unit} onChange={(value) => update("purchase_unit", value)} /></Field>
-      <Field label="Unidad base" tooltip="Cómo el sistema consume este producto en recetas e inventario.">
+      <Field label="Unidad de compra" fieldKey="purchase_unit" error={fieldError("purchase_unit")} tooltip="Cómo compras este producto al proveedor.">
+        <InventoryUnitSelect required value={form.purchase_unit} disabled={saving} onChange={(value) => update("purchase_unit", value)} />
+      </Field>
+      <Field label="Unidad base" fieldKey="base_unit" error={fieldError("base_unit")} tooltip="Cómo el sistema consume este producto en recetas e inventario.">
         <InventoryUnitSelect
           required
+          disabled={saving}
           value={form.base_unit}
-          onChange={(value) => setForm((current) => ({
-            ...current,
-            base_unit: value,
-            useRecipeWeightConversion: isPieceUnit(value) ? current.useRecipeWeightConversion : false
-          }))}
+          onChange={(value) => {
+            onClearFieldError?.("base_unit")
+            setForm((current) => ({
+              ...current,
+              base_unit: value,
+              useRecipeWeightConversion: isPieceUnit(value) ? current.useRecipeWeightConversion : false
+            }))
+          }}
         />
       </Field>
-      <Field label="Factor conversión" tooltip="Cuántas unidades base contiene la unidad de compra."><input min="0.0001" step="any" type="number" value={form.conversion_factor} onChange={(event) => update("conversion_factor", event.target.value)} /></Field>
-      <Field label="Precio de compra" tooltip="Costo total de la unidad como la compras al proveedor.">
-        <div className="inventory-currency-input"><span>Q</span><input min="0" step="0.01" type="number" placeholder="0.00" value={form.purchase_price} onChange={(event) => update("purchase_price", event.target.value)} /></div>
+      <Field label="Factor conversión" fieldKey="conversion_factor" error={fieldError("conversion_factor")} tooltip="Cuántas unidades base contiene la unidad de compra.">
+        <input min="0.0001" step="any" type="number" value={form.conversion_factor} onChange={(event) => update("conversion_factor", event.target.value)} disabled={saving} />
       </Field>
-      <Field label="Costo por unidad base" tooltip="Costo automático de una unidad pequeña utilizada por recetas.">
+      <Field label="Precio de compra" fieldKey="purchase_price" error={fieldError("purchase_price")} tooltip="Costo total de la unidad como la compras al proveedor.">
+        <div className="inventory-currency-input"><span>Q</span><input min="0" step="0.01" type="number" placeholder="0.00" value={form.purchase_price} onChange={(event) => update("purchase_price", event.target.value)} disabled={saving} /></div>
+      </Field>
+      <Field label="Costo por unidad base" fieldKey="cost_per_base_unit" error={fieldError("cost_per_base_unit")} tooltip="Costo automático de una unidad pequeña utilizada por recetas.">
         <input readOnly value={calculatedBaseCost(form)} />
         {form.purchase_price === "" && editing && <small className="inventory-base-muted">Conserva el costo registrado previamente hasta indicar un precio de compra.</small>}
       </Field>
-      {!editing && <Field label="Stock inicial almacén"><input min="0" step="any" type="number" value={form.initialQuantity} onChange={(event) => update("initialQuantity", event.target.value)} /></Field>}
-      {!editing && <Field label="Punto mínimo" tooltip="Cantidad mínima recomendada antes de alertar falta de stock."><input min="0" step="any" type="number" value={form.minimumQuantity} onChange={(event) => update("minimumQuantity", event.target.value)} /></Field>}
+      {!editing && (
+        <Field label="Stock inicial almacén" fieldKey="initialQuantity" error={fieldError("initialQuantity")}>
+          <input min="0" step="any" type="number" value={form.initialQuantity} onChange={(event) => update("initialQuantity", event.target.value)} disabled={saving} />
+        </Field>
+      )}
+      {!editing && (
+        <Field label="Punto mínimo" fieldKey="minimumQuantity" error={fieldError("minimumQuantity")} tooltip="Cantidad mínima recomendada antes de alertar falta de stock.">
+          <input min="0" step="any" type="number" value={form.minimumQuantity} onChange={(event) => update("minimumQuantity", event.target.value)} disabled={saving} />
+        </Field>
+      )}
     </div>
     {showRecipeConversion && (
       <section className="inventory-recipe-conversion">
@@ -969,12 +1148,16 @@ function ItemModal({ form, setForm, editingItem, providers, categories, categori
               value={form.recipeWeightGrams}
               onChange={(event) => update("recipeWeightGrams", event.target.value)}
               placeholder="80"
+              disabled={saving}
+              data-inventory-field="recipeWeightGrams"
+              aria-invalid={Boolean(fieldError("recipeWeightGrams"))}
             />
-            <select value={form.recipeWeightUnit || RECIPE_WEIGHT_UNIT} onChange={(event) => update("recipeWeightUnit", event.target.value)}>
+            <select value={form.recipeWeightUnit || RECIPE_WEIGHT_UNIT} onChange={(event) => update("recipeWeightUnit", event.target.value)} disabled={saving}>
               <option value={RECIPE_WEIGHT_UNIT}>Gramos</option>
             </select>
           </div>
         )}
+        {fieldError("recipeWeightGrams") && <small className="inventory-field-error" role="alert">{fieldError("recipeWeightGrams")}</small>}
         {form.existingRecipeConversion && !form.useRecipeWeightConversion && (
           <p className="inventory-recipe-note">Este producto ya tiene una equivalencia configurada; al guardar podrás decidir si deseas eliminarla.</p>
         )}
@@ -1019,16 +1202,22 @@ function ItemModal({ form, setForm, editingItem, providers, categories, categori
       <InventoryItemYieldPanel itemId={editingItem.id} item={editingItem} canManage={true} />
     )}
     <div className="inventory-modal-actions">
-      {editingItem?.active !== false && <button type="button" className="danger inventory-delete-action" onClick={() => onDelete(editingItem)}>Eliminar producto</button>}
-      <button type="button" className="secondary" onClick={onClose}>Cancelar</button>
-      <button type="submit" className="primary">Guardar</button>
+      {editingItem?.active !== false && (
+        <button type="button" className="danger inventory-delete-action" onClick={() => onDelete(editingItem)} disabled={saving}>
+          Eliminar producto
+        </button>
+      )}
+      <button type="button" className="secondary" onClick={onClose} disabled={saving}>Cancelar</button>
+      <button type="submit" className="primary" disabled={saving || imageBusy}>
+        {saving ? "Guardando…" : "Guardar"}
+      </button>
     </div>
   </form></div>
 }
 
-function InventoryUnitSelect({ value, onChange, required = false }) {
+function InventoryUnitSelect({ value, onChange, required = false, disabled = false }) {
   const legacyValue = value && !INVENTORY_UNITS.includes(value) ? value : ""
-  return <select required={required} value={value} onChange={(event) => onChange(event.target.value)}>
+  return <select required={required} disabled={disabled} value={value} onChange={(event) => onChange(event.target.value)}>
     <option value="">Seleccionar unidad</option>
     {legacyValue && <option value={legacyValue}>Otra: {legacyValue}</option>}
     {INVENTORY_UNITS.map((unit) => <option key={unit} value={unit}>{unit}</option>)}
@@ -1091,8 +1280,14 @@ function LegacyModal({ items, canManage, onMigrate, onMigrateSelected, onClose }
   </section></div>
 }
 
-function Field({ label, tooltip, children }) {
-  return <label className="inventory-field"><span>{label}{tooltip && <InfoTooltip text={tooltip} />}</span>{children}</label>
+function Field({ label, tooltip, children, error, fieldKey }) {
+  return (
+    <label className={`inventory-field${error ? " has-error" : ""}`} data-inventory-field={fieldKey || ""}>
+      <span>{label}{tooltip && <InfoTooltip text={tooltip} />}</span>
+      {children}
+      {error && <small className="inventory-field-error" role="alert">{error}</small>}
+    </label>
+  )
 }
 
 function ProductImage({ item, small = false, large = false }) {
@@ -1117,14 +1312,6 @@ function minimumOf(item, areaId) {
 
 function initials(name) {
   return String(name || "P").split(/\s+/).slice(0, 2).map((part) => part.charAt(0).toUpperCase()).join("")
-}
-
-function normalizeItemName(name) {
-  return String(name || "")
-    .trim()
-    .toLocaleLowerCase("es")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
 }
 
 function unitForForm(value) {

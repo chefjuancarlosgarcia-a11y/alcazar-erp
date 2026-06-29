@@ -817,6 +817,32 @@
   border-color: #475569;
 }
 
+.inventory-form-banner-error {
+  margin: 0 var(--erp-space-16) var(--erp-space-12);
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  background: rgba(127, 29, 29, 0.35);
+  color: #fecaca;
+  font-size: 14px;
+}
+
+.inventory-field.has-error input,
+.inventory-field.has-error select,
+.inventory-field.has-error textarea,
+.inventory-recipe-equivalence input[aria-invalid="true"] {
+  border-color: #f87171 !important;
+  box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.35);
+}
+
+.inventory-field-error {
+  display: block;
+  margin-top: 6px;
+  color: #fca5a5;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .inventory-currency-input {
   position: relative;
 }
