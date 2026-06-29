@@ -13,6 +13,8 @@ import {
   deleteInventoryImage,
   getInventoryItems,
   getInventoryMovements,
+  INVENTORY_IMAGE_ALLOWED_TYPES,
+  INVENTORY_IMAGE_MAX_BYTES,
   updateInventoryItemImage,
   uploadInventoryImage,
   updateInventoryItem
@@ -27,6 +29,7 @@ import { getSuppliers } from "../services/suppliersService"
 import { TestFlowBadge, TestFlowControls } from "../components/TestFlowBadge"
 import { TEST_FLOW_FILTER } from "../utils/testFlowMode"
 import InventoryItemYieldPanel from "../components/yield/InventoryItemYieldPanel"
+import { compressInventoryImageFile, revokeCompressedImagePreview } from "../utils/imageCompression"
 import "./InventoryBase.css"
 
 const DEFAULT_INVENTORY_UNIT = "Unidad/Pieza"
@@ -777,35 +780,60 @@ function MovementsTable({ movements, items, areas, loading }) {
 function ItemModal({ form, setForm, editingItem, providers, onSave, onDelete, onClose }) {
   const editing = Boolean(editingItem)
   const [imageError, setImageError] = useState("")
+  const [imageStatus, setImageStatus] = useState("")
+  const [imageStatusMessage, setImageStatusMessage] = useState("")
   const showRecipeConversion = isPieceUnit(form.base_unit)
+  const imageBusy = imageStatus === "optimizing"
   const update = (field, value) => setForm((current) => ({ ...current, [field]: value }))
-  function selectImage(event) {
-    const file = event.target.files?.[0]
-    if (!file) return
-    const allowed = ["image/jpeg", "image/png", "image/webp"]
-    if (!allowed.includes(file.type)) {
-      setImageError("Usa una imagen JPG, PNG o WEBP.")
-      return
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      setImageError("La imagen no puede superar 5 MB.")
-      return
-    }
-    const reader = new FileReader()
-    reader.onload = () => {
-      setForm((current) => ({
-        ...current,
-        imageFile: file,
-        imagePreview: String(reader.result || ""),
-        removeImage: false
-      }))
-      setImageError("")
-    }
-    reader.readAsDataURL(file)
+
+  function releasePreview(previewUrl) {
+    if (previewUrl?.startsWith("blob:")) revokeCompressedImagePreview(previewUrl)
   }
-  function removeImage() {
-    setForm((current) => ({ ...current, imageFile: null, imagePreview: "", removeImage: true }))
+
+  async function selectImage(event) {
+    const input = event.target
+    const file = input.files?.[0]
+    input.value = ""
+    if (!file) return
+    if (!INVENTORY_IMAGE_ALLOWED_TYPES.includes(file.type)) {
+      setImageError("Usa una imagen JPG, PNG o WEBP.")
+      setImageStatus("")
+      setImageStatusMessage("")
+      return
+    }
+
     setImageError("")
+    setImageStatus("optimizing")
+    setImageStatusMessage("Optimizando imagen…")
+
+    try {
+      const result = await compressInventoryImageFile(file, { maxBytes: INVENTORY_IMAGE_MAX_BYTES })
+      setForm((current) => {
+        releasePreview(current.imagePreview)
+        return {
+          ...current,
+          imageFile: result.file,
+          imagePreview: result.previewUrl,
+          removeImage: false
+        }
+      })
+      setImageStatus("success")
+      setImageStatusMessage("Imagen optimizada correctamente.")
+    } catch (error) {
+      setImageStatus("error")
+      setImageStatusMessage("")
+      setImageError(error.message || "No se pudo optimizar la imagen. Intenta con otra foto.")
+    }
+  }
+
+  function removeImage() {
+    setForm((current) => {
+      releasePreview(current.imagePreview)
+      return { ...current, imageFile: null, imagePreview: "", removeImage: true }
+    })
+    setImageError("")
+    setImageStatus("")
+    setImageStatusMessage("")
   }
   return <div className="inventory-modal-backdrop"><form className="inventory-modal" onSubmit={onSave}>
     <header><div><p className="inventory-base-eyebrow">Producto inventariable</p><h2>{editing ? "Editar producto" : "Nuevo producto"}</h2></div><button type="button" onClick={onClose}>Cerrar</button></header>
@@ -894,15 +922,23 @@ function ItemModal({ form, setForm, editingItem, providers, onSave, onDelete, on
       <div className="inventory-image-actions">
         <label className="inventory-image-action">
           Seleccionar imagen
-          <input type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" onChange={selectImage} />
+          <input type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" onChange={selectImage} disabled={imageBusy} />
         </label>
         <label className="inventory-image-action camera">
           Tomar foto
-          <input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={selectImage} />
+          <input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={selectImage} disabled={imageBusy} />
         </label>
       </div>
     </Field>
-    <p className="inventory-image-help">En móvil, “Tomar foto” abre la cámara del dispositivo.</p>
+    <p className="inventory-image-help">
+      En móvil, “Tomar foto” abre la cámara del dispositivo. Las fotos grandes se optimizan automáticamente antes de subir (máx. 10 MB).
+    </p>
+    {imageStatus === "optimizing" && (
+      <p className="inventory-image-status optimizing" role="status">{imageStatusMessage}</p>
+    )}
+    {imageStatus === "success" && imageStatusMessage && (
+      <p className="inventory-image-status success" role="status">{imageStatusMessage}</p>
+    )}
     {imageError && <div className="inventory-base-error">{imageError}</div>}
     {form.imagePreview ? (
       <div className="inventory-image-preview">

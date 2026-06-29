@@ -850,6 +850,26 @@
   font-size: 12px;
 }
 
+.inventory-image-status {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.inventory-image-status.optimizing {
+  border: 1px solid rgba(59, 130, 246, .35);
+  background: rgba(37, 99, 235, .12);
+  color: #bfdbfe;
+}
+
+.inventory-image-status.success {
+  border: 1px solid rgba(34, 197, 94, .35);
+  background: rgba(22, 163, 74, .12);
+  color: #bbf7d0;
+}
+
 .inventory-image-preview {
   padding: var(--erp-space-16);
   border: 1px solid #24344a;

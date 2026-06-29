@@ -2,6 +2,14 @@ import { supabase } from "../lib/supabase"
 import { getActiveAreas } from "./areasService"
 
 const INVENTORY_IMAGES_BUCKET = "inventory-images"
+export const INVENTORY_IMAGE_MAX_BYTES = 10 * 1024 * 1024
+export const INVENTORY_IMAGE_ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"]
+
+const MIME_TO_EXTENSION = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp"
+}
 
 function mapItem(item) {
   const stocks = item?.area_inventory || []
@@ -170,7 +178,22 @@ export function importInventoryRows(rows) {
 }
 
 export async function uploadInventoryImage(file, itemId) {
-  const extension = String(file.name || "").split(".").pop()?.toLowerCase() || "jpg"
+  if (!INVENTORY_IMAGE_ALLOWED_TYPES.includes(file.type)) {
+    return {
+      data: null,
+      error: { message: "Formato no permitido. Usa JPG, PNG o WEBP." }
+    }
+  }
+  if (file.size > INVENTORY_IMAGE_MAX_BYTES) {
+    return {
+      data: null,
+      error: {
+        message: "La imagen optimizada supera 10 MB. Intenta con otra foto o un encuadre más cercano."
+      }
+    }
+  }
+
+  const extension = MIME_TO_EXTENSION[file.type] || "jpg"
   const safeName = String(file.name || "imagen")
     .replace(/\.[^.]+$/, "")
     .normalize("NFD")
@@ -181,7 +204,12 @@ export async function uploadInventoryImage(file, itemId) {
   const { error } = await supabase.storage
     .from(INVENTORY_IMAGES_BUCKET)
     .upload(path, file, { cacheControl: "3600", contentType: file.type, upsert: false })
-  if (error) return { data: null, error }
+  if (error) {
+    const message = /payload too large|exceeded the maximum|413/i.test(error.message || "")
+      ? "La imagen supera el límite permitido por el servidor. Intenta con otra foto."
+      : error.message
+    return { data: null, error: { message } }
+  }
   const { data } = supabase.storage.from(INVENTORY_IMAGES_BUCKET).getPublicUrl(path)
   return { data: { path, url: data.publicUrl }, error: null }
 }
