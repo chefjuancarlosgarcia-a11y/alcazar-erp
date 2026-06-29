@@ -26,6 +26,12 @@ import {
 } from "../services/inventoryConversionsService"
 import { notifyRoles } from "../services/notificationsService"
 import { getSuppliers } from "../services/suppliersService"
+import { getActiveInventoryCategories } from "../services/inventoryCategoriesService"
+import {
+  buildInventoryCategoryOptions,
+  resolveInventoryCategoryCode,
+  resolveInventoryCategoryName
+} from "../utils/inventoryCategoryUtils"
 import { TestFlowBadge, TestFlowControls } from "../components/TestFlowBadge"
 import { TEST_FLOW_FILTER } from "../utils/testFlowMode"
 import InventoryItemYieldPanel from "../components/yield/InventoryItemYieldPanel"
@@ -134,6 +140,8 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
   const [importOpen, setImportOpen] = useState(false)
   const [legacyItems, setLegacyItems] = useState(readLegacyItems)
   const [providerOptions, setProviderOptions] = useState([])
+  const [inventoryCategories, setInventoryCategories] = useState([])
+  const [categoriesLoading, setCategoriesLoading] = useState(true)
   const [testFlowFilter, setTestFlowFilter] = useState(TEST_FLOW_FILTER.REAL)
   const realtimeTimerRef = useRef(null)
   const realtimeRefreshRef = useRef(null)
@@ -164,6 +172,15 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
     refresh()
   }, [])
 
+  useEffect(() => {
+    if (!showItemForm || !editingItem || !inventoryCategories.length) return
+    setItemForm((current) => {
+      const nextCode = resolveInventoryCategoryCode(editingItem.category, inventoryCategories)
+      if (current.category === nextCode) return current
+      return { ...current, category: nextCode }
+    })
+  }, [showItemForm, editingItem, inventoryCategories])
+
   useEffect(() => () => {
     window.clearTimeout(realtimeTimerRef.current)
     window.clearTimeout(realtimeRefreshRef.current)
@@ -172,11 +189,12 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
   async function refresh() {
     setLoading(true)
     setError("")
-    const [areasResult, itemsResult, movementsResult, suppliersResult] = await Promise.all([
+    const [areasResult, itemsResult, movementsResult, suppliersResult, categoriesResult] = await Promise.all([
       getActiveAreas(),
       getInventoryItems(),
       getInventoryMovements({ limit: 100, testFlowFilter }),
-      canEditCatalog ? getSuppliers() : Promise.resolve({ data: [], error: null })
+      canEditCatalog ? getSuppliers() : Promise.resolve({ data: [], error: null }),
+      getActiveInventoryCategories()
     ])
     if (areasResult.error || itemsResult.error || movementsResult.error) {
       setError("No se pudo cargar el inventario desde Supabase. Verifica que la migración 004 esté aplicada.")
@@ -184,8 +202,13 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
     setAreas(areasResult.data || [])
     setItems(itemsResult.data || [])
     setMovements(movementsResult.data || [])
+    setInventoryCategories(categoriesResult.data || [])
+    setCategoriesLoading(false)
     if (suppliersResult.error) {
       setError(suppliersResult.error.message || "No se pudieron cargar los proveedores desde Supabase.")
+    }
+    if (categoriesResult.error) {
+      setError(categoriesResult.error.message || "No se pudieron cargar las categorías de inventario.")
     }
     setProviderOptions(uniqueProviderNames(suppliersResult.data || []))
     setLoading(false)
@@ -222,7 +245,7 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
       ...EMPTY_ITEM,
       name: item.name || "",
       sku: item.sku || "",
-      category: item.category || "",
+      category: resolveInventoryCategoryCode(item.category, inventoryCategories),
       purchase_unit: unitForForm(item.purchase_unit),
       base_unit: unitForForm(item.base_unit),
       conversion_factor: String(item.conversion_factor || 1),
@@ -261,6 +284,10 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
       setError("Nombre, unidad de compra y unidad base son obligatorios.")
       return
     }
+    if (!itemForm.category?.trim()) {
+      setError("Selecciona una categoría.")
+      return
+    }
     const conversionFactor = Number(itemForm.conversion_factor)
     const purchasePrice = itemForm.purchase_price === "" ? null : Number(itemForm.purchase_price)
     if (!Number.isFinite(conversionFactor) || conversionFactor <= 0) {
@@ -286,6 +313,7 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
     }
     const itemToSave = {
       ...itemForm,
+      category: resolveInventoryCategoryName(itemForm.category, inventoryCategories),
       cost_per_base_unit: String(calculatedBaseCost(itemForm))
     }
     const result = editingItem
@@ -584,7 +612,19 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
       {section === "inventarioAreas" && <AreaStockDashboard items={items} areas={areas} initialAreaId={initialAreaId} canManage={canManage} onAdjust={openAdjustment} />}
       {section === "movimientosInventario" && <MovementsTable movements={movements} items={movementItems} areas={areaNames} loading={loading} />}
 
-      {showItemForm && <ItemModal form={itemForm} setForm={setItemForm} editingItem={editingItem} providers={providerOptions} onSave={saveItem} onDelete={deactivate} onClose={() => setShowItemForm(false)} />}
+      {showItemForm && (
+        <ItemModal
+          form={itemForm}
+          setForm={setItemForm}
+          editingItem={editingItem}
+          providers={providerOptions}
+          categories={inventoryCategories}
+          categoriesLoading={categoriesLoading}
+          onSave={saveItem}
+          onDelete={deactivate}
+          onClose={() => setShowItemForm(false)}
+        />
+      )}
       {adjustment && <AdjustmentModal adjustment={adjustment} setAdjustment={setAdjustment} items={items} areas={areas} onSave={saveAdjustment} onClose={() => setAdjustment(null)} />}
       {legacyOpen && <LegacyModal items={legacyItems} canManage={canManage} onMigrate={migrateLegacyItem} onMigrateSelected={migrateSelectedLegacyItems} onClose={() => setLegacyOpen(false)} />}
       {importOpen && <InventoryImportModal areas={areas} existingItems={items} onClose={() => setImportOpen(false)} onImported={refresh} />}
@@ -777,7 +817,7 @@ function MovementsTable({ movements, items, areas, loading }) {
   </div>
 }
 
-function ItemModal({ form, setForm, editingItem, providers, onSave, onDelete, onClose }) {
+function ItemModal({ form, setForm, editingItem, providers, categories, categoriesLoading, onSave, onDelete, onClose }) {
   const editing = Boolean(editingItem)
   const [imageError, setImageError] = useState("")
   const [imageStatus, setImageStatus] = useState("")
@@ -785,6 +825,10 @@ function ItemModal({ form, setForm, editingItem, providers, onSave, onDelete, on
   const showRecipeConversion = isPieceUnit(form.base_unit)
   const imageBusy = imageStatus === "optimizing"
   const update = (field, value) => setForm((current) => ({ ...current, [field]: value }))
+  const categoryOptions = useMemo(
+    () => buildInventoryCategoryOptions(categories, editingItem?.category || ""),
+    [categories, editingItem?.category]
+  )
 
   function releasePreview(previewUrl) {
     if (previewUrl?.startsWith("blob:")) revokeCompressedImagePreview(previewUrl)
@@ -840,7 +884,22 @@ function ItemModal({ form, setForm, editingItem, providers, onSave, onDelete, on
     <div className="inventory-form-grid">
       <Field label="Nombre"><input required value={form.name} onChange={(event) => update("name", event.target.value)} /></Field>
       <Field label="SKU"><input value={form.sku} onChange={(event) => update("sku", event.target.value)} /></Field>
-      <Field label="Categoría"><input value={form.category} onChange={(event) => update("category", event.target.value)} /></Field>
+      <Field label="Categoría">
+        {categoriesLoading ? (
+          <p className="inventory-base-muted">Cargando categorías...</p>
+        ) : !categoryOptions.length ? (
+          <p className="inventory-base-muted">No hay categorías activas configuradas.</p>
+        ) : (
+          <select required value={form.category} onChange={(event) => update("category", event.target.value)}>
+            <option value="">Seleccionar categoría</option>
+            {categoryOptions.map((category) => (
+              <option key={category.code} value={category.code}>
+                {category.name}
+              </option>
+            ))}
+          </select>
+        )}
+      </Field>
       <Field label="Proveedor">
         <div className="inventory-supplier-field">
           <select value={form.supplier} onChange={(event) => update("supplier", event.target.value)}>
