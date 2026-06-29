@@ -1,4 +1,5 @@
 import { supabase } from "../lib/supabase"
+import { inferBarcodeSource, inferBarcodeType, normalizeBarcode } from "../utils/barcodeUtils"
 import { getActiveAreas } from "./areasService"
 
 const INVENTORY_IMAGES_BUCKET = "inventory-images"
@@ -23,10 +24,35 @@ function mapItem(item) {
   } : item
 }
 
-function itemPayload(item) {
+function barcodePayload(item, { previousBarcode = null } = {}) {
+  const barcode = normalizeBarcode(item.barcode)
+  if (!barcode) {
+    return {
+      barcode: null,
+      barcode_type: null,
+      barcode_source: null,
+      barcode_created_at: null
+    }
+  }
+
+  const previous = normalizeBarcode(previousBarcode)
+  const isNewAssignment = !previous || previous !== barcode
+
+  return {
+    barcode,
+    barcode_type: item.barcode_type || inferBarcodeType(barcode),
+    barcode_source: inferBarcodeSource(barcode, item.barcode_source),
+    barcode_created_at: isNewAssignment
+      ? (item.barcode_created_at || new Date().toISOString())
+      : (item.barcode_created_at || null)
+  }
+}
+
+function itemPayload(item, options = {}) {
   return {
     name: item.name?.trim(),
     sku: item.sku?.trim() || null,
+    ...barcodePayload(item, options),
     category: item.category?.trim() || null,
     purchase_unit: item.purchase_unit?.trim() || null,
     base_unit: item.base_unit?.trim(),
@@ -50,6 +76,9 @@ export function mapInventoryError(error) {
   const lower = message.toLowerCase()
   if (lower.includes("duplicate key") && lower.includes("sku")) {
     return { message: "No se pudo guardar el producto porque el SKU ya existe.", code: error.code }
+  }
+  if (lower.includes("inventory_items_barcode") || (lower.includes("duplicate") && lower.includes("barcode"))) {
+    return { message: "Este código ya pertenece a otro producto.", code: error.code }
   }
   if (lower.includes("row-level security") || lower.includes("permission") || lower.includes("not authorized")) {
     return { message: "No tienes permisos para modificar productos de inventario.", code: error.code }
@@ -129,6 +158,52 @@ export async function getInventoryItemById(id) {
   return { data: mapItem(data), error: null }
 }
 
+export async function getInventoryItemByBarcode(barcode) {
+  const normalized = normalizeBarcode(barcode)
+  if (!normalized) {
+    return { data: null, error: { message: "Código de barras vacío." } }
+  }
+
+  const { data, error } = await withInventoryTimeout(
+    supabase.rpc("find_inventory_item_by_barcode", { p_barcode: normalized })
+  )
+  if (error) return { data: null, error: mapInventoryError(error) }
+
+  const row = Array.isArray(data) ? data[0] : data
+  if (!row?.id) return { data: null, error: null }
+
+  const detail = await getInventoryItemById(row.id)
+  return detail
+}
+
+export async function checkBarcodeExists(barcode, excludeItemId = "") {
+  const normalized = normalizeBarcode(barcode)
+  if (!normalized) return { exists: false, item: null, error: null }
+
+  const lookup = await getInventoryItemByBarcode(normalized)
+  if (lookup.error) return { exists: false, item: null, error: lookup.error }
+  if (!lookup.data) return { exists: false, item: null, error: null }
+  if (lookup.data.id === excludeItemId) return { exists: false, item: null, error: null }
+
+  return { exists: true, item: lookup.data, error: null }
+}
+
+export async function generateInternalBarcode() {
+  const { data, error } = await withInventoryTimeout(supabase.rpc("generate_internal_barcode"))
+  if (error) return { data: null, error: mapInventoryError(error) }
+  if (!data?.barcode) {
+    return { data: null, error: { message: "No se pudo generar el código interno." } }
+  }
+  return {
+    data: {
+      barcode: normalizeBarcode(data.barcode),
+      barcode_type: data.barcode_type || "CODE128",
+      barcode_source: data.barcode_source || "internal"
+    },
+    error: null
+  }
+}
+
 export async function createInventoryItem(item) {
   const { data, error } = await withInventoryTimeout(
     supabase.from("inventory_items").insert(itemPayload(item)).select("*").single()
@@ -143,9 +218,9 @@ export async function createInventoryItem(item) {
   return { data: mapped?.id ? mapped : null, error: mapped?.id ? null : { message: "No se pudo confirmar el producto creado." } }
 }
 
-export async function updateInventoryItem(id, updates) {
+export async function updateInventoryItem(id, updates, options = {}) {
   const { data, error } = await withInventoryTimeout(
-    supabase.from("inventory_items").update(itemPayload(updates)).eq("id", id).select("*, area_inventory(*)").single()
+    supabase.from("inventory_items").update(itemPayload(updates, options)).eq("id", id).select("*, area_inventory(*)").single()
   )
   if (error) return { data: null, error: mapInventoryError(error) }
   if (!data?.id) return { data: null, error: { message: "Supabase no devolvió el producto actualizado." } }

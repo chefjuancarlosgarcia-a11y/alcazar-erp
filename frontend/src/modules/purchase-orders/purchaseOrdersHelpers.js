@@ -54,6 +54,7 @@ export function getPurchaseProductDetails(item) {
     productoId: item?.id,
     nombre: item?.nombre || item?.name || "",
     sku: item?.codigo || item?.sku || item?.codigoBarras || "",
+    barcode: item?.barcode || "",
     categoria: item?.categoria || item?.category || "Sin categoria",
     unidadCompra: unitPurchase,
     unidadBase: unitBase,
@@ -79,6 +80,7 @@ export function mapPurchaseInventoryItem(item) {
     nombre: item?.name || item?.nombre || "",
     codigo: item?.sku || item?.codigo || item?.codigoBarras || "",
     sku: item?.sku || item?.codigo || "",
+    barcode: item?.barcode || "",
     categoria: item?.category || item?.categoria || "Sin categoria",
     unidadCompra: purchaseUnit,
     unidadBase: baseUnit,
@@ -101,6 +103,7 @@ export function getPurchaseSearchScore(item, searchText) {
   const fields = {
     name: String(item?.nombre || item?.name || "").toLowerCase(),
     code: String(item?.codigo || item?.sku || item?.codigoBarras || "").toLowerCase(),
+    barcode: String(item?.barcode || "").toLowerCase(),
     category: String(item?.categoria || item?.category || "").toLowerCase(),
     supplier: String(item?.proveedorNombre || item?.supplier || "").toLowerCase()
   }
@@ -108,15 +111,18 @@ export function getPurchaseSearchScore(item, searchText) {
 
   if (fields.name.startsWith(text)) score += 24
   if (fields.code.startsWith(text)) score += 20
+  if (fields.barcode.startsWith(text)) score += 22
   if (fields.category.startsWith(text)) score += 10
   if (fields.name.includes(text)) score += 14
   if (fields.code.includes(text)) score += 12
+  if (fields.barcode.includes(text)) score += 14
   if (fields.category.includes(text)) score += 6
   if (fields.supplier.includes(text)) score += 4
 
   text.split(" ").filter(Boolean).forEach((word) => {
     if (fields.name.includes(word)) score += 4
     if (fields.code.includes(word)) score += 3
+    if (fields.barcode.includes(word)) score += 4
     if (fields.category.includes(word)) score += 2
     if (fields.supplier.includes(word)) score += 1
   })

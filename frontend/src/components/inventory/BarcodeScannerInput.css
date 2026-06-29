@@ -1,0 +1,65 @@
+.barcode-scanner-input {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.barcode-scanner-input__label {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.barcode-scanner-input__row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+.barcode-scanner-input__field {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.barcode-scanner-input__focus-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.barcode-scanner-input__hint {
+  color: var(--erp-muted, #64748b);
+  font-size: 0.78rem;
+}
+
+.barcode-scanner-feedback {
+  font-size: 0.85rem;
+  margin: 0.25rem 0 0;
+}
+
+.barcode-scanner-feedback--success {
+  color: #15803d;
+}
+
+.barcode-scanner-feedback--error {
+  color: #b91c1c;
+}
+
+.barcode-field-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+}
+
+.barcode-label-preview {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  border: 1px dashed var(--erp-border, #cbd5e1);
+  border-radius: 8px;
+  display: grid;
+  gap: 0.35rem;
+  justify-items: start;
+}
+
+.barcode-label-preview svg {
+  max-width: 100%;
+  height: auto;
+}

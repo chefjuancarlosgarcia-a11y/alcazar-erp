@@ -6,6 +6,8 @@ import { useToast } from "../hooks/useToast"
 import { ToastContainer } from "../components/ToastContainer"
 import InfoTooltip from "../components/InfoTooltip"
 import InventoryImportModal from "../components/InventoryImportModal"
+import BarcodeScannerInput from "../components/inventory/BarcodeScannerInput"
+import "../components/inventory/BarcodeScannerInput.css"
 import PaginationControls from "../components/PaginationControls"
 import { pageItems } from "../utils/pagination"
 import { getActiveAreas } from "../services/areasService"
@@ -14,6 +16,8 @@ import {
   createInventoryItem,
   deactivateInventoryItem,
   deleteInventoryImage,
+  checkBarcodeExists,
+  generateInternalBarcode,
   getInventoryItemById,
   getInventoryItems,
   getInventoryMovements,
@@ -47,6 +51,8 @@ import {
   mapInventorySaveError,
   validateInventoryItemForm
 } from "../utils/inventoryItemValidation"
+import { normalizeBarcode } from "../utils/barcodeUtils"
+import { printInventoryBarcodeLabel, renderBarcodeSvg } from "../utils/barcodeLabel"
 import "./InventoryBase.css"
 
 const DEFAULT_INVENTORY_UNIT = "Unidad/Pieza"
@@ -72,6 +78,10 @@ const PIECE_UNIT_KEYS = new Set(["unidad", "unidades", "unidad_pieza", "pieza", 
 const EMPTY_ITEM = {
   name: "",
   sku: "",
+  barcode: "",
+  barcode_type: "",
+  barcode_source: "",
+  barcode_created_at: null,
   category: "",
   purchase_unit: DEFAULT_INVENTORY_UNIT,
   base_unit: DEFAULT_INVENTORY_UNIT,
@@ -269,6 +279,10 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
       ...EMPTY_ITEM,
       name: item.name || "",
       sku: item.sku || "",
+      barcode: item.barcode || "",
+      barcode_type: item.barcode_type || "",
+      barcode_source: item.barcode_source || "",
+      barcode_created_at: item.barcode_created_at || null,
       category: resolveInventoryCategoryCode(item.category, inventoryCategories),
       purchase_unit: unitForForm(item.purchase_unit),
       base_unit: unitForForm(item.base_unit),
@@ -348,6 +362,24 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
       return
     }
 
+    if (normalizeBarcode(itemForm.barcode)) {
+      const barcodeCheck = await checkBarcodeExists(itemForm.barcode, editingItem?.id || "")
+      if (barcodeCheck.error) {
+        const message = mapInventorySaveError(barcodeCheck.error)
+        setError(message)
+        showToast(message, "error", 5000)
+        return
+      }
+      if (barcodeCheck.exists) {
+        const message = `Este código ya pertenece a otro producto ("${barcodeCheck.item?.name || "otro producto"}").`
+        setItemFormErrors({ barcode: message })
+        setItemFormFocusField("barcode")
+        setError(message)
+        showToast(message, "error", 5000)
+        return
+      }
+    }
+
     setItemFormErrors({})
     setItemFormFocusField("")
     setSavingItem(true)
@@ -370,7 +402,7 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
 
     try {
       const result = isEdit
-        ? await updateInventoryItem(editingItem.id, itemToSave)
+        ? await updateInventoryItem(editingItem.id, itemToSave, { previousBarcode: editingItem.barcode })
         : await createInventoryItem(itemToSave)
 
       if (result.error || !result.data?.id) {
@@ -664,7 +696,7 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
   }
 
   const visibleItems = useMemo(() => items.filter((item) => {
-    const text = `${item.name || ""} ${item.sku || ""} ${item.category || ""}`.toLowerCase()
+    const text = `${item.name || ""} ${item.sku || ""} ${item.barcode || ""} ${item.category || ""}`.toLowerCase()
     return (!query || text.includes(query.toLowerCase())) && (areaFilter === "todos" || item.active !== false)
   }), [areaFilter, items, query])
   const pendingLegacyCount = legacyItems.filter((item) => !item.migratedToSupabaseId).length
@@ -742,6 +774,8 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
           categories={inventoryCategories}
           categoriesLoading={categoriesLoading}
           canManageCategories={canEditCatalog}
+          canManageInventory={canManage}
+          showToast={showToast}
           formErrors={itemFormErrors}
           focusField={itemFormFocusField}
           saving={savingItem}
@@ -810,7 +844,7 @@ function InventoryCatalog({ loading, items, areas, query, setQuery, areaFilter, 
             <article className="inventory-row" key={item.id}>
               <div className="inventory-product-cell">
                 <ProductImage item={item} />
-                <span><strong>{item.name}</strong><small>{item.category || "Sin categoría"} · {item.sku || "Sin SKU"}</small></span>
+                <span><strong>{item.name}</strong><small>{item.category || "Sin categoría"} · {item.sku || "Sin SKU"}{item.barcode ? ` · ${item.barcode}` : ""}</small></span>
               </div>
               <span className="inventory-row__cell" data-label="Unidad">{unitForForm(item.base_unit)}</span>
               <strong className="inventory-row__cell" data-label="Stock área">{areaStock}</strong>
@@ -970,6 +1004,8 @@ function ItemModal({
   categories,
   categoriesLoading,
   canManageCategories,
+  canManageInventory = false,
+  showToast,
   formErrors = {},
   focusField = "",
   saving = false,
@@ -983,6 +1019,8 @@ function ItemModal({
   const [imageError, setImageError] = useState("")
   const [imageStatus, setImageStatus] = useState("")
   const [imageStatusMessage, setImageStatusMessage] = useState("")
+  const [generatingBarcode, setGeneratingBarcode] = useState(false)
+  const [barcodeScanValue, setBarcodeScanValue] = useState(form.barcode || "")
   const formGridRef = useRef(null)
   const showRecipeConversion = isPieceUnit(form.base_unit)
   const imageBusy = imageStatus === "optimizing"
@@ -992,6 +1030,10 @@ function ItemModal({
     () => buildInventoryCategoryOptions(categories, editingItem?.category || ""),
     [categories, editingItem?.category]
   )
+
+  useEffect(() => {
+    setBarcodeScanValue(form.barcode || "")
+  }, [form.barcode])
 
   useEffect(() => {
     if (!focusField && !hasFieldErrors) return
@@ -1006,6 +1048,79 @@ function ItemModal({
   function fieldError(field) {
     return formErrors[field] || ""
   }
+
+  function applyBarcodeValue(value, source = "manual") {
+    const normalized = normalizeBarcode(value)
+    onClearFieldError?.("barcode")
+    setBarcodeScanValue(normalized)
+    setForm((current) => ({
+      ...current,
+      barcode: normalized,
+      barcode_type: normalized ? (current.barcode_type || inferBarcodeTypeFromValue(normalized)) : "",
+      barcode_source: normalized
+        ? (source === "scan" ? "scan" : source === "internal" ? "internal" : current.barcode_source || "manual")
+        : "",
+      barcode_created_at: normalized ? (current.barcode_created_at || null) : null
+    }))
+  }
+
+  function inferBarcodeTypeFromValue(value) {
+    const code = normalizeBarcode(value)
+    if (/^EGA-INV-/i.test(code)) return "CODE128"
+    if (/^\d{13}$/.test(code)) return "EAN13"
+    if (/^\d{12}$/.test(code)) return "UPC"
+    if (/^\d{8}$/.test(code)) return "EAN8"
+    return "CODE128"
+  }
+
+  async function handleBarcodeScan(code) {
+    const normalized = normalizeBarcode(code)
+    if (!normalized) return
+    applyBarcodeValue(normalized, "scan")
+    const duplicate = await checkBarcodeExists(normalized, editingItem?.id || "")
+    if (duplicate.exists) {
+      onUpdateField("barcode", normalized)
+      showToast?.(`Este código ya pertenece a otro producto ("${duplicate.item?.name || "otro producto"}").`, "error", 6000)
+      return
+    }
+    showToast?.("Código asignado correctamente", "success", 3500)
+  }
+
+  async function handleGenerateInternalBarcode() {
+    if (!canManageInventory || generatingBarcode || saving) return
+    setGeneratingBarcode(true)
+    try {
+      const result = await generateInternalBarcode()
+      if (result.error || !result.data?.barcode) {
+        showToast?.(result.error?.message || "No se pudo generar el código interno.", "error", 5000)
+        return
+      }
+      applyBarcodeValue(result.data.barcode, "internal")
+      setForm((current) => ({
+        ...current,
+        barcode_type: result.data.barcode_type,
+        barcode_source: result.data.barcode_source
+      }))
+      showToast?.("Código interno generado", "success", 3500)
+    } finally {
+      setGeneratingBarcode(false)
+    }
+  }
+
+  function handlePrintBarcodeLabel() {
+    const result = printInventoryBarcodeLabel({
+      name: form.name,
+      barcode: form.barcode,
+      barcodeType: form.barcode_type
+    })
+    if (!result.ok) {
+      showToast?.(result.error || "No se pudo imprimir la etiqueta.", "error", 5000)
+    }
+  }
+
+  const barcodePreviewSvg = form.barcode
+    ? renderBarcodeSvg(form.barcode, form.barcode_type)
+    : ""
 
   function releasePreview(previewUrl) {
     if (previewUrl?.startsWith("blob:")) revokeCompressedImagePreview(previewUrl)
@@ -1069,6 +1184,42 @@ function ItemModal({
       </Field>
       <Field label="SKU" fieldKey="sku" error={fieldError("sku")}>
         <input value={form.sku} onChange={(event) => update("sku", event.target.value)} disabled={saving} />
+      </Field>
+      <Field label="Código de barras" fieldKey="barcode" error={fieldError("barcode")}>
+        <BarcodeScannerInput
+          inputId="inventory-item-barcode"
+          value={barcodeScanValue}
+          onChange={(value) => {
+            setBarcodeScanValue(value)
+            onClearFieldError?.("barcode")
+            setForm((current) => ({ ...current, barcode: value }))
+          }}
+          onScan={handleBarcodeScan}
+          disabled={saving || !canManageInventory}
+          placeholder="Escanear o escribir código de barras..."
+          hint={canManageInventory ? "Opcional. Escanea con lector USB o genera un código interno EGA-INV." : "Solo lectura."}
+          showFocusButton={canManageInventory}
+        />
+        {canManageInventory && (
+          <div className="barcode-field-actions">
+            <button
+              type="button"
+              className="secondary"
+              disabled={saving || generatingBarcode}
+              onClick={handleGenerateInternalBarcode}
+            >
+              {generatingBarcode ? "Generando…" : "Generar código interno"}
+            </button>
+            {form.barcode && (
+              <button type="button" className="secondary" disabled={saving} onClick={handlePrintBarcodeLabel}>
+                Imprimir etiqueta
+              </button>
+            )}
+          </div>
+        )}
+        {form.barcode && barcodePreviewSvg && (
+          <div className="barcode-label-preview" aria-hidden="true" dangerouslySetInnerHTML={{ __html: barcodePreviewSvg }} />
+        )}
       </Field>
       <Field label="Categoría" fieldKey="category" error={fieldError("category")}>
         <div className="inventory-category-field">

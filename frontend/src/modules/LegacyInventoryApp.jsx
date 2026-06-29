@@ -22,7 +22,8 @@ import { createNotification, notifyRoles } from "../services/notificationsServic
 import { getPurchaseOrders, savePurchaseOrder } from "../services/purchaseOrdersService"
 import { canCreateTestFlow, TEST_FLOW_FILTER } from "../utils/testFlowMode"
 import { buildPurchaseOrderNotificationUrl, getPurchaseOrderWorkflowView } from "../utils/inventoryNotificationRoutes"
-import { getInventoryItems } from "../services/inventoryService"
+import { getInventoryItems, getInventoryItemByBarcode } from "../services/inventoryService"
+import { inventoryItemMatchesBarcode } from "../utils/barcodeUtils"
 import {
   getSuppliers,
   migrateLocalSuppliers,
@@ -138,6 +139,7 @@ function getPurchaseProductDetails(item) {
     productoId: item?.id,
     nombre: item?.nombre || item?.name || "",
     sku: item?.codigo || item?.sku || item?.codigoBarras || "",
+    barcode: item?.barcode || "",
     categoria: item?.categoria || item?.category || "Sin categoria",
     unidadCompra: unitPurchase,
     unidadBase: unitBase,
@@ -163,6 +165,7 @@ function mapPurchaseInventoryItem(item) {
     nombre: item?.name || item?.nombre || "",
     codigo: item?.sku || item?.codigo || item?.codigoBarras || "",
     sku: item?.sku || item?.codigo || "",
+    barcode: item?.barcode || "",
     categoria: item?.category || item?.categoria || "Sin categoria",
     unidadCompra: purchaseUnit,
     unidadBase: baseUnit,
@@ -342,6 +345,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
     return datos ? JSON.parse(datos) : []
   })
   const [manualBusqueda, setManualBusqueda] = useState("")
+  const [manualBarcodeMessage, setManualBarcodeMessage] = useState(null)
   const [manualIngredienteSeleccionadoId, setManualIngredienteSeleccionadoId] = useState(null)
   const [manualCantidadComprar, setManualCantidadComprar] = useState("")
   const [manualOrdenItems, setManualOrdenItems] = useState([])
@@ -1332,6 +1336,52 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
     completarProveedorDesdeIngrediente(ingrediente)
   }
 
+  async function escanearIngredienteOrdenManual(code) {
+    setManualBarcodeMessage(null)
+    const localMatch = manualInventorySource.find((item) => inventoryItemMatchesBarcode(item, code))
+    let inventoryItem = localMatch || null
+
+    if (!inventoryItem) {
+      const { data, error } = await getInventoryItemByBarcode(code)
+      if (error?.message) {
+        setManualBarcodeMessage({ type: "error", text: error.message })
+        return
+      }
+      if (!data) {
+        setManualBarcodeMessage({ type: "error", text: "Código no registrado" })
+        return
+      }
+      inventoryItem = mapPurchaseInventoryItem(data)
+    }
+
+    const productId = inventoryItem.id
+    const existingLine = manualOrdenItems.find((item) => (item.producto_id || item.id) === productId)
+    if (existingLine) {
+      setManualOrdenItems((items) =>
+        items.map((item) => {
+          if ((item.producto_id || item.id) !== productId) return item
+          const nextQty = Number(item.cantidad_compra ?? item.cantidadComprar ?? 0) + 1
+          const unitCost = Number(item.costoUnitario ?? item.precio_unitario_compra ?? 0)
+          const factor = Number(item.factor_conversion ?? 1)
+          return {
+            ...item,
+            cantidad_compra: nextQty,
+            cantidadComprar: nextQty,
+            subtotal: nextQty * unitCost,
+            cantidad_base_total: nextQty * factor
+          }
+        })
+      )
+      setManualBarcodeMessage({ type: "success", text: "Producto encontrado" })
+      return
+    }
+
+    seleccionarIngredienteOrdenManual(inventoryItem)
+    setManualBusqueda(inventoryItem.nombre || inventoryItem.name || "")
+    setManualCantidadComprar("1")
+    setManualBarcodeMessage({ type: "success", text: "Producto encontrado" })
+  }
+
   function agregarIngredienteOrdenManual() {
     if (!manualIngredienteSeleccionado) {
       alert("Selecciona un ingrediente válido para la orden manual.")
@@ -1354,6 +1404,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
       item_name: detalle.nombre,
       sku: detalle.sku,
       codigo: detalle.sku,
+      barcode: detalle.barcode || manualIngredienteSeleccionado.barcode || "",
       cantidad_compra: cantidad,
       cantidadComprar: cantidad,
       unidad_compra: detalle.unidadCompra,
@@ -2018,6 +2069,8 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
               proximoNumeroOrden={generarNumeroOrdenManual(ordenesCompraManual.length)}
               manualBusqueda={manualBusqueda}
               setManualBusqueda={setManualBusqueda}
+              manualBarcodeMessage={manualBarcodeMessage}
+              escanearIngredienteOrdenManual={escanearIngredienteOrdenManual}
               manualIngredienteSeleccionadoId={manualIngredienteSeleccionadoId}
               setManualIngredienteSeleccionadoId={setManualIngredienteSeleccionadoId}
               manualCantidadComprar={manualCantidadComprar}

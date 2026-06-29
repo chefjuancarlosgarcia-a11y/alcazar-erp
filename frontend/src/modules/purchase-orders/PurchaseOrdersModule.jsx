@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { TestFlowBadge, TestFlowControls, TestFlowWarning } from "../../components/TestFlowBadge"
+import BarcodeScannerInput from "../../components/inventory/BarcodeScannerInput"
+import "../../components/inventory/BarcodeScannerInput.css"
 import { isTestRecord } from "../../utils/testFlowMode"
 import PurchaseOrderDetailModal from "./PurchaseOrderDetailModal"
 import {
@@ -104,6 +106,8 @@ export default function PurchaseOrdersModule({
   proximoNumeroOrden,
   manualBusqueda,
   setManualBusqueda,
+  manualBarcodeMessage,
+  escanearIngredienteOrdenManual,
   manualIngredienteSeleccionadoId,
   setManualIngredienteSeleccionadoId,
   manualCantidadComprar,
@@ -393,6 +397,22 @@ export default function PurchaseOrdersModule({
               setManualCantidadComprar("")
             }}
           />
+        </div>
+
+        <div className="po-field">
+          <BarcodeScannerInput
+            inputId="po-manual-barcode-scan"
+            label="Escanear producto"
+            onScan={escanearIngredienteOrdenManual}
+            inputClassName="po-input"
+            placeholder="Escanea código de barras para seleccionar producto..."
+            hint="Si el producto ya está en la orden, aumenta la cantidad automáticamente."
+          />
+          {manualBarcodeMessage?.text && (
+            <p className={`barcode-scanner-feedback barcode-scanner-feedback--${manualBarcodeMessage.type || "success"}`}>
+              {manualBarcodeMessage.text}
+            </p>
+          )}
         </div>
 
         {manualBusqueda && (

@@ -1,4 +1,5 @@
 import { isLegacyInventoryCategoryCode, resolveInventoryCategoryName } from "./inventoryCategoryUtils"
+import { barcodesMatch, normalizeBarcode } from "./barcodeUtils"
 
 const PIECE_UNIT_KEYS = new Set(["unidad", "unidades", "unidad_pieza", "pieza", "piezas", "unit", "units", "piece", "pieces"])
 const GRAM_UNIT_KEYS = new Set(["gramo", "gramos", "g", "gr"])
@@ -46,6 +47,9 @@ export function mapInventorySaveError(error) {
   if (lower.includes("inventory_items_sku_key") || (lower.includes("duplicate") && lower.includes("sku"))) {
     return "No se pudo guardar el producto porque el SKU ya existe."
   }
+  if (lower.includes("inventory_items_barcode") || (lower.includes("duplicate") && lower.includes("barcode"))) {
+    return "Este código ya pertenece a otro producto."
+  }
   if (lower.includes("inventory_items_name") && lower.includes("duplicate")) {
     return "Ya existe un producto con ese nombre."
   }
@@ -61,7 +65,7 @@ export function mapInventorySaveError(error) {
 
 export function isInventoryItemVisibleInCatalog(item, { query = "", areaFilter = "todos" } = {}) {
   if (!item) return false
-  const text = `${item.name || ""} ${item.sku || ""} ${item.category || ""}`.toLowerCase()
+  const text = `${item.name || ""} ${item.sku || ""} ${item.barcode || ""} ${item.category || ""}`.toLowerCase()
   const matchesQuery = !query.trim() || text.includes(query.trim().toLowerCase())
   const matchesArea = areaFilter === "todos" || item.active !== false
   return matchesQuery && matchesArea
@@ -148,6 +152,16 @@ export function validateInventoryItemForm(form, {
     }
   }
 
+  const barcode = normalizeBarcode(form.barcode)
+  if (barcode) {
+    const duplicateBarcode = items.find((item) => (
+      item.id !== editingItemId && barcodesMatch(item.barcode, barcode)
+    ))
+    if (duplicateBarcode) {
+      errors.barcode = `Este código ya pertenece a otro producto ("${duplicateBarcode.name}").`
+    }
+  }
+
   const canUseRecipeConversion = isPieceUnit(form.base_unit)
   if (canUseRecipeConversion && form.useRecipeWeightConversion) {
     const recipeWeightGrams = Number(form.recipeWeightGrams)
@@ -162,6 +176,7 @@ export function validateInventoryItemForm(form, {
   const orderedFields = [
     "name",
     "sku",
+    "barcode",
     "category",
     "supplier",
     "purchase_unit",

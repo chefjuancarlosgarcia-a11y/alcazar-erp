@@ -1,8 +1,19 @@
+import { useState } from "react"
 import { TestFlowBadge, TestFlowWarning } from "../../components/TestFlowBadge"
 import FinanceIntegrationPanel from "../../components/FinanceIntegrationPanel"
+import BarcodeScannerInput from "../../components/inventory/BarcodeScannerInput"
+import "../../components/inventory/BarcodeScannerInput.css"
 import { isTestRecord } from "../../utils/testFlowMode"
 import { PO_WORKFLOW_VIEWS } from "../../utils/inventoryNotificationRoutes"
-import { formatCurrency, getPurchaseOrderStatusLabel, getPurchaseOrderStatusBadgeClass } from "./purchaseOrdersHelpers"
+import { getInventoryItemByBarcode } from "../../services/inventoryService"
+import { matchPurchaseOrderItemByBarcode } from "../../utils/barcodeUtils"
+import {
+  formatCurrency,
+  getPurchaseOrderItemKey,
+  getPurchaseOrderItemOrderedQty,
+  getPurchaseOrderStatusLabel,
+  getPurchaseOrderStatusBadgeClass
+} from "./purchaseOrdersHelpers"
 import PurchaseOrderReceptionLines from "./PurchaseOrderReceptionLines"
 import ReceptionImageCapture from "./ReceptionImageCapture"
 import "./PurchaseOrders.css"
@@ -46,7 +57,53 @@ export default function PurchaseOrderDetailModal({
   onReceive,
   purchaseActionBusy = false
 }) {
+  const [receptionScanValue, setReceptionScanValue] = useState("")
+  const [receptionScanFeedback, setReceptionScanFeedback] = useState("")
+  const [receptionScanFeedbackType, setReceptionScanFeedbackType] = useState("")
+
   if (!order) return null
+
+  async function handleReceptionBarcodeScan(code) {
+    setReceptionScanFeedback("")
+    const { data: inventoryItem, error } = await getInventoryItemByBarcode(code)
+    if (error?.message) {
+      setReceptionScanFeedbackType("error")
+      setReceptionScanFeedback(error.message)
+      return
+    }
+    if (!inventoryItem) {
+      setReceptionScanFeedbackType("error")
+      setReceptionScanFeedback("Código no registrado")
+      return
+    }
+
+    const orderItems = order.items || []
+    const poLine = matchPurchaseOrderItemByBarcode(orderItems, inventoryItem)
+    if (!poLine) {
+      setReceptionScanFeedbackType("error")
+      setReceptionScanFeedback("Producto no encontrado en esta orden")
+      return
+    }
+
+    const key = getPurchaseOrderItemKey(poLine)
+    const orderedQty = getPurchaseOrderItemOrderedQty(poLine)
+    const existing = manualRecepcionLineas[key] || {}
+    const nextQty = existing.entered
+      ? Number(existing.cantidadRecibida || 0) + 1
+      : Number(orderedQty || 1)
+
+    onReceptionLineChange(key, {
+      entered: true,
+      cantidadRecibida: String(nextQty)
+    })
+
+    setReceptionScanFeedbackType("success")
+    setReceptionScanFeedback("Producto encontrado")
+    setReceptionScanValue("")
+    window.setTimeout(() => {
+      document.getElementById(`po-reception-qty-${key}`)?.focus()
+    }, 50)
+  }
 
   const pending = ["pendiente", "pendiente_aprobacion", "borrador"].includes(order.status)
   const canSend = order.status === "aprobada"
@@ -183,6 +240,25 @@ export default function PurchaseOrderDetailModal({
           <article className="po-detail-card po-detail-card--wide po-reception-panel">
             <h4>Registrar recepción</h4>
             <p className="po-help">Marca cada producto que entró e ingresa la cantidad recibida.</p>
+            {puedeRecibirOrdenCompra && (
+              <div className="po-field">
+                <BarcodeScannerInput
+                  inputId="po-reception-barcode-scan"
+                  label="Escanear producto"
+                  value={receptionScanValue}
+                  onChange={setReceptionScanValue}
+                  onScan={handleReceptionBarcodeScan}
+                  inputClassName="po-input"
+                  placeholder="Escanea el código de barras del producto..."
+                  hint="Al escanear, se marca la línea de la orden y se enfoca la cantidad recibida."
+                />
+                {receptionScanFeedback && (
+                  <p className={`barcode-scanner-feedback barcode-scanner-feedback--${receptionScanFeedbackType || "success"}`}>
+                    {receptionScanFeedback}
+                  </p>
+                )}
+              </div>
+            )}
             <PurchaseOrderReceptionLines
               items={order.items || []}
               lines={manualRecepcionLineas}

@@ -6,7 +6,10 @@ import { canCreateTestFlow, TEST_FLOW_FILTER } from "../utils/testFlowMode"
 import { useAuth } from "../context/AuthContext"
 import { supabase } from "../lib/supabase"
 import { getActiveAreas } from "../services/areasService"
-import { getActiveInventoryItems } from "../services/inventoryService"
+import { getActiveInventoryItems, getInventoryItemByBarcode } from "../services/inventoryService"
+import { inventoryItemMatchesBarcode } from "../utils/barcodeUtils"
+import BarcodeScannerInput from "../components/inventory/BarcodeScannerInput"
+import "../components/inventory/BarcodeScannerInput.css"
 import {
   approveRequisition,
   cancelRequisition,
@@ -428,6 +431,8 @@ function RequestForm({ request, areas, destinationAreas, inventory, requesters, 
   const [showResults, setShowResults] = useState(false)
   const [formError, setFormError] = useState("")
   const [formNotice, setFormNotice] = useState("")
+  const [barcodeScanValue, setBarcodeScanValue] = useState("")
+  const [barcodeScanFeedback, setBarcodeScanFeedback] = useState("")
   const pickerRef = useRef(null)
   const selectedItem = inventory.find((item) => item.id === selectedItemId)
 
@@ -445,10 +450,60 @@ function RequestForm({ request, areas, destinationAreas, inventory, requesters, 
     return inventory.filter((item) => productMatches(item, term)).slice(0, 10)
   }, [inventory, productQuery])
 
+  function addOrIncrementItem(item) {
+    if (!item) return false
+    const existing = form.items.find((line) => line.itemId === item.id)
+    if (existing) {
+      setForm({
+        ...form,
+        items: form.items.map((line) => (
+          line.itemId === item.id
+            ? { ...line, requestedQuantity: Number(line.requestedQuantity || 0) + 1 }
+            : line
+        ))
+      })
+      return true
+    }
+    setForm({
+      ...form,
+      items: [...form.items, { itemId: item.id, requestedQuantity: 1, requestedUnit: item.base_unit, notes: "" }]
+    })
+    return true
+  }
+
   function addItem() {
-    if (!selectedItem || form.items.some((item) => item.itemId === selectedItem.id)) return
-    setForm({ ...form, items: [...form.items, { itemId: selectedItem.id, requestedQuantity: 1, requestedUnit: selectedItem.base_unit, notes: "" }] })
+    if (!selectedItem) return
+    if (addOrIncrementItem(selectedItem)) {
+      setFormError("")
+    }
+  }
+
+  async function handleRequisitionBarcodeScan(code) {
+    setBarcodeScanFeedback("")
     setFormError("")
+    const localMatch = inventory.find((item) => inventoryItemMatchesBarcode(item, code))
+    let item = localMatch || null
+
+    if (!item) {
+      const { data, error } = await getInventoryItemByBarcode(code)
+      if (error?.message) {
+        setFormError(error.message)
+        setBarcodeScanFeedback("Código no registrado")
+        return
+      }
+      if (!data) {
+        setFormError("Código no registrado")
+        setBarcodeScanFeedback("Código no registrado")
+        return
+      }
+      item = data
+    }
+
+    addOrIncrementItem(item)
+    selectProduct(item)
+    setBarcodeScanValue("")
+    setFormNotice("Producto encontrado")
+    setBarcodeScanFeedback("Producto encontrado")
   }
 
   function updateItem(itemId, updates) {
@@ -524,6 +579,18 @@ function RequestForm({ request, areas, destinationAreas, inventory, requesters, 
           )}
         </div>
         <div className="requisition-picker" ref={pickerRef}>
+          <BarcodeScannerInput
+            inputId="requisition-barcode-scan"
+            label="Escanear producto"
+            value={barcodeScanValue}
+            onChange={setBarcodeScanValue}
+            onScan={handleRequisitionBarcodeScan}
+            placeholder="Escanea código de barras para agregar a la requisición..."
+            hint="Si el producto ya está en la requisición, aumenta la cantidad."
+          />
+          {barcodeScanFeedback && (
+            <p className="barcode-scanner-feedback barcode-scanner-feedback--success">{barcodeScanFeedback}</p>
+          )}
           <div className="requisition-product-search">
             <span className="requisition-search-icon">⌕</span>
             <input
@@ -858,7 +925,7 @@ function normalizeSearch(value) {
 }
 
 function productMatches(item, term) {
-  return [item.name, item.category, item.base_unit, item.purchase_unit, item.supplier]
+  return [item.name, item.category, item.base_unit, item.purchase_unit, item.supplier, item.sku, item.barcode]
     .some((value) => normalizeSearch(value).includes(term))
 }
 
