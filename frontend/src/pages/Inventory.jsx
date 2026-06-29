@@ -5,6 +5,7 @@ import YieldProfilesCatalog from "./YieldProfilesCatalog"
 import YieldAuditCampaigns from "./YieldAuditCampaigns"
 import InternalProduction from "./InternalProduction"
 import InventoryCategoriesManagement from "./InventoryCategoriesManagement"
+import InventoryDuplicatesManagement from "./InventoryDuplicatesManagement"
 import RequisitionsSupabase from "./RequisitionsSupabase"
 import RecipesSupabase from "./RecipesSupabase"
 import { lazy, Suspense } from "react"
@@ -25,7 +26,8 @@ const allowedSections = new Set([
   "conversiones",
   "rendimientos",
   "auditoriasRendimiento",
-  "categorias"
+  "categorias",
+  "duplicados"
 ])
 
 function Inventory() {
@@ -85,6 +87,10 @@ function Inventory() {
 
   if (initialSeccion === "categorias") {
     return <InventoryCategoriesManagement />
+  }
+
+  if (initialSeccion === "duplicados") {
+    return <InventoryDuplicatesManagement />
   }
 
   return (
