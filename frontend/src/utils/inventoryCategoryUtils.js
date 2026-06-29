@@ -65,3 +65,15 @@ export function buildInventoryCategoryOptions(categories = [], currentStoredValu
 export function isLegacyInventoryCategoryCode(code) {
   return String(code || "").startsWith(LEGACY_PREFIX)
 }
+
+export function isValidInventoryCategoryCode(code) {
+  return /^[a-z0-9_-]+$/.test(String(code || "").trim())
+}
+
+export function findSimilarInventoryCategory(name, categories = [], excludeId = "") {
+  const normalized = normalizeInventoryCategoryLabel(name)
+  if (!normalized) return null
+  return categories.find(
+    (category) => category.id !== excludeId && normalizeInventoryCategoryLabel(category.name) === normalized
+  ) || null
+}

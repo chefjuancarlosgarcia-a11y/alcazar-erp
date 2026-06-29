@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
+import { Link } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
 import useSupabaseRealtime from "../hooks/useSupabaseRealtime"
 import InfoTooltip from "../components/InfoTooltip"
@@ -620,6 +621,7 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
           providers={providerOptions}
           categories={inventoryCategories}
           categoriesLoading={categoriesLoading}
+          canManageCategories={canEditCatalog}
           onSave={saveItem}
           onDelete={deactivate}
           onClose={() => setShowItemForm(false)}
@@ -817,7 +819,7 @@ function MovementsTable({ movements, items, areas, loading }) {
   </div>
 }
 
-function ItemModal({ form, setForm, editingItem, providers, categories, categoriesLoading, onSave, onDelete, onClose }) {
+function ItemModal({ form, setForm, editingItem, providers, categories, categoriesLoading, canManageCategories, onSave, onDelete, onClose }) {
   const editing = Boolean(editingItem)
   const [imageError, setImageError] = useState("")
   const [imageStatus, setImageStatus] = useState("")
@@ -885,20 +887,27 @@ function ItemModal({ form, setForm, editingItem, providers, categories, categori
       <Field label="Nombre"><input required value={form.name} onChange={(event) => update("name", event.target.value)} /></Field>
       <Field label="SKU"><input value={form.sku} onChange={(event) => update("sku", event.target.value)} /></Field>
       <Field label="Categoría">
-        {categoriesLoading ? (
-          <p className="inventory-base-muted">Cargando categorías...</p>
-        ) : !categoryOptions.length ? (
-          <p className="inventory-base-muted">No hay categorías activas configuradas.</p>
-        ) : (
-          <select required value={form.category} onChange={(event) => update("category", event.target.value)}>
-            <option value="">Seleccionar categoría</option>
-            {categoryOptions.map((category) => (
-              <option key={category.code} value={category.code}>
-                {category.name}
-              </option>
-            ))}
-          </select>
-        )}
+        <div className="inventory-category-field">
+          {categoriesLoading ? (
+            <p className="inventory-base-muted">Cargando categorías...</p>
+          ) : !categoryOptions.length ? (
+            <p className="inventory-base-muted">No hay categorías activas configuradas.</p>
+          ) : (
+            <select required value={form.category} onChange={(event) => update("category", event.target.value)}>
+              <option value="">Seleccionar categoría</option>
+              {categoryOptions.map((category) => (
+                <option key={category.code} value={category.code}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+          )}
+          {canManageCategories && (
+            <Link className="secondary inventory-category-admin-link" to="/inventory?section=categorias">
+              Administrar categorías
+            </Link>
+          )}
+        </div>
       </Field>
       <Field label="Proveedor">
         <div className="inventory-supplier-field">

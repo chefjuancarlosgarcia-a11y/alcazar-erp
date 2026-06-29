@@ -4,6 +4,7 @@ import InventoryItemConversions from "./InventoryItemConversions"
 import YieldProfilesCatalog from "./YieldProfilesCatalog"
 import YieldAuditCampaigns from "./YieldAuditCampaigns"
 import InternalProduction from "./InternalProduction"
+import InventoryCategoriesManagement from "./InventoryCategoriesManagement"
 import RequisitionsSupabase from "./RequisitionsSupabase"
 import RecipesSupabase from "./RecipesSupabase"
 import { lazy, Suspense } from "react"
@@ -23,7 +24,8 @@ const allowedSections = new Set([
   "produccionInterna",
   "conversiones",
   "rendimientos",
-  "auditoriasRendimiento"
+  "auditoriasRendimiento",
+  "categorias"
 ])
 
 function Inventory() {
@@ -79,6 +81,10 @@ function Inventory() {
 
   if (initialSeccion === "auditoriasRendimiento") {
     return <YieldAuditCampaigns />
+  }
+
+  if (initialSeccion === "categorias") {
+    return <InventoryCategoriesManagement />
   }
 
   return (

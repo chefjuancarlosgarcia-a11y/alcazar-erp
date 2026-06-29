@@ -793,6 +793,30 @@
   white-space: nowrap;
 }
 
+.inventory-category-field {
+  display: grid;
+  gap: var(--erp-space-8);
+}
+
+.inventory-category-admin-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--erp-border-subtle, #264653);
+  color: #cbd5e1;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.inventory-category-admin-link:hover {
+  background: #1e293b;
+  border-color: #475569;
+}
+
 .inventory-currency-input {
   position: relative;
 }

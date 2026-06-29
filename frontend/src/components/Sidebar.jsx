@@ -27,6 +27,7 @@ const navigationItems = [
 
 const inventorySubmenu = [
   { roles: ["admin", "gerente", "gerente_general", "encargado_almacen", "cocina"], to: "/inventory?section=inventario", label: "Productos" },
+  { roles: ["admin", "gerente_general", "encargado_almacen"], to: "/inventory?section=categorias", label: "Categorías" },
   { roles: ["admin", "gerente", "gerente_general", "supervisor", "encargado_area", "cocina"], to: "/inventory?section=requisicion", label: "Requisiciones" },
   { roles: ["admin", "gerente", "gerente_general", "encargado_almacen", "cocina"], to: "/inventory?section=movimientosInventario", label: "Movimientos" },
   { roles: ["admin", "gerente", "gerente_general", "encargado_almacen", "cocina"], to: "/inventory?section=inventarioAreas", label: "Inventario por áreas" },
