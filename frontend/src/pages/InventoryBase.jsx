@@ -96,6 +96,10 @@ const EMPTY_ITEM = {
 const EMPTY_ADJUSTMENT = { itemId: "", areaId: "almacen", quantity: "", minimumQuantity: "", reason: "" }
 const MANAGER_ROLES = ["admin", "gerente_general", "encargado_almacen"]
 
+function canManageInventory(user) {
+  return MANAGER_ROLES.includes(user?.role) && (user?.status ?? "active") === "active"
+}
+
 function providerName(provider) {
   return String(provider?.nombreComercial || provider?.razonSocial || provider?.nombre || "").trim()
 }
@@ -132,7 +136,7 @@ function findRecipeWeightConversion(conversions, baseUnit) {
 
 function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
   const { user } = useAuth()
-  const canManage = MANAGER_ROLES.includes(user?.role)
+  const canManage = canManageInventory(user)
   const canEditCatalog = canManage && section !== "movimientosInventario"
   const [items, setItems] = useState([])
   const [areas, setAreas] = useState([])
@@ -227,6 +231,7 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
     }
     setProviderOptions(uniqueProviderNames(suppliersResult.data || []))
     setLoading(false)
+    return itemsResult.data || []
   }
 
   useEffect(() => {
@@ -479,13 +484,11 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
       const successMessage = isEdit ? "Cambios guardados correctamente." : "Producto guardado correctamente."
       setShowItemForm(false)
       setEditingItem(null)
+      setAreaFilter("todos")
+      setQuery(savedItem.name || "")
       setMessage(successMessage)
       showToast(successMessage, "success", 3500)
       warnings.forEach((warning) => showToast(warning, "warning", 6000))
-
-      if (!isInventoryItemVisibleInCatalog(savedItem, { query, areaFilter })) {
-        showToast("Producto guardado. Los filtros actuales pueden ocultarlo en la lista.", "info", 5000)
-      }
 
       logInventorySaveDebug("save:success", { itemId: savedItem.id, warnings })
       logPerformanceEvent({
@@ -496,7 +499,15 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
         duration_ms: Date.now() - startedAt
       })
 
-      await refresh()
+      const refreshedItems = await refresh()
+      const itemLoaded = refreshedItems.some((item) => item.id === savedItem.id)
+      if (!itemLoaded) {
+        showToast(
+          "Producto guardado en Supabase, pero no aparece en la lista cargada. Busca por nombre o revisa duplicados de SKU.",
+          "warning",
+          7000
+        )
+      }
     } catch (unexpectedError) {
       const message = mapInventorySaveError(unexpectedError)
       logInventorySaveDebug("save:exception", { message: unexpectedError?.message })
@@ -766,6 +777,11 @@ function InventoryCatalog({ loading, items, areas, query, setQuery, areaFilter, 
   const totalInvestment = items.reduce((total, item) => (
     total + Number(item.totalQuantity || 0) * Number(item.cost_per_base_unit || 0)
   ), 0)
+
+  useEffect(() => {
+    setPage(1)
+  }, [query, areaFilter])
+
   return (
     <>
       <div className="inventory-base-filters">
@@ -778,6 +794,11 @@ function InventoryCatalog({ loading, items, areas, query, setQuery, areaFilter, 
       <div className="inventory-investment-summary erp-kpi-card">
         <span>Valor total invertido en inventario</span>
         <strong>{quetzales(totalInvestment)}</strong>
+        {!loading && items.length > 0 && (
+          <small className="inventory-base-muted">
+            {items.length} producto(s) en esta vista{query.trim() ? " (filtrados)" : ""}
+          </small>
+        )}
       </div>
       <div className="inventory-table">
         <div className="inventory-table-head"><span>Producto</span><span>Unidad</span><span>Stock área</span><span>Stock total</span><span>Valor</span><span>Mínimo</span><span>Estado</span><span>Acciones</span></div>

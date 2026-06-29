@@ -73,11 +73,43 @@ async function withInventoryTimeout(promise, label = "inventory") {
   }
 }
 
+const INVENTORY_FETCH_PAGE_SIZE = 1000
+
 async function queryItems(activeOnly = false) {
-  let query = supabase.from("inventory_items").select("*, area_inventory(*)")
-  if (activeOnly) query = query.eq("active", true)
-  const { data, error } = await query.order("name", { ascending: true })
-  return { data: (data || []).map(mapItem), error }
+  const rows = []
+  let from = 0
+  let totalCount = null
+
+  while (true) {
+    let query = supabase
+      .from("inventory_items")
+      .select("*, area_inventory(*)", from === 0 ? { count: "exact" } : undefined)
+      .order("name", { ascending: true })
+      .range(from, from + INVENTORY_FETCH_PAGE_SIZE - 1)
+
+    if (activeOnly) query = query.eq("active", true)
+
+    const { data, error, count } = await withInventoryTimeout(query)
+    if (error) return { data: [], error: mapInventoryError(error), totalCount: null }
+
+    if (from === 0 && typeof count === "number") {
+      totalCount = count
+    }
+
+    const batch = data || []
+    rows.push(...batch)
+
+    if (batch.length < INVENTORY_FETCH_PAGE_SIZE) break
+    from += INVENTORY_FETCH_PAGE_SIZE
+  }
+
+  if (import.meta.env.DEV && typeof totalCount === "number" && totalCount > rows.length) {
+    console.warn(
+      `[inventory] Catálogo parcial: ${rows.length}/${totalCount} productos visibles para este usuario. Revisa RLS o paginación.`
+    )
+  }
+
+  return { data: rows.map(mapItem), error: null, totalCount }
 }
 
 export function getInventoryItems() {
