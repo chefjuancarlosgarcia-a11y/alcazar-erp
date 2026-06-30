@@ -741,7 +741,10 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
           dispositivoNoAutorizado: mark.device_alert,
           banoInicioId: mark.related_mark_id,
           duracionMinutos: mark.duration_minutes,
-          excedido: Number(mark.duration_minutes || 0) > 10
+          excedido: Number(mark.duration_minutes || 0) > 10,
+          classification: mark.classification || null,
+          approvalStatus: mark.approval_status || null,
+          systemReason: mark.system_reason || ""
         }
       }))
     }

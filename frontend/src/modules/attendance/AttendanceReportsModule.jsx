@@ -10,6 +10,7 @@ import {
   getLateArrivalStatusLabel,
   getMovementTypeBadgeClass
 } from "./attendanceReportsHelpers"
+import { ATTENDANCE_CLASSIFICATION_LABELS, ATTENDANCE_APPROVAL_LABELS } from "../../utils/attendanceClassificationUtils"
 import "./AttendanceReports.css"
 
 const HISTORY_BATCH_SIZE = 80
@@ -366,6 +367,7 @@ function AttendanceReportsContent({
                     <th>Hora</th>
                     <th>Colaborador</th>
                     <th>Movimiento</th>
+                    <th>Clasificación</th>
                     <th>Dispositivo</th>
                     <th>Foto</th>
                     <th>Detalle</th>
@@ -381,6 +383,11 @@ function AttendanceReportsContent({
                         <span className={getMovementTypeBadgeClass(movimiento.tipo)}>
                           {getAttendanceMarkLabel(movimiento.tipo)}
                         </span>
+                      </td>
+                      <td>
+                        {movimiento.classification
+                          ? `${ATTENDANCE_CLASSIFICATION_LABELS[movimiento.classification] || movimiento.classification}${movimiento.approvalStatus && movimiento.approvalStatus !== "not_required" ? ` · ${ATTENDANCE_APPROVAL_LABELS[movimiento.approvalStatus] || movimiento.approvalStatus}` : ""}`
+                          : "-"}
                       </td>
                       <td>{formatAttendanceDevice(movimiento)}</td>
                       <td>

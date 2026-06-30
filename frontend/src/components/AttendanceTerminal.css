@@ -356,11 +356,19 @@
 
 .attendance-success,
 .attendance-error,
+.attendance-warning,
 .attendance-empty {
   padding: 16px 18px;
   border-radius: 14px;
   font-size: 18px;
   font-weight: 800;
+}
+
+.attendance-warning {
+  border: 1px solid #d97706;
+  background: #451a03;
+  color: #fde68a;
+  font-size: 16px;
 }
 
 .attendance-success {

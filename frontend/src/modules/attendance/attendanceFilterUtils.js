@@ -14,7 +14,9 @@ export const ATTENDANCE_RECORD_STATUS_OPTIONS = [
   { value: "descanso", label: "Descanso" },
   { value: "asueto", label: "Vacaciones" },
   { value: "pendiente", label: "Pendiente" },
-  { value: "horas_extra", label: "Horas extra" }
+  { value: "horas_extra", label: "Horas extra" },
+  { value: "extra_pendiente", label: "Extra pendiente" },
+  { value: "extra_rechazada", label: "Extra rechazada" }
 ]
 
 export function buildShiftTypeFilterOptions(shiftTypes = []) {

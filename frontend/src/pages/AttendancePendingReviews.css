@@ -1,0 +1,192 @@
+.attendance-pending-reviews {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+}
+
+.attendance-pending-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.attendance-pending-head h2 {
+  margin: 0 0 6px;
+}
+
+.attendance-pending-head p {
+  margin: 0;
+  color: #64748b;
+}
+
+.attendance-pending-kpis span {
+  display: inline-flex;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: #fef3c7;
+  color: #92400e;
+  font-weight: 700;
+}
+
+.attendance-pending-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: end;
+}
+
+.attendance-pending-filters label {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  color: #475569;
+}
+
+.attendance-pending-filters input,
+.attendance-pending-filters select {
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+}
+
+.attendance-pending-refresh {
+  min-height: 38px;
+  padding: 8px 14px;
+  border: 1px solid #0f766e;
+  border-radius: 8px;
+  background: #0f766e;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.attendance-pending-table-wrap {
+  overflow-x: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+}
+
+.attendance-pending-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.attendance-pending-table th,
+.attendance-pending-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #e2e8f0;
+  text-align: left;
+  vertical-align: top;
+}
+
+.attendance-pending-table th {
+  background: #f8fafc;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: #64748b;
+}
+
+.attendance-pending-badge {
+  display: inline-flex;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.attendance-pending-badge.approval-pending {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.attendance-pending-badge.approval-approved {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.attendance-pending-badge.approval-rejected {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.attendance-pending-badge.classification-no_schedule,
+.attendance-pending-badge.classification-rest_day_worked,
+.attendance-pending-badge.classification-out_of_schedule,
+.attendance-pending-badge.classification-pending_overtime {
+  background: #ffedd5;
+  color: #9a3412;
+}
+
+.attendance-pending-badge.classification-authorized_overtime {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.attendance-pending-actions {
+  display: grid;
+  gap: 6px;
+  min-width: 220px;
+}
+
+.attendance-pending-actions input {
+  min-height: 34px;
+  padding: 6px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+}
+
+.attendance-pending-actions button {
+  min-height: 34px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.attendance-pending-actions .approve {
+  background: #166534;
+  color: #fff;
+}
+
+.attendance-pending-actions .reject {
+  background: #991b1b;
+  color: #fff;
+}
+
+.attendance-pending-success,
+.attendance-pending-error,
+.attendance-pending-empty {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+}
+
+.attendance-pending-success {
+  background: #ecfdf5;
+  color: #065f46;
+}
+
+.attendance-pending-error {
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.attendance-pending-empty {
+  color: #64748b;
+}
+
+.attendance-pending-done {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.attendance-pending-table small {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+}

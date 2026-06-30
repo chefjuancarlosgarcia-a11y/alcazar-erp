@@ -50,6 +50,7 @@ const hrSubmenu = [
   { roles: ["admin", "gerente", "gerente_general", "recursos_humanos", "rrhh", "supervisor", "caja", "mesero", "cocina", "barista", "bartender", "pizzeria", "repostero", "panadero", "colaborador"], to: "/hr?section=horarios", label: "Horarios" },
   { roles: ["admin", "gerente", "gerente_general", "recursos_humanos", "rrhh", "mesero", "cocina"], to: "/hr?section=asistencia", label: "Marcaje de asistencia" },
   { roles: ["admin", "gerente_general", "recursos_humanos", "rrhh"], to: "/hr?section=dispositivosMarcaje", label: "Dispositivos de marcaje" },
+  { roles: ["admin", "gerente", "gerente_general", "recursos_humanos", "rrhh", "supervisor"], to: "/hr?section=marcacionesExtraordinarias", label: "Marcaciones extraord." },
   { roles: ["admin", "gerente", "gerente_general", "recursos_humanos", "rrhh"], to: "/hr?section=reportesAsistencia", label: "Reportes de asistencia" }
 ]
 

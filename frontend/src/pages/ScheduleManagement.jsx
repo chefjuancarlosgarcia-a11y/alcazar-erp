@@ -54,6 +54,8 @@ const ATTENDANCE_STATUS = {
   descanso: "Descanso",
   asueto: "Vacaciones",
   horas_extra: "Horas extra",
+  extra_pendiente: "Extra pendiente",
+  extra_rechazada: "Extra rechazada",
   pendiente: "Pendiente"
 }
 const OVERTIME_TOLERANCE_MINUTES = {
@@ -684,12 +686,14 @@ function ScheduleManagement() {
 
           <div className="schedule-payroll-table">
             <table>
-              <thead><tr><th>Colaborador</th><th>Area</th><th>Programadas</th><th>Reales</th><th>Ordinarias</th><th>Extra</th><th>Tarde</th><th>Ausencias</th><th>Pago</th><th>Estado</th>{isWeeklyPayrollView && <th>Acciones</th>}</tr></thead>
+              <thead><tr><th>Colaborador</th><th>Area</th><th>Programadas</th><th>Reales</th><th>Ordinarias</th><th>Extra</th><th>Extra pend.</th><th>Extra aprob.</th><th>Tarde</th><th>Ausencias</th><th>Pago</th><th>Estado</th>{isWeeklyPayrollView && <th>Acciones</th>}</tr></thead>
               <tbody>
                 {displayPayroll.map((row) => (
                   <tr key={row.employee_id}>
                     <td>{row.employee_name}</td><td>{row.area}</td><td>{row.scheduled_hours} h</td><td>{row.actual_hours} h</td><td>{row.regular_hours} h</td>
                     <td className={Number(row.overtime_hours) > 0 ? "warning" : ""}>{row.overtime_hours} h</td>
+                    <td className={Number(row.pending_extra_hours) > 0 ? "warning" : ""}>{row.pending_extra_hours || 0} h</td>
+                    <td className={Number(row.approved_extra_hours) > 0 ? "warning" : ""}>{row.approved_extra_hours || 0} h</td>
                     <td>{row.late_minutes} min</td><td>{row.absences}</td><td>Q{Number(row.estimated_pay).toFixed(2)}</td>
                     <td><span className={`schedule-status ${row.payroll_status}`}>{payrollLabel(row.payroll_status)}</span></td>
                     {isWeeklyPayrollView && (
@@ -708,7 +712,7 @@ function ScheduleManagement() {
           <h2>Detalle de marcajes vs. horario</h2>
           <div className="schedule-payroll-table">
             <table>
-              <thead><tr><th>Fecha</th><th>Colaborador</th><th>Turno</th><th>Area</th><th>Entrada prog.</th><th>Entrada real</th><th>Tarde</th><th>Salida comida</th><th>Regreso comida</th><th>Min comida</th><th>Salida prog.</th><th>Salida real</th><th>Prog.</th><th>Trab.</th><th>Extra</th><th>Estado</th><th>Observaciones</th></tr></thead>
+              <thead><tr><th>Fecha</th><th>Colaborador</th><th>Turno</th><th>Area</th><th>Entrada prog.</th><th>Entrada real</th><th>Tarde</th><th>Salida comida</th><th>Regreso comida</th><th>Min comida</th><th>Salida prog.</th><th>Salida real</th><th>Prog.</th><th>Trab.</th><th>Extra</th><th>Extra pend.</th><th>Extra aprob.</th><th>Estado</th><th>Observaciones</th></tr></thead>
               <tbody>
                 {filteredAttendanceDetails.map((row) => (
                   <tr key={row.schedule_id}>
@@ -720,6 +724,8 @@ function ScheduleManagement() {
                     <td>{formatMarkTime(row.meal_out)}</td><td>{formatMarkTime(row.meal_back)}</td><td>{row.meal_minutes || 0} min</td>
                     <td>{row.is_work_day ? formatTime(row.scheduled_end) : "-"}</td><td>{formatMarkTime(row.actual_end)}</td>
                     <td>{row.scheduled_hours || 0} h</td><td>{row.actual_hours || 0} h</td><td className={Number(row.overtime_hours) > 0 ? "warning" : ""}>{row.overtime_hours || 0} h</td>
+                    <td className={Number(row.pending_extra_hours) > 0 ? "warning" : ""}>{row.pending_extra_hours || 0} h</td>
+                    <td className={Number(row.approved_extra_hours) > 0 ? "warning" : ""}>{row.approved_extra_hours || 0} h</td>
                     <td><span className={`schedule-status ${row.attendance_status}`}>{attendanceStatusLabel(row.attendance_status)}</span></td>
                     <td>{sanitizeAttendanceObservation(row.observations) || "-"}</td>
                   </tr>

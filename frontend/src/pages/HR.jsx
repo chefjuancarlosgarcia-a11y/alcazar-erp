@@ -13,6 +13,7 @@ import ScheduleManagement from "./ScheduleManagement"
 import AttendanceDevicesManagement from "./AttendanceDevicesManagement"
 import HRCatalogsManagement from "./HRCatalogsManagement"
 import AttendanceTerminal from "../components/AttendanceTerminal"
+import AttendancePendingReviews from "./AttendancePendingReviews"
 import ExpedientesDashboard from "../modules/hr-expedientes/ExpedientesDashboard"
 import RecruitmentDashboard from "../modules/hr-recruitment/RecruitmentDashboard"
 import { Navigate, useLocation } from "react-router-dom"
@@ -58,6 +59,10 @@ function HR() {
 
   if (selectedSection === "asistencia") {
     return <AttendanceTerminal />
+  }
+
+  if (selectedSection === "marcacionesExtraordinarias") {
+    return <AttendancePendingReviews />
   }
 
   if (selectedSection === "dispositivosMarcaje") {

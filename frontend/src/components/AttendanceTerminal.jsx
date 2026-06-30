@@ -8,7 +8,9 @@ import {
   getAttendanceMarks,
   getAttendanceSecurityStatus,
   getAttendanceTerminalProfiles,
+  getMarkRegistrationMessage,
   getOrRegisterAttendanceDevice,
+  getSchedulePreviewMessage,
   registerAttendanceMark,
   uploadAttendanceEvidence,
   validateEmployeeScheduleForMarking
@@ -44,6 +46,7 @@ function AttendanceTerminal({ kiosk = false }) {
   const [pin, setPin] = useState("")
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
+  const [scheduleWarning, setScheduleWarning] = useState("")
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [cameraReady, setCameraReady] = useState(false)
@@ -89,8 +92,8 @@ function AttendanceTerminal({ kiosk = false }) {
   const lastShiftMark = selectedMarks.find((mark) => ["entrada", "salida", "salida_final"].includes(mark.mark_type))
   const isCheckedIn = lastShiftMark?.mark_type === "entrada"
   const activeMeal = selectedMarks.find((mark) => ["salida_comida", "bano_inicio"].includes(mark.mark_type) && !selectedMarks.some((candidate) => candidate.related_mark_id === mark.id && ["regreso_comida", "bano_regreso"].includes(candidate.mark_type)))
-  const canMarkEntrada = scheduleValidation?.allowed_for_entrada === true
-  const canCompleteShift = scheduleValidation?.allowed_for_completion === true || isCheckedIn
+  const canMarkEntrada = !isCheckedIn && scheduleValidation?.allowed_for_entrada !== false
+  const canCompleteShift = isCheckedIn || scheduleValidation?.allowed_for_completion === true
 
   async function refreshMarkingState(employeeId = selected?.id) {
     if (!employeeId || !canMark) return null
@@ -219,6 +222,7 @@ function AttendanceTerminal({ kiosk = false }) {
     setSelected(profile)
     setError("")
     setMessage("")
+    setScheduleWarning("")
     setScheduleValidation(null)
     setPendingMarkType("")
     resetPhotoCapture()
@@ -228,31 +232,26 @@ function AttendanceTerminal({ kiosk = false }) {
     ])
     if (!marksResult.error) setMarks(marksResult.data || [])
     setScheduleValidation(validation)
-    const canUseTerminal = validation?.allowed === true
-      || validation?.allowed_for_completion === true
-      || validation?.has_open_entry === true
-    if (!canUseTerminal) {
-      setError(validation?.reason || "Horario no asignado. Comunícate con Recursos Humanos antes de registrar tu asistencia.")
+    if (validation?.reason_code === "open_entry") {
+      setError(validation?.reason || "Ya existe una entrada activa para este colaborador.")
+      return
     }
+    const preview = getSchedulePreviewMessage(validation)
+    if (preview) setScheduleWarning(preview)
   }
 
   async function ensureScheduleAllowed(markType = pendingMarkType) {
     if (!selected?.id) return false
     const validation = await validateEmployeeScheduleForMarking(selected.id, markType || null)
     setScheduleValidation(validation)
-    if (markType === "entrada") {
-      if (!validation?.allowed_for_entrada) {
-        setError(validation?.reason || "Horario no asignado. Comunícate con Recursos Humanos antes de registrar tu asistencia.")
-        return false
-      }
-      return true
+    if (markType === "entrada" && validation?.reason_code === "open_entry") {
+      setError(validation?.reason || "Ya existe una entrada activa para este colaborador.")
+      return false
     }
-    if (validation?.allowed_for_completion || validation?.allowed) {
-      setError("")
-      return true
-    }
-    setError(validation?.reason || "Horario no asignado. Comunícate con Recursos Humanos antes de registrar tu asistencia.")
-    return false
+    setError("")
+    const preview = getSchedulePreviewMessage(validation)
+    setScheduleWarning(preview)
+    return true
   }
 
   async function takePhoto() {
@@ -328,7 +327,8 @@ function AttendanceTerminal({ kiosk = false }) {
         observation: devicePayload.observation
       })
       if (result.error) throw result.error
-      setMessage(`${MARK_LABELS[pendingMarkType]} registrada correctamente para ${selected.fullName}.`)
+      const mark = result.data
+      setMessage(getMarkRegistrationMessage(mark, MARK_LABELS[pendingMarkType]))
       setPin("")
       setObservation("")
       resetPhotoCapture()
@@ -352,6 +352,7 @@ function AttendanceTerminal({ kiosk = false }) {
     setObservation("")
     setError("")
     setMessage("")
+    setScheduleWarning("")
     setScheduleValidation(null)
   }
 
@@ -395,6 +396,7 @@ function AttendanceTerminal({ kiosk = false }) {
         </header>
 
         {message && <div className="attendance-success">{message}</div>}
+        {scheduleWarning && !error && <div className="attendance-warning">{scheduleWarning}</div>}
         {error && <div className="attendance-error">{error}</div>}
 
         {securityLoading ? (
@@ -453,7 +455,7 @@ function AttendanceTerminal({ kiosk = false }) {
               <button type="button" className={`exit ${pendingMarkType === "salida_final" ? "selected" : ""}`} disabled={saving || !canCompleteShift || !isCheckedIn || Boolean(activeMeal)} onClick={() => selectMarkType("salida_final")}>Salida final</button>
             </div>
 
-            {(scheduleValidation?.allowed || scheduleValidation?.allowed_for_completion) && scheduleValidation?.schedule_status && (
+            {(scheduleValidation?.allowed || scheduleValidation?.allowed_for_completion || scheduleValidation?.classification) && scheduleValidation?.schedule_status && (
               <p className="attendance-pending-mark">
                 Horario{scheduleValidation?.labor_date ? ` (${scheduleValidation.labor_date})` : ""}:{" "}
                 <strong>{scheduleValidation.schedule_status === "draft" ? "Borrador" : "Publicado"}</strong>

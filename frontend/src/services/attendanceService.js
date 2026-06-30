@@ -1,4 +1,7 @@
 import { supabase } from "../lib/supabase"
+import { getMarkRegistrationMessage, getSchedulePreviewMessage } from "../utils/attendanceClassificationUtils"
+
+export { getMarkRegistrationMessage, getSchedulePreviewMessage }
 
 const EVIDENCE_BUCKET = "attendance-evidence"
 
@@ -76,14 +79,17 @@ export async function validateEmployeeScheduleForMarking(employeeId, markType = 
       labor_date: null,
       has_open_entry: false,
       has_open_meal: false,
-      overnight_shift: false
+      overnight_shift: false,
+      classification: null,
+      approval_status: null,
+      system_reason: null
     }
   }
   return data || {
-    allowed: false,
-    allowed_for_entrada: false,
+    allowed: true,
+    allowed_for_entrada: true,
     allowed_for_completion: false,
-    reason: "Horario no asignado. Comunícate con Recursos Humanos antes de registrar tu asistencia.",
+    reason: "Sin horario asignado. La marcación se registrará para revisión de RRHH.",
     reason_code: "no_schedule",
     schedule_id: null,
     schedule_status: null,
@@ -91,7 +97,10 @@ export async function validateEmployeeScheduleForMarking(employeeId, markType = 
     labor_date: null,
     has_open_entry: false,
     has_open_meal: false,
-    overnight_shift: false
+    overnight_shift: false,
+    classification: "no_schedule",
+    approval_status: "pending",
+    system_reason: null
   }
 }
 
@@ -105,6 +114,22 @@ export function registerAttendanceMark({ employeeId, pin, markType, photoPath, d
     p_device_name: deviceName,
     p_observation: observation || null,
     p_client_ip: clientIp || null
+  })
+}
+
+export function getAttendanceMarksForReview({ status = "pending", from = null, to = null } = {}) {
+  return supabase.rpc("get_attendance_marks_for_review", {
+    p_status: status || "pending",
+    p_from: from || null,
+    p_to: to || null
+  })
+}
+
+export function reviewAttendanceMark({ markId, action, notes = "" }) {
+  return supabase.rpc("review_attendance_mark", {
+    p_mark_id: markId,
+    p_action: action,
+    p_notes: notes || null
   })
 }
 

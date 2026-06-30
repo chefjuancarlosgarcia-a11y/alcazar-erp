@@ -129,6 +129,8 @@ export function aggregatePayrollFromDetails(details = [], summaries = []) {
         actual_hours: 0,
         regular_hours: 0,
         overtime_hours: 0,
+        pending_extra_hours: 0,
+        approved_extra_hours: 0,
         late_minutes: 0,
         absences: 0,
         estimated_pay: 0,
@@ -143,6 +145,8 @@ export function aggregatePayrollFromDetails(details = [], summaries = []) {
     aggregate.actual_hours += actualHours
     aggregate.regular_hours += Math.min(actualHours, scheduledHours)
     aggregate.overtime_hours += Number(detail.overtime_hours || 0)
+    aggregate.pending_extra_hours += Number(detail.pending_extra_hours || 0)
+    aggregate.approved_extra_hours += Number(detail.approved_extra_hours || 0)
     aggregate.late_minutes += Number(detail.late_minutes || 0)
     if (detail.attendance_status === "falta") aggregate.absences += 1
     aggregate.estimated_pay += dailyPay
@@ -154,6 +158,8 @@ export function aggregatePayrollFromDetails(details = [], summaries = []) {
     actual_hours: Number(row.actual_hours.toFixed(2)),
     regular_hours: Number(row.regular_hours.toFixed(2)),
     overtime_hours: Number(row.overtime_hours.toFixed(2)),
+    pending_extra_hours: Number(row.pending_extra_hours.toFixed(2)),
+    approved_extra_hours: Number(row.approved_extra_hours.toFixed(2)),
     estimated_pay: Number(row.estimated_pay.toFixed(2))
   }))
 }
