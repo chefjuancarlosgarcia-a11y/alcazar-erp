@@ -122,7 +122,9 @@ function ExecutiveCommandCenter({ recentTasks = [] }) {
       label: "Requisiciones",
       value: Number(kpis?.pendingRequisitions || 0),
       delta: { label: kpis?.pendingRequisitions ? "Pendientes" : "Al día", tone: kpis?.pendingRequisitions ? "down" : "up" },
-      hint: "Por aprobar o completar",
+      hint: kpis?.partialRequisitions
+        ? `${kpis.partialRequisitions} parcialmente surtida${kpis.partialRequisitions === 1 ? "" : "s"}`
+        : "Por aprobar, completar o surtir",
       tone: kpis?.pendingRequisitions ? "warn" : "good",
       to: "/inventory?section=requisicion",
       icon: "📋"

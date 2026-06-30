@@ -143,6 +143,25 @@
 .requisition-route b { color: #2dd4bf; }
 .requisition-meta { color: #94a3b8; font-size: 13px; gap: 18px; }
 .requisition-meta strong { color: #e2e8f0; }
+.requisition-pending-summary {
+  color: #fdba74;
+  font-weight: 600;
+}
+.requisition-pending-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #431407;
+  color: #fdba74;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+}
+.requisition-card--has-pending {
+  border-color: #854d0e;
+}
 .requisition-buttons button { padding: 8px 10px; font-size: 13px; }
 
 .req-badge {
@@ -155,6 +174,8 @@
 .status-pending { color: #93c5fd; background: #10284b; }
 .status-approved { color: #fcd34d; background: #422006; }
 .status-completed { color: #86efac; background: #052e24; }
+.status-partially_fulfilled { color: #fdba74; background: #431407; }
+.status-pending_fulfillment { color: #fca5a5; background: #3b1119; }
 .status-rejected, .status-cancelled { color: #fca5a5; background: #3b1119; }
 .priority-low { color: #cbd5e1; background: #1e293b; }
 .priority-normal { color: #93c5fd; background: #10284b; }
@@ -473,6 +494,123 @@
 .low-stock-suggestion-success {
   display: grid;
   gap: 12px;
+}
+
+.requisitions-modal.approval,
+.requisitions-modal.fulfillment {
+  width: min(760px, 100%);
+}
+
+.requisition-quantity-lines {
+  display: grid;
+  gap: 14px;
+}
+
+.approval-line {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  background: #101b2d;
+}
+
+.approval-line__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.approval-line label {
+  display: grid;
+  gap: 6px;
+  color: #cbd5e1;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.approval-line input,
+.approval-line select {
+  width: 100%;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #0b1526;
+  color: #e2e8f0;
+}
+
+.requisition-pending-hint {
+  color: #fdba74;
+}
+
+.requisition-fulfillment-summary {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid #854d0e;
+  background: #33240b;
+  color: #fde68a;
+  font-size: 13px;
+}
+
+.fulfillment-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.fulfillment-badge--fulfilled {
+  background: #052e24;
+  color: #86efac;
+}
+
+.fulfillment-badge--partial {
+  background: #33240b;
+  color: #fde68a;
+}
+
+.fulfillment-badge--out_of_stock,
+.fulfillment-badge--pending_fulfillment {
+  background: #3b1119;
+  color: #fecaca;
+}
+
+.requisition-detail-table--fulfillment > div {
+  grid-template-columns: 1.4fr repeat(5, minmax(0, 1fr));
+}
+
+.requisition-line-stock-hint {
+  grid-column: 1 / -1;
+  color: #94a3b8;
+}
+
+.purchase-suggestion-source {
+  display: inline-flex;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.purchase-suggestion-source--requisition_shortage {
+  background: #3b1119;
+  color: #fecaca;
+}
+
+.purchase-suggestion-source--low_stock {
+  background: #10284b;
+  color: #93c5fd;
+}
+
+.purchase-suggestion-source--both {
+  background: #33240b;
+  color: #fde68a;
 }
 
 @media (max-width: 1000px) {

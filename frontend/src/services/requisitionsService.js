@@ -103,13 +103,37 @@ export function submitRequisition(id) {
   return supabase.rpc("submit_requisition", { p_requisition_id: id })
 }
 
+function serializeApprovalItems(items) {
+  return items.map((item) => ({
+    id: item.id,
+    approved_quantity: item.approvedQuantity !== undefined && item.approvedQuantity !== ""
+      ? Number(item.approvedQuantity)
+      : Number(item.approved_quantity ?? item.requested_quantity),
+    shortage_reason: item.shortageReason || item.shortage_reason || null,
+    shortage_notes: item.shortageNotes || item.shortage_notes || null
+  }))
+}
+
+function serializeFulfillmentItems(items) {
+  return items.map((item) => ({
+    id: item.id,
+    delivered_quantity: item.deliveredQuantity !== undefined && item.deliveredQuantity !== ""
+      ? Number(item.deliveredQuantity)
+      : Number(
+        item.delivered_quantity
+        ?? item.approved_quantity
+        ?? item.approvedQuantity
+        ?? item.requested_quantity
+      ),
+    shortage_reason: item.shortageReason || item.shortage_reason || null,
+    shortage_notes: item.shortageNotes || item.shortage_notes || null
+  }))
+}
+
 export function approveRequisition(id, items) {
   return supabase.rpc("approve_requisition", {
     p_requisition_id: id,
-    p_items: serializeItems(items).map((item) => ({
-      id: item.id,
-      approved_quantity: Number(item.approved_quantity ?? item.requested_quantity)
-    }))
+    p_items: serializeApprovalItems(items)
   })
 }
 
@@ -121,8 +145,19 @@ export function cancelRequisition(id, reason) {
   return supabase.rpc("cancel_requisition", { p_requisition_id: id, p_reason: reason })
 }
 
-export function completeRequisition(id) {
-  return supabase.rpc("complete_requisition", { p_requisition_id: id })
+export function completeRequisition(id, items = null) {
+  return supabase.rpc("complete_requisition", {
+    p_requisition_id: id,
+    p_items: items ? serializeFulfillmentItems(items) : null
+  })
+}
+
+export async function getRequisitionPurchaseSuggestions(requisitionId, { recordSuggested = true } = {}) {
+  const { data, error } = await supabase.rpc("get_requisition_purchase_suggestions", {
+    p_requisition_id: requisitionId,
+    p_record_suggested: recordSuggested
+  })
+  return { data: Array.isArray(data) ? data : (data || []), error }
 }
 
 export async function getRequisitionLowStockImpacts(requisitionId, { recordSuggested = true } = {}) {

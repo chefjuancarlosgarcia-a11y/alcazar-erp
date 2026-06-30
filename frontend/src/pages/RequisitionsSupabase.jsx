@@ -34,6 +34,8 @@ const TABS = [
   ["draft", "Borradores"],
   ["pending", "Pendientes"],
   ["approved", "Aprobadas"],
+  ["partially_fulfilled", "Parcialmente surtidas"],
+  ["pending_fulfillment", "Pendientes de surtir"],
   ["completed", "Completadas"],
   ["rejected", "Rechazadas"],
   ["cancelled", "Canceladas"]
@@ -44,8 +46,30 @@ const STATUS_LABELS = {
   pending: "Pendiente",
   approved: "Aprobada",
   completed: "Completada",
+  partially_fulfilled: "Parcialmente surtida",
+  pending_fulfillment: "Pendiente de surtir",
   rejected: "Rechazada",
   cancelled: "Cancelada"
+}
+
+const SHORTAGE_REASONS = [
+  { value: "sin_existencia", label: "Sin existencia en almacén" },
+  { value: "vencido_danado", label: "Producto vencido/dañado" },
+  { value: "error_solicitud", label: "Error en solicitud" },
+  { value: "otro", label: "Otro" }
+]
+
+const FULFILLMENT_STATUS_LABELS = {
+  fulfilled: "Completo",
+  partial: "Parcial",
+  out_of_stock: "Sin stock",
+  pending_fulfillment: "Pendiente"
+}
+
+const PURCHASE_SUGGESTION_SOURCE_LABELS = {
+  requisition_shortage: "Faltante requisición",
+  low_stock: "Stock mínimo",
+  both: "Faltante + mínimo"
 }
 
 const PRIORITY_LABELS = {
@@ -112,6 +136,7 @@ function RequisitionsSupabase({
   const [formRequest, setFormRequest] = useState(null)
   const [detail, setDetail] = useState(null)
   const [approval, setApproval] = useState(null)
+  const [fulfillment, setFulfillment] = useState(null)
   const [lowStockSuggestion, setLowStockSuggestion] = useState(null)
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
@@ -122,7 +147,7 @@ function RequisitionsSupabase({
 
   const manager = ["admin", "gerente_general"].includes(user?.role)
   const isWarehouseManager = user?.role === "encargado_almacen"
-  const canApprove = manager
+  const canApprove = manager || isWarehouseManager
   const canComplete = manager || isWarehouseManager
 
   async function notifyRequisitionPending(requisition) {
@@ -304,28 +329,34 @@ function RequisitionsSupabase({
     }
   }
 
-  async function handleComplete(request) {
+  async function handleComplete(request, items) {
     setWorkingId(request.id)
     setError("")
-    const result = await completeRequisition(request.id)
+    const result = await completeRequisition(request.id, items)
     setWorkingId("")
     if (result.error) {
       setError(result.error.message)
-      return
+      return { ok: false, error: result.error.message }
     }
+    const newStatus = result.data?.status || "completed"
     setMessage(
       request.is_test
         ? "Requisición de prueba completada. Traslado simulado registrado."
-        : "Requisición completada. Inventario actualizado."
+        : newStatus === "completed"
+          ? "Requisición completada. Inventario actualizado."
+          : newStatus === "pending_fulfillment"
+            ? "Requisición registrada sin entregas. Quedó pendiente de surtir."
+            : "Requisición surtida parcialmente. Inventario actualizado."
     )
     setDetail(null)
+    setFulfillment(null)
     await loadData()
 
     if (!request.is_test && canComplete) {
       const impactsResult = await getRequisitionLowStockImpacts(request.id)
       if (impactsResult.error) {
-        console.error("No se pudo evaluar stock mínimo post-requisición.", impactsResult.error)
-        return
+        console.error("No se pudo evaluar sugerencias post-requisición.", impactsResult.error)
+        return { ok: true }
       }
       if (impactsResult.data?.length) {
         setLowStockSuggestion({
@@ -339,6 +370,7 @@ function RequisitionsSupabase({
         })
       }
     }
+    return { ok: true }
   }
 
   async function runAction(id, action, successMessage) {
@@ -419,12 +451,20 @@ function RequisitionsSupabase({
 
       <div className="requisitions-list">
         {loading && <p className="requisitions-empty">Cargando requisiciones...</p>}
-        {!loading && pagedRequests.map((request) => (
-          <article className={`requisition-card${request.is_test ? " requisition-card--test" : ""}${focusedRequisitionId === String(request.id) ? " requisition-card--focused" : ""}`} key={request.id}>
+        {!loading && pagedRequests.map((request) => {
+          const pendingSummary = getRequisitionPendingSummary(request)
+          const showPendingSummary = pendingSummary.hasPending
+            && (
+              tab === "all"
+              || ["partially_fulfilled", "pending_fulfillment", "approved"].includes(request.status)
+            )
+          return (
+          <article className={`requisition-card${request.is_test ? " requisition-card--test" : ""}${focusedRequisitionId === String(request.id) ? " requisition-card--focused" : ""}${showPendingSummary ? " requisition-card--has-pending" : ""}`} key={request.id}>
             <div className="requisition-summary">
               <strong>{request.requisition_number}</strong>
               {request.is_test && <TestFlowBadge />}
               <StatusBadge status={request.status} />
+              {showPendingSummary && <RequisitionPendingBadge summary={pendingSummary} />}
               <PriorityBadge priority={request.priority} />
             </div>
             <div className="requisition-route">
@@ -436,18 +476,26 @@ function RequisitionsSupabase({
               <span>Solicitante: <strong>{request.requestedByName}</strong></span>
               <span>{formatDate(request.created_at)}</span>
               <span>{request.items.length} productos</span>
+              {showPendingSummary && (
+                <span className="requisition-pending-summary">{formatRequisitionPendingSummary(pendingSummary)}</span>
+              )}
             </div>
             <div className="requisition-buttons">
               <button type="button" onClick={() => setDetail(request)}>Ver detalle</button>
               {request.status === "draft" && request.requested_by === user?.id && <button type="button" onClick={() => openEdit(request)}>Editar</button>}
               {request.status === "draft" && request.requested_by === user?.id && <button type="button" className="primary" disabled={workingId === request.id} onClick={() => runAction(request.id, () => submitRequisition(request.id), "Requisición enviada para aprobación.")}>Enviar</button>}
               {canApprove && request.status === "pending" && <button type="button" className="primary" onClick={() => setApproval(request)}>Aprobar</button>}
-              {canComplete && request.status === "approved" && <button type="button" className="primary" disabled={workingId === request.id} onClick={() => handleComplete(request)}>Completar traslado</button>}
+              {canComplete && request.status === "approved" && (
+                <button type="button" className="primary" disabled={workingId === request.id} onClick={() => setFulfillment(request)}>
+                  Completar traslado
+                </button>
+              )}
               {canApprove && ["pending", "approved"].includes(request.status) && <button type="button" className="danger" onClick={() => askReason("rechazar", (reason) => runAction(request.id, () => rejectRequisition(request.id, reason), "Requisición rechazada."))}>Rechazar</button>}
               {["draft", "pending", "approved"].includes(request.status) && (canApprove || request.requested_by === user?.id) && <button type="button" className="danger" onClick={() => askReason("cancelar", (reason) => runAction(request.id, () => cancelRequisition(request.id, reason), "Requisición cancelada."))}>Cancelar</button>}
             </div>
           </article>
-        ))}
+          )
+        })}
         {!loading && <PaginationControls page={page} total={visibleRequests.length} onChange={setPage} />}
         {!loading && !visibleRequests.length && <p className="requisitions-empty">No hay requisiciones para esta selección.</p>}
       </div>
@@ -469,6 +517,14 @@ function RequisitionsSupabase({
       )}
       {detail && <RequestDetail request={detail} areas={areas} inventory={inventory} unitConversions={unitConversions} onClose={() => setDetail(null)} />}
       {approval && <ApprovalModal request={approval} saving={workingId === approval.id} onClose={() => setApproval(null)} onApprove={handleApprove} />}
+      {fulfillment && (
+        <FulfillmentModal
+          request={fulfillment}
+          saving={workingId === fulfillment.id}
+          onClose={() => setFulfillment(null)}
+          onComplete={(items) => handleComplete(fulfillment, items)}
+        />
+      )}
       {lowStockSuggestion && (
         <LowStockPurchaseSuggestionModal
           suggestion={lowStockSuggestion}
@@ -760,6 +816,7 @@ function RequestForm({ request, areas, destinationAreas, inventory, requesters, 
 }
 
 function RequestDetail({ request, areas, inventory, unitConversions, onClose }) {
+  const isFulfilled = ["completed", "partially_fulfilled", "pending_fulfillment"].includes(request.status)
   return (
     <div className="requisitions-backdrop">
       <section className="requisitions-modal detail">
@@ -782,28 +839,48 @@ function RequestDetail({ request, areas, inventory, unitConversions, onClose }) 
           <span>Creada <strong>{formatDate(request.created_at)}</strong></span>
         </div>
         {request.notes && <p className="requisition-note">{request.notes}</p>}
-        <div className="requisition-detail-table">
-          <div><strong>Producto</strong><strong>Solicitado / aprobado</strong><strong>Disponibilidad</strong><strong>Origen ahora / después</strong><strong>Destino ahora / después</strong></div>
+        <div className="requisition-detail-table requisition-detail-table--fulfillment">
+          <div>
+            <strong>Producto</strong>
+            <strong>Solicitado</strong>
+            <strong>{isFulfilled ? "Entregado" : "Aprobado"}</strong>
+            <strong>Pendiente</strong>
+            <strong>Estado</strong>
+            <strong>Motivo</strong>
+          </div>
           {request.items.map((line) => {
             const item = inventory.find((entry) => entry.id === line.item_id)
             const requestedUnit = line.requested_unit || line.unit || item?.base_unit
-            const quantity = Number(line.converted_approved_quantity || line.converted_requested_quantity || line.approved_quantity || line.requested_quantity)
+            const requestedQty = Number(line.requested_quantity || 0)
+            const approvedQty = line.approved_quantity != null ? Number(line.approved_quantity) : null
+            const deliveredQty = line.delivered_quantity != null ? Number(line.delivered_quantity) : null
+            const shownQty = isFulfilled ? deliveredQty : approvedQty
+            const pendingQty = isFulfilled
+              ? Number(line.pending_quantity ?? Math.max(requestedQty - Number(deliveredQty || 0), 0))
+              : Number(line.pending_quantity ?? Math.max(requestedQty - Number(approvedQty ?? requestedQty), 0))
+            const lineStatus = line.fulfillment_status || previewLineFulfillmentStatus(requestedQty, shownQty ?? requestedQty)
             const origin = stockOf(item, request.from_area_id)
             const destination = stockOf(item, request.to_area_id)
-            const availability = calculateAvailability(item, request.from_area_id, line.approved_quantity || line.requested_quantity, requestedUnit, unitConversions)
-            const insufficient = availability.shortage > 0 && request.status !== "completed"
+            const movedBase = Number(
+              line.converted_delivered_quantity
+              || line.converted_approved_quantity
+              || line.converted_requested_quantity
+              || shownQty
+              || 0
+            )
             return (
-              <div className={insufficient ? "insufficient" : ""} key={line.id}>
+              <div className={pendingQty > 0 ? "insufficient" : ""} key={line.id}>
                 <strong>{line.item_name}</strong>
-                <span>{formatNumber(line.requested_quantity)} / {line.approved_quantity ? formatNumber(line.approved_quantity) : "-"} {requestedUnit}</span>
-                <span>
-                  <AvailabilityBadge status={line.availability_status || availability.status} />
-                  Actual: {formatNumber(origin)} {item?.base_unit || line.unit} · Mínimo: {formatNumber(minimumOf(item, request.from_area_id))} {item?.base_unit || line.unit}
-                </span>
-                <span>{formatNumber(origin)} / {formatNumber(origin - quantity)} {item?.base_unit || line.unit}</span>
-                <span>{formatNumber(destination)} / {formatNumber(destination + quantity)} {item?.base_unit || line.unit}</span>
-                {insufficient && <small>⚠ Stock insuficiente. Solicitado: {formatNumber(availability.requestedBase)}. Disponible: {formatNumber(availability.available)}. Faltante: {formatNumber(availability.shortage)}.</small>}
-                {(line.conversion_warning || availability.conversionWarning) && <small>No había conversión configurada para {requestedUnit} → {item?.base_unit || line.unit}.</small>}
+                <span>{formatNumber(requestedQty)} {requestedUnit}</span>
+                <span>{shownQty != null ? `${formatNumber(shownQty)} ${requestedUnit}` : "-"}</span>
+                <span>{formatNumber(pendingQty)} {requestedUnit}</span>
+                <span><FulfillmentStatusBadge status={lineStatus} /></span>
+                <span>{formatShortageReason(line.shortage_reason, line.shortage_notes)}</span>
+                {!isFulfilled && (
+                  <small className="requisition-line-stock-hint">
+                    Origen: {formatNumber(origin)} → {formatNumber(origin - movedBase)} · Destino: {formatNumber(destination)} → {formatNumber(destination + movedBase)}
+                  </small>
+                )}
               </div>
             )
           })}
@@ -831,10 +908,13 @@ function LowStockPurchaseSuggestionModal({ suggestion, saving, onClose, onViewDe
   async function handleConfirm() {
     setLocalError("")
     const payload = items.map((item) => ({
+      requisition_item_id: item.requisition_item_id || null,
       item_id: item.item_id,
+      pending_quantity: item.pending_quantity,
       stock_after: item.stock_after,
       minimum_stock: item.minimum_stock,
-      suggested_quantity: Number(item.suggested_quantity)
+      suggested_quantity: Number(item.suggested_quantity),
+      source: item.source || "low_stock"
     }))
     if (payload.some((item) => !item.suggested_quantity || item.suggested_quantity <= 0)) {
       setLocalError("Cada producto debe tener una cantidad sugerida mayor que cero.")
@@ -851,10 +931,13 @@ function LowStockPurchaseSuggestionModal({ suggestion, saving, onClose, onViewDe
   async function handleIgnore() {
     setLocalError("")
     const payload = items.map((item) => ({
+      requisition_item_id: item.requisition_item_id || null,
       item_id: item.item_id,
+      pending_quantity: item.pending_quantity,
       stock_after: item.stock_after,
       minimum_stock: item.minimum_stock,
-      suggested_quantity: Number(item.suggested_quantity)
+      suggested_quantity: Number(item.suggested_quantity),
+      source: item.source || "low_stock"
     }))
     await onIgnore(payload)
   }
@@ -865,9 +948,9 @@ function LowStockPurchaseSuggestionModal({ suggestion, saving, onClose, onViewDe
         <header>
           <div>
             <p className="requisitions-eyebrow">{suggestion.requisitionNumber}</p>
-            <h2>Productos en punto mínimo</h2>
+            <h2>Sugerencias de compra</h2>
             <p className="requisitions-muted">
-              Estos productos han llegado al punto mínimo. ¿Deseas agregarlos a la orden de compra de hoy?
+              Productos con faltante de requisición o en punto mínimo. ¿Deseas agregarlos a la orden de compra de hoy?
             </p>
           </div>
           <button type="button" onClick={onClose} disabled={saving}>Cerrar</button>
@@ -900,6 +983,8 @@ function LowStockPurchaseSuggestionModal({ suggestion, saving, onClose, onViewDe
                 <thead>
                   <tr>
                     <th>Producto</th>
+                    <th>Origen</th>
+                    <th>Pendiente</th>
                     <th>Stock actual</th>
                     <th>Punto mínimo</th>
                     <th>Unidad</th>
@@ -914,8 +999,14 @@ function LowStockPurchaseSuggestionModal({ suggestion, saving, onClose, onViewDe
                         <strong>{item.item_name}</strong>
                         {item.sku ? <small>{item.sku}</small> : null}
                       </td>
-                      <td>{formatNumber(item.stock_after)}</td>
-                      <td>{formatNumber(item.minimum_stock)}</td>
+                      <td>
+                        <span className={`purchase-suggestion-source purchase-suggestion-source--${item.source || "low_stock"}`}>
+                          {PURCHASE_SUGGESTION_SOURCE_LABELS[item.source] || PURCHASE_SUGGESTION_SOURCE_LABELS.low_stock}
+                        </span>
+                      </td>
+                      <td>{Number(item.pending_quantity || 0) > 0 ? formatNumber(item.pending_quantity) : "—"}</td>
+                      <td>{item.stock_after != null ? formatNumber(item.stock_after) : "—"}</td>
+                      <td>{item.minimum_stock != null ? formatNumber(item.minimum_stock) : "—"}</td>
                       <td>{item.purchase_unit || item.unit || "—"}</td>
                       <td>{item.supplier || "—"}</td>
                       <td>
@@ -947,30 +1038,284 @@ function LowStockPurchaseSuggestionModal({ suggestion, saving, onClose, onViewDe
 }
 
 function ApprovalModal({ request, saving, onClose, onApprove }) {
-  const [items, setItems] = useState(() => request.items.map((item) => ({
-    ...item,
-    approvedQuantity: item.approved_quantity || item.requested_quantity
-  })))
+  const [items, setItems] = useState(() => buildQuantityLineState(request.items, "approvedQuantity"))
+  const [formError, setFormError] = useState("")
+  const summary = buildFulfillmentSummary(items, "approvedQuantity")
+
+  function updateLine(id, patch) {
+    setItems((current) => current.map((line) => (line.id === id ? { ...line, ...patch } : line)))
+  }
+
+  function handleSubmit(event) {
+    event.preventDefault()
+    const validationError = validateQuantityLines(items, "approvedQuantity")
+    if (validationError) {
+      setFormError(validationError)
+      return
+    }
+    setFormError("")
+    onApprove(items)
+  }
+
   return (
     <div className="requisitions-backdrop">
-      <form className="requisitions-modal approval" onSubmit={(event) => { event.preventDefault(); onApprove(items) }}>
+      <form className="requisitions-modal approval" onSubmit={handleSubmit}>
         <header>
           <div><p className="requisitions-eyebrow">{request.requisition_number}</p><h2>Aprobar cantidades</h2></div>
           <button type="button" onClick={onClose}>Cerrar</button>
         </header>
-        {items.map((item) => (
-          <label className="approval-line" key={item.id}>
-            <span>{item.item_name}<small>Solicitado: {item.requested_quantity} {item.unit}</small></span>
-            <input type="number" step="any" min="0.001" value={item.approvedQuantity} onChange={(event) => setItems(items.map((line) => line.id === item.id ? { ...line, approvedQuantity: event.target.value } : line))} />
-          </label>
-        ))}
+        <QuantityLinesEditor items={items} quantityField="approvedQuantity" onUpdateLine={updateLine} />
+        <FulfillmentSummary summary={summary} actionLabel="aprobar" />
+        {formError && <div className="requisitions-error">{formError}</div>}
         <div className="requisitions-modal-actions">
           <button type="button" onClick={onClose}>Cancelar</button>
-          <button type="submit" className="primary" disabled={saving}>Aprobar requisición</button>
+          <button type="submit" className="primary" disabled={saving}>{saving ? "Guardando..." : "Aprobar requisición"}</button>
         </div>
       </form>
     </div>
   )
+}
+
+function FulfillmentModal({ request, saving, onClose, onComplete }) {
+  const [items, setItems] = useState(() => buildQuantityLineState(request.items, "deliveredQuantity", true))
+  const [formError, setFormError] = useState("")
+  const summary = buildFulfillmentSummary(items, "deliveredQuantity")
+
+  function updateLine(id, patch) {
+    setItems((current) => current.map((line) => (line.id === id ? { ...line, ...patch } : line)))
+  }
+
+  async function handleSubmit(event) {
+    event.preventDefault()
+    const validationError = validateQuantityLines(items, "deliveredQuantity")
+    if (validationError) {
+      setFormError(validationError)
+      return
+    }
+    setFormError("")
+    const result = await onComplete(items)
+    if (result?.error) setFormError(result.error)
+  }
+
+  return (
+    <div className="requisitions-backdrop">
+      <form className="requisitions-modal approval fulfillment" onSubmit={handleSubmit}>
+        <header>
+          <div><p className="requisitions-eyebrow">{request.requisition_number}</p><h2>Surtir requisición</h2></div>
+          <button type="button" onClick={onClose}>Cerrar</button>
+        </header>
+        <p className="requisitions-muted">Indica cuánto se entrega realmente por producto. Puedes registrar 0 si no hay existencia.</p>
+        <QuantityLinesEditor items={items} quantityField="deliveredQuantity" onUpdateLine={updateLine} />
+        <FulfillmentSummary summary={summary} actionLabel="surtir" />
+        {formError && <div className="requisitions-error">{formError}</div>}
+        <div className="requisitions-modal-actions">
+          <button type="button" onClick={onClose}>Cancelar</button>
+          <button type="submit" className="primary" disabled={saving}>{saving ? "Registrando..." : "Confirmar surtido"}</button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
+function QuantityLinesEditor({ items, quantityField, onUpdateLine }) {
+  return (
+    <div className="requisition-quantity-lines">
+      {items.map((item) => {
+        const requestedQty = Number(item.requested_quantity || 0)
+        const quantityValue = item[quantityField]
+        const quantityNumber = Number(quantityValue)
+        const pendingQty = Math.max(requestedQty - (Number.isFinite(quantityNumber) ? quantityNumber : 0), 0)
+        const lineStatus = previewLineFulfillmentStatus(requestedQty, quantityNumber)
+        const needsReason = pendingQty > 0
+        return (
+          <div className="approval-line" key={item.id}>
+            <div className="approval-line__header">
+              <span>{item.item_name}<small>Solicitado: {formatNumber(requestedQty)} {item.unit}</small></span>
+              <FulfillmentStatusBadge status={lineStatus} />
+            </div>
+            <label>
+              <span>Cantidad {quantityField === "deliveredQuantity" ? "entregada" : "aprobada"}</span>
+              <input
+                type="number"
+                step="any"
+                min="0"
+                value={quantityValue}
+                onChange={(event) => onUpdateLine(item.id, { [quantityField]: event.target.value })}
+              />
+            </label>
+            {pendingQty > 0 && <small className="requisition-pending-hint">Pendiente: {formatNumber(pendingQty)} {item.unit}</small>}
+            {needsReason && (
+              <>
+                <label>
+                  <span>Motivo del faltante</span>
+                  <select
+                    value={item.shortageReason || ""}
+                    onChange={(event) => onUpdateLine(item.id, { shortageReason: event.target.value })}
+                    required
+                  >
+                    <option value="">Selecciona un motivo</option>
+                    {SHORTAGE_REASONS.map((reason) => (
+                      <option key={reason.value} value={reason.value}>{reason.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>Notas (opcional)</span>
+                  <input
+                    value={item.shortageNotes || ""}
+                    onChange={(event) => onUpdateLine(item.id, { shortageNotes: event.target.value })}
+                    placeholder="Detalle adicional"
+                  />
+                </label>
+              </>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function FulfillmentSummary({ summary, actionLabel }) {
+  if (!summary.total || summary.fulfilled === summary.total) return null
+  return (
+    <div className="requisition-fulfillment-summary">
+      <strong>Esta requisición será {actionLabel === "surtir" ? "surtida" : "aprobada"} parcialmente:</strong>
+      <span>Entregados completos: {summary.fulfilled}</span>
+      <span>Parciales: {summary.partial}</span>
+      <span>Sin stock: {summary.outOfStock}</span>
+    </div>
+  )
+}
+
+function FulfillmentStatusBadge({ status }) {
+  const normalized = status || "pending_fulfillment"
+  return (
+    <span className={`fulfillment-badge fulfillment-badge--${normalized}`}>
+      {FULFILLMENT_STATUS_LABELS[normalized] || normalized}
+    </span>
+  )
+}
+
+function RequisitionPendingBadge({ summary }) {
+  if (!summary?.hasPending) return null
+  return (
+    <span className="requisition-pending-badge" title={formatRequisitionPendingSummary(summary)}>
+      Pendiente
+    </span>
+  )
+}
+
+function getLinePendingQuantity(line, requestStatus) {
+  const requested = Number(line.requested_quantity || 0)
+  if (line.pending_quantity != null && line.pending_quantity !== "" && Number.isFinite(Number(line.pending_quantity))) {
+    return Math.max(Number(line.pending_quantity), 0)
+  }
+  if (["completed", "partially_fulfilled", "pending_fulfillment"].includes(requestStatus)) {
+    return Math.max(requested - Number(line.delivered_quantity ?? 0), 0)
+  }
+  if (requestStatus === "approved" && line.approved_quantity != null) {
+    return Math.max(requested - Number(line.approved_quantity), 0)
+  }
+  return 0
+}
+
+function getRequisitionPendingSummary(request) {
+  const items = request.items || []
+  let pendingLines = 0
+  let outOfStockLines = 0
+
+  items.forEach((line) => {
+    const pending = getLinePendingQuantity(line, request.status)
+    if (pending <= 0) return
+    pendingLines += 1
+    const delivered = line.delivered_quantity != null
+      ? Number(line.delivered_quantity)
+      : (request.status === "approved" && line.approved_quantity != null ? Number(line.approved_quantity) : null)
+    if (line.fulfillment_status === "out_of_stock" || (delivered === 0 && pending > 0)) {
+      outOfStockLines += 1
+    }
+  })
+
+  return { pendingLines, outOfStockLines, hasPending: pendingLines > 0 }
+}
+
+function formatRequisitionPendingSummary(summary) {
+  if (!summary?.hasPending) return ""
+  const parts = [
+    `${summary.pendingLines} producto${summary.pendingLines === 1 ? "" : "s"} pendiente${summary.pendingLines === 1 ? "" : "s"}`
+  ]
+  if (summary.outOfStockLines > 0) {
+    parts.push(`${summary.outOfStockLines} sin stock`)
+  }
+  return parts.join(" · ")
+}
+
+function buildQuantityLineState(items, quantityField, useApprovedDefault = false) {
+  return items.map((item) => {
+    const defaultQty = useApprovedDefault
+      ? (item.approved_quantity ?? item.requested_quantity)
+      : (item.approved_quantity ?? item.requested_quantity)
+    return {
+      ...item,
+      [quantityField]: String(defaultQty ?? ""),
+      shortageReason: item.shortage_reason || "",
+      shortageNotes: item.shortage_notes || ""
+    }
+  })
+}
+
+function previewLineFulfillmentStatus(requestedQty, quantity) {
+  const qty = Number(quantity)
+  if (!Number.isFinite(qty) || qty < 0) return "pending_fulfillment"
+  if (qty <= 0 && requestedQty > 0) return "out_of_stock"
+  if (qty >= requestedQty) return "fulfilled"
+  if (qty > 0) return "partial"
+  return "pending_fulfillment"
+}
+
+function buildFulfillmentSummary(items, quantityField) {
+  return items.reduce((summary, item) => {
+    const requestedQty = Number(item.requested_quantity || 0)
+    const quantity = Number(item[quantityField])
+    const status = previewLineFulfillmentStatus(requestedQty, quantity)
+    summary.total += 1
+    if (status === "fulfilled") summary.fulfilled += 1
+    if (status === "partial") summary.partial += 1
+    if (status === "out_of_stock") summary.outOfStock += 1
+    return summary
+  }, { total: 0, fulfilled: 0, partial: 0, outOfStock: 0 })
+}
+
+function validateQuantityLines(items, quantityField) {
+  for (const item of items) {
+    const requestedQty = Number(item.requested_quantity || 0)
+    const rawValue = item[quantityField]
+    if (rawValue === "" || rawValue == null) {
+      return `Indica la cantidad para ${item.item_name}.`
+    }
+    const quantity = Number(rawValue)
+    if (!Number.isFinite(quantity)) {
+      return `La cantidad para ${item.item_name} no es válida.`
+    }
+    if (quantity < 0) {
+      return `La cantidad para ${item.item_name} no puede ser negativa.`
+    }
+    if (quantity > requestedQty) {
+      return `La cantidad para ${item.item_name} no puede superar lo solicitado (${formatNumber(requestedQty)}).`
+    }
+    const pendingQty = Math.max(requestedQty - quantity, 0)
+    if (pendingQty > 0 && !item.shortageReason) {
+      return `Selecciona el motivo del faltante para ${item.item_name}.`
+    }
+  }
+  return ""
+}
+
+function formatShortageReason(reason, notes) {
+  if (!reason) return "—"
+  const label = SHORTAGE_REASONS.find((entry) => entry.value === reason)?.label || reason
+  return notes ? `${label}. ${notes}` : label
 }
 
 function Field({ label, children }) {

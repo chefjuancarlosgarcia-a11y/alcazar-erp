@@ -15,6 +15,27 @@ function empty(data, error = null) {
   return { data, error: error ? message(error) : "" }
 }
 
+const REQUISITION_WORKFLOW_PENDING_STATUSES = ["draft", "pending", "approved"]
+const REQUISITION_PARTIAL_STATUSES = ["partially_fulfilled", "pending_fulfillment"]
+const REQUISITION_OPEN_STATUSES = [
+  ...REQUISITION_WORKFLOW_PENDING_STATUSES,
+  ...REQUISITION_PARTIAL_STATUSES
+]
+
+function summarizeRequisitionStatuses(rows = []) {
+  const countByStatuses = (statuses) => rows.filter((row) => statuses.includes(row.status)).length
+  const workflowPending = countByStatuses(REQUISITION_WORKFLOW_PENDING_STATUSES)
+  const partial = countByStatuses(REQUISITION_PARTIAL_STATUSES)
+  return {
+    pending: workflowPending,
+    partial,
+    open: workflowPending + partial,
+    completed: rows.filter((row) => row.status === "completed").length,
+    rejected: rows.filter((row) => row.status === "rejected").length,
+    cancelled: rows.filter((row) => row.status === "cancelled").length
+  }
+}
+
 export function getReportDateRange(filters = {}) {
   const now = new Date()
   const end = filters.end ? new Date(`${filters.end}T23:59:59.999`) : now
@@ -115,6 +136,7 @@ function countActiveTables(orders = []) {
 
 export function buildExecutiveKPIsFromDashboardReport(reportData, { tickets = [], stock = [], requisitions = [] } = {}) {
   if (!reportData) return null
+  const requisitionSummary = summarizeRequisitionStatuses(requisitions)
   return {
     salesToday: number(reportData.current?.day?.total),
     salesMonth: number(reportData.current?.month?.total),
@@ -123,7 +145,9 @@ export function buildExecutiveKPIsFromDashboardReport(reportData, { tickets = []
     activeTables: Number(reportData.activeTables || 0),
     activeTickets: tickets.length,
     lowStock: stock.filter((row) => number(row.quantity) <= number(row.minimum_quantity)).length,
-    pendingRequisitions: requisitions.length,
+    pendingRequisitions: requisitionSummary.open,
+    workflowPendingRequisitions: requisitionSummary.pending,
+    partialRequisitions: requisitionSummary.partial,
     range: reportData.ranges?.day ? { start: reportData.ranges.day.start, end: reportData.ranges.day.end } : getReportDateRange({ preset: "today" })
   }
 }
@@ -132,7 +156,7 @@ async function fetchCommandCenterSupportMetrics() {
   const [tickets, stock, requisitions] = await Promise.all([
     supabase.from("production_tickets").select("id,status").not("status", "in", "(served,cancelled)"),
     supabase.from("area_inventory").select("quantity,minimum_quantity"),
-    supabase.from("requisitions").select("id,status").eq("is_test", false).in("status", ["draft", "pending", "approved"])
+    supabase.from("requisitions").select("id,status").eq("is_test", false).in("status", REQUISITION_OPEN_STATUSES)
   ])
   return {
     tickets: tickets.data || [],
@@ -162,12 +186,13 @@ export async function getExecutiveKPIs(filters = {}) {
     fetchOrders(monthFilters),
     supabase.from("production_tickets").select("id,status").not("status", "in", "(served,cancelled)"),
     supabase.from("area_inventory").select("quantity,minimum_quantity"),
-    supabase.from("requisitions").select("id,status").eq("is_test", false).in("status", ["draft", "pending", "approved"])
+    supabase.from("requisitions").select("id,status").eq("is_test", false).in("status", REQUISITION_OPEN_STATUSES)
   ])
   const errors = [todayOrders.error, monthOrders.error, tickets.error, stock.error, requisitions.error].filter(Boolean)
   const ordersToday = todayOrders.data || []
   const salesToday = ordersToday.reduce((sum, order) => sum + number(order.total), 0)
   const activeTables = countActiveTables(ordersToday)
+  const requisitionSummary = summarizeRequisitionStatuses(requisitions.data || [])
   return empty({
     salesToday,
     salesMonth: (monthOrders.data || []).reduce((sum, order) => sum + number(order.total), 0),
@@ -176,7 +201,9 @@ export async function getExecutiveKPIs(filters = {}) {
     activeTables,
     activeTickets: (tickets.data || []).length,
     lowStock: (stock.data || []).filter((row) => number(row.quantity) <= number(row.minimum_quantity)).length,
-    pendingRequisitions: (requisitions.data || []).length,
+    pendingRequisitions: requisitionSummary.open,
+    workflowPendingRequisitions: requisitionSummary.pending,
+    partialRequisitions: requisitionSummary.partial,
     range: getReportDateRange(filters)
   }, errors[0])
 }
@@ -515,12 +542,9 @@ export async function getRequisitionReport(filters = {}) {
       itemMap.set(item.item_name, current + number(item.requested_quantity))
     })
   })
+  const summary = summarizeRequisitionStatuses(rows)
   return empty({
-    summary: {
-      pending: rows.filter((row) => ["draft", "pending", "approved"].includes(row.status)).length,
-      completed: rows.filter((row) => row.status === "completed").length,
-      rejected: rows.filter((row) => row.status === "rejected").length
-    },
+    summary,
     byArea: [...areaMap].map(([area, count]) => ({ area, count })),
     byRequester: [...requesterMap].map(([requester, count]) => ({ requester, count })),
     topItems: [...itemMap].map(([item, quantity]) => ({ item, quantity })).sort((a, b) => b.quantity - a.quantity),
@@ -611,7 +635,19 @@ export async function getOperationalAlerts() {
   inventory.data.out.forEach((row) => alerts.push({ priority: "critical", type: "Stock agotado", area: row.area?.name || row.area_id, detail: row.item?.name, action: "Generar requisición" }))
   inventory.data.low.forEach((row) => alerts.push({ priority: "high", type: "Stock bajo", area: row.area?.name || row.area_id, detail: row.item?.name, action: "Revisar abastecimiento" }))
   if (production.data.summary.late) alerts.push({ priority: "high", type: "KDS atrasado", area: "Producción", detail: `${production.data.summary.late} ticket(s) con más de 15 min`, action: "Revisar estación" })
-  if (requisitions.data.summary.pending) alerts.push({ priority: "medium", type: "Requisiciones", area: "Inventario", detail: `${requisitions.data.summary.pending} pendiente(s)`, action: "Aprobar o completar" })
+  const reqSummary = requisitions.data.summary || {}
+  if (reqSummary.open) {
+    const partialNote = reqSummary.partial
+      ? ` (${reqSummary.partial} parcialmente surtida${reqSummary.partial === 1 ? "" : "s"})`
+      : ""
+    alerts.push({
+      priority: "medium",
+      type: "Requisiciones",
+      area: "Inventario",
+      detail: `${reqSummary.open} pendiente(s) operativa(s)${partialNote}`,
+      action: "Aprobar, completar o surtir faltantes"
+    })
+  }
   ;(products.data || []).filter((product) => !product.production_ready || !product.recipe_id || !product.production_area_id).forEach((product) => alerts.push({ priority: "high", type: "Producto POS incompleto", area: "POS", detail: product.name, action: "Conectar receta y área" }))
   ;(recipes.data || []).filter((recipe) => number(recipe.estimated_cost) === 0).forEach((recipe) => alerts.push({ priority: "medium", type: "Receta sin costo", area: "Recetas", detail: recipe.name, action: "Actualizar ingredientes/costos" }))
   return empty(alerts, errors[0])
