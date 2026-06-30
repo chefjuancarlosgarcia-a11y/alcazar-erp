@@ -417,6 +417,64 @@
 .approval-line span { display: grid; gap: 4px; }
 .approval-line small { color: #94a3b8; font-weight: 400; }
 
+.requisitions-modal.low-stock-suggestion {
+  width: min(960px, 96vw);
+}
+
+.low-stock-suggestion-table-wrap {
+  overflow-x: auto;
+  border: 1px solid #1d2b40;
+  border-radius: 10px;
+}
+
+.low-stock-suggestion-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 720px;
+}
+
+.low-stock-suggestion-table th,
+.low-stock-suggestion-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #1d2b40;
+  text-align: left;
+  vertical-align: top;
+}
+
+.low-stock-suggestion-table th {
+  color: #94a3b8;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  background: #0b1526;
+}
+
+.low-stock-suggestion-table td strong {
+  display: block;
+  color: #f8fafc;
+}
+
+.low-stock-suggestion-table td small {
+  display: block;
+  color: #94a3b8;
+  margin-top: 2px;
+}
+
+.low-stock-suggestion-table input {
+  width: 100%;
+  min-width: 88px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #0b1526;
+  color: #e2e8f0;
+}
+
+.low-stock-suggestion-success {
+  display: grid;
+  gap: 12px;
+}
+
 @media (max-width: 1000px) {
   .requisitions-page { padding: 16px; }
   .requisitions-filters { grid-template-columns: repeat(2, 1fr); }

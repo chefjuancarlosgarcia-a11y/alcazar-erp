@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useNavigate } from "react-router-dom"
 import PaginationControls from "../components/PaginationControls"
 import { TestFlowBadge, TestFlowControls, TestFlowWarning } from "../components/TestFlowBadge"
 import { pageItems } from "../utils/pagination"
@@ -11,18 +12,21 @@ import { inventoryItemMatchesBarcode } from "../utils/barcodeUtils"
 import BarcodeScannerInput from "../components/inventory/BarcodeScannerInput"
 import "../components/inventory/BarcodeScannerInput.css"
 import {
+  addLowStockItemsToTodayPurchaseOrder,
   approveRequisition,
   cancelRequisition,
   completeRequisition,
   createRequisition,
   getInventoryUnitConversions,
+  getRequisitionLowStockImpacts,
   getRequisitions,
+  ignoreLowStockPurchaseSuggestion,
   rejectRequisition,
   submitRequisition,
   updateRequisition
 } from "../services/requisitionsService"
 import { notifyRoles } from "../services/notificationsService"
-import { buildRequisitionNotificationUrl } from "../utils/inventoryNotificationRoutes"
+import { buildPurchaseOrderNotificationUrl, buildRequisitionNotificationUrl } from "../utils/inventoryNotificationRoutes"
 import "./RequisitionsSupabase.css"
 
 const TABS = [
@@ -94,6 +98,7 @@ function RequisitionsSupabase({
   initialFocus = false
 }) {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const [requisitions, setRequisitions] = useState([])
   const [areas, setAreas] = useState([])
   const [inventory, setInventory] = useState([])
@@ -107,6 +112,7 @@ function RequisitionsSupabase({
   const [formRequest, setFormRequest] = useState(null)
   const [detail, setDetail] = useState(null)
   const [approval, setApproval] = useState(null)
+  const [lowStockSuggestion, setLowStockSuggestion] = useState(null)
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
   const [testFlowFilter, setTestFlowFilter] = useState(initialTestFlowFilter || TEST_FLOW_FILTER.REAL)
@@ -298,6 +304,43 @@ function RequisitionsSupabase({
     }
   }
 
+  async function handleComplete(request) {
+    setWorkingId(request.id)
+    setError("")
+    const result = await completeRequisition(request.id)
+    setWorkingId("")
+    if (result.error) {
+      setError(result.error.message)
+      return
+    }
+    setMessage(
+      request.is_test
+        ? "Requisición de prueba completada. Traslado simulado registrado."
+        : "Requisición completada. Inventario actualizado."
+    )
+    setDetail(null)
+    await loadData()
+
+    if (!request.is_test && canComplete) {
+      const impactsResult = await getRequisitionLowStockImpacts(request.id)
+      if (impactsResult.error) {
+        console.error("No se pudo evaluar stock mínimo post-requisición.", impactsResult.error)
+        return
+      }
+      if (impactsResult.data?.length) {
+        setLowStockSuggestion({
+          requisitionId: request.id,
+          requisitionNumber: request.requisition_number,
+          request,
+          items: impactsResult.data.map((item) => ({
+            ...item,
+            suggested_quantity: Number(item.suggested_quantity || 1)
+          }))
+        })
+      }
+    }
+  }
+
   async function runAction(id, action, successMessage) {
     setWorkingId(id)
     setError("")
@@ -399,7 +442,7 @@ function RequisitionsSupabase({
               {request.status === "draft" && request.requested_by === user?.id && <button type="button" onClick={() => openEdit(request)}>Editar</button>}
               {request.status === "draft" && request.requested_by === user?.id && <button type="button" className="primary" disabled={workingId === request.id} onClick={() => runAction(request.id, () => submitRequisition(request.id), "Requisición enviada para aprobación.")}>Enviar</button>}
               {canApprove && request.status === "pending" && <button type="button" className="primary" onClick={() => setApproval(request)}>Aprobar</button>}
-              {canComplete && request.status === "approved" && <button type="button" className="primary" disabled={workingId === request.id} onClick={() => runAction(request.id, () => completeRequisition(request.id), request.is_test ? "Requisición de prueba completada. Traslado simulado registrado." : "Requisición completada. Inventario actualizado.")}>Completar traslado</button>}
+              {canComplete && request.status === "approved" && <button type="button" className="primary" disabled={workingId === request.id} onClick={() => handleComplete(request)}>Completar traslado</button>}
               {canApprove && ["pending", "approved"].includes(request.status) && <button type="button" className="danger" onClick={() => askReason("rechazar", (reason) => runAction(request.id, () => rejectRequisition(request.id, reason), "Requisición rechazada."))}>Rechazar</button>}
               {["draft", "pending", "approved"].includes(request.status) && (canApprove || request.requested_by === user?.id) && <button type="button" className="danger" onClick={() => askReason("cancelar", (reason) => runAction(request.id, () => cancelRequisition(request.id, reason), "Requisición cancelada."))}>Cancelar</button>}
             </div>
@@ -426,6 +469,46 @@ function RequisitionsSupabase({
       )}
       {detail && <RequestDetail request={detail} areas={areas} inventory={inventory} unitConversions={unitConversions} onClose={() => setDetail(null)} />}
       {approval && <ApprovalModal request={approval} saving={workingId === approval.id} onClose={() => setApproval(null)} onApprove={handleApprove} />}
+      {lowStockSuggestion && (
+        <LowStockPurchaseSuggestionModal
+          suggestion={lowStockSuggestion}
+          saving={Boolean(workingId)}
+          onClose={() => setLowStockSuggestion(null)}
+          onViewDetail={() => {
+            setDetail(lowStockSuggestion.request)
+            setLowStockSuggestion(null)
+          }}
+          onIgnore={async (items) => {
+            setWorkingId("low-stock-ignore")
+            const result = await ignoreLowStockPurchaseSuggestion(lowStockSuggestion.requisitionId, items)
+            setWorkingId("")
+            if (result.error) {
+              setError(result.error.message)
+              return
+            }
+            setLowStockSuggestion(null)
+            setMessage("Sugerencia de compra omitida.")
+          }}
+          onConfirm={async (items) => {
+            setWorkingId("low-stock-add")
+            const result = await addLowStockItemsToTodayPurchaseOrder(lowStockSuggestion.requisitionId, items)
+            setWorkingId("")
+            if (result.error) {
+              setError(result.error.message)
+              return { ok: false, error: result.error.message }
+            }
+            setMessage("Productos agregados a la orden de compra de hoy.")
+            return { ok: true, data: result.data || {} }
+          }}
+          onGoToPurchaseOrder={(orderMeta) => {
+            setLowStockSuggestion(null)
+            navigate(buildPurchaseOrderNotificationUrl({
+              id: orderMeta.purchase_order_id,
+              status: orderMeta.status
+            }))
+          }}
+        />
+      )}
     </section>
   )
 }
@@ -727,6 +810,138 @@ function RequestDetail({ request, areas, inventory, unitConversions, onClose }) 
         </div>
         {request.rejection_reason && <div className="requisitions-error">Motivo: {request.rejection_reason}</div>}
       </section>
+    </div>
+  )
+}
+
+function LowStockPurchaseSuggestionModal({ suggestion, saving, onClose, onViewDetail, onIgnore, onConfirm, onGoToPurchaseOrder }) {
+  const [items, setItems] = useState(() => suggestion.items.map((item) => ({ ...item })))
+  const [successOrder, setSuccessOrder] = useState(null)
+  const [localError, setLocalError] = useState("")
+
+  function updateQuantity(itemId, value) {
+    const quantity = Number(value)
+    setItems((current) => current.map((item) => (
+      item.item_id === itemId
+        ? { ...item, suggested_quantity: Number.isFinite(quantity) && quantity > 0 ? quantity : item.suggested_quantity }
+        : item
+    )))
+  }
+
+  async function handleConfirm() {
+    setLocalError("")
+    const payload = items.map((item) => ({
+      item_id: item.item_id,
+      stock_after: item.stock_after,
+      minimum_stock: item.minimum_stock,
+      suggested_quantity: Number(item.suggested_quantity)
+    }))
+    if (payload.some((item) => !item.suggested_quantity || item.suggested_quantity <= 0)) {
+      setLocalError("Cada producto debe tener una cantidad sugerida mayor que cero.")
+      return
+    }
+    const result = await onConfirm(payload)
+    if (result?.ok) {
+      setSuccessOrder(result.data)
+    } else if (result?.error) {
+      setLocalError(result.error)
+    }
+  }
+
+  async function handleIgnore() {
+    setLocalError("")
+    const payload = items.map((item) => ({
+      item_id: item.item_id,
+      stock_after: item.stock_after,
+      minimum_stock: item.minimum_stock,
+      suggested_quantity: Number(item.suggested_quantity)
+    }))
+    await onIgnore(payload)
+  }
+
+  return (
+    <div className="requisitions-backdrop">
+      <div className="requisitions-modal low-stock-suggestion">
+        <header>
+          <div>
+            <p className="requisitions-eyebrow">{suggestion.requisitionNumber}</p>
+            <h2>Productos en punto mínimo</h2>
+            <p className="requisitions-muted">
+              Estos productos han llegado al punto mínimo. ¿Deseas agregarlos a la orden de compra de hoy?
+            </p>
+          </div>
+          <button type="button" onClick={onClose} disabled={saving}>Cerrar</button>
+        </header>
+
+        {successOrder ? (
+          <div className="low-stock-suggestion-success">
+            <p className="requisitions-success">Productos agregados a la orden de compra de hoy.</p>
+            <p className="requisitions-muted">
+              Orden: <strong>{successOrder.order_number || successOrder.purchase_order_id}</strong>
+            </p>
+            <div className="requisitions-modal-actions">
+              <button type="button" onClick={onClose}>Cerrar</button>
+              {successOrder.purchase_order_id && (
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={() => onGoToPurchaseOrder(successOrder)}
+                >
+                  Ir a la orden de compra
+                </button>
+              )}
+            </div>
+          </div>
+        ) : (
+          <>
+            {localError && <p className="requisitions-error">{localError}</p>}
+            <div className="low-stock-suggestion-table-wrap">
+              <table className="low-stock-suggestion-table">
+                <thead>
+                  <tr>
+                    <th>Producto</th>
+                    <th>Stock actual</th>
+                    <th>Punto mínimo</th>
+                    <th>Unidad</th>
+                    <th>Proveedor</th>
+                    <th>Cantidad sugerida</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((item) => (
+                    <tr key={item.item_id}>
+                      <td>
+                        <strong>{item.item_name}</strong>
+                        {item.sku ? <small>{item.sku}</small> : null}
+                      </td>
+                      <td>{formatNumber(item.stock_after)}</td>
+                      <td>{formatNumber(item.minimum_stock)}</td>
+                      <td>{item.purchase_unit || item.unit || "—"}</td>
+                      <td>{item.supplier || "—"}</td>
+                      <td>
+                        <input
+                          type="number"
+                          min="0.001"
+                          step="any"
+                          value={item.suggested_quantity}
+                          onChange={(event) => updateQuantity(item.item_id, event.target.value)}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="requisitions-modal-actions">
+              <button type="button" onClick={handleIgnore} disabled={saving}>Omitir por ahora</button>
+              <button type="button" onClick={onViewDetail} disabled={saving}>Ver detalle</button>
+              <button type="button" className="primary" onClick={handleConfirm} disabled={saving}>
+                {saving ? "Guardando..." : "Agregar a orden de compra de hoy"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   )
 }

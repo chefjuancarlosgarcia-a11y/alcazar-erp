@@ -124,3 +124,26 @@ export function cancelRequisition(id, reason) {
 export function completeRequisition(id) {
   return supabase.rpc("complete_requisition", { p_requisition_id: id })
 }
+
+export async function getRequisitionLowStockImpacts(requisitionId, { recordSuggested = true } = {}) {
+  const { data, error } = await supabase.rpc("get_requisition_low_stock_impacts", {
+    p_requisition_id: requisitionId,
+    p_record_suggested: recordSuggested
+  })
+  return { data: Array.isArray(data) ? data : (data || []), error }
+}
+
+export function addLowStockItemsToTodayPurchaseOrder(requisitionId, items) {
+  return supabase.rpc("add_low_stock_items_to_today_purchase_order", {
+    p_requisition_id: requisitionId,
+    p_items: items
+  })
+}
+
+export function ignoreLowStockPurchaseSuggestion(requisitionId, items, notes = "") {
+  return supabase.rpc("ignore_low_stock_purchase_suggestion", {
+    p_requisition_id: requisitionId,
+    p_items: items,
+    p_notes: notes || null
+  })
+}
