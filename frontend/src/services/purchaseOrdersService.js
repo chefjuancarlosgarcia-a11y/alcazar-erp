@@ -31,3 +31,20 @@ export function savePurchaseOrder(order) {
     }
   })
 }
+
+export async function receivePurchaseOrderLines(purchaseOrderId, supplierName, lines, invoice = {}) {
+  const { data, error } = await supabase.rpc("receive_purchase_order_lines", {
+    p_purchase_order_id: purchaseOrderId,
+    p_supplier_name: supplierName,
+    p_lines: lines,
+    p_invoice: invoice
+  })
+  return { data, error }
+}
+
+export async function getPurchaseOrderReceivingProgress(purchaseOrderId) {
+  const { data, error } = await supabase.rpc("get_purchase_order_receiving_progress", {
+    p_purchase_order_id: purchaseOrderId
+  })
+  return { data, error }
+}

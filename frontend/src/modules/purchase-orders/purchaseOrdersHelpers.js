@@ -241,10 +241,18 @@ export function getPurchaseOrderItemUnit(item) {
 
 export function buildEmptyReceptionLines(items = []) {
   return Object.fromEntries(
-    (items || []).map((item) => [
-      getPurchaseOrderItemKey(item),
-      { entered: false, cantidadRecibida: "" }
-    ])
+    (items || []).map((item) => {
+      const key = getPurchaseOrderItemKey(item)
+      const defaultCost = Number(item.costoUnitario ?? item.precio_unitario_compra ?? item.purchase_price ?? 0)
+      return [
+        key,
+        {
+          entered: false,
+          cantidadRecibida: "",
+          unitCostPurchase: Number.isFinite(defaultCost) && defaultCost >= 0 ? String(defaultCost) : ""
+        }
+      ]
+    })
   )
 }
 

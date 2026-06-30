@@ -107,7 +107,8 @@ export default function PurchaseOrderDetailModal({
 
   const pending = ["pendiente", "pendiente_aprobacion", "borrador"].includes(order.status)
   const canSend = order.status === "aprobada"
-  const canReceive = ["enviada_proveedor", "en tránsito"].includes(order.status)
+  const canReceive = ["enviada_proveedor", "en tránsito", "recibida_parcial", "aprobada"].includes(order.status)
+    && !["recibida_completa", "recibida", "cancelada", "rechazada"].includes(order.status)
   const showReceptionForm = workflowView === PO_WORKFLOW_VIEWS.RECEPTION && canReceive
   const proveedor = order.proveedor || {}
   const canSendToFinance = ["aprobada", "recibida_parcial", "recibida_completa"].includes(order.status)

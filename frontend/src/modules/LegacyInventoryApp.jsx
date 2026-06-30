@@ -19,7 +19,7 @@ import { BRANDING } from "../branding"
 import { useAuth } from "../context/AuthContext"
 import { supabase } from "../lib/supabase"
 import { createNotification, notifyRoles } from "../services/notificationsService"
-import { getPurchaseOrders, savePurchaseOrder } from "../services/purchaseOrdersService"
+import { getPurchaseOrders, receivePurchaseOrderLines, savePurchaseOrder } from "../services/purchaseOrdersService"
 import { canCreateTestFlow, TEST_FLOW_FILTER } from "../utils/testFlowMode"
 import { buildPurchaseOrderNotificationUrl, getPurchaseOrderWorkflowView } from "../utils/inventoryNotificationRoutes"
 import { getInventoryItems, getInventoryItemByBarcode } from "../services/inventoryService"
@@ -371,6 +371,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
   const [manualRecepcionEstado, setManualRecepcionEstado] = useState("bueno")
   const [manualRecepcionNombre, setManualRecepcionNombre] = useState("")
   const [manualRecepcionImagen, setManualRecepcionImagen] = useState("")
+  const manualReceptionRequestIdRef = useRef(null)
   const [testFlowFilter, setTestFlowFilter] = useState(() => initialTestFlowFilter || TEST_FLOW_FILTER.REAL)
   const [manualCreateTestMode, setManualCreateTestMode] = useState(false)
   const [highlightedOrderId, setHighlightedOrderId] = useState(initialHighlightedOrder || "")
@@ -1627,6 +1628,7 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
     setManualRecepcionEstado("bueno")
     setManualRecepcionNombre("")
     setManualRecepcionImagen("")
+    manualReceptionRequestIdRef.current = null
   }
 
   function actualizarLineaRecepcion(key, line) {
@@ -1788,6 +1790,137 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
     }
 
     await runPurchaseAction(async () => {
+    if (manualRecepcionEstado === "bueno") {
+      const supplierName = String(
+        ordenManualSeleccionada?.proveedor?.nombre
+        || entries.find(({ item }) => item?.proveedor)?.item?.proveedor
+        || "Sin proveedor"
+      ).trim() || "Sin proveedor"
+
+      const productiveLines = entries.map(({ item, cantidadRecibida }) => {
+        const key = getPurchaseOrderItemKey(item)
+        const lineState = manualRecepcionLineas[key] || {}
+        return {
+          item_id: key,
+          qty_received: Number(cantidadRecibida),
+          unit_cost_purchase: Number(
+            lineState.unitCostPurchase ?? item.costoUnitario ?? item.precio_unitario_compra ?? 0
+          ),
+          supplier_name: item.proveedor || supplierName
+        }
+      })
+
+      if (!manualReceptionRequestIdRef.current) {
+        manualReceptionRequestIdRef.current = crypto.randomUUID()
+      }
+      const clientRequestId = manualReceptionRequestIdRef.current
+
+      const receiveResult = await receivePurchaseOrderLines(
+        ordenManualSeleccionada.id,
+        supplierName,
+        productiveLines,
+        {
+          client_request_id: clientRequestId,
+          invoice_image_url: manualRecepcionImagen || null,
+          notes: manualRecepcionNombre.trim()
+            ? `Recibido por ${manualRecepcionNombre.trim()}`
+            : null
+        }
+      )
+
+      if (receiveResult.error) {
+        alert(`No se pudo registrar la recepción productiva: ${receiveResult.error.message}`)
+        return
+      }
+
+      manualReceptionRequestIdRef.current = null
+
+      const payload = receiveResult.data || {}
+      const wasIdempotentRetry = payload.idempotent === true
+      const nuevoStatus = payload.status || ordenManualSeleccionada.status
+      const recepcionCompleta = nuevoStatus === "recibida_completa"
+      const recepcionItems = entries.map(({ item, cantidadPedida, cantidadRecibida }) => ({
+        itemId: getPurchaseOrderItemKey(item),
+        nombre: item.nombre || item.name || "Producto",
+        cantidadPedida,
+        cantidadRecibida,
+        unidad: item.unidadCompra || item.unidad_compra || item.unit || ""
+      }))
+
+      setOrdenesCompraManual((actuales) => actuales.map((orden) => {
+        if (String(orden.id) !== String(ordenManualSeleccionada.id)) return orden
+        return {
+          ...orden,
+          status: nuevoStatus,
+          receiving_progress_percent: payload.progress_percent,
+          recepcion: {
+            cantidadRecibidaReal: recepcionItems.reduce((sum, line) => sum + Number(line.cantidadRecibida || 0), 0),
+            items: recepcionItems,
+            estadoProducto: manualRecepcionEstado,
+            recibidoPor: manualRecepcionNombre,
+            imagenRecepcion: manualRecepcionImagen,
+            fechaRecepcion: new Date().toLocaleString(),
+            last_receipt_id: payload.receipt_id,
+            progress_percent: payload.progress_percent
+          }
+        }
+      }))
+
+      await publicarNotificacionOrden(["admin", "gerente_general"], {
+        type: recepcionCompleta ? "purchase_order_received" : "purchase_order_partially_received",
+        title: recepcionCompleta ? "Orden recibida completamente" : "Orden recibida parcialmente",
+        message: `${ordenManualSeleccionada.numeroOrden} fue registrada como ${recepcionCompleta ? "recibida completa" : "recibida parcial"}.`,
+        entityType: "purchase_order",
+        entityId: ordenManualSeleccionada.id,
+        entityStatus: nuevoStatus
+      }, { ...ordenManualSeleccionada, status: nuevoStatus })
+      if (ordenManualSeleccionada.creadoPorRol === "gerente") {
+        await notificarCreadorOrden(
+          ordenManualSeleccionada,
+          recepcionCompleta ? "Orden recibida completamente" : "Orden recibida parcialmente",
+          `${ordenManualSeleccionada.numeroOrden} cambió a ${recepcionCompleta ? "recibida completa" : "recibida parcial"}.`,
+          recepcionCompleta ? "purchase_order_received" : "purchase_order_partially_received"
+        )
+      }
+
+      if (ordenManualSeleccionada?.proveedorId && !ordenManualSeleccionada.is_test) {
+        const proveedorIndex = proveedores.findIndex((p) => p.id === ordenManualSeleccionada.proveedorId)
+        if (proveedorIndex !== -1) {
+          const proveedorActualizado = { ...proveedores[proveedorIndex] }
+          const totalOrden = entries.reduce(
+            (sum, { item, cantidadRecibida }) => sum + Number(item.costoUnitario || 0) * Number(cantidadRecibida || 0),
+            0
+          )
+          proveedorActualizado.historialCompras = [
+            {
+              id: Date.now(),
+              fecha: new Date().toLocaleString(),
+              numeroOrden: ordenManualSeleccionada.numeroOrden,
+              total: totalOrden,
+              estado: recepcionCompleta ? "recibida" : "recibida_parcial",
+              items: recepcionItems,
+              receipt_id: payload.receipt_id
+            },
+            ...(proveedorActualizado.historialCompras || [])
+          ]
+          setProveedores((current) => current.map((p) => (
+            p.id === proveedorActualizado.id ? proveedorActualizado : p
+          )))
+          const supplierUpdate = await updateSupplier(proveedorActualizado.id, proveedorActualizado)
+          if (supplierUpdate.error) {
+            alert("La recepción se registró, pero no se pudo actualizar el historial del proveedor.")
+          }
+        }
+      }
+
+      alert(
+        wasIdempotentRetry
+          ? "Esta recepción ya estaba registrada (reintento idempotente). No se duplicó stock."
+          : ordenManualSeleccionada.is_test
+            ? "Recepción de prueba registrada en Supabase."
+            : "Recepción registrada. Inventario y costos actualizados en Supabase."
+      )
+    } else {
     const recepcionCompleta = manualRecepcionEstado === "bueno" && allEntered && allMatchOrdered
     const nuevoStatus = recepcionCompleta ? "recibida_completa" : "recibida_parcial"
     const recepcionItems = entries.map(({ item, cantidadPedida, cantidadRecibida }) => ({
@@ -1819,98 +1952,18 @@ function LegacyInventoryApp({ initialSeccion = "dashboard", initialPurchaseOrder
     const ordenRecibida = ordenActualizada.find((orden) => orden.id === ordenManualSeleccionada.id)
     const saveResult = await savePurchaseOrder(ordenRecibida)
     if (saveResult.error) {
-      alert("No se pudo registrar la recepción en Supabase.")
+      alert("No se pudo registrar la recepción documental en Supabase.")
       return
     }
     setOrdenesCompraManual(ordenActualizada)
-    await publicarNotificacionOrden(["admin", "gerente_general"], {
-      type: recepcionCompleta ? "purchase_order_received" : "purchase_order_partially_received",
-      title: recepcionCompleta ? "Orden recibida completamente" : "Orden recibida parcialmente",
-      message: `${ordenManualSeleccionada.numeroOrden} fue registrada como ${recepcionCompleta ? "recibida completa" : "recibida parcial"}.`,
-      entityType: "purchase_order",
-      entityId: ordenManualSeleccionada.id
-    })
-    if (ordenManualSeleccionada.creadoPorRol === "gerente") {
-      await notificarCreadorOrden(
-        ordenManualSeleccionada,
-        recepcionCompleta ? "Orden recibida completamente" : "Orden recibida parcialmente",
-        `${ordenManualSeleccionada.numeroOrden} cambió a ${recepcionCompleta ? "recibida completa" : "recibida parcial"}.`,
-        recepcionCompleta ? "purchase_order_received" : "purchase_order_partially_received"
-      )
-    }
-
-    if (manualRecepcionEstado === "bueno" && !ordenManualSeleccionada.is_test) {
-      const receivedByItemId = new Map(
-        entries.map(({ item, cantidadRecibida }) => [getPurchaseOrderItemKey(item), Number(cantidadRecibida)])
-      )
-
-      const inventarioActualizado = ingredientes.map((ingrediente) => {
-        const itemKey = String(ingrediente.id)
-        const cantidadRecibida = receivedByItemId.get(itemKey)
-        if (cantidadRecibida == null) return ingrediente
-
-        const normalizedItem = normalizeInventoryItem(ingrediente)
-        const stockAlmacen = getLocationStock(normalizedItem, "almacen")
-        const stockByLocation = {
-          ...normalizedItem.stockByLocation,
-          almacen: stockAlmacen + cantidadRecibida
-        }
-        const total = Object.values(stockByLocation).reduce((sum, value) => sum + Number(value || 0), 0)
-
-        return {
-          ...normalizedItem,
-          stockByLocation,
-          stockActual: total,
-          totalUnidades: total,
-          ultimaEdicion: new Date().toLocaleString()
-        }
-      })
-
-      setIngredientes(inventarioActualizado)
-
-      if (ordenManualSeleccionada?.proveedorId) {
-        const proveedorIndex = proveedores.findIndex((p) => p.id === ordenManualSeleccionada.proveedorId)
-        if (proveedorIndex !== -1) {
-          const proveedorActualizado = { ...proveedores[proveedorIndex] }
-          const totalOrden = entries.reduce(
-            (sum, { item, cantidadRecibida }) => sum + Number(item.costoUnitario || 0) * Number(cantidadRecibida || 0),
-            0
-          )
-          const nuevaCompra = {
-            id: Date.now(),
-            fecha: new Date().toLocaleString(),
-            numeroOrden: ordenManualSeleccionada.numeroOrden,
-            total: totalOrden,
-            estado: recepcionCompleta ? "recibida" : "recibida_parcial",
-            items: recepcionItems
-          }
-          proveedorActualizado.historialCompras = [
-            nuevaCompra,
-            ...(proveedorActualizado.historialCompras || [])
-          ]
-
-          const nuevosProveedores = proveedores.map((p) =>
-            p.id === proveedorActualizado.id ? proveedorActualizado : p
-          )
-          setProveedores(nuevosProveedores)
-          const supplierUpdate = await updateSupplier(proveedorActualizado.id, proveedorActualizado)
-          if (supplierUpdate.error) {
-            alert("La orden se recibió, pero no se pudo actualizar el historial del proveedor.")
-          }
-        }
-      }
-
-      alert("Orden recibida y cantidades sumadas al inventario.")
-    } else if (manualRecepcionEstado === "bueno" && ordenManualSeleccionada.is_test) {
-      alert("Recepción de prueba registrada. No se modificó el inventario real.")
-    } else {
-      alert("Orden registrada como parcialmente completada. No se actualizaron cantidades a inventario porque el producto no está en buen estado.")
+    alert("Orden registrada documentalmente. No se actualizó inventario porque el producto no está en buen estado.")
     }
 
     setManualRecepcionLineas({})
     setManualRecepcionEstado("bueno")
     setManualRecepcionNombre("")
     setManualRecepcionImagen("")
+    manualReceptionRequestIdRef.current = null
     })
   }
 
