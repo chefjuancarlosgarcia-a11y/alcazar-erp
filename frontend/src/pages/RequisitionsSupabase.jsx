@@ -115,6 +115,9 @@ function RequisitionsSupabase({
   const deepLinkHandledRef = useRef(false)
 
   const manager = ["admin", "gerente_general"].includes(user?.role)
+  const isWarehouseManager = user?.role === "encargado_almacen"
+  const canApprove = manager
+  const canComplete = manager || isWarehouseManager
 
   async function notifyRequisitionPending(requisition) {
     if (!requisition || requisition.status !== "pending") return
@@ -142,18 +145,21 @@ function RequisitionsSupabase({
     }
     setFocusedRequisitionId(String(target.id))
     window.setTimeout(() => setFocusedRequisitionId(""), 6000)
-    if (initialApproveId && manager) {
+    if (initialApproveId && canApprove) {
       setApproval(target)
     } else {
       setDetail(target)
     }
-  }, [loading, requisitions, initialRequisitionId, initialApproveId, initialTab, manager, testFlowFilter])
+  }, [loading, requisitions, initialRequisitionId, initialApproveId, initialTab, canApprove, testFlowFilter])
 
   const canCreateTest = canCreateTestFlow(user)
   const canUseStockOverrideToggle = STOCK_OVERRIDE_ROLES.has(user?.role)
   const ownResponsibleAreas = areas.filter((area) => area.responsibleUserId === user?.id)
-  const canCreate = manager || (user?.role === "supervisor" && Boolean(user?.areaId)) || ownResponsibleAreas.length > 0
-  const allowedDestinationAreas = manager
+  const canCreate = manager
+    || isWarehouseManager
+    || (user?.role === "supervisor" && Boolean(user?.areaId))
+    || ownResponsibleAreas.length > 0
+  const allowedDestinationAreas = manager || isWarehouseManager
     ? areas
     : areas.filter((area) => area.id === user?.areaId || area.responsibleUserId === user?.id)
   const hasLegacy = readLegacyRequests().length > 0
@@ -392,10 +398,10 @@ function RequisitionsSupabase({
               <button type="button" onClick={() => setDetail(request)}>Ver detalle</button>
               {request.status === "draft" && request.requested_by === user?.id && <button type="button" onClick={() => openEdit(request)}>Editar</button>}
               {request.status === "draft" && request.requested_by === user?.id && <button type="button" className="primary" disabled={workingId === request.id} onClick={() => runAction(request.id, () => submitRequisition(request.id), "Requisición enviada para aprobación.")}>Enviar</button>}
-              {manager && request.status === "pending" && <button type="button" className="primary" onClick={() => setApproval(request)}>Aprobar</button>}
-              {manager && request.status === "approved" && <button type="button" className="primary" disabled={workingId === request.id} onClick={() => runAction(request.id, () => completeRequisition(request.id), request.is_test ? "Requisición de prueba completada. Traslado simulado registrado." : "Requisición completada. Inventario actualizado.")}>Completar traslado</button>}
-              {manager && ["pending", "approved"].includes(request.status) && <button type="button" className="danger" onClick={() => askReason("rechazar", (reason) => runAction(request.id, () => rejectRequisition(request.id, reason), "Requisición rechazada."))}>Rechazar</button>}
-              {["draft", "pending", "approved"].includes(request.status) && (manager || request.requested_by === user?.id) && <button type="button" className="danger" onClick={() => askReason("cancelar", (reason) => runAction(request.id, () => cancelRequisition(request.id, reason), "Requisición cancelada."))}>Cancelar</button>}
+              {canApprove && request.status === "pending" && <button type="button" className="primary" onClick={() => setApproval(request)}>Aprobar</button>}
+              {canComplete && request.status === "approved" && <button type="button" className="primary" disabled={workingId === request.id} onClick={() => runAction(request.id, () => completeRequisition(request.id), request.is_test ? "Requisición de prueba completada. Traslado simulado registrado." : "Requisición completada. Inventario actualizado.")}>Completar traslado</button>}
+              {canApprove && ["pending", "approved"].includes(request.status) && <button type="button" className="danger" onClick={() => askReason("rechazar", (reason) => runAction(request.id, () => rejectRequisition(request.id, reason), "Requisición rechazada."))}>Rechazar</button>}
+              {["draft", "pending", "approved"].includes(request.status) && (canApprove || request.requested_by === user?.id) && <button type="button" className="danger" onClick={() => askReason("cancelar", (reason) => runAction(request.id, () => cancelRequisition(request.id, reason), "Requisición cancelada."))}>Cancelar</button>}
             </div>
           </article>
         ))}
