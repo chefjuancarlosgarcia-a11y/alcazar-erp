@@ -2,7 +2,13 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
 import useSupabaseRealtime from "../hooks/useSupabaseRealtime"
-import { getNotifications, isNotificationUnread, markNotificationRead, normalizeIsRead } from "../services/notificationsService"
+import {
+  getNotifications,
+  isNotificationUnread,
+  markAllNotificationsRead,
+  markNotificationRead,
+  normalizeIsRead
+} from "../services/notificationsService"
 import {
   buildPurchaseOrderNotificationUrl,
   resolveNotificationTarget
@@ -25,6 +31,8 @@ function NotificationsBell({ currentUser }) {
   const [open, setOpen] = useState(false)
   const [notifications, setNotifications] = useState([])
   const [error, setError] = useState("")
+  const [markingAllRead, setMarkingAllRead] = useState(false)
+  const isAdmin = currentUser?.role === "admin"
 
   const loadNotifications = useCallback(async () => {
     if (!session?.user?.id) return
@@ -68,6 +76,24 @@ function NotificationsBell({ currentUser }) {
 
   async function markRead(notification) {
     if (isNotificationUnread(notification)) await markNotificationRead(notification.id)
+  }
+
+  async function markAllRead() {
+    if (!isAdmin || markingAllRead || unreadCount === 0) return
+
+    setMarkingAllRead(true)
+    setError("")
+
+    const { error: markError } = await markAllNotificationsRead()
+
+    if (markError) {
+      console.error("[NotificationsBell] markAllRead", markError.message || markError)
+      setError(markError.message || "No se pudieron marcar todas como leídas.")
+    } else {
+      await loadNotifications()
+    }
+
+    setMarkingAllRead(false)
   }
 
   async function viewEntity(notification) {
@@ -133,8 +159,20 @@ function NotificationsBell({ currentUser }) {
       {open && (
         <section className="notifications-panel" aria-label="Panel de notificaciones">
           <header>
-            <strong>Notificaciones</strong>
-            <small>{unreadCount} pendiente{unreadCount === 1 ? "" : "s"}</small>
+            <div className="notifications-panel-heading">
+              <strong>Notificaciones</strong>
+              <small>{unreadCount} pendiente{unreadCount === 1 ? "" : "s"}</small>
+            </div>
+            {isAdmin && unreadCount > 0 && (
+              <button
+                type="button"
+                className="notifications-mark-all-read"
+                disabled={markingAllRead}
+                onClick={markAllRead}
+              >
+                {markingAllRead ? "Marcando..." : "Marcar todas leídas"}
+              </button>
+            )}
           </header>
           {error && <p className="notifications-error">{error}</p>}
           {!error && notifications.length === 0 && <p className="notifications-empty">No tienes notificaciones.</p>}

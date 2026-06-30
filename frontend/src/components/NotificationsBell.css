@@ -54,12 +54,41 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 10px;
   padding: 16px;
   border-bottom: 1px solid #203047;
 }
 
+.notifications-panel-heading {
+  display: grid;
+  gap: 2px;
+}
+
 .notifications-panel header small {
   color: #5eead4;
+}
+
+.notifications-mark-all-read {
+  flex-shrink: 0;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid #14b8a6;
+  border-radius: 8px;
+  background: #0f766e;
+  color: #ecfeff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.notifications-mark-all-read:hover:not(:disabled) {
+  background: #115e59;
+}
+
+.notifications-mark-all-read:disabled {
+  opacity: .65;
+  cursor: wait;
 }
 
 .notifications-list {

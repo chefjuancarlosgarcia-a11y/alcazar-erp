@@ -63,6 +63,12 @@ export async function markNotificationRead(id) {
   return result
 }
 
+export async function markAllNotificationsRead() {
+  const result = await supabase.rpc("mark_all_my_notifications_read")
+  window.dispatchEvent(new CustomEvent("notifications-updated"))
+  return result
+}
+
 export async function createNotification(notification) {
   const result = await supabase.rpc("create_notification", {
     p_user_id: notification.userId || null,
