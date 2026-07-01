@@ -1,5 +1,6 @@
 import { isLegacyInventoryCategoryCode, resolveInventoryCategoryName } from "./inventoryCategoryUtils"
 import { barcodesMatch, normalizeBarcode } from "./barcodeUtils"
+import { resolveItemRequisitionUnitFactor, unitsMatch } from "./inventoryUnitConversion"
 
 const PIECE_UNIT_KEYS = new Set(["unidad", "unidades", "unidad_pieza", "pieza", "piezas", "unit", "units", "piece", "pieces"])
 const GRAM_UNIT_KEYS = new Set(["gramo", "gramos", "g", "gr"])
@@ -75,7 +76,8 @@ export function validateInventoryItemForm(form, {
   categories = [],
   providers = [],
   items = [],
-  editingItemId = ""
+  editingItemId = "",
+  globalConversions = []
 } = {}) {
   const errors = {}
 
@@ -99,12 +101,36 @@ export function validateInventoryItemForm(form, {
   }
 
   if (!String(form.base_unit || "").trim()) {
-    errors.base_unit = "La unidad base es obligatoria."
+    errors.base_unit = "La unidad de inventario es obligatoria."
+  }
+
+  const defaultRequisitionUnit = String(form.default_requisition_unit || form.base_unit || "").trim()
+  if (!defaultRequisitionUnit) {
+    errors.default_requisition_unit = "La unidad de requisición es obligatoria."
   }
 
   const conversionFactor = Number(form.conversion_factor)
   if (!Number.isFinite(conversionFactor) || conversionFactor <= 0) {
     errors.conversion_factor = "El factor de conversión debe ser mayor a 0."
+  }
+
+  if (
+    defaultRequisitionUnit
+    && form.base_unit
+    && !unitsMatch(defaultRequisitionUnit, form.base_unit)
+    && !unitsMatch(defaultRequisitionUnit, form.purchase_unit)
+  ) {
+    const probeItem = {
+      id: editingItemId || "new",
+      name: form.name || "Producto",
+      base_unit: form.base_unit,
+      purchase_unit: form.purchase_unit,
+      conversion_factor: conversionFactor
+    }
+    const { factor } = resolveItemRequisitionUnitFactor(probeItem, defaultRequisitionUnit, globalConversions)
+    if (factor == null) {
+      errors.default_requisition_unit = "La unidad de requisición debe poder convertirse a la unidad de inventario."
+    }
   }
 
   const purchasePrice = form.purchase_price === "" || form.purchase_price == null
@@ -162,7 +188,7 @@ export function validateInventoryItemForm(form, {
     }
   }
 
-  const canUseRecipeConversion = isPieceUnit(form.base_unit)
+  const canUseRecipeConversion = !isGramsUnit(form.base_unit)
   if (canUseRecipeConversion && form.useRecipeWeightConversion) {
     const recipeWeightGrams = Number(form.recipeWeightGrams)
     if (!Number.isFinite(recipeWeightGrams) || recipeWeightGrams <= 0) {
@@ -181,6 +207,7 @@ export function validateInventoryItemForm(form, {
     "supplier",
     "purchase_unit",
     "base_unit",
+    "default_requisition_unit",
     "conversion_factor",
     "purchase_price",
     "cost_per_base_unit",
