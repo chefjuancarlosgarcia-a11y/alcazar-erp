@@ -72,8 +72,16 @@ const INVENTORY_UNITS = [
   "Botella",
   "Quintal"
 ]
+import {
+  buildPurchaseConversionHint,
+  canConfigureRecipeUsageUnit,
+  isGramsUnit,
+  isPieceUnit,
+  normalizeUnitKey
+} from "../utils/inventoryUnitConversion"
+import { getInventoryUnitConversions } from "../services/requisitionsService"
+
 const RECIPE_WEIGHT_UNIT = "Gramos"
-const PIECE_UNIT_KEYS = new Set(["unidad", "unidades", "unidad_pieza", "pieza", "piezas", "unit", "units", "piece", "pieces"])
 
 const EMPTY_ITEM = {
   name: "",
@@ -85,6 +93,7 @@ const EMPTY_ITEM = {
   category: "",
   purchase_unit: DEFAULT_INVENTORY_UNIT,
   base_unit: DEFAULT_INVENTORY_UNIT,
+  default_requisition_unit: DEFAULT_INVENTORY_UNIT,
   conversion_factor: "1",
   purchase_price: "",
   cost_per_base_unit: "0",
@@ -118,21 +127,16 @@ function uniqueProviderNames(providers) {
   return Array.from(new Set(providers.map(providerName).filter(Boolean))).sort((a, b) => a.localeCompare(b, "es"))
 }
 
-function normalizeUnitKey(value) {
-  return String(value || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .trim()
-    .replace(/[\/\s]+/g, "_")
+function normalizeUnitKeyLocal(value) {
+  return normalizeUnitKey(value)
 }
 
-function isPieceUnit(unit) {
-  return PIECE_UNIT_KEYS.has(normalizeUnitKey(unit))
+function isPieceUnitLocal(unit) {
+  return isPieceUnit(unit)
 }
 
-function isGramsUnit(unit) {
-  return ["gramo", "gramos", "g", "gr"].includes(normalizeUnitKey(unit))
+function isGramsUnitLocal(unit) {
+  return isGramsUnit(unit)
 }
 
 function findRecipeWeightConversion(conversions, baseUnit) {
@@ -170,6 +174,7 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
   const [savingItem, setSavingItem] = useState(false)
   const [itemFormErrors, setItemFormErrors] = useState({})
   const [itemFormFocusField, setItemFormFocusField] = useState("")
+  const [globalUnitConversions, setGlobalUnitConversions] = useState([])
   const { toasts, showToast, dismissToast } = useToast()
   const [testFlowFilter, setTestFlowFilter] = useState(TEST_FLOW_FILTER.REAL)
   const realtimeTimerRef = useRef(null)
@@ -218,12 +223,13 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
   async function refresh() {
     setLoading(true)
     setError("")
-    const [areasResult, itemsResult, movementsResult, suppliersResult, categoriesResult] = await Promise.all([
+    const [areasResult, itemsResult, movementsResult, suppliersResult, categoriesResult, unitConversionsResult] = await Promise.all([
       getActiveAreas(),
       getInventoryItems(),
       getInventoryMovements({ limit: 100, testFlowFilter }),
       canEditCatalog ? getSuppliers() : Promise.resolve({ data: [], error: null }),
-      getActiveInventoryCategories()
+      getActiveInventoryCategories(),
+      getInventoryUnitConversions()
     ])
     if (areasResult.error || itemsResult.error || movementsResult.error) {
       setError("No se pudo cargar el inventario desde Supabase. Verifica que la migración 004 esté aplicada.")
@@ -232,6 +238,7 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
     setItems(itemsResult.data || [])
     setMovements(movementsResult.data || [])
     setInventoryCategories(categoriesResult.data || [])
+    setGlobalUnitConversions(unitConversionsResult.data || [])
     setCategoriesLoading(false)
     if (suppliersResult.error) {
       setError(suppliersResult.error.message || "No se pudieron cargar los proveedores desde Supabase.")
@@ -286,6 +293,7 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
       category: resolveInventoryCategoryCode(item.category, inventoryCategories),
       purchase_unit: unitForForm(item.purchase_unit),
       base_unit: unitForForm(item.base_unit),
+      default_requisition_unit: unitForForm(item.default_requisition_unit || item.base_unit),
       conversion_factor: String(item.conversion_factor || 1),
       purchase_price: item.purchase_price == null ? "" : String(item.purchase_price),
       cost_per_base_unit: String(item.cost_per_base_unit || 0),
@@ -346,7 +354,8 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
       categories: inventoryCategories,
       providers: providerOptions,
       items,
-      editingItemId: editingItem?.id || ""
+      editingItemId: editingItem?.id || "",
+      globalConversions: globalUnitConversions
     })
 
     if (!validation.valid) {
@@ -421,7 +430,7 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
       }
 
       let savedItem = result.data
-      const canUseRecipeConversion = isPieceUnit(itemForm.base_unit)
+      const canUseRecipeConversion = canConfigureRecipeUsageUnit(itemForm.base_unit)
       const recipeWeightGrams = validation.normalized.recipeWeightGrams
 
       if (canUseRecipeConversion && itemForm.useRecipeWeightConversion) {
@@ -1022,7 +1031,9 @@ function ItemModal({
   const [generatingBarcode, setGeneratingBarcode] = useState(false)
   const [barcodeScanValue, setBarcodeScanValue] = useState(form.barcode || "")
   const formGridRef = useRef(null)
-  const showRecipeConversion = isPieceUnit(form.base_unit)
+  const showRecipeConversion = canConfigureRecipeUsageUnit(form.base_unit)
+  const purchaseConversionHint = buildPurchaseConversionHint(form.purchase_unit, form.base_unit, form.conversion_factor)
+  const purchaseUnitsDiffer = normalizeUnitKey(form.purchase_unit) !== normalizeUnitKey(form.base_unit)
   const imageBusy = imageStatus === "optimizing"
   const hasFieldErrors = Object.keys(formErrors).length > 0
   const update = (field, value) => onUpdateField(field, value)
@@ -1257,10 +1268,14 @@ function ItemModal({
         </div>
         {!providers.length && <small className="inventory-base-muted">No hay proveedores guardados todavía.</small>}
       </Field>
-      <Field label="Unidad de compra" fieldKey="purchase_unit" error={fieldError("purchase_unit")} tooltip="Cómo compras este producto al proveedor.">
+      <div className="inventory-form-section-title inventory-form-grid__full">
+        <h3>Compra e inventario</h3>
+        <p>Unidad base interna usada para costos, recetas e inventario.</p>
+      </div>
+      <Field label="Unidad de compra" fieldKey="purchase_unit" error={fieldError("purchase_unit")} tooltip="Cómo factura el proveedor este producto.">
         <InventoryUnitSelect required value={form.purchase_unit} disabled={saving} onChange={(value) => update("purchase_unit", value)} />
       </Field>
-      <Field label="Unidad base" fieldKey="base_unit" error={fieldError("base_unit")} tooltip="Cómo el sistema consume este producto en recetas e inventario.">
+      <Field label="Unidad de inventario" fieldKey="base_unit" error={fieldError("base_unit")} tooltip="Unidad base interna usada para costos, recetas e inventario.">
         <InventoryUnitSelect
           required
           disabled={saving}
@@ -1270,13 +1285,18 @@ function ItemModal({
             setForm((current) => ({
               ...current,
               base_unit: value,
-              useRecipeWeightConversion: isPieceUnit(value) ? current.useRecipeWeightConversion : false
+              default_requisition_unit: current.default_requisition_unit || value,
+              useRecipeWeightConversion: canConfigureRecipeUsageUnit(value) ? current.useRecipeWeightConversion : false
             }))
           }}
         />
       </Field>
-      <Field label="Factor conversión" fieldKey="conversion_factor" error={fieldError("conversion_factor")} tooltip="Cuántas unidades base contiene la unidad de compra.">
+      <Field label="Factor conversión" fieldKey="conversion_factor" error={fieldError("conversion_factor")} tooltip="Cuántas unidades de inventario contiene 1 unidad de compra.">
         <input min="0.0001" step="any" type="number" value={form.conversion_factor} onChange={(event) => update("conversion_factor", event.target.value)} disabled={saving} />
+        <small className="inventory-base-muted">{purchaseConversionHint}</small>
+        {purchaseUnitsDiffer && (
+          <small className="inventory-field-warning">Verifica que el factor indique cuántas unidades de inventario hay en 1 unidad de compra.</small>
+        )}
       </Field>
       <Field label="Precio de compra" fieldKey="purchase_price" error={fieldError("purchase_price")} tooltip="Costo total de la unidad como la compras al proveedor.">
         <div className="inventory-currency-input"><span>Q</span><input min="0" step="0.01" type="number" placeholder="0.00" value={form.purchase_price} onChange={(event) => update("purchase_price", event.target.value)} disabled={saving} /></div>
@@ -1296,11 +1316,26 @@ function ItemModal({
         </Field>
       )}
     </div>
+    <section className="inventory-form-section">
+      <div className="inventory-form-section__header">
+        <h3>Requisiciones</h3>
+        <p>El personal pedirá este producto en esta unidad.</p>
+      </div>
+      <Field label="Unidad de requisición" fieldKey="default_requisition_unit" error={fieldError("default_requisition_unit")} tooltip="Unidad en la que el personal debe pedir este producto al almacén.">
+        <InventoryUnitSelect
+          required
+          disabled={saving}
+          value={form.default_requisition_unit || form.base_unit}
+          onChange={(value) => update("default_requisition_unit", value)}
+        />
+      </Field>
+      <p className="inventory-base-muted">El sistema convertirá automáticamente a la unidad de inventario para descontar stock.</p>
+    </section>
     {showRecipeConversion && (
-      <section className="inventory-recipe-conversion">
+      <section className="inventory-recipe-conversion inventory-form-section">
         <div>
-          <h3>Conversión para recetas</h3>
-          <p>Activa esta opción si este producto se compra por unidad, pero se usa por gramos en recetas.</p>
+          <h3>Unidad de uso en recetas</h3>
+          <p>Usa esta opción cuando el producto se controla en una unidad, pero las recetas lo consumen en otra. Ejemplo: aguacate se controla por unidad, pero una receta usa 80 g.</p>
         </div>
         <label className="inventory-recipe-toggle">
           <input
@@ -1308,7 +1343,7 @@ function ItemModal({
             checked={Boolean(form.useRecipeWeightConversion)}
             onChange={(event) => update("useRecipeWeightConversion", event.target.checked)}
           />
-          <span>Usar este producto por peso en recetas</span>
+          <span>Definir equivalencia para recetas en gramos</span>
         </label>
         {form.useRecipeWeightConversion && (
           <div className="inventory-recipe-equivalence">

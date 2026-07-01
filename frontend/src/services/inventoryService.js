@@ -56,6 +56,7 @@ function itemPayload(item, options = {}) {
     category: item.category?.trim() || null,
     purchase_unit: item.purchase_unit?.trim() || null,
     base_unit: item.base_unit?.trim(),
+    default_requisition_unit: item.default_requisition_unit?.trim() || item.base_unit?.trim() || null,
     conversion_factor: Number(item.conversion_factor || 1),
     purchase_price: item.purchase_price === "" || item.purchase_price == null
       ? null
