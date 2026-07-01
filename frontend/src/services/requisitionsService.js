@@ -1,6 +1,7 @@
 import { supabase } from "../lib/supabase"
 import { CACHE_KEYS, CACHE_TTL } from "./cacheConfig"
 import { cachedQuery } from "./queryCache"
+import { mapRequisitionError } from "../utils/requisitionErrorUtils"
 
 const requisitionSelect = `
   *,
@@ -84,23 +85,23 @@ export function getRequisitionItems(id) {
 }
 
 export function createRequisition(data, items, submit = false) {
-  return supabase.rpc("create_requisition", {
+  return rpcMutation(supabase.rpc("create_requisition", {
     p_data: serializeData(data),
     p_items: serializeItems(items),
     p_submit: submit
-  })
+  }))
 }
 
 export function updateRequisition(id, updates, items) {
-  return supabase.rpc("update_draft_requisition", {
+  return rpcMutation(supabase.rpc("update_draft_requisition", {
     p_requisition_id: id,
     p_data: serializeData(updates),
     p_items: serializeItems(items)
-  })
+  }))
 }
 
 export function submitRequisition(id) {
-  return supabase.rpc("submit_requisition", { p_requisition_id: id })
+  return rpcMutation(supabase.rpc("submit_requisition", { p_requisition_id: id }))
 }
 
 function serializeApprovalItems(items) {
@@ -130,26 +131,34 @@ function serializeFulfillmentItems(items) {
   }))
 }
 
-export function approveRequisition(id, items) {
-  return supabase.rpc("approve_requisition", {
+async function rpcMutation(promise) {
+  const result = await promise
+  if (result.error) {
+    return { ...result, error: { ...result.error, message: mapRequisitionError(result.error) } }
+  }
+  return result
+}
+
+export async function approveRequisition(id, items) {
+  return rpcMutation(supabase.rpc("approve_requisition", {
     p_requisition_id: id,
     p_items: serializeApprovalItems(items)
-  })
+  }))
 }
 
-export function rejectRequisition(id, reason) {
-  return supabase.rpc("reject_requisition", { p_requisition_id: id, p_reason: reason })
+export async function rejectRequisition(id, reason) {
+  return rpcMutation(supabase.rpc("reject_requisition", { p_requisition_id: id, p_reason: reason }))
 }
 
-export function cancelRequisition(id, reason) {
-  return supabase.rpc("cancel_requisition", { p_requisition_id: id, p_reason: reason })
+export async function cancelRequisition(id, reason) {
+  return rpcMutation(supabase.rpc("cancel_requisition", { p_requisition_id: id, p_reason: reason }))
 }
 
-export function completeRequisition(id, items = null) {
-  return supabase.rpc("complete_requisition", {
+export async function completeRequisition(id, items = null) {
+  return rpcMutation(supabase.rpc("complete_requisition", {
     p_requisition_id: id,
     p_items: items ? serializeFulfillmentItems(items) : null
-  })
+  }))
 }
 
 export async function getRequisitionPurchaseSuggestions(requisitionId, { recordSuggested = true } = {}) {
@@ -181,4 +190,17 @@ export function ignoreLowStockPurchaseSuggestion(requisitionId, items, notes = "
     p_items: items,
     p_notes: notes || null
   })
+}
+
+export async function getItemOpenRequisitionsForUnitChange(itemId) {
+  const { data, error } = await supabase.rpc("get_item_open_requisitions_for_unit_change", {
+    p_item_id: itemId
+  })
+  if (error) return { data: [], error: { ...error, message: mapRequisitionError(error) } }
+  const rows = Array.isArray(data) ? data : []
+  return { data: rows, error: null }
+}
+
+export function mapRequisitionRpcError(error) {
+  return mapRequisitionError(error)
 }

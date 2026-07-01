@@ -51,6 +51,8 @@ import {
   mapInventorySaveError,
   validateInventoryItemForm
 } from "../utils/inventoryItemValidation"
+import { hasCriticalInventoryUnitChange } from "../utils/requisitionErrorUtils"
+import { getItemOpenRequisitionsForUnitChange } from "../services/requisitionsService"
 import { normalizeBarcode } from "../utils/barcodeUtils"
 import { printInventoryBarcodeLabel, renderBarcodeSvg } from "../utils/barcodeLabel"
 import "./InventoryBase.css"
@@ -175,6 +177,7 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
   const [itemFormErrors, setItemFormErrors] = useState({})
   const [itemFormFocusField, setItemFormFocusField] = useState("")
   const [globalUnitConversions, setGlobalUnitConversions] = useState([])
+  const [unitChangeWarning, setUnitChangeWarning] = useState(null)
   const { toasts, showToast, dismissToast } = useToast()
   const [testFlowFilter, setTestFlowFilter] = useState(TEST_FLOW_FILTER.REAL)
   const realtimeTimerRef = useRef(null)
@@ -346,49 +349,7 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
     setItemForm((current) => ({ ...current, [field]: value }))
   }
 
-  async function saveItem(event) {
-    event.preventDefault()
-    if (savingItem) return
-
-    const validation = validateInventoryItemForm(itemForm, {
-      categories: inventoryCategories,
-      providers: providerOptions,
-      items,
-      editingItemId: editingItem?.id || "",
-      globalConversions: globalUnitConversions
-    })
-
-    if (!validation.valid) {
-      setItemFormErrors(validation.errors)
-      setItemFormFocusField(validation.firstErrorField || "")
-      const summary = "Faltan campos obligatorios. Revisa los campos marcados."
-      setError(summary)
-      showToast(summary, "error", 4500)
-      return
-    }
-
-    if (validation.normalized.duplicateNameItem && !window.confirm(`Ya existe el producto "${validation.normalized.duplicateNameItem.name}". ¿Deseas ingresarlo de igual manera?`)) {
-      return
-    }
-
-    if (normalizeBarcode(itemForm.barcode)) {
-      const barcodeCheck = await checkBarcodeExists(itemForm.barcode, editingItem?.id || "")
-      if (barcodeCheck.error) {
-        const message = mapInventorySaveError(barcodeCheck.error)
-        setError(message)
-        showToast(message, "error", 5000)
-        return
-      }
-      if (barcodeCheck.exists) {
-        const message = `Este código ya pertenece a otro producto ("${barcodeCheck.item?.name || "otro producto"}").`
-        setItemFormErrors({ barcode: message })
-        setItemFormFocusField("barcode")
-        setError(message)
-        showToast(message, "error", 5000)
-        return
-      }
-    }
-
+  async function performSaveItem(validation) {
     setItemFormErrors({})
     setItemFormFocusField("")
     setSavingItem(true)
@@ -563,6 +524,70 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
       showToast(message, "error", 5000)
     } finally {
       setSavingItem(false)
+    }
+  }
+
+  async function saveItem(event) {
+    event.preventDefault()
+    if (savingItem) return
+
+    const validation = validateInventoryItemForm(itemForm, {
+      categories: inventoryCategories,
+      providers: providerOptions,
+      items,
+      editingItemId: editingItem?.id || "",
+      globalConversions: globalUnitConversions
+    })
+
+    if (!validation.valid) {
+      setItemFormErrors(validation.errors)
+      setItemFormFocusField(validation.firstErrorField || "")
+      const summary = "Faltan campos obligatorios. Revisa los campos marcados."
+      setError(summary)
+      showToast(summary, "error", 4500)
+      return
+    }
+
+    if (validation.normalized.duplicateNameItem && !window.confirm(`Ya existe el producto "${validation.normalized.duplicateNameItem.name}". ¿Deseas ingresarlo de igual manera?`)) {
+      return
+    }
+
+    if (normalizeBarcode(itemForm.barcode)) {
+      const barcodeCheck = await checkBarcodeExists(itemForm.barcode, editingItem?.id || "")
+      if (barcodeCheck.error) {
+        const message = mapInventorySaveError(barcodeCheck.error)
+        setError(message)
+        showToast(message, "error", 5000)
+        return
+      }
+      if (barcodeCheck.exists) {
+        const message = `Este código ya pertenece a otro producto ("${barcodeCheck.item?.name || "otro producto"}").`
+        setItemFormErrors({ barcode: message })
+        setItemFormFocusField("barcode")
+        setError(message)
+        showToast(message, "error", 5000)
+        return
+      }
+    }
+
+    if (editingItem && hasCriticalInventoryUnitChange(editingItem, itemForm)) {
+      const openResult = await getItemOpenRequisitionsForUnitChange(editingItem.id)
+      if (openResult.error) {
+        showToast(openResult.error.message || "No se pudo verificar requisiciones pendientes.", "warning", 5000)
+      } else if (openResult.data?.length) {
+        setUnitChangeWarning({ requisitions: openResult.data, validation })
+        return
+      }
+    }
+
+    await performSaveItem(validation)
+  }
+
+  async function confirmUnitChangeSaveAnyway() {
+    const pending = unitChangeWarning
+    setUnitChangeWarning(null)
+    if (pending?.validation) {
+      await performSaveItem(pending.validation)
     }
   }
 
@@ -804,6 +829,14 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
       {adjustment && <AdjustmentModal adjustment={adjustment} setAdjustment={setAdjustment} items={items} areas={areas} onSave={saveAdjustment} onClose={() => setAdjustment(null)} />}
       {legacyOpen && <LegacyModal items={legacyItems} canManage={canManage} onMigrate={migrateLegacyItem} onMigrateSelected={migrateSelectedLegacyItems} onClose={() => setLegacyOpen(false)} />}
       {importOpen && <InventoryImportModal areas={areas} existingItems={items} onClose={() => setImportOpen(false)} onImported={refresh} />}
+      {unitChangeWarning && (
+        <InventoryUnitChangeWarningModal
+          requisitions={unitChangeWarning.requisitions}
+          saving={savingItem}
+          onCancel={() => setUnitChangeWarning(null)}
+          onConfirm={confirmUnitChangeSaveAnyway}
+        />
+      )}
       {canEditCatalog && (
         <button type="button" className="inventory-mobile-create primary" onClick={openCreate}>
           + Nuevo producto
@@ -1002,6 +1035,63 @@ function MovementsTable({ movements, items, areas, loading }) {
     {!loading && !movements.length && <p className="inventory-empty">No hay movimientos registrados.</p>}
     {!loading && <PaginationControls page={page} total={movements.length} onChange={setPage} />}
   </div>
+}
+
+const OPEN_REQUISITION_STATUS_LABELS = {
+  draft: "Borrador",
+  pending: "Pendiente",
+  approved: "Aprobada",
+  partially_fulfilled: "Parcialmente surtida",
+  pending_fulfillment: "Pendiente de surtir"
+}
+
+function InventoryUnitChangeWarningModal({ requisitions, saving, onCancel, onConfirm }) {
+  return (
+    <div className="inventory-modal-backdrop" role="presentation">
+      <section className="inventory-modal compact inventory-unit-change-warning" aria-labelledby="unit-change-warning-title">
+        <header>
+          <div>
+            <p className="inventory-base-eyebrow">Cambio de unidades</p>
+            <h2 id="unit-change-warning-title">Requisiciones pendientes detectadas</h2>
+          </div>
+        </header>
+        <p>
+          Este producto tiene requisiciones pendientes creadas con la configuración anterior.
+          Si cambia las unidades:
+        </p>
+        <ul>
+          <li>Las requisiciones existentes conservarán la configuración anterior.</li>
+          <li>Podrían producirse errores de surtido.</li>
+          <li>Se recomienda cancelar esas requisiciones y crear nuevas.</li>
+        </ul>
+        {requisitions?.length > 0 && (
+          <div className="inventory-unit-change-warning__list">
+            <strong>Requisiciones afectadas ({requisitions.length})</strong>
+            <ul>
+              {requisitions.map((req) => (
+                <li key={req.requisition_id}>
+                  <span>{req.requisition_number || req.requisition_id}</span>
+                  <span>{OPEN_REQUISITION_STATUS_LABELS[req.status] || req.status}</span>
+                  {req.requested_quantity != null && (
+                    <span>
+                      {Number(req.requested_quantity)} {req.requested_unit || ""}
+                      {req.inventory_base_unit_at_request ? ` (inventario: ${req.inventory_base_unit_at_request})` : ""}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        <div className="inventory-modal-actions">
+          <button type="button" onClick={onCancel} disabled={saving}>Cancelar edición</button>
+          <button type="button" className="primary" onClick={onConfirm} disabled={saving}>
+            {saving ? "Guardando..." : "Guardar de todos modos"}
+          </button>
+        </div>
+      </section>
+    </div>
+  )
 }
 
 function ItemModal({

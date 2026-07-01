@@ -72,7 +72,7 @@
   color: #fde68a;
 }
 .requisitions-success { border-color: #0f766e; background: #052e2c; color: #99f6e4; }
-.requisitions-error { border-color: #991b1b; background: #3b1119; color: #fecaca; }
+.requisitions-error { border-color: #991b1b; background: #3b1119; color: #fecaca; white-space: pre-line; }
 
 .requisitions-tabs {
   display: flex;
