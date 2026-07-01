@@ -230,35 +230,90 @@
 }
 .requisition-picker {
   display: grid;
-  grid-template-columns: 2fr 1fr auto;
-  align-items: start;
-  gap: 10px;
-  padding: 13px;
-  border-radius: 11px;
+  grid-template-columns: 1fr;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 12px;
   background: #101b2d;
   color: #94a3b8;
+}
+.requisition-picker__primary {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.requisition-picker__label {
+  color: #e2e8f0;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.requisition-picker__hint {
+  margin: 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.requisition-picker__scanner {
+  display: grid;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid #1d2b40;
 }
 .requisition-picker strong { color: #f8fafc; }
 .requisition-product-search {
   position: relative;
   display: grid;
-  grid-template-columns: 28px 1fr auto;
-  align-items: center;
-  gap: 6px;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 0;
+  width: 100%;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  overflow: visible;
+  background: #081425;
 }
 .requisition-search-icon {
   display: grid;
   place-items: center;
-  height: 42px;
-  border: 1px solid #334155;
-  border-radius: 8px;
-  background: #081425;
+  min-height: 52px;
+  border-right: 1px solid #334155;
+  background: #0b1424;
   color: #5eead4;
+  font-size: 18px;
   font-weight: 900;
 }
+.requisition-product-search input {
+  width: 100%;
+  min-height: 52px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #f8fafc;
+  font-size: 15px;
+}
+.requisition-product-search input::placeholder {
+  color: #64748b;
+}
+.requisition-product-search input:focus {
+  outline: none;
+  box-shadow: inset 0 0 0 2px rgba(94, 234, 212, 0.35);
+}
+.requisition-product-search__clear,
 .requisition-product-search > button {
-  min-height: 42px;
-  padding: 8px 10px;
+  align-self: center;
+  margin-right: 8px;
+  min-height: 36px;
+  padding: 8px 12px;
+  border-radius: 8px;
+}
+.requisition-product-search__clear {
+  border: 1px solid #334155;
+  background: #13233a;
+  color: #cbd5e1;
+  font-size: 12px;
 }
 .requisition-product-results {
   position: absolute;
@@ -345,6 +400,19 @@
   text-transform: uppercase;
 }
 .requisition-item-row { border-top: 1px solid #1d2b40; }
+.requisition-item-row--highlight {
+  animation: requisition-row-highlight 2.2s ease-out;
+}
+@keyframes requisition-row-highlight {
+  0% {
+    background: rgba(94, 234, 212, 0.2);
+    box-shadow: inset 0 0 0 1px rgba(94, 234, 212, 0.45);
+  }
+  100% {
+    background: transparent;
+    box-shadow: none;
+  }
+}
 .requisition-item-row span { color: #94a3b8; font-size: 13px; }
 .requisition-item-row strong small {
   display: block;

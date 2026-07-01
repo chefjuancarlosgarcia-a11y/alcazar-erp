@@ -664,15 +664,17 @@ function RequestForm({
   onSave
 }) {
   const [form, setForm] = useState(request)
-  const [selectedItemId, setSelectedItemId] = useState("")
   const [productQuery, setProductQuery] = useState("")
   const [showResults, setShowResults] = useState(false)
   const [formError, setFormError] = useState("")
   const [formNotice, setFormNotice] = useState("")
   const [barcodeScanValue, setBarcodeScanValue] = useState("")
   const [barcodeScanFeedback, setBarcodeScanFeedback] = useState("")
+  const [highlightedItemId, setHighlightedItemId] = useState("")
   const pickerRef = useRef(null)
-  const selectedItem = inventory.find((item) => item.id === selectedItemId)
+  const searchInputRef = useRef(null)
+  const rowRefs = useRef({})
+  const highlightTimerRef = useRef(null)
   const fromArea = areas.find((area) => area.id === form.fromAreaId) || warehouseArea
   const toArea = areas.find((area) => area.id === form.toAreaId)
   const requesterProfile = requesters.find((profile) => String(profile.id) === String(form.requestedByProfileId))
@@ -708,43 +710,66 @@ function RequestForm({
     return () => document.removeEventListener("mousedown", closeResults)
   }, [])
 
+  useEffect(() => () => window.clearTimeout(highlightTimerRef.current), [])
+
+  useEffect(() => {
+    if (!highlightedItemId) return undefined
+    const row = rowRefs.current[highlightedItemId]
+    row?.scrollIntoView({ behavior: "smooth", block: "nearest" })
+    return undefined
+  }, [highlightedItemId, form.items])
+
   const filteredProducts = useMemo(() => {
     const term = normalizeSearch(productQuery)
     if (!term) return []
     return inventory.filter((item) => productMatches(item, term)).slice(0, 10)
   }, [inventory, productQuery])
 
+  function clearProductSearch() {
+    setProductQuery("")
+    setShowResults(false)
+    window.requestAnimationFrame(() => searchInputRef.current?.focus())
+  }
+
+  function highlightAddedItem(itemId) {
+    if (highlightTimerRef.current) window.clearTimeout(highlightTimerRef.current)
+    setHighlightedItemId(itemId)
+    highlightTimerRef.current = window.setTimeout(() => setHighlightedItemId(""), 2200)
+  }
+
   function addOrIncrementItem(item) {
     if (!item) return false
-    const existing = form.items.find((line) => line.itemId === item.id)
-    if (existing) {
-      setForm({
-        ...form,
-        items: form.items.map((line) => (
-          line.itemId === item.id
-            ? { ...line, requestedQuantity: Number(line.requestedQuantity || 0) + 1 }
-            : line
-        ))
-      })
-      return true
-    }
-    setForm({
-      ...form,
-      items: [...form.items, {
-        itemId: item.id,
-        requestedQuantity: 1,
-        requestedUnit: getDefaultRequisitionUnit(item),
-        notes: ""
-      }]
+    highlightAddedItem(item.id)
+    setForm((current) => {
+      const existing = current.items.find((line) => line.itemId === item.id)
+      if (existing) {
+        const updated = {
+          ...existing,
+          requestedQuantity: Number(existing.requestedQuantity || 0) + 1
+        }
+        return {
+          ...current,
+          items: [updated, ...current.items.filter((line) => line.itemId !== item.id)]
+        }
+      }
+      return {
+        ...current,
+        items: [{
+          itemId: item.id,
+          requestedQuantity: 1,
+          requestedUnit: getDefaultRequisitionUnit(item),
+          notes: ""
+        }, ...current.items]
+      }
     })
+    clearProductSearch()
+    setFormError("")
+    setFormNotice(`"${item.name}" agregado`)
     return true
   }
 
-  function addItem() {
-    if (!selectedItem) return
-    if (addOrIncrementItem(selectedItem)) {
-      setFormError("")
-    }
+  function pickProduct(item) {
+    addOrIncrementItem(item)
   }
 
   async function handleRequisitionBarcodeScan(code) {
@@ -769,10 +794,8 @@ function RequestForm({
     }
 
     addOrIncrementItem(item)
-    selectProduct(item)
     setBarcodeScanValue("")
-    setFormNotice("Producto encontrado")
-    setBarcodeScanFeedback("Producto encontrado")
+    setBarcodeScanFeedback(`"${item.name}" agregado`)
   }
 
   function updateItem(itemId, updates) {
@@ -802,13 +825,6 @@ function RequestForm({
       return
     }
     setFormNotice(result.message || (submit ? "Requisición enviada." : "Borrador guardado."))
-  }
-
-  function selectProduct(item) {
-    setSelectedItemId(item.id)
-    setProductQuery(item.name)
-    setShowResults(false)
-    setFormError("")
   }
 
   return (
@@ -867,45 +883,57 @@ function RequestForm({
           )}
         </div>
         <div className="requisition-picker" ref={pickerRef}>
-          <BarcodeScannerInput
-            inputId="requisition-barcode-scan"
-            label="Escanear producto"
-            value={barcodeScanValue}
-            onChange={setBarcodeScanValue}
-            onScan={handleRequisitionBarcodeScan}
-            placeholder="Escanea código de barras para agregar a la requisición..."
-            hint="Si el producto ya está en la requisición, aumenta la cantidad."
-          />
-          {barcodeScanFeedback && (
-            <p className="barcode-scanner-feedback barcode-scanner-feedback--success">{barcodeScanFeedback}</p>
-          )}
-          <div className="requisition-product-search">
-            <span className="requisition-search-icon">⌕</span>
-            <input
-              value={productQuery}
-              onChange={(event) => { setProductQuery(event.target.value); setShowResults(true); setSelectedItemId("") }}
-              onFocus={() => setShowResults(true)}
-              placeholder="Buscar producto del inventario..."
+          <div className="requisition-picker__primary">
+            <label className="requisition-picker__label" htmlFor="requisition-product-search">Buscar producto</label>
+            <div className="requisition-product-search">
+              <span className="requisition-search-icon" aria-hidden="true">⌕</span>
+              <input
+                id="requisition-product-search"
+                ref={searchInputRef}
+                value={productQuery}
+                onChange={(event) => {
+                  setProductQuery(event.target.value)
+                  setShowResults(true)
+                  setFormNotice("")
+                }}
+                onFocus={() => setShowResults(true)}
+                placeholder="Escribe el nombre, SKU o categoría del producto..."
+                autoComplete="off"
+              />
+              {productQuery && (
+                <button type="button" className="requisition-product-search__clear" onClick={clearProductSearch}>
+                  Limpiar
+                </button>
+              )}
+              {showResults && productQuery && (
+                <div className="requisition-product-results">
+                  {filteredProducts.map((item) => (
+                    <button type="button" key={item.id} onClick={() => pickProduct(item)}>
+                      {item.image_url ? <img src={item.image_url} alt="" /> : <span className="requisition-product-placeholder">{initials(item.name)}</span>}
+                      <strong>{item.name}<small>{item.category || "Sin categoria"} · {item.base_unit}</small></strong>
+                      <em>{stockOf(item, form.fromAreaId)} {item.base_unit}</em>
+                    </button>
+                  ))}
+                  {!filteredProducts.length && <p>No se encontraron productos.</p>}
+                </div>
+              )}
+            </div>
+            <p className="requisition-picker__hint">Selecciona un resultado para agregarlo de inmediato. Si ya está en la lista, sube su cantidad.</p>
+          </div>
+          <div className="requisition-picker__scanner">
+            <BarcodeScannerInput
+              inputId="requisition-barcode-scan"
+              label="Escanear producto"
+              value={barcodeScanValue}
+              onChange={setBarcodeScanValue}
+              onScan={handleRequisitionBarcodeScan}
+              placeholder="Escanea código de barras para agregar a la requisición..."
+              hint="Si el producto ya está en la requisición, aumenta la cantidad."
             />
-            {selectedItem && <button type="button" onClick={() => { setSelectedItemId(""); setProductQuery(""); setShowResults(false) }}>Limpiar</button>}
-            {showResults && productQuery && (
-              <div className="requisition-product-results">
-                {filteredProducts.map((item) => (
-                  <button type="button" key={item.id} onClick={() => selectProduct(item)}>
-                    {item.image_url ? <img src={item.image_url} alt="" /> : <span className="requisition-product-placeholder">{initials(item.name)}</span>}
-                    <strong>{item.name}<small>{item.category || "Sin categoria"} · {item.base_unit}</small></strong>
-                    <em>{stockOf(item, form.fromAreaId)} {item.base_unit}</em>
-                  </button>
-                ))}
-                {!filteredProducts.length && <p>No se encontraron productos.</p>}
-              </div>
+            {barcodeScanFeedback && (
+              <p className="barcode-scanner-feedback barcode-scanner-feedback--success">{barcodeScanFeedback}</p>
             )}
           </div>
-          <span className={selectedItem && stockOf(selectedItem, form.fromAreaId) <= 0 ? "requisition-stock-warning" : ""}>
-            {selectedItem ? <>Disponible en origen: <strong>{formatNumber(stockOf(selectedItem, form.fromAreaId))}</strong> {selectedItem.base_unit} · Minimo: <strong>{formatNumber(minimumOf(selectedItem, form.fromAreaId))}</strong></> : "Selecciona un producto"}
-            {selectedItem && stockOf(selectedItem, form.fromAreaId) <= 0 && <small>Sin stock disponible en el origen.</small>}
-          </span>
-          <button type="button" className="primary" onClick={addItem}>Agregar producto</button>
         </div>
         {formError && <div className="requisitions-error">{formError}</div>}
         {formNotice && <div className="requisitions-success">{formNotice}</div>}
@@ -934,7 +962,14 @@ function RequestForm({
               availability.conversionFactor
             )
             return (
-              <div className="requisition-item-row" key={line.itemId}>
+              <div
+                className={`requisition-item-row${highlightedItemId === line.itemId ? " requisition-item-row--highlight" : ""}`}
+                key={line.itemId}
+                ref={(node) => {
+                  if (node) rowRefs.current[line.itemId] = node
+                  else delete rowRefs.current[line.itemId]
+                }}
+              >
                 <strong>{item?.name || "Producto"}<small>Inventario: {item?.base_unit || ""}</small></strong>
                 <span>
                   Actual: {formatNumber(availability.available)} {item?.base_unit} · Minimo: {formatNumber(availability.minimum)} {item?.base_unit}
