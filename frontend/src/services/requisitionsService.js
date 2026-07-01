@@ -154,6 +154,10 @@ export async function cancelRequisition(id, reason) {
   return rpcMutation(supabase.rpc("cancel_requisition", { p_requisition_id: id, p_reason: reason }))
 }
 
+export async function deleteClosedRequisition(id) {
+  return rpcMutation(supabase.rpc("delete_closed_requisition", { p_requisition_id: id }))
+}
+
 export async function completeRequisition(id, items = null) {
   return rpcMutation(supabase.rpc("complete_requisition", {
     p_requisition_id: id,

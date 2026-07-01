@@ -20,6 +20,7 @@ import {
   cancelRequisition,
   completeRequisition,
   createRequisition,
+  deleteClosedRequisition,
   duplicateRequisitionWithCurrentUnits,
   getInventoryUnitConversions,
   getRequisitionById,
@@ -483,6 +484,19 @@ function RequisitionsSupabase({
     if (reason?.trim()) action(reason.trim())
   }
 
+  function askDeleteClosed(request) {
+    const statusLabel = request.status === "rejected" ? "rechazada" : "cancelada"
+    const confirmed = window.confirm(
+      `¿Eliminar permanentemente ${request.requisition_number} (${statusLabel})?\n\nEsta acción no se puede deshacer. Solo se permiten requisiciones rechazadas o canceladas.`
+    )
+    if (!confirmed) return
+    void runAction(
+      request.id,
+      () => deleteClosedRequisition(request.id),
+      "Requisición eliminada."
+    )
+  }
+
   async function handleApprove(values) {
     await runAction(approval.id, () => approveRequisition(approval.id, values), "Requisición aprobada. Ya puede completarse el traslado.")
     setApproval(null)
@@ -646,6 +660,16 @@ function RequisitionsSupabase({
               )}
               {canApprove && ["pending", "approved"].includes(request.status) && <button type="button" className="danger" onClick={() => askReason("rechazar", (reason) => runAction(request.id, () => rejectRequisition(request.id, reason), "Requisición rechazada."))}>Rechazar</button>}
               {["draft", "pending", "approved"].includes(request.status) && (canApprove || request.requested_by === user?.id) && <button type="button" className="danger" onClick={() => askReason("cancelar", (reason) => runAction(request.id, () => cancelRequisition(request.id, reason), "Requisición cancelada."))}>Cancelar</button>}
+              {canDeleteClosedRequisition(request, user, isElevated) && (
+                <button
+                  type="button"
+                  className="danger"
+                  disabled={workingId === request.id}
+                  onClick={() => askDeleteClosed(request)}
+                >
+                  Eliminar
+                </button>
+              )}
             </div>
           </article>
           )
@@ -684,9 +708,11 @@ function RequisitionsSupabase({
           inventory={inventory}
           unitConversions={unitConversions}
           canDuplicate={canCreate}
+          canDelete={canDeleteClosedRequisition(detail, user, isElevated)}
           working={duplicateSaving}
           onClose={() => setDetail(null)}
           onDuplicate={(request, mode) => setDuplicateModal({ request, mode })}
+          onDelete={askDeleteClosed}
         />
       )}
       {duplicateModal && (
@@ -1157,7 +1183,7 @@ function RequestForm({
   )
 }
 
-function RequestDetail({ request, areas, inventory, unitConversions, canDuplicate, working, onClose, onDuplicate }) {
+function RequestDetail({ request, areas, inventory, unitConversions, canDuplicate, canDelete, working, onClose, onDuplicate, onDelete }) {
   const isFulfilled = ["completed", "partially_fulfilled", "pending_fulfillment"].includes(request.status)
   const duplicateActions = canDuplicate ? getRequisitionDuplicateActions(request.status) : []
   return (
@@ -1267,6 +1293,14 @@ function RequestDetail({ request, areas, inventory, unitConversions, canDuplicat
               ))}
             </div>
           </section>
+        )}
+        {canDelete && (
+          <div className="requisition-detail-delete">
+            <button type="button" className="danger" disabled={working} onClick={() => onDelete(request)}>
+              Eliminar requisición
+            </button>
+            <p className="requisitions-muted">Solo disponible para requisiciones rechazadas o canceladas.</p>
+          </div>
         )}
       </section>
     </div>
@@ -1818,6 +1852,11 @@ function formatShortageReason(reason, notes) {
 
 function Field({ label, children }) {
   return <label className="requisition-field"><span>{label}</span>{children}</label>
+}
+
+function canDeleteClosedRequisition(request, user, isElevated) {
+  if (!request || !["rejected", "cancelled"].includes(request.status)) return false
+  return isElevated || String(request.requested_by) === String(user?.id)
 }
 
 function StatusBadge({ status }) {
