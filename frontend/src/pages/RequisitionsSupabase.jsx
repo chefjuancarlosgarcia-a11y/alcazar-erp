@@ -626,13 +626,13 @@ function RequisitionsSupabase({
             </div>
             <div className="requisition-buttons">
               <button type="button" onClick={() => setDetail(request)}>Ver detalle</button>
-              {request.status === "draft" && request.requested_by === user?.id && <button type="button" onClick={() => openEdit(request)}>Editar</button>}
-              {request.status === "draft" && request.requested_by === user?.id && (
+              {request.status === "draft" && String(request.requested_by) === String(user?.id) && <button type="button" onClick={() => openEdit(request)}>Editar</button>}
+              {request.status === "draft" && String(request.requested_by) === String(user?.id) && (
                 <button
                   type="button"
                   className="primary"
-                  disabled={workingId === request.id || draftHasBlockingConversionIssues(request, inventory, unitConversions)}
-                  title={draftHasBlockingConversionIssues(request, inventory, unitConversions) ? "Corrige las unidades no configuradas antes de enviar." : ""}
+                  disabled={workingId === request.id || Boolean(getDraftSubmitBlockReason(request, inventory, unitConversions))}
+                  title={getDraftSubmitBlockReason(request, inventory, unitConversions) || ""}
                   onClick={() => runAction(request.id, () => submitRequisition(request.id), "Requisición enviada para aprobación.")}
                 >
                   Enviar
@@ -1078,11 +1078,12 @@ function RequestForm({
               line.requestedQuantity,
               requestedUnit,
               unitConversions,
-              line.conversionWarning ? {
-                conversionWarning: true,
-                storedConversionFactor: line.storedConversionFactor,
-                convertedRequestedQuantity: line.convertedRequestedQuantity
-              } : null
+              readStoredConversionFactor(line)
+                ? {
+                  storedConversionFactor: readStoredConversionFactor(line),
+                  convertedRequestedQuantity: readStoredConvertedQuantity(line)
+                }
+                : null
             )
             const preview = buildRequisitionConversionPreview(
               line.requestedQuantity,
@@ -1144,10 +1145,10 @@ function RequestForm({
             </div>
           )}
           <button type="button" onClick={onClose} disabled={saving}>Cancelar</button>
-          <button type="button" disabled={saving || hasInvalidRequisitionConversions(form.items, inventory, unitConversions)} onClick={() => submitForm(false)}>
+          <button type="button" disabled={saving || Boolean(getRequisitionConversionBlockReason(form.items, inventory, unitConversions))} title={getRequisitionConversionBlockReason(form.items, inventory, unitConversions) || ""} onClick={() => submitForm(false)}>
             {saving ? "Guardando..." : "Guardar borrador"}
           </button>
-          <button type="button" className="primary" disabled={saving || hasInvalidRequisitionConversions(form.items, inventory, unitConversions)} onClick={() => submitForm(true)}>
+          <button type="button" className="primary" disabled={saving || Boolean(getRequisitionConversionBlockReason(form.items, inventory, unitConversions))} title={getRequisitionConversionBlockReason(form.items, inventory, unitConversions) || ""} onClick={() => submitForm(true)}>
             {saving ? "Enviando..." : "Enviar requisición"}
           </button>
         </div>
@@ -1852,9 +1853,9 @@ function calculateAvailability(item, areaId, requestedQuantity, requestedUnit, c
   const minimum = minimumOf(item, areaId)
   const quantity = Number(requestedQuantity || 0)
   const unit = requestedUnit || getDefaultRequisitionUnit(item) || item?.base_unit || ""
-  if (historical?.conversionWarning && historical?.storedConversionFactor != null) {
-    const factor = Number(historical.storedConversionFactor)
-    const requestedBase = Number.isFinite(factor) ? quantity * factor : Number(historical.convertedRequestedQuantity || 0)
+  const storedFactor = Number(historical?.storedConversionFactor)
+  if (Number.isFinite(storedFactor) && storedFactor > 0) {
+    const requestedBase = quantity * storedFactor
     const shortage = Math.max(0, requestedBase - available)
     const status = available <= 0 ? "Sin stock" : shortage > 0 ? "Parcial" : "Disponible"
     return {
@@ -1863,7 +1864,7 @@ function calculateAvailability(item, areaId, requestedQuantity, requestedUnit, c
       requestedBase,
       shortage,
       status,
-      conversionFactor: factor,
+      conversionFactor: storedFactor,
       conversionError: ""
     }
   }
@@ -1882,36 +1883,80 @@ function calculateAvailability(item, areaId, requestedQuantity, requestedUnit, c
   }
 }
 
-function validateRequisitionConversions(items, inventory, conversions) {
+function readStoredConversionFactor(line) {
+  const factor = Number(
+    line.conversionFactor
+    ?? line.conversion_factor
+    ?? line.storedConversionFactor
+  )
+  return Number.isFinite(factor) && factor > 0 ? factor : null
+}
+
+function readStoredConvertedQuantity(line) {
+  const converted = Number(
+    line.convertedRequestedQuantity
+    ?? line.converted_requested_quantity
+  )
+  return Number.isFinite(converted) && converted > 0 ? converted : null
+}
+
+function resolveLineConversionFactor(line, item, conversions) {
+  if (line.conversionWarning || line.conversion_warning) {
+    return { factor: null, error: "", unit: "" }
+  }
+
+  const unit = line.requestedUnit || line.requested_unit || line.unit || getDefaultRequisitionUnit(item)
+  const storedFactor = readStoredConversionFactor(line)
+  const storedConverted = readStoredConvertedQuantity(line)
+  if (storedFactor != null && (storedConverted != null || Number(line.requestedQuantity ?? line.requested_quantity) > 0)) {
+    return { factor: storedFactor, error: "", unit }
+  }
+
+  const resolved = resolveItemRequisitionUnitFactor(item, unit, conversions)
+  return { ...resolved, unit }
+}
+
+function getRequisitionConversionBlockReason(items, inventory, conversions) {
   for (const line of items) {
     if (line.conversionWarning || line.conversion_warning) continue
     const item = inventory.find((entry) => entry.id === (line.itemId || line.item_id))
-    const unit = line.requestedUnit || line.requested_unit || getDefaultRequisitionUnit(item)
-    const { factor, error } = resolveItemRequisitionUnitFactor(item, unit, conversions)
-    if (factor == null) return error || `La unidad no está configurada para ${item?.name || "un producto"}.`
+    const itemName = item?.name || line.item_name || "un producto"
+    if (!item) {
+      return `No se encontró el producto "${itemName}" en el inventario activo. Actualiza la lista o edita el borrador.`
+    }
+    const { factor, error, unit } = resolveLineConversionFactor(line, item, conversions)
+    if (factor == null) {
+      return error || `La unidad ${unit || "(sin unidad)"} no está configurada para ${itemName}. Corrige la unidad o configura la conversión antes de enviar.`
+    }
   }
   return ""
 }
 
-function draftHasBlockingConversionIssues(request, inventory, conversions) {
-  return request.items.some((line) => {
-    if (line.conversion_warning) return false
-    const item = inventory.find((entry) => entry.id === line.item_id)
-    const unit = line.requested_unit || line.unit || getDefaultRequisitionUnit(item)
-    const { factor } = resolveItemRequisitionUnitFactor(item, unit, conversions)
-    return factor == null
-  })
+function getDraftSubmitBlockReason(request, inventory, conversions) {
+  return getRequisitionConversionBlockReason(request.items || [], inventory, conversions)
 }
 
-function hasInvalidRequisitionConversions(items, inventory, conversions) {
-  return Boolean(validateRequisitionConversions(items, inventory, conversions))
+function validateRequisitionConversions(items, inventory, conversions) {
+  return getRequisitionConversionBlockReason(items, inventory, conversions)
 }
 
 function enrichRequestItems(items, inventory, fromAreaId, conversions) {
   return items.map((line) => {
     const item = inventory.find((entry) => entry.id === line.itemId || entry.id === line.item_id)
     const requestedUnit = line.requestedUnit || line.requested_unit || getDefaultRequisitionUnit(item) || line.unit
-    const availability = calculateAvailability(item, fromAreaId, line.requestedQuantity ?? line.requested_quantity, requestedUnit, conversions)
+    const availability = calculateAvailability(
+      item,
+      fromAreaId,
+      line.requestedQuantity ?? line.requested_quantity,
+      requestedUnit,
+      conversions,
+      readStoredConversionFactor(line)
+        ? {
+          storedConversionFactor: readStoredConversionFactor(line),
+          convertedRequestedQuantity: readStoredConvertedQuantity(line)
+        }
+        : null
+    )
     return {
       ...line,
       requestedUnit,
