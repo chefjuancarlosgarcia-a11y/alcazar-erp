@@ -165,6 +165,8 @@ function RequisitionsSupabase({
   const [requesters, setRequesters] = useState([])
   const [loading, setLoading] = useState(true)
   const [workingId, setWorkingId] = useState("")
+  const [formSaving, setFormSaving] = useState(false)
+  const [duplicateSaving, setDuplicateSaving] = useState(false)
   const [page, setPage] = useState(1)
   const [tab, setTab] = useState("all")
   const [filters, setFilters] = useState({ date: "", fromAreaId: "", toAreaId: "", priority: "", search: "" })
@@ -208,16 +210,20 @@ function RequisitionsSupabase({
 
   async function notifyRequisitionPending(requisition) {
     if (!requisition || requisition.status !== "pending") return
-    await notifyRoles(["admin", "gerente_general"], {
-      type: "requisition_pending",
-      title: requisition.is_test ? "Prueba de requisición pendiente" : "Requisición pendiente de aprobación",
-      message: `${requisition.requisition_number} requiere revisión administrativa.`,
-      entityType: "requisition",
-      entityId: requisition.id,
-      entityStatus: requisition.status,
-      entityIsTest: requisition.is_test,
-      actionUrl: buildRequisitionNotificationUrl(requisition)
-    })
+    try {
+      await notifyRoles(["admin", "gerente_general"], {
+        type: "requisition_pending",
+        title: requisition.is_test ? "Prueba de requisición pendiente" : "Requisición pendiente de aprobación",
+        message: `${requisition.requisition_number} requiere revisión administrativa.`,
+        entityType: "requisition",
+        entityId: requisition.id,
+        entityStatus: requisition.status,
+        entityIsTest: requisition.is_test,
+        actionUrl: buildRequisitionNotificationUrl(requisition)
+      })
+    } catch (notificationError) {
+      console.error("No se pudo registrar la notificación de requisición pendiente.", notificationError)
+    }
   }
 
   useEffect(() => {
@@ -322,7 +328,9 @@ function RequisitionsSupabase({
       requestedByProfileId: request.requested_by_profile_id || request.requested_by || defaultRequesterId(requesters, user),
       notes: request.notes || "",
       allowOverStock: true,
+      isTest: Boolean(request.is_test),
       items: request.items.map((item) => ({
+        id: item.id,
         itemId: item.item_id,
         requestedQuantity: item.requested_quantity,
         requestedUnit: item.requested_unit || item.unit,
@@ -351,51 +359,64 @@ function RequisitionsSupabase({
       setError(validation)
       return { ok: false, error: validation }
     }
-    setWorkingId(data.id || "new")
+
+    setFormSaving(true)
+    let pendingRecord = null
+    let successMessage = ""
+    let nextFilter = testFlowFilter
     try {
       const result = enrichedData.id
         ? await updateRequisition(enrichedData.id, enrichedData, enrichedData.items)
         : await createRequisition(enrichedData, enrichedData.items, submit)
+
       let actionError = result.error
-      let pendingRecord = result.data
+      pendingRecord = result.data
+
       if (!actionError && enrichedData.id && submit) {
         const submitResult = await submitRequisition(enrichedData.id)
         actionError = submitResult.error
         if (!actionError) pendingRecord = submitResult.data
       }
+
       if (actionError) {
         const friendlyError = requisitionError(actionError)
         setError(friendlyError)
+        showToast(friendlyError, "error", 7000)
         return { ok: false, error: friendlyError }
       }
 
       const isTest = Boolean(enrichedData.isTest ?? enrichedData.is_test)
-      if (submit && pendingRecord?.status === "pending") {
-        await notifyRequisitionPending({
-          ...pendingRecord,
-          is_test: isTest
-        })
-      }
-
-      const nextFilter = isTest && testFlowFilter === TEST_FLOW_FILTER.REAL
-        ? TEST_FLOW_FILTER.TEST
-        : testFlowFilter
-      if (nextFilter !== testFlowFilter) setTestFlowFilter(nextFilter)
-      if (submit) setTab("pending")
-
-      setFormRequest(null)
-      const successMessage = submit
+      successMessage = submit
         ? isTest
           ? "Prueba de flujo enviada para aprobación."
           : "Requisición enviada para aprobación."
         : isTest
           ? "Borrador de prueba guardado correctamente."
           : "Borrador guardado correctamente."
+
+      nextFilter = isTest && testFlowFilter === TEST_FLOW_FILTER.REAL
+        ? TEST_FLOW_FILTER.TEST
+        : testFlowFilter
+      if (submit) setTab("pending")
+      setFormRequest(null)
       setMessage(successMessage)
-      await loadData({ testFlowFilter: nextFilter })
-      return { ok: true, message: successMessage }
+      showToast(successMessage, "success", 5000)
+
+      return { ok: true, message: successMessage, record: pendingRecord, nextFilter, isTest, submit }
     } finally {
-      setWorkingId("")
+      setFormSaving(false)
+    }
+  }
+
+  async function finalizeSavedRequisition({ record, nextFilter, isTest, submit }) {
+    if (submit && record?.status === "pending") {
+      void notifyRequisitionPending({ ...record, is_test: isTest })
+    }
+    if (nextFilter !== testFlowFilter) setTestFlowFilter(nextFilter)
+    try {
+      await loadData({ testFlowFilter: nextFilter })
+    } catch (refreshError) {
+      console.error("No se pudo refrescar la lista de requisiciones.", refreshError)
     }
   }
 
@@ -472,7 +493,7 @@ function RequisitionsSupabase({
     const resolvedMode = mode || duplicateModal?.mode
     if (!request || !resolvedMode) return
 
-    setWorkingId(request.id)
+    setDuplicateSaving(true)
     setError("")
     setMessage("")
     try {
@@ -495,7 +516,6 @@ function RequisitionsSupabase({
         ? TEST_FLOW_FILTER.TEST
         : testFlowFilter
       if (nextFilter !== testFlowFilter) setTestFlowFilter(nextFilter)
-      await loadData({ testFlowFilter: nextFilter })
 
       const fetched = await getRequisitionById(payload.new_requisition_id)
       if (fetched.data) {
@@ -505,8 +525,9 @@ function RequisitionsSupabase({
       }
 
       showToast(buildDuplicateResultMessage(payload), "success", 6000)
+      void loadData({ testFlowFilter: nextFilter })
     } finally {
-      setWorkingId("")
+      setDuplicateSaving(false)
     }
   }
 
@@ -647,9 +668,13 @@ function RequisitionsSupabase({
           warehouseArea={warehouseArea}
           operationalAreaIds={operationalAreaIds}
           canUseStockOverrideToggle={canUseStockOverrideToggle}
-          saving={Boolean(workingId)}
-          onClose={() => setFormRequest(null)}
+          saving={formSaving}
+          onClose={() => {
+            if (formSaving) return
+            setFormRequest(null)
+          }}
           onSave={saveRequest}
+          onSaved={finalizeSavedRequisition}
         />
       )}
       {detail && (
@@ -659,7 +684,7 @@ function RequisitionsSupabase({
           inventory={inventory}
           unitConversions={unitConversions}
           canDuplicate={canCreate}
-          working={Boolean(workingId)}
+          working={duplicateSaving}
           onClose={() => setDetail(null)}
           onDuplicate={(request, mode) => setDuplicateModal({ request, mode })}
         />
@@ -668,7 +693,7 @@ function RequisitionsSupabase({
         <DuplicateRequisitionModal
           request={duplicateModal.request}
           initialMode={duplicateModal.mode}
-          saving={Boolean(workingId)}
+          saving={duplicateSaving}
           onClose={() => setDuplicateModal(null)}
           onConfirm={handleDuplicateConfirm}
         />
@@ -756,7 +781,8 @@ function RequestForm({
   canUseStockOverrideToggle,
   saving,
   onClose,
-  onSave
+  onSave,
+  onSaved
 }) {
   const [form, setForm] = useState(request)
   const [productQuery, setProductQuery] = useState("")
@@ -920,6 +946,14 @@ function RequestForm({
       return
     }
     setFormNotice(result.message || (submit ? "Requisición enviada." : "Borrador guardado."))
+    if (onSaved) {
+      void onSaved({
+        record: result.record,
+        nextFilter: result.nextFilter,
+        isTest: result.isTest,
+        submit
+      })
+    }
   }
 
   return (
