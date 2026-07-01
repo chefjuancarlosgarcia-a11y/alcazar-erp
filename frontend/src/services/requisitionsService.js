@@ -204,3 +204,14 @@ export async function getItemOpenRequisitionsForUnitChange(itemId) {
 export function mapRequisitionRpcError(error) {
   return mapRequisitionError(error)
 }
+
+export async function duplicateRequisitionWithCurrentUnits(requisitionId, mode = "full_duplicate") {
+  const { data, error } = await supabase.rpc("duplicate_requisition_with_current_units", {
+    p_requisition_id: requisitionId,
+    p_mode: mode
+  })
+  if (error) {
+    return { data: null, error: { ...error, message: mapRequisitionError(error) } }
+  }
+  return { data: data || null, error: null }
+}

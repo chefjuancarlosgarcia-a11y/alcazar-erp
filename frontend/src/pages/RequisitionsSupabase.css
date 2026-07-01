@@ -203,6 +203,7 @@
   gap: 17px;
 }
 .requisitions-modal.detail { width: min(940px, 100%); }
+.requisitions-modal.duplicate-requisition { width: min(560px, 100%); }
 .requisitions-modal.approval { width: min(570px, 100%); }
 .requisition-form-grid {
   display: grid;
@@ -689,6 +690,204 @@
 .fulfillment-badge--pending_fulfillment {
   background: #3b1119;
   color: #fecaca;
+}
+
+.requisition-detail-actions {
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--erp-space-12);
+}
+
+.requisition-detail-actions-panel {
+  border-top: 1px solid #334155;
+  padding-top: var(--erp-space-16);
+  display: grid;
+  gap: var(--erp-space-12);
+}
+
+.requisition-detail-actions-panel__header h3 {
+  margin: 0 0 var(--erp-space-6);
+  font-size: 1.05rem;
+  color: #e2e8f0;
+}
+
+.requisition-detail-actions-panel__header p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.requisition-detail-actions-panel__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--erp-space-10);
+}
+
+.requisition-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--erp-space-8);
+  padding: 0.65rem 1rem;
+  border-radius: var(--erp-radius-card);
+  border: 1px solid transparent;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.requisition-action-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.requisition-action-btn--success {
+  background: #14532d;
+  border-color: #166534;
+  color: #bbf7d0;
+}
+
+.requisition-action-btn--template {
+  background: #1e3a8a;
+  border-color: #1d4ed8;
+  color: #bfdbfe;
+}
+
+.requisition-action-btn--warning {
+  background: #713f12;
+  border-color: #b45309;
+  color: #fde68a;
+}
+
+.requisition-action-btn.recommended {
+  box-shadow: 0 0 0 1px rgba(74, 222, 128, 0.35);
+}
+
+.requisition-action-btn__badge {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.requisition-duplicate-result-notice {
+  position: fixed;
+  right: var(--erp-space-16);
+  bottom: var(--erp-space-16);
+  z-index: 60;
+  width: min(420px, calc(100vw - 2rem));
+  background: #0f172a;
+  border: 1px solid #166534;
+  border-radius: var(--erp-radius-card);
+  padding: var(--erp-space-16);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+  display: grid;
+  gap: var(--erp-space-12);
+}
+
+.requisition-duplicate-result-notice__header {
+  display: grid;
+  gap: 0.25rem;
+  color: #dcfce7;
+}
+
+.requisition-duplicate-result-notice__stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--erp-space-8);
+  margin: 0;
+}
+
+.requisition-duplicate-result-notice__stats div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.requisition-duplicate-result-notice__stats dt {
+  font-size: 0.78rem;
+  color: #94a3b8;
+}
+
+.requisition-duplicate-result-notice__stats dd {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #e2e8f0;
+}
+
+.requisition-duplicate-result-notice__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--erp-space-8);
+}
+
+.requisition-duplicate-warnings-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: var(--erp-space-8);
+  color: #fecaca;
+}
+
+.requisition-duplicate-hint {
+  flex: 1 1 100%;
+  margin: 0;
+  line-height: 1.45;
+}
+
+.requisition-duplicate-options {
+  border: 1px solid #334155;
+  border-radius: var(--erp-radius-card);
+  padding: var(--erp-space-12);
+  margin: 0;
+  display: grid;
+  gap: var(--erp-space-10);
+}
+
+.requisition-duplicate-option {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--erp-space-10);
+  align-items: start;
+  padding: var(--erp-space-10);
+  border: 1px solid #1e293b;
+  border-radius: var(--erp-radius-card);
+  cursor: pointer;
+}
+
+.requisition-duplicate-option.active {
+  border-color: #2563eb;
+  background: rgba(37, 99, 235, 0.08);
+}
+
+.requisition-duplicate-option span {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.requisition-duplicate-option small {
+  color: #94a3b8;
+}
+
+.requisition-duplicate-cancelled-confirm {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--erp-space-10);
+  align-items: start;
+  color: #cbd5e1;
+  line-height: 1.45;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .requisition-detail-table--fulfillment > div {
