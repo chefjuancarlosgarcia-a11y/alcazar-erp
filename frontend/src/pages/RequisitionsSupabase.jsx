@@ -18,7 +18,9 @@ import {
   cancelRequisition,
   completeRequisition,
   createRequisition,
+  duplicateRequisitionWithCurrentUnits,
   getInventoryUnitConversions,
+  getRequisitionById,
   getRequisitionLowStockImpacts,
   getRequisitions,
   ignoreLowStockPurchaseSuggestion,
@@ -36,6 +38,12 @@ import {
   resolveItemRequisitionUnitFactor,
   unitsMatch
 } from "../utils/inventoryUnitConversion"
+import {
+  buildDuplicateResultMessage,
+  DUPLICATION_MODES,
+  formatDuplicateWarning,
+  getRequisitionDuplicateConfig
+} from "../utils/requisitionDuplicateUtils"
 import "./RequisitionsSupabase.css"
 
 const TABS = [
@@ -160,6 +168,7 @@ function RequisitionsSupabase({
   const [approval, setApproval] = useState(null)
   const [fulfillment, setFulfillment] = useState(null)
   const [lowStockSuggestion, setLowStockSuggestion] = useState(null)
+  const [duplicateModal, setDuplicateModal] = useState(null)
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
   const [testFlowFilter, setTestFlowFilter] = useState(initialTestFlowFilter || TEST_FLOW_FILTER.REAL)
@@ -450,6 +459,47 @@ function RequisitionsSupabase({
     setApproval(null)
   }
 
+  async function handleDuplicateConfirm(mode) {
+    const request = duplicateModal?.request
+    if (!request || !mode) return
+
+    setWorkingId(request.id)
+    setError("")
+    setMessage("")
+    try {
+      const result = await duplicateRequisitionWithCurrentUnits(request.id, mode)
+      if (result.error) {
+        setError(result.error.message)
+        return
+      }
+
+      const payload = result.data || {}
+      setDuplicateModal(null)
+      setDetail(null)
+      setTab("draft")
+
+      const nextFilter = request.is_test && testFlowFilter === TEST_FLOW_FILTER.REAL
+        ? TEST_FLOW_FILTER.TEST
+        : testFlowFilter
+      if (nextFilter !== testFlowFilter) setTestFlowFilter(nextFilter)
+      await loadData({ testFlowFilter: nextFilter })
+
+      const fetched = await getRequisitionById(payload.new_requisition_id)
+      if (fetched.data) {
+        openEdit(fetched.data)
+      }
+
+      let summary = buildDuplicateResultMessage(payload)
+      const warnings = Array.isArray(payload.warnings) ? payload.warnings : []
+      if (warnings.length) {
+        summary += ` ${warnings.map(formatDuplicateWarning).join(" ")}`
+      }
+      setMessage(summary)
+    } finally {
+      setWorkingId("")
+    }
+  }
+
   return (
     <section className="requisitions-page">
       <header className="requisitions-header">
@@ -592,7 +642,26 @@ function RequisitionsSupabase({
           onSave={saveRequest}
         />
       )}
-      {detail && <RequestDetail request={detail} areas={areas} inventory={inventory} unitConversions={unitConversions} onClose={() => setDetail(null)} />}
+      {detail && (
+        <RequestDetail
+          request={detail}
+          areas={areas}
+          inventory={inventory}
+          unitConversions={unitConversions}
+          canDuplicate={canCreate}
+          working={Boolean(workingId)}
+          onClose={() => setDetail(null)}
+          onDuplicate={(request) => setDuplicateModal({ request })}
+        />
+      )}
+      {duplicateModal && (
+        <DuplicateRequisitionModal
+          request={duplicateModal.request}
+          saving={Boolean(workingId)}
+          onClose={() => setDuplicateModal(null)}
+          onConfirm={handleDuplicateConfirm}
+        />
+      )}
       {approval && <ApprovalModal request={approval} saving={workingId === approval.id} onClose={() => setApproval(null)} onApprove={handleApprove} />}
       {fulfillment && (
         <FulfillmentModal
@@ -1027,8 +1096,9 @@ function RequestForm({
   )
 }
 
-function RequestDetail({ request, areas, inventory, unitConversions, onClose }) {
+function RequestDetail({ request, areas, inventory, unitConversions, canDuplicate, working, onClose, onDuplicate }) {
   const isFulfilled = ["completed", "partially_fulfilled", "pending_fulfillment"].includes(request.status)
+  const duplicateConfig = canDuplicate ? getRequisitionDuplicateConfig(request.status) : null
   return (
     <div className="requisitions-backdrop">
       <section className="requisitions-modal detail">
@@ -1113,6 +1183,127 @@ function RequestDetail({ request, areas, inventory, unitConversions, onClose }) 
           })}
         </div>
         {request.rejection_reason && <div className="requisitions-error">Motivo: {request.rejection_reason}</div>}
+        {duplicateConfig && (
+          <footer className="requisitions-modal-actions requisition-detail-actions">
+            <p className="requisitions-muted requisition-duplicate-hint">
+              {duplicateConfig.actionType === "template" || duplicateConfig.actionType === "template_confirm"
+                ? "Creará una nueva requisición en borrador usando la configuración actual del inventario. La requisición original no se modifica."
+                : "Creará una nueva requisición en borrador recalculando unidades, conversiones y disponibilidad actuales. La requisición original no se modifica."}
+            </p>
+            <button type="button" onClick={onClose} disabled={working}>Cerrar</button>
+            <button
+              type="button"
+              className="primary"
+              disabled={working}
+              onClick={() => onDuplicate(request)}
+            >
+              {duplicateConfig.label}
+            </button>
+          </footer>
+        )}
+      </section>
+    </div>
+  )
+}
+
+function DuplicateRequisitionModal({ request, saving, onClose, onConfirm }) {
+  const config = getRequisitionDuplicateConfig(request.status)
+  const [mode, setMode] = useState(
+    config?.requiresPartialChoice ? DUPLICATION_MODES.PENDING : (config?.modes?.[0] || DUPLICATION_MODES.FULL)
+  )
+  const [cancelledConfirmed, setCancelledConfirmed] = useState(false)
+
+  if (!config) return null
+
+  const isTemplate = config.actionType === "template" || config.actionType === "template_confirm"
+  const requiresCancelledConfirm = Boolean(config.requiresCancelledConfirm)
+  const canSubmit = !requiresCancelledConfirm || cancelledConfirmed
+
+  return (
+    <div className="requisitions-backdrop">
+      <section className="requisitions-modal duplicate-requisition">
+        <header>
+          <div>
+            <p className="requisitions-eyebrow">{request.requisition_number}</p>
+            <h2>{isTemplate ? "Usar como plantilla" : "Duplicar requisición"}</h2>
+          </div>
+          <button type="button" onClick={onClose} disabled={saving}>Cerrar</button>
+        </header>
+
+        {isTemplate ? (
+          <p>
+            Se creará una <strong>nueva requisición en borrador</strong> basada en {request.requisition_number}.
+            Se copiarán área, productos y cantidades solicitadas originales, recalculando unidades y stock con la
+            configuración <strong>actual</strong> del inventario. La requisición original no cambiará.
+          </p>
+        ) : config.requiresPartialChoice ? (
+          <>
+            <p>
+              Esta requisición tiene entregas parciales. Elige qué copiar a una nueva requisición en borrador con
+              la configuración actual del inventario.
+            </p>
+            <fieldset className="requisition-duplicate-options">
+              <legend className="sr-only">Modo de duplicación</legend>
+              <label className={`requisition-duplicate-option${mode === DUPLICATION_MODES.PENDING ? " active" : ""}`}>
+                <input
+                  type="radio"
+                  name="duplicate-mode"
+                  value={DUPLICATION_MODES.PENDING}
+                  checked={mode === DUPLICATION_MODES.PENDING}
+                  onChange={() => setMode(DUPLICATION_MODES.PENDING)}
+                  disabled={saving}
+                />
+                <span>
+                  <strong>Solo cantidades pendientes</strong> (recomendado)
+                  <small>Copia únicamente lo que falta por entregar de cada producto.</small>
+                </span>
+              </label>
+              <label className={`requisition-duplicate-option${mode === DUPLICATION_MODES.FULL ? " active" : ""}`}>
+                <input
+                  type="radio"
+                  name="duplicate-mode"
+                  value={DUPLICATION_MODES.FULL}
+                  checked={mode === DUPLICATION_MODES.FULL}
+                  onChange={() => setMode(DUPLICATION_MODES.FULL)}
+                  disabled={saving}
+                />
+                <span>
+                  <strong>Toda la requisición</strong>
+                  <small>Copia las cantidades solicitadas originales completas.</small>
+                </span>
+              </label>
+            </fieldset>
+          </>
+        ) : (
+          <p>
+            Se creará una nueva requisición en borrador con las mismas áreas, notas y productos.
+            Las unidades, conversiones y disponibilidad se recalcularán con la configuración actual del inventario.
+          </p>
+        )}
+
+        {requiresCancelledConfirm && (
+          <label className="requisition-duplicate-cancelled-confirm">
+            <input
+              type="checkbox"
+              checked={cancelledConfirmed}
+              onChange={(event) => setCancelledConfirmed(event.target.checked)}
+              disabled={saving}
+            />
+            <span>Entiendo que esta requisición está cancelada y deseo usarla solo como referencia para una nueva solicitud.</span>
+          </label>
+        )}
+
+        <div className="requisitions-modal-actions">
+          <button type="button" onClick={onClose} disabled={saving}>Cancelar</button>
+          <button
+            type="button"
+            className="primary"
+            disabled={saving || !canSubmit}
+            onClick={() => onConfirm(isTemplate ? DUPLICATION_MODES.TEMPLATE : mode)}
+          >
+            {saving ? "Creando..." : isTemplate ? "Crear desde plantilla" : "Crear borrador"}
+          </button>
+        </div>
       </section>
     </div>
   )
