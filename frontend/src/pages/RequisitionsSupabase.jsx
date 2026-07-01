@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import PaginationControls from "../components/PaginationControls"
+import { ToastContainer } from "../components/ToastContainer"
 import { TestFlowBadge, TestFlowControls, TestFlowWarning } from "../components/TestFlowBadge"
+import { useToast } from "../hooks/useToast"
 import { pageItems } from "../utils/pagination"
 import { canCreateTestFlow, TEST_FLOW_FILTER } from "../utils/testFlowMode"
 import { useAuth } from "../context/AuthContext"
@@ -40,9 +42,12 @@ import {
 } from "../utils/inventoryUnitConversion"
 import {
   buildDuplicateResultMessage,
+  buildDuplicateResultSummary,
+  duplicateModeDescription,
+  duplicateModeTitle,
   DUPLICATION_MODES,
   formatDuplicateWarning,
-  getRequisitionDuplicateConfig
+  getRequisitionDuplicateActions
 } from "../utils/requisitionDuplicateUtils"
 import "./RequisitionsSupabase.css"
 
@@ -169,6 +174,9 @@ function RequisitionsSupabase({
   const [fulfillment, setFulfillment] = useState(null)
   const [lowStockSuggestion, setLowStockSuggestion] = useState(null)
   const [duplicateModal, setDuplicateModal] = useState(null)
+  const [duplicateResult, setDuplicateResult] = useState(null)
+  const [duplicateWarningsOpen, setDuplicateWarningsOpen] = useState(false)
+  const { toasts, showToast, dismissToast } = useToast()
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
   const [testFlowFilter, setTestFlowFilter] = useState(initialTestFlowFilter || TEST_FLOW_FILTER.REAL)
@@ -461,22 +469,27 @@ function RequisitionsSupabase({
 
   async function handleDuplicateConfirm(mode) {
     const request = duplicateModal?.request
-    if (!request || !mode) return
+    const resolvedMode = mode || duplicateModal?.mode
+    if (!request || !resolvedMode) return
 
     setWorkingId(request.id)
     setError("")
     setMessage("")
     try {
-      const result = await duplicateRequisitionWithCurrentUnits(request.id, mode)
+      const result = await duplicateRequisitionWithCurrentUnits(request.id, resolvedMode)
       if (result.error) {
         setError(result.error.message)
+        showToast(result.error.message, "error", 7000)
         return
       }
 
       const payload = result.data || {}
+      const summary = buildDuplicateResultSummary(payload)
+
       setDuplicateModal(null)
       setDetail(null)
-      setTab("draft")
+      setDuplicateResult(summary)
+      setDuplicateWarningsOpen(false)
 
       const nextFilter = request.is_test && testFlowFilter === TEST_FLOW_FILTER.REAL
         ? TEST_FLOW_FILTER.TEST
@@ -487,14 +500,11 @@ function RequisitionsSupabase({
       const fetched = await getRequisitionById(payload.new_requisition_id)
       if (fetched.data) {
         openEdit(fetched.data)
+      } else {
+        showToast("La requisición se creó, pero no se pudo abrir automáticamente. Actualiza la lista.", "warning", 8000)
       }
 
-      let summary = buildDuplicateResultMessage(payload)
-      const warnings = Array.isArray(payload.warnings) ? payload.warnings : []
-      if (warnings.length) {
-        summary += ` ${warnings.map(formatDuplicateWarning).join(" ")}`
-      }
-      setMessage(summary)
+      showToast(buildDuplicateResultMessage(payload), "success", 6000)
     } finally {
       setWorkingId("")
     }
@@ -651,15 +661,30 @@ function RequisitionsSupabase({
           canDuplicate={canCreate}
           working={Boolean(workingId)}
           onClose={() => setDetail(null)}
-          onDuplicate={(request) => setDuplicateModal({ request })}
+          onDuplicate={(request, mode) => setDuplicateModal({ request, mode })}
         />
       )}
       {duplicateModal && (
         <DuplicateRequisitionModal
           request={duplicateModal.request}
+          initialMode={duplicateModal.mode}
           saving={Boolean(workingId)}
           onClose={() => setDuplicateModal(null)}
           onConfirm={handleDuplicateConfirm}
+        />
+      )}
+      {duplicateResult && (
+        <RequisitionDuplicateResultNotice
+          result={duplicateResult}
+          onViewDetails={() => setDuplicateWarningsOpen(true)}
+          onDismiss={() => setDuplicateResult(null)}
+        />
+      )}
+      {duplicateWarningsOpen && duplicateResult?.warnings?.length > 0 && (
+        <DuplicateWarningsModal
+          warnings={duplicateResult.warnings}
+          requisitionNumber={duplicateResult.requisitionNumber}
+          onClose={() => setDuplicateWarningsOpen(false)}
         />
       )}
       {approval && <ApprovalModal request={approval} saving={workingId === approval.id} onClose={() => setApproval(null)} onApprove={handleApprove} />}
@@ -711,6 +736,7 @@ function RequisitionsSupabase({
           }}
         />
       )}
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </section>
   )
 }
@@ -1098,7 +1124,7 @@ function RequestForm({
 
 function RequestDetail({ request, areas, inventory, unitConversions, canDuplicate, working, onClose, onDuplicate }) {
   const isFulfilled = ["completed", "partially_fulfilled", "pending_fulfillment"].includes(request.status)
-  const duplicateConfig = canDuplicate ? getRequisitionDuplicateConfig(request.status) : null
+  const duplicateActions = canDuplicate ? getRequisitionDuplicateActions(request.status) : []
   return (
     <div className="requisitions-backdrop">
       <section className="requisitions-modal detail">
@@ -1183,40 +1209,45 @@ function RequestDetail({ request, areas, inventory, unitConversions, canDuplicat
           })}
         </div>
         {request.rejection_reason && <div className="requisitions-error">Motivo: {request.rejection_reason}</div>}
-        {duplicateConfig && (
-          <footer className="requisitions-modal-actions requisition-detail-actions">
-            <p className="requisitions-muted requisition-duplicate-hint">
-              {duplicateConfig.actionType === "template" || duplicateConfig.actionType === "template_confirm"
-                ? "Creará una nueva requisición en borrador usando la configuración actual del inventario. La requisición original no se modifica."
-                : "Creará una nueva requisición en borrador recalculando unidades, conversiones y disponibilidad actuales. La requisición original no se modifica."}
-            </p>
-            <button type="button" onClick={onClose} disabled={working}>Cerrar</button>
-            <button
-              type="button"
-              className="primary"
-              disabled={working}
-              onClick={() => onDuplicate(request)}
-            >
-              {duplicateConfig.label}
-            </button>
-          </footer>
+        {duplicateActions.length > 0 && (
+          <section className="requisition-detail-actions-panel" aria-labelledby="requisition-actions-title">
+            <div className="requisition-detail-actions-panel__header">
+              <h3 id="requisition-actions-title">Acciones de la requisición</h3>
+              <p className="requisitions-muted">
+                Crea un documento nuevo en borrador con la configuración actual del inventario. La requisición original no se modifica.
+              </p>
+            </div>
+            <div className="requisition-detail-actions-panel__buttons">
+              {duplicateActions.map((action) => (
+                <button
+                  key={action.mode}
+                  type="button"
+                  className={`requisition-action-btn requisition-action-btn--${action.tone}${action.badge ? " recommended" : ""}`}
+                  disabled={working}
+                  onClick={() => onDuplicate(request, action.mode)}
+                >
+                  <span className="requisition-action-btn__label">{action.label}</span>
+                  {action.badge && <span className="requisition-action-btn__badge">{action.badge}</span>}
+                </button>
+              ))}
+            </div>
+          </section>
         )}
       </section>
     </div>
   )
 }
 
-function DuplicateRequisitionModal({ request, saving, onClose, onConfirm }) {
-  const config = getRequisitionDuplicateConfig(request.status)
-  const [mode, setMode] = useState(
-    config?.requiresPartialChoice ? DUPLICATION_MODES.PENDING : (config?.modes?.[0] || DUPLICATION_MODES.FULL)
-  )
+function DuplicateRequisitionModal({ request, initialMode, saving, onClose, onConfirm }) {
+  const actions = getRequisitionDuplicateActions(request.status)
+  const selectedAction = actions.find((action) => action.mode === initialMode) || actions[0]
+  const mode = initialMode || selectedAction?.mode || DUPLICATION_MODES.FULL
   const [cancelledConfirmed, setCancelledConfirmed] = useState(false)
 
-  if (!config) return null
+  if (!selectedAction) return null
 
-  const isTemplate = config.actionType === "template" || config.actionType === "template_confirm"
-  const requiresCancelledConfirm = Boolean(config.requiresCancelledConfirm)
+  const isTemplate = mode === DUPLICATION_MODES.TEMPLATE
+  const requiresCancelledConfirm = Boolean(selectedAction.requiresCancelledConfirm)
   const canSubmit = !requiresCancelledConfirm || cancelledConfirmed
 
   return (
@@ -1225,61 +1256,12 @@ function DuplicateRequisitionModal({ request, saving, onClose, onConfirm }) {
         <header>
           <div>
             <p className="requisitions-eyebrow">{request.requisition_number}</p>
-            <h2>{isTemplate ? "Usar como plantilla" : "Duplicar requisición"}</h2>
+            <h2>{duplicateModeTitle(mode)}</h2>
           </div>
           <button type="button" onClick={onClose} disabled={saving}>Cerrar</button>
         </header>
 
-        {isTemplate ? (
-          <p>
-            Se creará una <strong>nueva requisición en borrador</strong> basada en {request.requisition_number}.
-            Se copiarán área, productos y cantidades solicitadas originales, recalculando unidades y stock con la
-            configuración <strong>actual</strong> del inventario. La requisición original no cambiará.
-          </p>
-        ) : config.requiresPartialChoice ? (
-          <>
-            <p>
-              Esta requisición tiene entregas parciales. Elige qué copiar a una nueva requisición en borrador con
-              la configuración actual del inventario.
-            </p>
-            <fieldset className="requisition-duplicate-options">
-              <legend className="sr-only">Modo de duplicación</legend>
-              <label className={`requisition-duplicate-option${mode === DUPLICATION_MODES.PENDING ? " active" : ""}`}>
-                <input
-                  type="radio"
-                  name="duplicate-mode"
-                  value={DUPLICATION_MODES.PENDING}
-                  checked={mode === DUPLICATION_MODES.PENDING}
-                  onChange={() => setMode(DUPLICATION_MODES.PENDING)}
-                  disabled={saving}
-                />
-                <span>
-                  <strong>Solo cantidades pendientes</strong> (recomendado)
-                  <small>Copia únicamente lo que falta por entregar de cada producto.</small>
-                </span>
-              </label>
-              <label className={`requisition-duplicate-option${mode === DUPLICATION_MODES.FULL ? " active" : ""}`}>
-                <input
-                  type="radio"
-                  name="duplicate-mode"
-                  value={DUPLICATION_MODES.FULL}
-                  checked={mode === DUPLICATION_MODES.FULL}
-                  onChange={() => setMode(DUPLICATION_MODES.FULL)}
-                  disabled={saving}
-                />
-                <span>
-                  <strong>Toda la requisición</strong>
-                  <small>Copia las cantidades solicitadas originales completas.</small>
-                </span>
-              </label>
-            </fieldset>
-          </>
-        ) : (
-          <p>
-            Se creará una nueva requisición en borrador con las mismas áreas, notas y productos.
-            Las unidades, conversiones y disponibilidad se recalcularán con la configuración actual del inventario.
-          </p>
-        )}
+        <p>{duplicateModeDescription(mode, request.requisition_number)}</p>
 
         {requiresCancelledConfirm && (
           <label className="requisition-duplicate-cancelled-confirm">
@@ -1299,10 +1281,59 @@ function DuplicateRequisitionModal({ request, saving, onClose, onConfirm }) {
             type="button"
             className="primary"
             disabled={saving || !canSubmit}
-            onClick={() => onConfirm(isTemplate ? DUPLICATION_MODES.TEMPLATE : mode)}
+            onClick={() => onConfirm(mode)}
           >
             {saving ? "Creando..." : isTemplate ? "Crear desde plantilla" : "Crear borrador"}
           </button>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function RequisitionDuplicateResultNotice({ result, onViewDetails, onDismiss }) {
+  return (
+    <aside className="requisition-duplicate-result-notice" role="status" aria-live="polite">
+      <div className="requisition-duplicate-result-notice__header">
+        <strong>Se creó una nueva requisición utilizando la configuración actual.</strong>
+        {result.requisitionNumber && <span>{result.requisitionNumber}</span>}
+      </div>
+      <dl className="requisition-duplicate-result-notice__stats">
+        <div><dt>Productos copiados</dt><dd>{result.itemsCopied}</dd></div>
+        <div><dt>Productos omitidos</dt><dd>{result.itemsSkipped}</dd></div>
+        <div><dt>Advertencias</dt><dd>{result.warningsCount}</dd></div>
+      </dl>
+      <div className="requisition-duplicate-result-notice__actions">
+        {result.warningsCount > 0 && (
+          <button type="button" onClick={onViewDetails}>Ver detalles</button>
+        )}
+        <button type="button" className="primary" onClick={onDismiss}>Entendido</button>
+      </div>
+    </aside>
+  )
+}
+
+function DuplicateWarningsModal({ warnings, requisitionNumber, onClose }) {
+  return (
+    <div className="requisitions-backdrop">
+      <section className="requisitions-modal duplicate-requisition">
+        <header>
+          <div>
+            <p className="requisitions-eyebrow">{requisitionNumber || "Nueva requisición"}</p>
+            <h2>Productos omitidos</h2>
+          </div>
+          <button type="button" onClick={onClose}>Cerrar</button>
+        </header>
+        <p className="requisitions-muted">Estos productos no se copiaron a la nueva requisición. Revísalos antes de enviar el borrador.</p>
+        <ul className="requisition-duplicate-warnings-list">
+          {warnings.map((warning, index) => (
+            <li key={`${warning.item_id || warning.item_name || "warning"}-${index}`}>
+              {formatDuplicateWarning(warning)}
+            </li>
+          ))}
+        </ul>
+        <div className="requisitions-modal-actions">
+          <button type="button" className="primary" onClick={onClose}>Cerrar</button>
         </div>
       </section>
     </div>

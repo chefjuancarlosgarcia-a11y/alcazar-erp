@@ -4,55 +4,112 @@ export const DUPLICATION_MODES = {
   TEMPLATE: "template"
 }
 
-export function getRequisitionDuplicateConfig(status) {
+export function getRequisitionDuplicateActions(status) {
   switch (status) {
     case "draft":
     case "pending":
     case "approved":
-      return {
-        actionType: "duplicate",
+      return [{
+        mode: DUPLICATION_MODES.FULL,
         label: "Duplicar con configuración actual",
-        modes: [DUPLICATION_MODES.FULL],
-        requiresPartialChoice: false
-      }
+        tone: "success"
+      }]
     case "partially_fulfilled":
     case "pending_fulfillment":
-      return {
-        actionType: "duplicate_partial",
-        label: "Duplicar pendientes",
-        modes: [DUPLICATION_MODES.PENDING, DUPLICATION_MODES.FULL],
-        requiresPartialChoice: true
-      }
+      return [
+        {
+          mode: DUPLICATION_MODES.PENDING,
+          label: "Duplicar pendientes",
+          badge: "Recomendado",
+          tone: "success"
+        },
+        {
+          mode: DUPLICATION_MODES.FULL,
+          label: "Duplicar completa",
+          tone: "success"
+        }
+      ]
     case "completed":
-      return {
-        actionType: "template",
+      return [{
+        mode: DUPLICATION_MODES.TEMPLATE,
         label: "Usar como plantilla",
-        modes: [DUPLICATION_MODES.TEMPLATE],
-        requiresPartialChoice: false
-      }
+        tone: "template"
+      }]
     case "cancelled":
-      return {
-        actionType: "template_confirm",
+      return [{
+        mode: DUPLICATION_MODES.TEMPLATE,
         label: "Usar como plantilla",
-        modes: [DUPLICATION_MODES.TEMPLATE],
-        requiresPartialChoice: false,
+        tone: "warning",
         requiresCancelledConfirm: true
-      }
+      }]
     default:
-      return null
+      return []
+  }
+}
+
+/** @deprecated use getRequisitionDuplicateActions */
+export function getRequisitionDuplicateConfig(status) {
+  const actions = getRequisitionDuplicateActions(status)
+  if (!actions.length) return null
+  const first = actions[0]
+  return {
+    actionType: first.mode === DUPLICATION_MODES.TEMPLATE
+      ? (status === "cancelled" ? "template_confirm" : "template")
+      : actions.length > 1 ? "duplicate_partial" : "duplicate",
+    label: first.label,
+    modes: actions.map((action) => action.mode),
+    requiresPartialChoice: actions.length > 1,
+    requiresCancelledConfirm: Boolean(first.requiresCancelledConfirm)
+  }
+}
+
+export function duplicateModeTitle(mode) {
+  switch (mode) {
+    case DUPLICATION_MODES.PENDING:
+      return "Duplicar pendientes"
+    case DUPLICATION_MODES.FULL:
+      return "Duplicar con configuración actual"
+    case DUPLICATION_MODES.TEMPLATE:
+      return "Usar como plantilla"
+    default:
+      return "Duplicar requisición"
+  }
+}
+
+export function duplicateModeDescription(mode, requisitionNumber) {
+  const ref = requisitionNumber || "esta requisición"
+  switch (mode) {
+    case DUPLICATION_MODES.PENDING:
+      return `Se creará una nueva requisición en borrador copiando solo las cantidades pendientes de ${ref}, recalculando unidades y stock con la configuración actual. La requisición original no cambiará.`
+    case DUPLICATION_MODES.FULL:
+      return `Se creará una nueva requisición en borrador con las mismas áreas, notas y cantidades solicitadas de ${ref}, recalculando unidades y stock con la configuración actual. La requisición original no cambiará.`
+    case DUPLICATION_MODES.TEMPLATE:
+      return `Se creará una nueva requisición en borrador basada en ${ref} como plantilla, usando la configuración actual del inventario. No quedará ligada operacionalmente como pendiente de la original.`
+    default:
+      return ""
+  }
+}
+
+export function normalizeDuplicateWarnings(warnings) {
+  if (!warnings) return []
+  if (Array.isArray(warnings)) return warnings
+  return []
+}
+
+export function buildDuplicateResultSummary(result) {
+  const warnings = normalizeDuplicateWarnings(result?.warnings)
+  return {
+    requisitionNumber: result?.requisition_number || "",
+    itemsCopied: Number(result?.items_copied || 0),
+    itemsSkipped: Number(result?.items_skipped || 0),
+    warningsCount: warnings.length,
+    warnings
   }
 }
 
 export function buildDuplicateResultMessage(result) {
-  if (!result) return ""
-  const copied = Number(result.items_copied || 0)
-  const skipped = Number(result.items_skipped || 0)
-  const parts = [`Se creó ${result.requisition_number || "la nueva requisición"} en borrador.`]
-  parts.push(`${copied} producto${copied === 1 ? "" : "s"} copiado${copied === 1 ? "" : "s"}.`)
-  if (skipped > 0) {
-    parts.push(`${skipped} producto${skipped === 1 ? "" : "s"} omitido${skipped === 1 ? "" : "s"} y requiere${skipped === 1 ? "" : "n"} revisión.`)
-  }
-  return parts.join(" ")
+  const summary = buildDuplicateResultSummary(result)
+  return `Se creó ${summary.requisitionNumber || "una nueva requisición"} utilizando la configuración actual.`
 }
 
 export function formatDuplicateWarning(warning) {
