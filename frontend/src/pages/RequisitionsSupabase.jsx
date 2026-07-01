@@ -28,6 +28,14 @@ import {
 } from "../services/requisitionsService"
 import { notifyRoles } from "../services/notificationsService"
 import { buildPurchaseOrderNotificationUrl, buildRequisitionNotificationUrl } from "../utils/inventoryNotificationRoutes"
+import {
+  buildRequisitionConversionPreview,
+  getDefaultRequisitionUnit,
+  getRequisitionUnitOptions,
+  normalizeInventoryUnit,
+  resolveItemRequisitionUnitFactor,
+  unitsMatch
+} from "../utils/inventoryUnitConversion"
 import "./RequisitionsSupabase.css"
 
 const TABS = [
@@ -301,7 +309,10 @@ function RequisitionsSupabase({
         itemId: item.item_id,
         requestedQuantity: item.requested_quantity,
         requestedUnit: item.requested_unit || item.unit,
-        notes: item.notes || ""
+        notes: item.notes || "",
+        conversionWarning: Boolean(item.conversion_warning),
+        storedConversionFactor: item.conversion_factor,
+        convertedRequestedQuantity: item.converted_requested_quantity
       }))
     })
   }
@@ -312,6 +323,11 @@ function RequisitionsSupabase({
     const enrichedData = {
       ...data,
       items: enrichRequestItems(data.items, inventory, data.fromAreaId, unitConversions)
+    }
+    const conversionError = validateRequisitionConversions(enrichedData.items, inventory, unitConversions)
+    if (conversionError) {
+      setError(conversionError)
+      return { ok: false, error: conversionError }
     }
     const validation = validateRequest(enrichedData, inventory, areas)
     if (validation) {
@@ -530,7 +546,17 @@ function RequisitionsSupabase({
             <div className="requisition-buttons">
               <button type="button" onClick={() => setDetail(request)}>Ver detalle</button>
               {request.status === "draft" && request.requested_by === user?.id && <button type="button" onClick={() => openEdit(request)}>Editar</button>}
-              {request.status === "draft" && request.requested_by === user?.id && <button type="button" className="primary" disabled={workingId === request.id} onClick={() => runAction(request.id, () => submitRequisition(request.id), "Requisición enviada para aprobación.")}>Enviar</button>}
+              {request.status === "draft" && request.requested_by === user?.id && (
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={workingId === request.id || draftHasBlockingConversionIssues(request, inventory, unitConversions)}
+                  title={draftHasBlockingConversionIssues(request, inventory, unitConversions) ? "Corrige las unidades no configuradas antes de enviar." : ""}
+                  onClick={() => runAction(request.id, () => submitRequisition(request.id), "Requisición enviada para aprobación.")}
+                >
+                  Enviar
+                </button>
+              )}
               {canApprove && request.status === "pending" && <button type="button" className="primary" onClick={() => setApproval(request)}>Aprobar</button>}
               {canComplete && request.status === "approved" && (
                 <button type="button" className="primary" disabled={workingId === request.id} onClick={() => setFulfillment(request)}>
@@ -704,7 +730,12 @@ function RequestForm({
     }
     setForm({
       ...form,
-      items: [...form.items, { itemId: item.id, requestedQuantity: 1, requestedUnit: item.base_unit, notes: "" }]
+      items: [...form.items, {
+        itemId: item.id,
+        requestedQuantity: 1,
+        requestedUnit: getDefaultRequisitionUnit(item),
+        notes: ""
+      }]
     })
     return true
   }
@@ -753,6 +784,11 @@ function RequestForm({
     const enrichedForm = {
       ...form,
       items: enrichRequestItems(form.items, inventory, form.fromAreaId, unitConversions)
+    }
+    const conversionError = validateRequisitionConversions(enrichedForm.items, inventory, unitConversions)
+    if (conversionError) {
+      setFormError(conversionError)
+      return
     }
     const validation = validateRequest(enrichedForm, inventory, areas)
     if (validation) {
@@ -874,33 +910,67 @@ function RequestForm({
         {formError && <div className="requisitions-error">{formError}</div>}
         {formNotice && <div className="requisitions-success">{formNotice}</div>}
         <div className="requisition-items">
-          <div className="requisition-items-head"><span>Producto</span><span>Stock / disponibilidad</span><span>Cantidad</span><span>Solicitar en</span><span>Notas</span><span /></div>
+          <div className="requisition-items-head"><span>Producto</span><span>Stock / disponibilidad</span><span>Cantidad</span><span>Solicitar en</span><span>Conversión</span><span>Notas</span><span /></div>
           {form.items.map((line) => {
             const item = inventory.find((inventoryItem) => inventoryItem.id === line.itemId)
-            const unitOptions = getUnitOptions(item, unitConversions)
-            const requestedUnit = line.requestedUnit || item?.base_unit || ""
-            const availability = calculateAvailability(item, form.fromAreaId, line.requestedQuantity, requestedUnit, unitConversions)
+            const unitOptions = getRequisitionUnitOptions(item, unitConversions)
+            const requestedUnit = line.requestedUnit || getDefaultRequisitionUnit(item) || item?.base_unit || ""
+            const availability = calculateAvailability(
+              item,
+              form.fromAreaId,
+              line.requestedQuantity,
+              requestedUnit,
+              unitConversions,
+              line.conversionWarning ? {
+                conversionWarning: true,
+                storedConversionFactor: line.storedConversionFactor,
+                convertedRequestedQuantity: line.convertedRequestedQuantity
+              } : null
+            )
+            const preview = buildRequisitionConversionPreview(
+              line.requestedQuantity,
+              requestedUnit,
+              item?.base_unit,
+              availability.conversionFactor
+            )
             return (
               <div className="requisition-item-row" key={line.itemId}>
-                <strong>{item?.name || "Producto"}<small>{item?.base_unit || ""}</small></strong>
+                <strong>{item?.name || "Producto"}<small>Inventario: {item?.base_unit || ""}</small></strong>
                 <span>
                   Actual: {formatNumber(availability.available)} {item?.base_unit} · Minimo: {formatNumber(availability.minimum)} {item?.base_unit}
                   <AvailabilityBadge status={availability.status} />
                   {availability.shortage > 0 && (
                     <small className="requisition-stock-warning">⚠ Stock insuficiente. Solicitado: {formatNumber(availability.requestedBase)} {item?.base_unit}. Disponible: {formatNumber(availability.available)}. Faltante: {formatNumber(availability.shortage)}.</small>
                   )}
-                  {availability.conversionWarning && <small className="requisition-stock-warning">No hay conversion configurada; se guardara la cantidad solicitada como referencia operativa.</small>}
                 </span>
                 <input type="number" min="0.001" step="any" value={line.requestedQuantity} onChange={(event) => updateItem(line.itemId, { requestedQuantity: event.target.value })} />
                 <select value={requestedUnit} onChange={(event) => updateItem(line.itemId, { requestedUnit: event.target.value })}>
                   {unitOptions.map((unit) => <option key={unit} value={unit}>{unitLabel(unit)}</option>)}
                 </select>
+                <div className="requisition-conversion-preview">
+                  {line.conversionWarning && (
+                    <span className="requisition-conversion-badge">Conversión no configurada al crear esta requisición</span>
+                  )}
+                  {availability.conversionError ? (
+                    <small className="requisition-stock-warning">{availability.conversionError}</small>
+                  ) : preview ? (
+                    <>
+                      <strong>{preview.expression}</strong>
+                      <small>{preview.deduction}</small>
+                    </>
+                  ) : (
+                    <small className="requisitions-muted">Ingresa cantidad y unidad.</small>
+                  )}
+                </div>
                 <input value={line.notes} onChange={(event) => updateItem(line.itemId, { notes: event.target.value })} placeholder="Opcional" />
                 <button type="button" className="danger" onClick={() => setForm({ ...form, items: form.items.filter((itemLine) => itemLine.itemId !== line.itemId) })}>Quitar</button>
               </div>
             )
           })}
           {!form.items.length && <p className="requisitions-empty">Agrega al menos un producto inventariable.</p>}
+          {form.items.length > 0 && (
+            <p className="requisitions-muted requisition-conversion-note">El sistema convertirá automáticamente a la unidad de inventario para descontar stock.</p>
+          )}
         </div>
         <div className="requisitions-modal-actions">
           {(formError || formNotice) && (
@@ -910,10 +980,10 @@ function RequestForm({
             </div>
           )}
           <button type="button" onClick={onClose} disabled={saving}>Cancelar</button>
-          <button type="button" disabled={saving} onClick={() => submitForm(false)}>
+          <button type="button" disabled={saving || hasInvalidRequisitionConversions(form.items, inventory, unitConversions)} onClick={() => submitForm(false)}>
             {saving ? "Guardando..." : "Guardar borrador"}
           </button>
-          <button type="button" className="primary" disabled={saving} onClick={() => submitForm(true)}>
+          <button type="button" className="primary" disabled={saving || hasInvalidRequisitionConversions(form.items, inventory, unitConversions)} onClick={() => submitForm(true)}>
             {saving ? "Enviando..." : "Enviar requisición"}
           </button>
         </div>
@@ -975,11 +1045,26 @@ function RequestDetail({ request, areas, inventory, unitConversions, onClose }) 
               || shownQty
               || 0
             )
+            const convertedBase = Number(line.converted_requested_quantity || 0)
+            const showConversionHint = convertedBase > 0
+              && requestedUnit
+              && item?.base_unit
+              && !unitsMatch(requestedUnit, item.base_unit)
             return (
               <div className={pendingQty > 0 ? "insufficient" : ""} key={line.id}>
-                <strong>{line.item_name}</strong>
+                <strong>
+                  {line.item_name}
+                  {line.conversion_warning && (
+                    <span className="requisition-conversion-badge">Conversión no configurada al crear esta requisición</span>
+                  )}
+                </strong>
                 <span>{formatNumber(requestedQty)} {requestedUnit}</span>
-                <span>{shownQty != null ? `${formatNumber(shownQty)} ${requestedUnit}` : "-"}</span>
+                <span>
+                  {shownQty != null ? `${formatNumber(shownQty)} ${requestedUnit}` : "-"}
+                  {showConversionHint && (
+                    <small className="requisitions-muted">≈ {formatNumber(convertedBase)} {item.base_unit} en inventario</small>
+                  )}
+                </span>
                 <span>{formatNumber(pendingQty)} {requestedUnit}</span>
                 <span><FulfillmentStatusBadge status={lineStatus} /></span>
                 <span>{formatShortageReason(line.shortage_reason, line.shortage_notes)}</span>
@@ -1237,7 +1322,21 @@ function QuantityLinesEditor({ items, quantityField, onUpdateLine }) {
         return (
           <div className="approval-line" key={item.id}>
             <div className="approval-line__header">
-              <span>{item.item_name}<small>Solicitado: {formatNumber(requestedQty)} {item.unit}</small></span>
+              <span>
+                {item.item_name}
+                <small>Solicitado: {formatNumber(requestedQty)} {item.unit || item.requested_unit}</small>
+                {item.conversion_warning && (
+                  <span className="requisition-conversion-badge">Conversión no configurada al crear esta requisición</span>
+                )}
+                {Number(item.conversion_factor) > 0 && Number(item.converted_requested_quantity) > 0 && (
+                  <small className="requisitions-muted">
+                    Solicitud original: {formatNumber(item.converted_requested_quantity)} u. inventario
+                    {Number.isFinite(quantityNumber) && quantityNumber !== requestedQty && (
+                      <> · Aprobar {formatNumber(quantityNumber)} {item.unit} ≈ {formatNumber(quantityNumber * Number(item.conversion_factor))} u. inventario</>
+                    )}
+                  </small>
+                )}
+              </span>
               <FulfillmentStatusBadge status={lineStatus} />
             </div>
             <label>
@@ -1450,49 +1549,35 @@ function minimumOf(item, areaId) {
 }
 
 function normalizeUnit(unit) {
-  const value = String(unit || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-  if (["unidad", "unidades", "u"].includes(value)) return "unidad"
-  if (["libra", "libras", "lb", "lbs"].includes(value)) return "libra"
-  if (["onza", "onzas", "oz"].includes(value)) return "onza"
-  if (["kilogramo", "kilogramos", "kg"].includes(value)) return "kilogramo"
-  if (["gramo", "gramos", "g"].includes(value)) return "gramo"
-  return value
+  return normalizeInventoryUnit(unit)
 }
 
 function unitLabel(unit) {
   return UNIT_LABELS[normalizeUnit(unit)] || unit || "Unidad"
 }
 
-function getUnitOptions(item, conversions) {
-  if (!item?.base_unit) return ["unidad"]
-  const baseUnit = normalizeUnit(item.base_unit)
-  const options = new Set([item.base_unit])
-  conversions.forEach((conversion) => {
-    const fromUnit = normalizeUnit(conversion.from_unit)
-    const toUnit = normalizeUnit(conversion.to_unit)
-    if (fromUnit === baseUnit) options.add(conversion.to_unit)
-    if (toUnit === baseUnit) options.add(conversion.from_unit)
-  })
-  return Array.from(options)
-}
-
-function findConversionFactor(fromUnit, toUnit, conversions) {
-  const fromKey = normalizeUnit(fromUnit)
-  const toKey = normalizeUnit(toUnit)
-  if (!fromKey || !toKey || fromKey === toKey) return { factor: 1, warning: false }
-  const direct = conversions.find((conversion) => normalizeUnit(conversion.from_unit) === fromKey && normalizeUnit(conversion.to_unit) === toKey)
-  if (direct) return { factor: Number(direct.factor || 1), warning: false }
-  const reverse = conversions.find((conversion) => normalizeUnit(conversion.from_unit) === toKey && normalizeUnit(conversion.to_unit) === fromKey)
-  if (reverse && Number(reverse.factor) > 0) return { factor: 1 / Number(reverse.factor), warning: false }
-  return { factor: 1, warning: true }
-}
-
-function calculateAvailability(item, areaId, requestedQuantity, requestedUnit, conversions) {
+function calculateAvailability(item, areaId, requestedQuantity, requestedUnit, conversions, historical = null) {
   const available = stockOf(item, areaId)
   const minimum = minimumOf(item, areaId)
   const quantity = Number(requestedQuantity || 0)
-  const conversion = findConversionFactor(requestedUnit || item?.base_unit, item?.base_unit, conversions)
-  const requestedBase = quantity * conversion.factor
+  const unit = requestedUnit || getDefaultRequisitionUnit(item) || item?.base_unit || ""
+  if (historical?.conversionWarning && historical?.storedConversionFactor != null) {
+    const factor = Number(historical.storedConversionFactor)
+    const requestedBase = Number.isFinite(factor) ? quantity * factor : Number(historical.convertedRequestedQuantity || 0)
+    const shortage = Math.max(0, requestedBase - available)
+    const status = available <= 0 ? "Sin stock" : shortage > 0 ? "Parcial" : "Disponible"
+    return {
+      available,
+      minimum,
+      requestedBase,
+      shortage,
+      status,
+      conversionFactor: factor,
+      conversionError: ""
+    }
+  }
+  const { factor, error } = resolveItemRequisitionUnitFactor(item, unit, conversions)
+  const requestedBase = factor != null ? quantity * factor : 0
   const shortage = Math.max(0, requestedBase - available)
   const status = available <= 0 ? "Sin stock" : shortage > 0 ? "Parcial" : "Disponible"
   return {
@@ -1501,15 +1586,40 @@ function calculateAvailability(item, areaId, requestedQuantity, requestedUnit, c
     requestedBase,
     shortage,
     status,
-    conversionFactor: conversion.factor,
-    conversionWarning: conversion.warning
+    conversionFactor: factor,
+    conversionError: error || (factor == null ? "Unidad no convertible." : "")
   }
+}
+
+function validateRequisitionConversions(items, inventory, conversions) {
+  for (const line of items) {
+    if (line.conversionWarning || line.conversion_warning) continue
+    const item = inventory.find((entry) => entry.id === (line.itemId || line.item_id))
+    const unit = line.requestedUnit || line.requested_unit || getDefaultRequisitionUnit(item)
+    const { factor, error } = resolveItemRequisitionUnitFactor(item, unit, conversions)
+    if (factor == null) return error || `La unidad no está configurada para ${item?.name || "un producto"}.`
+  }
+  return ""
+}
+
+function draftHasBlockingConversionIssues(request, inventory, conversions) {
+  return request.items.some((line) => {
+    if (line.conversion_warning) return false
+    const item = inventory.find((entry) => entry.id === line.item_id)
+    const unit = line.requested_unit || line.unit || getDefaultRequisitionUnit(item)
+    const { factor } = resolveItemRequisitionUnitFactor(item, unit, conversions)
+    return factor == null
+  })
+}
+
+function hasInvalidRequisitionConversions(items, inventory, conversions) {
+  return Boolean(validateRequisitionConversions(items, inventory, conversions))
 }
 
 function enrichRequestItems(items, inventory, fromAreaId, conversions) {
   return items.map((line) => {
     const item = inventory.find((entry) => entry.id === line.itemId || entry.id === line.item_id)
-    const requestedUnit = line.requestedUnit || line.requested_unit || item?.base_unit || line.unit
+    const requestedUnit = line.requestedUnit || line.requested_unit || getDefaultRequisitionUnit(item) || line.unit
     const availability = calculateAvailability(item, fromAreaId, line.requestedQuantity ?? line.requested_quantity, requestedUnit, conversions)
     return {
       ...line,
@@ -1519,7 +1629,7 @@ function enrichRequestItems(items, inventory, fromAreaId, conversions) {
       availabilityStatus: availability.status,
       stockAvailableAtRequest: availability.available,
       stockMinimumAtRequest: availability.minimum,
-      conversionWarning: availability.conversionWarning
+      conversionWarning: Boolean(availability.conversionError)
     }
   })
 }
@@ -1655,6 +1765,9 @@ function requisitionError(error) {
     return "Solo Administración o Gerencia General pueden crear pruebas de flujo."
   }
   if (lower.includes("permiso")) return message
+  if (lower.includes("no esta configurada para el producto") || lower.includes("no está configurada para el producto")) {
+    return message
+  }
   if (lower.includes("area de requisicion asignada")) {
     return "Tu usuario no tiene un área asignada para solicitar inventario. Contacta a administración."
   }
