@@ -7,6 +7,7 @@ import { canCreateTestFlow, TEST_FLOW_FILTER } from "../utils/testFlowMode"
 import { useAuth } from "../context/AuthContext"
 import { supabase } from "../lib/supabase"
 import { getActiveAreas } from "../services/areasService"
+import { resolveUserProductionAreaIds } from "../services/productionAreasService"
 import { getActiveInventoryItems, getInventoryItemByBarcode } from "../services/inventoryService"
 import { inventoryItemMatchesBarcode } from "../utils/barcodeUtils"
 import BarcodeScannerInput from "../components/inventory/BarcodeScannerInput"
@@ -96,6 +97,19 @@ const UNIT_LABELS = {
   oz: "Onza"
 }
 
+const AREA_DISPLAY_ICONS = {
+  almacen: "📦",
+  cafeteria: "☕",
+  cocina: "🍕",
+  pizzeria: "🍕",
+  barra: "🍸",
+  mesas: "🍽️",
+  caja: "💵",
+  limpieza: "🧹",
+  panaderia: "🥖",
+  reposteria: "🍰"
+}
+
 const REQUESTER_ROLES = new Set([
   "admin",
   "administrador",
@@ -143,12 +157,29 @@ function RequisitionsSupabase({
   const [testFlowFilter, setTestFlowFilter] = useState(initialTestFlowFilter || TEST_FLOW_FILTER.REAL)
   const [createTestMode, setCreateTestMode] = useState(false)
   const [focusedRequisitionId, setFocusedRequisitionId] = useState(initialFocus ? initialRequisitionId : "")
+  const [userProductionAreaIds, setUserProductionAreaIds] = useState([])
   const deepLinkHandledRef = useRef(false)
 
   const manager = ["admin", "gerente_general"].includes(user?.role)
   const isWarehouseManager = user?.role === "encargado_almacen"
-  const canApprove = manager || isWarehouseManager
-  const canComplete = manager || isWarehouseManager
+  const isElevated = manager || isWarehouseManager
+  const canApprove = isElevated
+  const canComplete = isElevated
+  const warehouseArea = useMemo(() => findWarehouseArea(areas), [areas])
+  const operationalAreaIds = useMemo(
+    () => buildOperationalAreaIds(areas, user, userProductionAreaIds),
+    [areas, user, userProductionAreaIds]
+  )
+  const inventoryDestinationAreas = useMemo(
+    () => areas.filter((area) => area.canRequestInventory !== false && area.id !== warehouseArea?.id),
+    [areas, warehouseArea]
+  )
+  const allowedDestinationAreas = isElevated
+    ? inventoryDestinationAreas
+    : areas.filter((area) => operationalAreaIds.includes(area.id))
+  const canCreate = isElevated || (operationalAreaIds.length > 0 && Boolean(warehouseArea))
+  const missingRequisitionArea = !isElevated && operationalAreaIds.length === 0
+  const missingWarehouseArea = !isElevated && operationalAreaIds.length > 0 && !warehouseArea
 
   async function notifyRequisitionPending(requisition) {
     if (!requisition || requisition.status !== "pending") return
@@ -185,15 +216,8 @@ function RequisitionsSupabase({
 
   const canCreateTest = canCreateTestFlow(user)
   const canUseStockOverrideToggle = STOCK_OVERRIDE_ROLES.has(user?.role)
-  const ownResponsibleAreas = areas.filter((area) => area.responsibleUserId === user?.id)
-  const canCreate = manager
-    || isWarehouseManager
-    || (user?.role === "supervisor" && Boolean(user?.areaId))
-    || ownResponsibleAreas.length > 0
-  const allowedDestinationAreas = manager || isWarehouseManager
-    ? areas
-    : areas.filter((area) => area.id === user?.areaId || area.responsibleUserId === user?.id)
   const hasLegacy = readLegacyRequests().length > 0
+  const userAreaIdSet = useMemo(() => new Set(operationalAreaIds), [operationalAreaIds])
 
   const loadData = useCallback(async (options = {}) => {
     const activeTestFilter = options.testFlowFilter ?? testFlowFilter
@@ -205,6 +229,7 @@ function RequisitionsSupabase({
       getAuthorizedRequesters(),
       getInventoryUnitConversions()
     ])
+    const productionAreaIds = await resolveUserProductionAreaIds(user)
     const loadError = requestsResult.error || areasResult.error || inventoryResult.error || requestersResult.error
     if (loadError) setError(`No se pudieron cargar requisiciones: ${loadError.message}`)
     else {
@@ -213,10 +238,11 @@ function RequisitionsSupabase({
       setInventory(inventoryResult.data)
       setRequesters(requestersResult.data)
       setUnitConversions(conversionsResult.error ? [] : conversionsResult.data)
+      setUserProductionAreaIds(productionAreaIds)
       setError("")
     }
     setLoading(false)
-  }, [testFlowFilter])
+  }, [testFlowFilter, user])
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -226,6 +252,9 @@ function RequisitionsSupabase({
   }, [loadData])
 
   const visibleRequests = useMemo(() => requisitions.filter((request) => {
+    if (!isElevated && !userAreaIdSet.has(request.to_area_id) && !userAreaIdSet.has(request.from_area_id)) {
+      return false
+    }
     if (tab !== "all" && request.status !== tab) return false
     if (filters.date && !String(request.created_at || "").startsWith(filters.date)) return false
     if (filters.fromAreaId && request.from_area_id !== filters.fromAreaId) return false
@@ -234,16 +263,24 @@ function RequisitionsSupabase({
     const term = filters.search.trim().toLowerCase()
     return !term || [request.requisition_number, request.requestedByName, areaName(areas, request.to_area_id)]
       .some((value) => String(value || "").toLowerCase().includes(term))
-  }), [areas, filters, requisitions, tab])
+  }), [areas, filters, isElevated, requisitions, tab, userAreaIdSet])
   const pagedRequests = pageItems(visibleRequests, page)
 
   function openNew() {
+    if (missingWarehouseArea) {
+      setError("No existe un área de Almacén activa. Contacta a administración.")
+      return
+    }
     setFormRequest({
       id: "",
-      fromAreaId: areas.find((area) => area.id === "almacen")?.id || areas[0]?.id || "",
-      toAreaId: allowedDestinationAreas.find((area) => area.id !== "almacen")?.id || "",
+      fromAreaId: isElevated
+        ? (warehouseArea?.id || areas[0]?.id || "")
+        : (warehouseArea?.id || ""),
+      toAreaId: isElevated
+        ? (allowedDestinationAreas[0]?.id || "")
+        : (operationalAreaIds.length === 1 ? operationalAreaIds[0] : ""),
       priority: "normal",
-      requestedByProfileId: defaultRequesterId(requesters, user),
+      requestedByProfileId: isElevated ? defaultRequesterId(requesters, user) : (user?.id || ""),
       notes: "",
       allowOverStock: true,
       isTest: createTestMode,
@@ -411,6 +448,16 @@ function RequisitionsSupabase({
         </div>
       </header>
 
+      {missingRequisitionArea && (
+        <div className="requisitions-warning">
+          Tu usuario no tiene un área asignada para solicitar inventario. Contacta a administración.
+        </div>
+      )}
+      {missingWarehouseArea && (
+        <div className="requisitions-warning">
+          No existe un área de Almacén activa. No se pueden crear requisiciones operativas hasta que administración la configure.
+        </div>
+      )}
       {hasLegacy && <div className="requisitions-warning">Existen requisiciones locales antiguas. Deben migrarse a Supabase.</div>}
       {message && <div className="requisitions-success">{message}</div>}
       {error && <div className="requisitions-error">{error}</div>}
@@ -504,11 +551,15 @@ function RequisitionsSupabase({
         <RequestForm
           request={formRequest}
           areas={areas}
+          originAreas={isElevated ? areas : (warehouseArea ? [warehouseArea] : [])}
           destinationAreas={allowedDestinationAreas}
           inventory={inventory}
           requesters={requesters}
           unitConversions={unitConversions}
           currentUser={user}
+          isElevated={isElevated}
+          warehouseArea={warehouseArea}
+          operationalAreaIds={operationalAreaIds}
           canUseStockOverrideToggle={canUseStockOverrideToggle}
           saving={Boolean(workingId)}
           onClose={() => setFormRequest(null)}
@@ -569,7 +620,23 @@ function RequisitionsSupabase({
   )
 }
 
-function RequestForm({ request, areas, destinationAreas, inventory, requesters, unitConversions, currentUser, canUseStockOverrideToggle, saving, onClose, onSave }) {
+function RequestForm({
+  request,
+  areas,
+  originAreas,
+  destinationAreas,
+  inventory,
+  requesters,
+  unitConversions,
+  currentUser,
+  isElevated,
+  warehouseArea,
+  operationalAreaIds,
+  canUseStockOverrideToggle,
+  saving,
+  onClose,
+  onSave
+}) {
   const [form, setForm] = useState(request)
   const [selectedItemId, setSelectedItemId] = useState("")
   const [productQuery, setProductQuery] = useState("")
@@ -580,6 +647,32 @@ function RequestForm({ request, areas, destinationAreas, inventory, requesters, 
   const [barcodeScanFeedback, setBarcodeScanFeedback] = useState("")
   const pickerRef = useRef(null)
   const selectedItem = inventory.find((item) => item.id === selectedItemId)
+  const fromArea = areas.find((area) => area.id === form.fromAreaId) || warehouseArea
+  const toArea = areas.find((area) => area.id === form.toAreaId)
+  const requesterProfile = requesters.find((profile) => String(profile.id) === String(form.requestedByProfileId))
+    || (currentUser?.id ? {
+      id: currentUser.id,
+      full_name: currentUser.fullName || currentUser.name,
+      username: currentUser.username,
+      role: currentUser.role
+    } : null)
+  const lockOperationalFields = !isElevated
+  const operationalDestinations = destinationAreas.filter((area) => operationalAreaIds.includes(area.id))
+
+  useEffect(() => {
+    if (isElevated || !warehouseArea?.id || !currentUser?.id) return
+    setForm((prev) => {
+      const updates = {}
+      if (prev.fromAreaId !== warehouseArea.id) updates.fromAreaId = warehouseArea.id
+      if (operationalAreaIds.length === 1 && prev.toAreaId !== operationalAreaIds[0]) {
+        updates.toAreaId = operationalAreaIds[0]
+      }
+      if (String(prev.requestedByProfileId) !== String(currentUser.id)) {
+        updates.requestedByProfileId = currentUser.id
+      }
+      return Object.keys(updates).length ? { ...prev, ...updates } : prev
+    })
+  }, [isElevated, warehouseArea?.id, currentUser?.id, operationalAreaIds])
 
   useEffect(() => {
     function closeResults(event) {
@@ -692,15 +785,25 @@ function RequestForm({ request, areas, destinationAreas, inventory, requesters, 
         {form.isTest && <TestFlowWarning className="requisitions-test-warning" />}
         <div className="requisition-form-grid">
           <Field label="Origen">
-            <select value={form.fromAreaId} onChange={(event) => setForm({ ...form, fromAreaId: event.target.value })}>
-              {areas.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}
-            </select>
+            {lockOperationalFields ? (
+              <div className="requisition-field-readonly">{areaDisplayLabel(fromArea)}</div>
+            ) : (
+              <select value={form.fromAreaId} onChange={(event) => setForm({ ...form, fromAreaId: event.target.value })}>
+                {originAreas.map((area) => <option key={area.id} value={area.id}>{areaDisplayLabel(area)}</option>)}
+              </select>
+            )}
           </Field>
           <Field label="Destino">
-            <select value={form.toAreaId} onChange={(event) => setForm({ ...form, toAreaId: event.target.value })}>
-              <option value="">Selecciona destino</option>
-              {destinationAreas.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}
-            </select>
+            {lockOperationalFields && operationalDestinations.length <= 1 ? (
+              <div className="requisition-field-readonly">{areaDisplayLabel(toArea || operationalDestinations[0])}</div>
+            ) : (
+              <select value={form.toAreaId} onChange={(event) => setForm({ ...form, toAreaId: event.target.value })}>
+                <option value="">Selecciona destino</option>
+                {(lockOperationalFields ? operationalDestinations : destinationAreas).map((area) => (
+                  <option key={area.id} value={area.id}>{areaDisplayLabel(area)}</option>
+                ))}
+              </select>
+            )}
           </Field>
           <Field label="Prioridad">
             <select value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value })}>
@@ -708,10 +811,14 @@ function RequestForm({ request, areas, destinationAreas, inventory, requesters, 
             </select>
           </Field>
           <Field label="Solicitado por">
-            <select required value={form.requestedByProfileId || ""} onChange={(event) => setForm({ ...form, requestedByProfileId: event.target.value })}>
-              <option value="">Selecciona solicitante</option>
-              {requesters.map((profile) => <option key={profile.id} value={profile.id}>{profileLabel(profile)}</option>)}
-            </select>
+            {lockOperationalFields ? (
+              <div className="requisition-field-readonly">{profileLabel(requesterProfile)}</div>
+            ) : (
+              <select required value={form.requestedByProfileId || ""} onChange={(event) => setForm({ ...form, requestedByProfileId: event.target.value })}>
+                <option value="">Selecciona solicitante</option>
+                {requesters.map((profile) => <option key={profile.id} value={profile.id}>{profileLabel(profile)}</option>)}
+              </select>
+            )}
           </Field>
           <Field label="Notas">
             <input value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} placeholder="Motivo o instrucciones" />
@@ -1482,6 +1589,39 @@ function defaultRequesterId(requesters, user) {
   return requesters.find((profile) => String(profile.id) === String(user?.id))?.id || requesters[0]?.id || ""
 }
 
+function normalizeAreaName(value) {
+  return String(value || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+}
+
+function findWarehouseArea(areas) {
+  return areas.find((area) => area.id === "almacen")
+    || areas.find((area) => normalizeAreaName(area.name) === "almacen")
+    || areas.find((area) => area.type === "principal" && area.canRequestInventory === false)
+    || null
+}
+
+function buildOperationalAreaIds(areas, user, productionAreaIds = []) {
+  const ids = new Set()
+  productionAreaIds.forEach((areaId) => {
+    const area = areas.find((item) => item.id === areaId)
+    if (area?.canRequestInventory !== false) ids.add(areaId)
+  })
+  if (user?.areaId) {
+    const area = areas.find((item) => item.id === user.areaId)
+    if (area?.canRequestInventory !== false) ids.add(user.areaId)
+  }
+  areas
+    .filter((area) => area.responsibleUserId === user?.id && area.canRequestInventory !== false)
+    .forEach((area) => ids.add(area.id))
+  return [...ids]
+}
+
+function areaDisplayLabel(area) {
+  if (!area) return "—"
+  const icon = AREA_DISPLAY_ICONS[area.id] || ""
+  return `${icon ? `${icon} ` : ""}${area.name}`
+}
+
 function normalizeRole(value) {
   return String(value || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
 }
@@ -1515,6 +1655,13 @@ function requisitionError(error) {
     return "Solo Administración o Gerencia General pueden crear pruebas de flujo."
   }
   if (lower.includes("permiso")) return message
+  if (lower.includes("area de requisicion asignada")) {
+    return "Tu usuario no tiene un área asignada para solicitar inventario. Contacta a administración."
+  }
+  if (lower.includes("area de almacen activa")) {
+    return "No existe un área de Almacén activa. Contacta a administración."
+  }
+  if (lower.includes("nombre de otro usuario")) return message
   if (lower.includes("jwt") || lower.includes("not authenticated")) return "Tu sesión expiró. Vuelve a iniciar sesión."
   return message
 }

@@ -216,6 +216,18 @@
   font-size: 13px;
   font-weight: 700;
 }
+.requisition-field-readonly {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #334155;
+  background: #0f172a;
+  color: #f8fafc;
+  font-size: 14px;
+  font-weight: 600;
+}
 .requisition-picker {
   display: grid;
   grid-template-columns: 2fr 1fr auto;
