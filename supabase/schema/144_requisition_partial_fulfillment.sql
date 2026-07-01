@@ -212,7 +212,7 @@ declare
   item_row public.requisition_items;
   approved_qty numeric;
   pending_qty numeric;
-  shortage_reason text;
+  v_shortage_reason text;
 begin
   if not (public.is_profile_manager() or public.is_inventory_manager()) then
     raise exception 'No tienes permiso para aprobar requisiciones.';
@@ -248,9 +248,9 @@ begin
         item_row.requested_quantity;
     end if;
 
-    shortage_reason := nullif(trim(row_data ->> 'shortage_reason'), '');
+    v_shortage_reason := nullif(trim(row_data ->> 'shortage_reason'), '');
     if public.requisition_shortage_reason_required(item_row.requested_quantity, approved_qty)
-       and shortage_reason is null then
+       and v_shortage_reason is null then
       raise exception
         'Debes indicar el motivo del faltante para %.',
         item_row.item_name;
@@ -258,18 +258,18 @@ begin
 
     pending_qty := greatest(item_row.requested_quantity - approved_qty, 0);
 
-    update public.requisition_items
+    update public.requisition_items ri
     set
       approved_quantity = approved_qty,
-      converted_approved_quantity = approved_qty * coalesce(conversion_factor, 1),
+      converted_approved_quantity = approved_qty * coalesce(ri.conversion_factor, 1),
       pending_quantity = pending_qty,
       shortage_reason = case
-        when public.requisition_shortage_reason_required(requested_quantity, approved_qty)
-          then shortage_reason
+        when public.requisition_shortage_reason_required(ri.requested_quantity, approved_qty)
+          then v_shortage_reason
         else null
       end,
       shortage_notes = nullif(trim(row_data ->> 'shortage_notes'), '')
-    where id = item_row.id;
+    where ri.id = item_row.id;
   end loop;
 
   update public.requisition_items
