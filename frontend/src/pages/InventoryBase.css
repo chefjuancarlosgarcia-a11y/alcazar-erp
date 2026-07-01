@@ -698,6 +698,67 @@
   margin-right: auto;
 }
 
+.inventory-unit-change-warning p {
+  margin: 0;
+  color: #cbd5e1;
+  line-height: 1.5;
+}
+
+.inventory-unit-change-warning > ul {
+  margin: 0;
+  padding-left: 1.25rem;
+  color: #94a3b8;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.inventory-unit-change-warning__list {
+  border: 1px solid #334155;
+  border-radius: var(--erp-radius-card);
+  background: rgba(15, 23, 42, 0.72);
+  padding: var(--erp-space-12);
+  display: grid;
+  gap: var(--erp-space-8);
+}
+
+.inventory-unit-change-warning__list > ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--erp-space-8);
+  max-height: 180px;
+  overflow: auto;
+}
+
+.inventory-unit-change-warning__list li {
+  display: grid;
+  gap: 0.15rem;
+  padding-bottom: var(--erp-space-8);
+  border-bottom: 1px solid #1e293b;
+  font-size: 0.92rem;
+}
+
+.inventory-unit-change-warning__list li:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.inventory-unit-change-warning__list li span:first-child {
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.inventory-unit-change-warning__list li span:nth-child(2) {
+  color: #fdba74;
+  font-size: 0.85rem;
+}
+
+.inventory-unit-change-warning__list li span:nth-child(3) {
+  color: #94a3b8;
+  font-size: 0.85rem;
+}
+
 .inventory-recipe-conversion {
   border: 1px solid #334155;
   border-radius: var(--erp-radius-card);
