@@ -173,8 +173,11 @@ export function buildAttendanceExportRows(details = [], summaries = [], shiftTyp
     const weekStart = getMonday(detail.shift_date)
     const payroll = payrollByKey.get(`${detail.employee_id}:${weekStart}`) || {}
     const scheduledHours = Number(detail.scheduled_hours || 0)
-    const actualHours = Number(detail.actual_hours || 0)
-    const regularHours = Math.min(actualHours, scheduledHours)
+    const regularActualHours = Number(detail.actual_hours || 0)
+    const pendingExtraHours = Number(detail.pending_extra_hours || 0)
+    const approvedExtraHours = Number(detail.approved_extra_hours || 0)
+    const actualHours = regularActualHours + pendingExtraHours + approvedExtraHours
+    const regularHours = Math.min(regularActualHours || actualHours, scheduledHours)
     const weekActualHours = Number(payroll.actual_hours || 0)
     const estimatedPay = Number(payroll.estimated_pay || 0)
     const dailyPay = weekActualHours > 0 ? (actualHours / weekActualHours) * estimatedPay : 0
@@ -196,7 +199,7 @@ export function buildAttendanceExportRows(details = [], summaries = [], shiftTyp
       horas_programadas: scheduledHours,
       horas_trabajadas: actualHours,
       horas_ordinarias: Number(regularHours.toFixed(2)),
-      horas_extra: Number(detail.overtime_hours || 0),
+      horas_extra: Number((Number(detail.overtime_hours || 0) + pendingExtraHours + approvedExtraHours).toFixed(2)),
       ausencias: detail.attendance_status === "falta" ? 1 : 0,
       pago: Number(dailyPay.toFixed(2)),
       estado: attendanceStatusLabel(detail.attendance_status),

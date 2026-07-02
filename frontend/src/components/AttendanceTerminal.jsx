@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { BRANDING } from "../branding"
 import {
+  getAttendanceMarkingState,
   getAttendanceMarks,
   getAttendanceSecurityStatus,
   getAttendanceTerminalProfiles,
@@ -34,6 +35,8 @@ const MARK_LABELS = {
 
 const MIN_PHOTO_BYTES = 4096
 const MARKING_STATE_REFRESH_MS = 60000
+const ATTENDANCE_TERMINAL_DEBUG = import.meta.env.DEV
+  || (typeof window !== "undefined" && window.localStorage?.getItem("ATTENDANCE_TERMINAL_DEBUG") === "1")
 
 function AttendanceTerminal({ kiosk = false }) {
   const videoRef = useRef(null)
@@ -61,6 +64,8 @@ function AttendanceTerminal({ kiosk = false }) {
   const [capturedBlob, setCapturedBlob] = useState(null)
   const [previewUrl, setPreviewUrl] = useState("")
   const [scheduleValidation, setScheduleValidation] = useState(null)
+  const [markingStatesByType, setMarkingStatesByType] = useState({})
+  const [markingStatesLoading, setMarkingStatesLoading] = useState(false)
 
   const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : ""
   const suggestedDeviceName = resolveAttendanceDeviceName(userAgent)
@@ -89,17 +94,142 @@ function AttendanceTerminal({ kiosk = false }) {
     marks.filter((mark) => String(mark.employee_id) === String(selected?.id))
   ), [marks, selected])
 
-  const lastShiftMark = selectedMarks.find((mark) => ["entrada", "salida", "salida_final"].includes(mark.mark_type))
-  const isCheckedIn = lastShiftMark?.mark_type === "entrada"
-  const activeMeal = selectedMarks.find((mark) => ["salida_comida", "bano_inicio"].includes(mark.mark_type) && !selectedMarks.some((candidate) => candidate.related_mark_id === mark.id && ["regreso_comida", "bano_regreso"].includes(candidate.mark_type)))
-  const canMarkEntrada = !isCheckedIn && scheduleValidation?.allowed_for_entrada !== false
-  const canCompleteShift = isCheckedIn || scheduleValidation?.allowed_for_completion === true
+  const markingEntrada = markingStatesByType.entrada
+  const markingSalidaComida = markingStatesByType.salida_comida
+  const markingRegresoComida = markingStatesByType.regreso_comida
+  const markingSalidaFinal = markingStatesByType.salida_final
+  const shiftDisplayState = markingSalidaComida || markingEntrada || {}
+
+  const hasOpenEntry = shiftDisplayState?.has_open_entry === true
+  const hasOpenMeal = shiftDisplayState?.has_open_meal === true
+
+  const canMarkEntrada = markingEntrada?.allowed_for_entrada !== false
+    && markingEntrada?.allowed !== false
+    && !markingEntrada?.error
+  const canMarkSalidaComida = markingSalidaComida?.allowed === true
+  const canMarkRegresoComida = markingRegresoComida?.allowed === true
+  const canMarkSalidaFinal = markingSalidaFinal?.allowed === true
+
+  const allowedActions = useMemo(() => ({
+    entrada: {
+      allowed: canMarkEntrada && !markingStatesLoading,
+      disabledReasons: [
+        saving ? "saving" : null,
+        markingStatesLoading ? "markingStatesLoading" : null,
+        !canMarkEntrada ? "backend:allowed_for_entrada=false" : null
+      ].filter(Boolean)
+    },
+    salida_comida: {
+      allowed: canMarkSalidaComida && !markingStatesLoading,
+      disabledReasons: [
+        saving ? "saving" : null,
+        markingStatesLoading ? "markingStatesLoading" : null,
+        !canMarkSalidaComida ? "backend:allowed!=true" : null
+      ].filter(Boolean)
+    },
+    regreso_comida: {
+      allowed: canMarkRegresoComida && !markingStatesLoading,
+      disabledReasons: [
+        saving ? "saving" : null,
+        markingStatesLoading ? "markingStatesLoading" : null,
+        !canMarkRegresoComida ? "backend:allowed!=true" : null
+      ].filter(Boolean)
+    },
+    salida_final: {
+      allowed: canMarkSalidaFinal && !markingStatesLoading,
+      disabledReasons: [
+        saving ? "saving" : null,
+        markingStatesLoading ? "markingStatesLoading" : null,
+        !canMarkSalidaFinal ? "backend:allowed!=true" : null
+      ].filter(Boolean)
+    }
+  }), [
+    canMarkEntrada,
+    canMarkRegresoComida,
+    canMarkSalidaComida,
+    canMarkSalidaFinal,
+    markingStatesLoading,
+    saving
+  ])
+
+  const currentOpenShift = useMemo(() => {
+    if (!hasOpenEntry) return null
+    return {
+      open_entry_marked_at: markingEntrada?.open_entry_marked_at || null,
+      open_entry_labor_date: markingEntrada?.open_entry_labor_date || markingEntrada?.labor_date || null,
+      overnight_shift: shiftDisplayState?.overnight_shift === true,
+      has_open_meal: hasOpenMeal,
+      today_authorized_overtime: markingEntrada?.today_authorized_overtime === true,
+      reason_code: markingEntrada?.reason_code || null,
+      reason: markingEntrada?.reason || null
+    }
+  }, [hasOpenEntry, hasOpenMeal, markingEntrada, shiftDisplayState?.overnight_shift])
+
+  const nextExpectedMark = useMemo(() => {
+    if (!hasOpenEntry) return "entrada"
+    if (hasOpenMeal) return "regreso_comida"
+    return "salida_comida o salida_final"
+  }, [hasOpenEntry, hasOpenMeal])
+
+  async function loadMarkingStates(employeeId) {
+    if (!employeeId) return null
+    setMarkingStatesLoading(true)
+    const markTypes = ["entrada", "salida_comida", "regreso_comida", "salida_final"]
+    const results = await Promise.all(
+      markTypes.map(async (markType) => {
+        const { data, error } = await getAttendanceMarkingState(employeeId, markType)
+        return [markType, error ? { error: error.message, allowed: false } : (data || {})]
+      })
+    )
+    const byType = Object.fromEntries(results)
+    setMarkingStatesByType(byType)
+    setScheduleValidation(byType.entrada || null)
+    setMarkingStatesLoading(false)
+    return byType
+  }
+
+  useEffect(() => {
+    if (!ATTENDANCE_TERMINAL_DEBUG || !selected?.id) return
+
+    console.log({
+      backendState: markingStatesByType,
+      hasOpenEntry,
+      hasOpenMeal,
+      allowedActions,
+      currentOpenShift,
+      nextExpectedMark
+    })
+
+    console.groupCollapsed(`[ATTENDANCE_TERMINAL_DEBUG] ${selected.fullName}`)
+    console.log("selectedEmployee", {
+      id: selected.id,
+      fullName: selected.fullName,
+      areaName: selected.areaName
+    })
+    console.log("markingStateByType", markingStatesByType)
+    console.log("allowedActions", allowedActions)
+    console.log("selectedMarks", selectedMarks.map((mark) => ({
+      id: mark.id,
+      mark_type: mark.mark_type,
+      marked_at: mark.marked_at,
+      related_mark_id: mark.related_mark_id,
+      labor_date: mark.labor_date
+    })))
+    console.groupEnd()
+  }, [
+    selected,
+    markingStatesByType,
+    allowedActions,
+    currentOpenShift,
+    nextExpectedMark,
+    hasOpenEntry,
+    hasOpenMeal,
+    selectedMarks
+  ])
 
   async function refreshMarkingState(employeeId = selected?.id) {
     if (!employeeId || !canMark) return null
-    const validation = await validateEmployeeScheduleForMarking(employeeId)
-    setScheduleValidation(validation)
-    return validation
+    return loadMarkingStates(employeeId)
   }
 
   useEffect(() => {
@@ -224,28 +354,29 @@ function AttendanceTerminal({ kiosk = false }) {
     setMessage("")
     setScheduleWarning("")
     setScheduleValidation(null)
+    setMarkingStatesByType({})
     setPendingMarkType("")
     resetPhotoCapture()
-    const [validation, marksResult] = await Promise.all([
-      validateEmployeeScheduleForMarking(profile.id),
-      getAttendanceMarks(false)
-    ])
+    const marksResult = await getAttendanceMarks(false)
     if (!marksResult.error) setMarks(marksResult.data || [])
-    setScheduleValidation(validation)
+    const byType = await loadMarkingStates(profile.id)
+    const validation = byType?.entrada || null
     if (validation?.reason_code === "open_entry") {
-      setError(validation?.reason || "Ya existe una entrada activa para este colaborador.")
-      return
+      setScheduleWarning(validation?.reason || "Turno abierto pendiente de cierre.")
+      setError("")
+    } else {
+      const preview = getSchedulePreviewMessage(validation)
+      if (preview) setScheduleWarning(preview)
     }
-    const preview = getSchedulePreviewMessage(validation)
-    if (preview) setScheduleWarning(preview)
   }
 
   async function ensureScheduleAllowed(markType = pendingMarkType) {
     if (!selected?.id) return false
     const validation = await validateEmployeeScheduleForMarking(selected.id, markType || null)
-    setScheduleValidation(validation)
+    await loadMarkingStates(selected.id)
     if (markType === "entrada" && validation?.reason_code === "open_entry") {
-      setError(validation?.reason || "Ya existe una entrada activa para este colaborador.")
+      setScheduleWarning(validation?.reason || "Turno abierto pendiente de cierre.")
+      setError("Registra salida final del turno abierto antes de marcar una nueva entrada.")
       return false
     }
     setError("")
@@ -354,6 +485,7 @@ function AttendanceTerminal({ kiosk = false }) {
     setMessage("")
     setScheduleWarning("")
     setScheduleValidation(null)
+    setMarkingStatesByType({})
   }
 
   function renderSecurityGate() {
@@ -432,13 +564,15 @@ function AttendanceTerminal({ kiosk = false }) {
                 <h2>{selected.fullName}</h2>
                 <p>
                   {selected.areaName || "Sin area"} ·{" "}
-                  {isCheckedIn
-                    ? activeMeal
-                      ? "En comida"
-                      : scheduleValidation?.overnight_shift
-                        ? "Entrada activa (turno anterior)"
-                        : "Entrada activa"
-                    : "Fuera de turno"}
+                  {markingStatesLoading
+                    ? "Consultando estado..."
+                    : hasOpenEntry
+                      ? hasOpenMeal
+                        ? "En comida"
+                        : shiftDisplayState?.overnight_shift
+                          ? "Entrada activa (turno anterior)"
+                          : "Entrada activa"
+                      : "Fuera de turno"}
                 </p>
               </div>
             </div>
@@ -449,23 +583,36 @@ function AttendanceTerminal({ kiosk = false }) {
             </label>
 
             <div className="attendance-actions attendance-actions-select">
-              <button type="button" className={`entry ${pendingMarkType === "entrada" ? "selected" : ""}`} disabled={saving || isCheckedIn || !canMarkEntrada} onClick={() => selectMarkType("entrada")}>Entrada</button>
-              <button type="button" className={`meal ${pendingMarkType === "salida_comida" ? "selected" : ""}`} disabled={saving || !canCompleteShift || !isCheckedIn || Boolean(activeMeal)} onClick={() => selectMarkType("salida_comida")}>Salida a comida</button>
-              <button type="button" className={`meal ${pendingMarkType === "regreso_comida" ? "selected" : ""}`} disabled={saving || !canCompleteShift || !isCheckedIn || !activeMeal} onClick={() => selectMarkType("regreso_comida")}>Regreso de comida</button>
-              <button type="button" className={`exit ${pendingMarkType === "salida_final" ? "selected" : ""}`} disabled={saving || !canCompleteShift || !isCheckedIn || Boolean(activeMeal)} onClick={() => selectMarkType("salida_final")}>Salida final</button>
+              <button type="button" className={`entry ${pendingMarkType === "entrada" ? "selected" : ""}`} disabled={saving || markingStatesLoading || !canMarkEntrada} onClick={() => selectMarkType("entrada")}>Entrada</button>
+              <button type="button" className={`meal ${pendingMarkType === "salida_comida" ? "selected" : ""}`} disabled={saving || markingStatesLoading || !canMarkSalidaComida} onClick={() => selectMarkType("salida_comida")}>Salida a comida</button>
+              <button type="button" className={`meal ${pendingMarkType === "regreso_comida" ? "selected" : ""}`} disabled={saving || markingStatesLoading || !canMarkRegresoComida} onClick={() => selectMarkType("regreso_comida")}>Regreso de comida</button>
+              <button type="button" className={`exit ${pendingMarkType === "salida_final" ? "selected" : ""}`} disabled={saving || markingStatesLoading || !canMarkSalidaFinal} onClick={() => selectMarkType("salida_final")}>Salida final</button>
             </div>
 
-            {(scheduleValidation?.allowed || scheduleValidation?.allowed_for_completion || scheduleValidation?.classification) && scheduleValidation?.schedule_status && (
+            {(shiftDisplayState?.allowed || shiftDisplayState?.allowed_for_completion || shiftDisplayState?.classification) && shiftDisplayState?.schedule_status && (
               <p className="attendance-pending-mark">
-                Horario{scheduleValidation?.labor_date ? ` (${scheduleValidation.labor_date})` : ""}:{" "}
-                <strong>{scheduleValidation.schedule_status === "draft" ? "Borrador" : "Publicado"}</strong>
-                {scheduleValidation?.overnight_shift ? " · turno cruza medianoche" : ""}
+                Horario{shiftDisplayState?.labor_date ? ` (${shiftDisplayState.labor_date})` : ""}:{" "}
+                <strong>{shiftDisplayState.schedule_status === "draft" ? "Borrador" : "Publicado"}</strong>
+                {shiftDisplayState?.overnight_shift && hasOpenEntry
+                  ? " · turno abierto de día anterior"
+                  : shiftDisplayState?.overnight_shift
+                    ? " · turno cruza medianoche"
+                    : ""}
               </p>
             )}
 
-            {scheduleValidation?.has_open_entry && !scheduleValidation?.allowed_for_entrada && (
+            {hasOpenEntry && (
+              <p className={`attendance-pending-mark${shiftDisplayState?.overnight_shift ? " attendance-open-shift-warning" : ""}`}>
+                {markingEntrada?.reason_code === "open_entry"
+                  ? markingEntrada?.reason
+                  : markingSalidaComida?.reason || "Turno abierto pendiente de cierre. Puedes registrar comida o salida final."}
+                {" "}Si no puedes cerrarlo, solicita a RRHH cerrar este turno (Marcaciones extraordinarias → Turnos abiertos).
+              </p>
+            )}
+
+            {markingEntrada?.today_authorized_overtime && !hasOpenEntry && (
               <p className="attendance-pending-mark">
-                Turno abierto pendiente de cierre. Puedes registrar comida o salida final.
+                Tiempo extraordinario autorizado para hoy. Puedes marcar entrada.
               </p>
             )}
 

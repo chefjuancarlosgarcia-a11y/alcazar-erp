@@ -172,11 +172,63 @@ function calcularMinutosEntre(inicioISO, finISO) {
   return Math.max(0, Math.round((fin - inicio) / 60000))
 }
 
+const EXIT_MARK_TYPES = ["salida", "salida_final"]
+const MEAL_OUT_TYPES = ["salida_comida", "bano_inicio"]
+const MEAL_BACK_TYPES = ["regreso_comida", "bano_regreso"]
+
+export function computeWorkedMinutesFromMarks(movimientos = []) {
+  const sorted = [...movimientos].sort(
+    (a, b) => new Date(a.fechaHoraISO || 0) - new Date(b.fechaHoraISO || 0)
+  )
+  let totalMinutos = 0
+  let entradaAbierta = null
+  let comidaInicio = null
+
+  sorted.forEach((movimiento) => {
+    if (movimiento.tipo === "entrada") {
+      entradaAbierta = movimiento
+      comidaInicio = null
+      return
+    }
+    if (MEAL_OUT_TYPES.includes(movimiento.tipo) && entradaAbierta) {
+      comidaInicio = movimiento
+      return
+    }
+    if (MEAL_BACK_TYPES.includes(movimiento.tipo) && comidaInicio) {
+      comidaInicio = null
+      return
+    }
+    if (EXIT_MARK_TYPES.includes(movimiento.tipo) && entradaAbierta) {
+      let minutosTurno = calcularMinutosEntre(entradaAbierta.fechaHoraISO, movimiento.fechaHoraISO)
+      const comidaOut = sorted.find(
+        (item) => MEAL_OUT_TYPES.includes(item.tipo)
+          && new Date(item.fechaHoraISO || 0) > new Date(entradaAbierta.fechaHoraISO || 0)
+          && new Date(item.fechaHoraISO || 0) < new Date(movimiento.fechaHoraISO || 0)
+      )
+      const comidaBack = comidaOut
+        ? sorted.find(
+          (item) => MEAL_BACK_TYPES.includes(item.tipo)
+            && new Date(item.fechaHoraISO || 0) > new Date(comidaOut.fechaHoraISO || 0)
+            && new Date(item.fechaHoraISO || 0) < new Date(movimiento.fechaHoraISO || 0)
+        )
+        : null
+      if (comidaOut && comidaBack) {
+        minutosTurno -= calcularMinutosEntre(comidaOut.fechaHoraISO, comidaBack.fechaHoraISO)
+      }
+      totalMinutos += Math.max(0, minutosTurno)
+      entradaAbierta = null
+      comidaInicio = null
+    }
+  })
+
+  return totalMinutos
+}
+
 function getUltimoMovimientoEntradaSalida(colaboradorId, asistenciaMovimientos, fechaHoy) {
   return asistenciaMovimientos
     .filter((movimiento) => movimiento.colaboradorId === colaboradorId && movimiento.fecha === fechaHoy)
     .sort((a, b) => new Date(b.fechaHoraISO || 0) - new Date(a.fechaHoraISO || 0))
-    .find((movimiento) => ["entrada", "salida"].includes(movimiento.tipo))
+    .find((movimiento) => ["entrada", ...EXIT_MARK_TYPES].includes(movimiento.tipo))
 }
 
 export function normalizeLateArrivalRow(row, index = 0) {
@@ -215,7 +267,7 @@ export function computeAttendanceReportMetrics({
   )
   const colaboradoresSinSalida = colaboradoresDentroTurno
   const entradasDelDia = movimientosReportes.filter((movimiento) => movimiento.tipo === "entrada")
-  const salidasDelDia = movimientosReportes.filter((movimiento) => movimiento.tipo === "salida")
+  const salidasDelDia = movimientosReportes.filter((movimiento) => EXIT_MARK_TYPES.includes(movimiento.tipo))
   const banosDelDia = movimientosReportes.filter((movimiento) => movimiento.tipo === "bano_inicio")
   const regresosBanoDelDia = movimientosReportes.filter((movimiento) => movimiento.tipo === "bano_regreso")
   const llegadasTarde = asistenciaLlegadasTarde
@@ -239,18 +291,10 @@ export function computeAttendanceReportMetrics({
   )
 
   const horasTrabajadas = asistenciaPerfiles.map((usuario) => {
-    const movimientosUsuario = movimientosFechaFiltro
-      .filter((movimiento) => movimiento.colaboradorId === usuario.id && ["entrada", "salida"].includes(movimiento.tipo))
-      .sort((a, b) => new Date(a.fechaHoraISO || 0) - new Date(b.fechaHoraISO || 0))
-    let totalMinutos = 0
-    let entradaAbierta = null
-    movimientosUsuario.forEach((movimiento) => {
-      if (movimiento.tipo === "entrada") entradaAbierta = movimiento
-      if (movimiento.tipo === "salida" && entradaAbierta) {
-        totalMinutos += calcularMinutosEntre(entradaAbierta.fechaHoraISO, movimiento.fechaHoraISO)
-        entradaAbierta = null
-      }
-    })
+    const movimientosUsuario = movimientosFechaFiltro.filter(
+      (movimiento) => movimiento.colaboradorId === usuario.id
+    )
+    const totalMinutos = computeWorkedMinutesFromMarks(movimientosUsuario)
     return { usuario, totalMinutos }
   }).filter((item) => item.totalMinutos > 0)
 

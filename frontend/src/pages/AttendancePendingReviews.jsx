@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useAuth } from "../context/AuthContext"
 import {
+  closeOpenAttendanceShift,
   getAttendanceMarksForReview,
+  getOpenAttendanceShifts,
   reviewAttendanceMark
 } from "../services/attendanceService"
 import {
@@ -34,6 +36,21 @@ function AttendancePendingReviews() {
   const [message, setMessage] = useState("")
   const [notesById, setNotesById] = useState({})
   const [busyId, setBusyId] = useState("")
+  const [openShifts, setOpenShifts] = useState([])
+  const [openShiftsLoading, setOpenShiftsLoading] = useState(false)
+  const [closeNotesByEmployee, setCloseNotesByEmployee] = useState({})
+
+  const loadOpenShifts = useCallback(async () => {
+    if (!canApprove) return
+    setOpenShiftsLoading(true)
+    const { data, error: queryError } = await getOpenAttendanceShifts()
+    if (queryError) {
+      setOpenShifts([])
+    } else {
+      setOpenShifts(data || [])
+    }
+    setOpenShiftsLoading(false)
+  }, [canApprove])
 
   const loadRows = useCallback(async () => {
     if (!canView) return
@@ -55,7 +72,8 @@ function AttendancePendingReviews() {
 
   useEffect(() => {
     loadRows()
-  }, [loadRows])
+    loadOpenShifts()
+  }, [loadRows, loadOpenShifts])
 
   const pendingCount = useMemo(
     () => rows.filter((row) => row.approval_status === "pending").length,
@@ -77,6 +95,28 @@ function AttendancePendingReviews() {
     } else {
       setMessage(action === "approve" ? "Marcación aprobada." : "Marcación rechazada.")
       await loadRows()
+    }
+    setBusyId("")
+  }
+
+  async function handleCloseOpenShift(row) {
+    if (!canApprove) return
+    const note = closeNotesByEmployee[row.employee_id] || ""
+    if (!window.confirm(
+      `¿Cerrar manualmente el turno abierto de ${row.employee_name} desde ${new Date(row.entrada_at).toLocaleString("es-GT")}?`
+    )) return
+    setBusyId(row.employee_id)
+    setMessage("")
+    setError("")
+    const { error: closeError } = await closeOpenAttendanceShift({
+      employeeId: row.employee_id,
+      observation: note || "Cierre manual de turno abierto."
+    })
+    if (closeError) {
+      setError(closeError.message || "No se pudo cerrar el turno.")
+    } else {
+      setMessage(`Turno de ${row.employee_name} cerrado manualmente.`)
+      await Promise.all([loadRows(), loadOpenShifts()])
     }
     setBusyId("")
   }
@@ -103,6 +143,73 @@ function AttendancePendingReviews() {
 
       {message && <div className="attendance-pending-success">{message}</div>}
       {error && <div className="attendance-pending-error">{error}</div>}
+
+      {canApprove && (
+        <section className="attendance-open-shifts-panel">
+          <header>
+            <h3>Turnos abiertos</h3>
+            <p>Colaboradores con entrada sin salida final. Ciérralos manualmente si quedaron pendientes.</p>
+          </header>
+          {openShiftsLoading ? (
+            <p className="attendance-pending-empty">Cargando turnos abiertos...</p>
+          ) : openShifts.length === 0 ? (
+            <p className="attendance-pending-empty">No hay turnos abiertos.</p>
+          ) : (
+            <div className="attendance-pending-table-wrap">
+              <table className="attendance-pending-table">
+                <thead>
+                  <tr>
+                    <th>Colaborador</th>
+                    <th>Entrada</th>
+                    <th>Fecha labor</th>
+                    <th>Estado</th>
+                    <th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {openShifts.map((row) => (
+                    <tr key={row.entrada_id}>
+                      <td>{row.employee_name}</td>
+                      <td>{new Date(row.entrada_at).toLocaleString("es-GT")}</td>
+                      <td>
+                        {row.labor_date}
+                        {row.overnight_shift ? " · día anterior" : ""}
+                      </td>
+                      <td>
+                        {row.has_open_meal
+                          ? "En comida (cierra comida en terminal primero)"
+                          : row.overnight_shift
+                            ? "Turno nocturno abierto"
+                            : "Turno abierto hoy"}
+                      </td>
+                      <td className="attendance-pending-actions">
+                        <input
+                          type="text"
+                          placeholder="Nota de cierre"
+                          value={closeNotesByEmployee[row.employee_id] || ""}
+                          onChange={(event) => setCloseNotesByEmployee((current) => ({
+                            ...current,
+                            [row.employee_id]: event.target.value
+                          }))}
+                          disabled={row.has_open_meal || busyId === row.employee_id}
+                        />
+                        <button
+                          type="button"
+                          className="approve"
+                          disabled={row.has_open_meal || busyId === row.employee_id}
+                          onClick={() => handleCloseOpenShift(row)}
+                        >
+                          Cerrar turno manualmente
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
 
       <div className="attendance-pending-filters">
         <label>

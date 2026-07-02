@@ -61,6 +61,14 @@ export function getAttendanceMarkingState(employeeId, markType = null) {
   })
 }
 
+export function diagnoseAttendanceEmployeeState(employeeName, startDate, endDate) {
+  return supabase.rpc("diagnose_attendance_employee_state", {
+    p_employee_name: employeeName,
+    p_start_date: startDate,
+    p_end_date: endDate
+  })
+}
+
 export async function validateEmployeeScheduleForMarking(employeeId, markType = null) {
   const { data, error } = await getAttendanceMarkingState(employeeId, markType)
   if (import.meta.env.DEV) {
@@ -130,6 +138,18 @@ export function reviewAttendanceMark({ markId, action, notes = "" }) {
     p_mark_id: markId,
     p_action: action,
     p_notes: notes || null
+  })
+}
+
+export function getOpenAttendanceShifts() {
+  return supabase.rpc("get_open_attendance_shifts")
+}
+
+export function closeOpenAttendanceShift({ employeeId, closedAt = null, observation = "" } = {}) {
+  return supabase.rpc("close_open_attendance_shift", {
+    p_employee_id: employeeId,
+    p_closed_at: closedAt || new Date().toISOString(),
+    p_observation: observation || null
   })
 }
 

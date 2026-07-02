@@ -1,3 +1,22 @@
+.attendance-open-shifts-panel {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #fcd34d;
+  border-radius: 12px;
+  background: #fffbeb;
+}
+
+.attendance-open-shifts-panel header h3 {
+  margin: 0 0 4px;
+}
+
+.attendance-open-shifts-panel header p {
+  margin: 0;
+  color: #92400e;
+  font-size: 14px;
+}
+
 .attendance-pending-reviews {
   display: grid;
   gap: 16px;

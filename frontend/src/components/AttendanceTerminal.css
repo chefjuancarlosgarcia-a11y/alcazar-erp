@@ -237,6 +237,12 @@
   color: #f8fafc;
 }
 
+.attendance-open-shift-warning {
+  border-color: #f59e0b;
+  background: #fffbeb;
+  color: #92400e;
+}
+
 .attendance-photo-actions {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
