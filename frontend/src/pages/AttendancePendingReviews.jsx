@@ -11,6 +11,12 @@ import {
   ATTENDANCE_CLASSIFICATION_LABELS
 } from "../utils/attendanceClassificationUtils"
 import { getAttendanceMarkLabel } from "../modules/attendance/attendanceReportsHelpers"
+import {
+  formatOpenShiftEntrada,
+  formatOpenShiftLaborDate,
+  getOpenShiftElapsed,
+  getOpenShiftStatusLabel
+} from "./attendanceOpenShiftDisplay"
 import "./AttendancePendingReviews.css"
 
 const APPROVER_ROLES = ["admin", "gerente_general", "recursos_humanos", "rrhh"]
@@ -155,58 +161,56 @@ function AttendancePendingReviews() {
           ) : openShifts.length === 0 ? (
             <p className="attendance-pending-empty">No hay turnos abiertos.</p>
           ) : (
-            <div className="attendance-pending-table-wrap">
-              <table className="attendance-pending-table">
-                <thead>
-                  <tr>
-                    <th>Colaborador</th>
-                    <th>Entrada</th>
-                    <th>Fecha labor</th>
-                    <th>Estado</th>
-                    <th>Acciones</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {openShifts.map((row) => (
-                    <tr key={row.entrada_id}>
-                      <td>{row.employee_name}</td>
-                      <td>{new Date(row.entrada_at).toLocaleString("es-GT")}</td>
-                      <td>
-                        {row.labor_date}
-                        {row.overnight_shift ? " · día anterior" : ""}
-                      </td>
-                      <td>
-                        {row.has_open_meal
-                          ? "En comida (cierra comida en terminal primero)"
-                          : row.overnight_shift
-                            ? "Turno nocturno abierto"
-                            : "Turno abierto hoy"}
-                      </td>
-                      <td className="attendance-pending-actions">
-                        <input
-                          type="text"
-                          placeholder="Nota de cierre"
-                          value={closeNotesByEmployee[row.employee_id] || ""}
-                          onChange={(event) => setCloseNotesByEmployee((current) => ({
-                            ...current,
-                            [row.employee_id]: event.target.value
-                          }))}
-                          disabled={row.has_open_meal || busyId === row.employee_id}
-                        />
-                        <button
-                          type="button"
-                          className="approve"
-                          disabled={row.has_open_meal || busyId === row.employee_id}
-                          onClick={() => handleCloseOpenShift(row)}
-                        >
-                          Cerrar turno manualmente
-                        </button>
-                      </td>
+            <>
+              <div className="attendance-open-shifts-table-wrap attendance-pending-table-wrap">
+                <table className="attendance-open-shifts-table">
+                  <thead>
+                    <tr>
+                      <th>Colaborador</th>
+                      <th>Área</th>
+                      <th>Fecha laboral</th>
+                      <th>Entrada</th>
+                      <th>Tiempo abierto</th>
+                      <th>Estado</th>
+                      <th>Acciones</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {openShifts.map((row) => (
+                      <OpenShiftRow
+                        key={row.entrada_id}
+                        row={row}
+                        busyId={busyId}
+                        closeNote={closeNotesByEmployee[row.employee_id] || ""}
+                        onCloseNoteChange={(value) => setCloseNotesByEmployee((current) => ({
+                          ...current,
+                          [row.employee_id]: value
+                        }))}
+                        onClose={() => handleCloseOpenShift(row)}
+                        variant="table"
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="attendance-open-shifts-cards">
+                {openShifts.map((row) => (
+                  <OpenShiftRow
+                    key={`card-${row.entrada_id}`}
+                    row={row}
+                    busyId={busyId}
+                    closeNote={closeNotesByEmployee[row.employee_id] || ""}
+                    onCloseNoteChange={(value) => setCloseNotesByEmployee((current) => ({
+                      ...current,
+                      [row.employee_id]: value
+                    }))}
+                    onClose={() => handleCloseOpenShift(row)}
+                    variant="card"
+                  />
+                ))}
+              </div>
+            </>
           )}
         </section>
       )}
@@ -330,6 +334,112 @@ function defaultFromDate() {
 
 function defaultToDate() {
   return new Date().toLocaleDateString("en-CA", { timeZone: "America/Guatemala" })
+}
+
+function OpenShiftRow({
+  row,
+  busyId,
+  closeNote,
+  onCloseNoteChange,
+  onClose,
+  variant
+}) {
+  const entrada = formatOpenShiftEntrada(row.entrada_at)
+  const elapsed = getOpenShiftElapsed(row.entrada_at)
+  const statusLabel = getOpenShiftStatusLabel(row)
+  const laborDateLabel = formatOpenShiftLaborDate(row.labor_date)
+  const actionsDisabled = row.has_open_meal || busyId === row.employee_id
+
+  const actions = (
+    <div className="attendance-open-shift-actions">
+      <input
+        type="text"
+        placeholder="Nota de cierre"
+        value={closeNote}
+        onChange={(event) => onCloseNoteChange(event.target.value)}
+        disabled={actionsDisabled}
+      />
+      <button
+        type="button"
+        className="attendance-open-shift-close-btn"
+        disabled={actionsDisabled}
+        onClick={onClose}
+      >
+        Cerrar turno manualmente
+      </button>
+    </div>
+  )
+
+  if (variant === "card") {
+    return (
+      <article className={`attendance-open-shift-card tier-${elapsed.tier}`}>
+        <div className="attendance-open-shift-card-head">
+          <div>
+            <h4>{row.employee_name}</h4>
+            <p>{row.area || "Sin área"}</p>
+          </div>
+          <span className={`attendance-open-shift-elapsed tier-${elapsed.tier}`}>
+            {elapsed.label}
+          </span>
+        </div>
+        <dl className="attendance-open-shift-card-grid">
+          <div>
+            <dt>Fecha laboral</dt>
+            <dd>
+              {laborDateLabel}
+              {row.overnight_shift ? " · cruza medianoche" : ""}
+            </dd>
+          </div>
+          <div>
+            <dt>Entrada</dt>
+            <dd>
+              {entrada.date}
+              {entrada.time ? <span className="attendance-open-shift-sub">{entrada.time}</span> : null}
+            </dd>
+          </div>
+          <div className="attendance-open-shift-card-status">
+            <dt>Estado</dt>
+            <dd>
+              <span className={`attendance-open-shift-status tier-${elapsed.tier}`}>
+                ⚠ {statusLabel}
+              </span>
+            </dd>
+          </div>
+        </dl>
+        {actions}
+      </article>
+    )
+  }
+
+  return (
+    <tr className={`attendance-open-shift-row tier-${elapsed.tier}`}>
+      <td>
+        <strong className="attendance-open-shift-name">{row.employee_name}</strong>
+      </td>
+      <td>{row.area || "—"}</td>
+      <td>
+        {laborDateLabel}
+        {row.overnight_shift ? (
+          <span className="attendance-open-shift-sub">Cruza medianoche</span>
+        ) : null}
+      </td>
+      <td>
+        <div>{entrada.date}</div>
+        {entrada.time ? <span className="attendance-open-shift-sub">{entrada.time}</span> : null}
+      </td>
+      <td>
+        <span className={`attendance-open-shift-elapsed tier-${elapsed.tier}`}>
+          {elapsed.label}
+        </span>
+      </td>
+      <td>
+        <span className={`attendance-open-shift-status tier-${elapsed.tier}`}>
+          ⚠ {statusLabel}
+        </span>
+      </td>
+      <td>{actions}</td>
+    </tr>
+  )
 }
 
 export default AttendancePendingReviews
