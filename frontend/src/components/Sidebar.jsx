@@ -16,6 +16,7 @@ const navigationItems = [
   { module: "pos", to: "/pos", label: "Punto de Venta", submenu: "pos" },
   { module: "cash", to: "/cash", label: "Caja" },
   { module: "production", to: "/production", label: "Producción" },
+  { module: "bakery", to: "/bakery", label: "Panadería / Pastelería" },
   { module: "inventory", to: "/inventory", label: "Inventario", submenu: "inventory" },
   { module: "hr", to: "/hr", label: "Recursos Humanos", submenu: "hr" },
   { module: "tasks", to: "/tasks", label: "Tareas" },

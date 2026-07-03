@@ -17,14 +17,15 @@ const MODULES = {
   catering: "/catering",
   finance: "/finance",
   settings: "/settings",
-  operations_center: "/operations-center"
+  operations_center: "/operations-center",
+  bakery: "/bakery"
 }
 
 const ROLE_PERMISSIONS = {
-  admin: ["dashboard", "inventory", "pos", "cash", "production", "hr", "tasks", "reports", "catering", "finance", "settings", "operations_center"],
+  admin: ["dashboard", "inventory", "pos", "cash", "production", "hr", "tasks", "reports", "catering", "finance", "settings", "operations_center", "bakery"],
   ceo: ["dashboard", "inventory", "pos", "cash", "production", "hr", "tasks", "reports", "catering", "settings"],
-  gerente_general: ["dashboard", "inventory", "pos", "cash", "production", "hr", "tasks", "reports", "catering", "finance", "settings"],
-  gerente: ["dashboard", "inventory", "hr", "tasks"],
+  gerente_general: ["dashboard", "inventory", "pos", "cash", "production", "hr", "tasks", "reports", "catering", "finance", "settings", "operations_center", "bakery"],
+  gerente: ["dashboard", "inventory", "hr", "tasks", "bakery"],
   gerente_operaciones: ["pos", "production", "hr", "catering"],
   encargado_almacen: ["inventory"],
   rrhh: ["inventory", "hr", "tasks"],
@@ -50,7 +51,8 @@ const ROLE_PERMISSIONS = {
   mantenimiento: ["hr", "tasks"],
   repartidor: ["hr"],
   colaborador: ["hr"],
-  contador: ["dashboard", "finance"]
+  contador: ["dashboard", "finance"],
+  supervisor_panaderia: ["bakery", "hr"]
 }
 
 const LEGACY_ROLE_NAMES = {
@@ -83,7 +85,8 @@ const LEGACY_ROLE_NAMES = {
   mantenimiento: "Mantenimiento",
   repartidor: "Repartidor",
   colaborador: "Colaborador",
-  contador: "Contador"
+  contador: "Contador",
+  supervisor_panaderia: "Supervisor Panadería"
 }
 
 const AuthContext = createContext(null)

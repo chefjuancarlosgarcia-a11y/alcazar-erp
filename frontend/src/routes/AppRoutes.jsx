@@ -63,6 +63,7 @@ const Tasks = lazyWithPerformanceLogging("tasks", () => import("../pages/Tasks")
 const CateringDashboard = lazyWithPerformanceLogging("catering", () => import("../modules/catering/CateringDashboard"))
 const Finance = lazyWithPerformanceLogging("finance", () => import("../pages/Finance"))
 const OperationsCenter = lazyWithPerformanceLogging("operations_center", () => import("../pages/OperationsCenter"))
+const BakeryProductionHub = lazyWithPerformanceLogging("bakery", () => import("../modules/bakery/BakeryProductionHub"))
 
 function PageLoadingFallback() {
   return <p>Cargando módulo...</p>
@@ -109,6 +110,7 @@ function AppRoutes() {
             <Route path="/settings" element={<ProtectedRoute module="settings"><Settings /></ProtectedRoute>} />
             <Route path="/settings/tickets" element={<ProtectedRoute module="settings"><TicketTemplateSettings /></ProtectedRoute>} />
             <Route path="/operations-center" element={<ProtectedRoute module="operations_center"><OperationsCenter /></ProtectedRoute>} />
+            <Route path="/bakery" element={<ProtectedRoute module="bakery"><BakeryProductionHub /></ProtectedRoute>} />
             <Route path="/account" element={<ProtectedRoute><Account /></ProtectedRoute>} />
             <Route path="*" element={<DefaultRedirect />} />
           </Route>

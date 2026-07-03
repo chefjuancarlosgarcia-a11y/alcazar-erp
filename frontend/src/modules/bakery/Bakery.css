@@ -1,0 +1,253 @@
+.bakery-module {
+  display: grid;
+  gap: 20px;
+  color: #e2e8f0;
+}
+
+.bakery-header h1 {
+  margin: 0 0 6px;
+  font-size: 1.6rem;
+}
+
+.bakery-header p {
+  margin: 0;
+  color: #94a3b8;
+}
+
+.bakery-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.bakery-tabs button {
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid #334155;
+  background: #0f172a;
+  color: #cbd5e1;
+  cursor: pointer;
+}
+
+.bakery-tabs button.active {
+  background: #0ea5a4;
+  border-color: #0ea5a4;
+  color: #022c2c;
+  font-weight: 700;
+}
+
+.bakery-card {
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid #334155;
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.bakery-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.bakery-stat {
+  background: #111827;
+  border-radius: 12px;
+  padding: 14px;
+  border: 1px solid #1f2937;
+}
+
+.bakery-stat strong {
+  display: block;
+  font-size: 1.4rem;
+  margin-top: 4px;
+}
+
+.bakery-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: end;
+}
+
+.bakery-toolbar label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.85rem;
+}
+
+.bakery-toolbar input,
+.bakery-toolbar select,
+.bakery-toolbar textarea {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #475569;
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
+.bakery-table-wrap {
+  overflow-x: auto;
+}
+
+.bakery-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.bakery-table th,
+.bakery-table td {
+  padding: 10px 8px;
+  border-bottom: 1px solid #334155;
+  text-align: left;
+  vertical-align: top;
+}
+
+.bakery-table th {
+  color: #94a3b8;
+  font-size: 0.85rem;
+}
+
+.bakery-btn {
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: #0ea5a4;
+  color: #022c2c;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.bakery-btn.secondary {
+  background: #334155;
+  color: #e2e8f0;
+}
+
+.bakery-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.bakery-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.bakery-badge.planned { background: #1e3a8a; color: #bfdbfe; }
+.bakery-badge.in_progress { background: #854d0e; color: #fef08a; }
+.bakery-badge.delivered { background: #14532d; color: #bbf7d0; }
+.bakery-badge.partial { background: #7c2d12; color: #fed7aa; }
+.bakery-badge.cancelled { background: #374151; color: #d1d5db; }
+.bakery-badge.urgent { background: #7f1d1d; color: #fecaca; }
+
+.bakery-alert {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(127, 29, 29, 0.35);
+  border: 1px solid #991b1b;
+  color: #fecaca;
+}
+
+.bakery-warning {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(120, 53, 15, 0.35);
+  border: 1px solid #b45309;
+  color: #fde68a;
+}
+
+.bakery-success {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(20, 83, 45, 0.35);
+  border: 1px solid #15803d;
+  color: #bbf7d0;
+}
+
+.bakery-error {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(127, 29, 29, 0.35);
+  border: 1px solid #991b1b;
+  color: #fecaca;
+}
+
+.bakery-form-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.bakery-form-grid label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.85rem;
+}
+
+.bakery-unauthorized {
+  min-height: 50vh;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  gap: 8px;
+}
+
+.bakery-list {
+  display: grid;
+  gap: 10px;
+}
+
+.bakery-list-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: #0f172a;
+}
+
+.bakery-list-item.overdue {
+  border-color: #b91c1c;
+}
+
+.bakery-list-item.cold-alert {
+  border-color: #ea580c;
+}
+
+.bakery-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.75);
+  display: grid;
+  place-items: center;
+  z-index: 40;
+  padding: 16px;
+}
+
+.bakery-modal {
+  width: min(720px, 100%);
+  max-height: 90vh;
+  overflow: auto;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 16px;
+  padding: 18px;
+  display: grid;
+  gap: 14px;
+}
+
+.bakery-modal h3 {
+  margin: 0;
+}
+
+.bakery-modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
