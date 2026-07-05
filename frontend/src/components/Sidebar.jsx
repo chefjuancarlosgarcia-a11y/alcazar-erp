@@ -37,6 +37,7 @@ const inventorySubmenu = [
   { roles: ["admin", "gerente", "gerente_general", "encargado_almacen"], to: "/inventory?section=ordenes", label: "Órdenes de compra" },
   { roles: ["admin", "gerente", "gerente_general", "encargado_almacen", "recursos_humanos", "rrhh"], to: "/inventory?section=proveedores", label: "Proveedores" },
   { roles: ["admin", "gerente", "gerente_general", "supervisor"], to: "/inventory?section=recetas", label: "Recetas estandarizadas" },
+  { roles: ["admin", "gerente", "gerente_general", "supervisor"], to: "/inventory?section=implementacionPos", label: "Implementación POS" },
   { roles: ["admin", "gerente", "gerente_general", "supervisor", "cocina", "pizzeria", "panadero", "repostero"], to: "/inventory?section=produccionInterna", label: "Producción interna" },
   { roles: ["admin", "gerente", "gerente_general", "supervisor"], to: "/inventory?section=conversiones", label: "Conversiones" },
   { roles: ["admin", "gerente", "gerente_general", "supervisor", "encargado_almacen"], to: "/inventory?section=rendimientos", label: "Rendimientos" },

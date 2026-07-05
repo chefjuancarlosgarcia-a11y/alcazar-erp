@@ -214,7 +214,7 @@ export async function addItemToOrder(orderId, product, quantity = 1, notesOrOpti
       total_price: unitPrice * Number(quantity),
       recipe_id: options.recipeId || product.recipeId || product.recipe_id,
       production_area_id: options.productionAreaId || product.productionAreaId || product.production_area_id || product.areaProduccion,
-      production_ready: product.productionReady === true,
+      production_ready: options.productionReady ?? (product.productionReady === true),
       is_test_item: product.isTestItem === true || product.is_test_item === true,
       notes: options.notes || null,
       modifiers,

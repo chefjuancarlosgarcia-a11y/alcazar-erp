@@ -266,7 +266,7 @@ const PosProductQuickSearch = forwardRef(function PosProductQuickSearch({
         </div>
       ) : results.length ? results.map((product, index) => {
         const state = getItemState(product)
-        const available = state.active && state.productionReady
+        const available = state.active && (state.saleAllowed ?? state.productionReady)
         return (
           <button
             key={product.id}

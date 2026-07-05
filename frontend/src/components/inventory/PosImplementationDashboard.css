@@ -1,0 +1,148 @@
+.pos-implementation-dashboard {
+  display: grid;
+  gap: 20px;
+  padding: 20px;
+  color: var(--erp-text-primary, #f8fafc);
+}
+
+.pos-implementation-dashboard header h2 {
+  margin: 0 0 6px;
+}
+
+.pos-implementation-dashboard header p {
+  margin: 0;
+  color: var(--erp-text-secondary, #94a3b8);
+}
+
+.pos-implementation-kpis {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.pos-implementation-kpi {
+  padding: 14px 16px;
+  border: 1px solid var(--erp-border, #334155);
+  border-radius: 12px;
+  background: var(--erp-surface-color, #0f172a);
+}
+
+.pos-implementation-kpi strong {
+  display: block;
+  font-size: 1.5rem;
+  margin-bottom: 4px;
+}
+
+.pos-implementation-kpi span {
+  color: var(--erp-text-secondary, #94a3b8);
+  font-size: 13px;
+}
+
+.pos-implementation-progress {
+  padding: 16px;
+  border: 1px solid var(--erp-border, #334155);
+  border-radius: 12px;
+  background: var(--erp-surface-color, #0f172a);
+}
+
+.pos-implementation-progress-bar {
+  height: 10px;
+  border-radius: 999px;
+  background: var(--erp-border-subtle, #1e293b);
+  overflow: hidden;
+  margin-top: 10px;
+}
+
+.pos-implementation-progress-bar div {
+  height: 100%;
+  background: var(--erp-primary-color, #14b8a6);
+}
+
+.pos-implementation-lists {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.pos-implementation-panel {
+  border: 1px solid var(--erp-border, #334155);
+  border-radius: 12px;
+  background: var(--erp-surface-color, #0f172a);
+  overflow: hidden;
+}
+
+.pos-implementation-panel h3 {
+  margin: 0;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--erp-border-subtle, #1e293b);
+  font-size: 14px;
+}
+
+.pos-implementation-panel table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.pos-implementation-panel th,
+.pos-implementation-panel td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--erp-border-subtle, #1e293b);
+  text-align: left;
+}
+
+.pos-implementation-panel th {
+  color: var(--erp-text-secondary, #94a3b8);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.pos-implementation-empty {
+  padding: 16px;
+  color: var(--erp-text-secondary, #94a3b8);
+}
+
+.pos-implementation-mode-badge {
+  display: inline-flex;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--erp-warning-soft, rgba(245, 158, 11, 0.16));
+  color: #fcd34d;
+}
+
+.pos-implementation-badge {
+  display: inline-flex;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.pos-implementation-badge.success {
+  background: var(--erp-success-soft, rgba(34, 197, 94, 0.14));
+  color: #86efac;
+}
+
+.pos-implementation-badge.warning {
+  background: var(--erp-warning-soft, rgba(245, 158, 11, 0.16));
+  color: #fcd34d;
+}
+
+.pos-implementation-badge.danger {
+  background: var(--erp-danger-soft, rgba(239, 68, 68, 0.16));
+  color: #fca5a5;
+}
+
+.pos-implementation-badge.muted {
+  background: color-mix(in srgb, var(--erp-border, #334155) 60%, transparent);
+  color: var(--erp-text-secondary, #94a3b8);
+}
+
+.pos-product-implementation-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}

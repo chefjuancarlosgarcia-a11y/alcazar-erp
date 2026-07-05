@@ -5,6 +5,11 @@ import useSupabaseRealtime from "../hooks/useSupabaseRealtime"
 import { useActionGuard } from "../hooks/useActionGuard"
 import { useToast } from "../hooks/useToast"
 import { ToastContainer } from "../components/ToastContainer"
+import { useInventoryDeductionMode } from "../context/InventoryMigrationModeProvider"
+import {
+  getProductSaleState,
+  getInventorySkipWarning
+} from "../utils/posImplementationMode"
 import { createStockRequisition } from "../utils/posProduction"
 import { createPreBillFromPOSOrder, createSplitBill, printPreBill as markPreBillPrinted, sendPreBillToCashier } from "../utils/cashier"
 import { getProductionAreas } from "../services/areasService"
@@ -668,6 +673,7 @@ function POS() {
   const params = new URLSearchParams(location.search)
   const section = params.get("section") || "pos"
   const { toasts, showToast, dismissToast } = useToast()
+  const { deductionMode, enabled: migrationModeEnabled } = useInventoryDeductionMode()
 
   const [items, setItems] = useState([])
   const [itemsLoading, setItemsLoading] = useState(true)
@@ -782,11 +788,16 @@ function POS() {
   )
   const finalRecipes = standardRecipes.filter((recipe) => recipe.recipe_type === "final_product" && recipe.active !== false)
   const itemsCategoria = useMemo(
-    () => items.filter((item) =>
-      productCategoryId(item) === categoriaActiva
-      && getProductProductionState(item, finalRecipes, productionAreas, activeCategories).productionReady
-    ),
-    [items, categoriaActiva, finalRecipes, productionAreas, activeCategories]
+    () => items.filter((item) => {
+      if (productCategoryId(item) !== categoriaActiva) return false
+      const saleState = getProductSaleState(
+        item,
+        getProductProductionState(item, finalRecipes, productionAreas, activeCategories),
+        deductionMode
+      )
+      return saleState.saleAllowed
+    }),
+    [items, categoriaActiva, finalRecipes, productionAreas, activeCategories, deductionMode]
   )
   const getSearchRecipe = useCallback((product) => {
     const recipeId = productRecipeId(product)
@@ -835,10 +846,14 @@ function POS() {
   const historialMesaActual = mesaKeyActual ? ordenesEnviadas.filter((ordenItem) => ordenItem.mesaKey === mesaKeyActual && ordenItem.id !== currentOrder?.id).slice(0, 5) : []
   const mesaBloqueadaPorCobro = ["awaiting_bill", "sent_to_cashier", "payment_in_progress"].includes(currentOrder?.status)
     || historialMesaActual.some((order) => ["sent_to_cashier", "payment_in_progress"].includes(order.status))
-  const getCatalogItemState = useCallback((item) => getProductProductionState(item, finalRecipes, productionAreas, activeCategories), [finalRecipes, productionAreas, activeCategories])
+  const getCatalogItemState = useCallback((item) => getProductSaleState(
+    item,
+    getProductProductionState(item, finalRecipes, productionAreas, activeCategories),
+    deductionMode
+  ), [finalRecipes, productionAreas, activeCategories, deductionMode])
   const invalidActiveProducts = items.filter((item) => {
     const state = getCatalogItemState(item)
-    return state.active && !state.productionReady
+    return state.active && !state.saleAllowed
   })
   const formProductType = form.productType || "simple"
   const selectedRecipe = finalRecipes.find((recipe) => String(recipe.id) === String(productRecipeId(form)))
@@ -853,8 +868,8 @@ function POS() {
           || formProductType === "manual_test"
           || (
             formProductType === "pizza"
-              ? activeFormVariants.length > 0 && activeFormVariants.every((variant) => Number(variant.price || 0) > 0 && variant.recipeId)
-              : selectedRecipe
+              ? activeFormVariants.length > 0 && activeFormVariants.every((variant) => Number(variant.price || 0) > 0 && (deductionMode === "strict" ? variant.recipeId : true))
+              : (deductionMode !== "strict" || selectedRecipe)
           )
         )
       )
@@ -2297,11 +2312,19 @@ function POS() {
     setEditandoId(null)
     setMostrarFormulario(false)
     setErrores({})
-    const savedState = getProductProductionState(savedProduct, finalRecipes, productionAreas, activeCategories)
-    if (savedState.productionReady) {
+    const savedState = getProductSaleState(
+      savedProduct,
+      getProductProductionState(savedProduct, finalRecipes, productionAreas, activeCategories),
+      deductionMode
+    )
+    if (savedState.saleAllowed) {
       setPostSaveHint(null)
       setCatalogFeedbackTone("success")
-      setOrdenError(item.isTestItem ? "Platillo de prueba guardado. Se enviará a KDS sin consumir inventario." : "Platillo guardado y validado para producción.")
+      setOrdenError(item.isTestItem
+        ? "Platillo de prueba guardado. Se enviará a KDS sin consumir inventario."
+        : savedState.inventoryWillDeduct
+          ? "Platillo guardado y validado para producción con descarga de inventario."
+          : "Platillo guardado. Disponible para venta; inventario se activará cuando complete receta y control.")
     } else {
       const needsRecipe = savedState.issues.some((issue) => /receta|tamaño|variante/i.test(issue))
       setPostSaveHint({
@@ -2428,8 +2451,9 @@ function POS() {
       return false
     }
     const productionState = getProductProductionState(product, finalRecipes, productionAreas, activeCategories)
-    if (!productionState.productionReady) {
-      setOrdenError(`Producto ${product.nombre} no está listo para producción: ${productionState.issues.join(", ")}.`)
+    const saleState = getProductSaleState(product, productionState, deductionMode)
+    if (!saleState.saleAllowed) {
+      setOrdenError(`Producto ${product.nombre} no está disponible: ${saleState.issues?.join(", ") || "configuración incompleta"}.`)
       return false
     }
     if (mesaBloqueadaPorCobro) {
@@ -2453,8 +2477,9 @@ function POS() {
       return
     }
     const productionState = getProductProductionState(item, finalRecipes, productionAreas, activeCategories)
-    if (!productionState.productionReady) {
-      setOrdenError(`Producto ${item.nombre} no está listo para producción: ${productionState.issues.join(", ")}.`)
+    const saleState = getProductSaleState(item, productionState, deductionMode)
+    if (!saleState.saleAllowed) {
+      setOrdenError(`Producto ${item.nombre} no está disponible: ${saleState.issues?.join(", ") || "configuración incompleta"}.`)
       return
     }
     if (mesaBloqueadaPorCobro) {
@@ -2544,7 +2569,15 @@ function POS() {
         const result = await updateOrderItemQuantity(existe.lineId, existe.cantidad + safeQuantity, existe.precio)
         if (result.error) throw new Error(result.message || result.error.message)
       } else {
-        const result = await addItemToOrder(orderId, productToAdd, safeQuantity, {
+        const saleState = getProductSaleState(
+          productToAdd,
+          getProductProductionState(productToAdd, finalRecipes, productionAreas, activeCategories),
+          deductionMode
+        )
+        const result = await addItemToOrder(orderId, {
+          ...productToAdd,
+          productionReady: saleState.saleAllowed
+        }, safeQuantity, {
           notes: notas,
           modifiers: modifierLabels,
           unitPrice: finalUnitPrice,
@@ -2553,7 +2586,8 @@ function POS() {
           productVariantId: selectedVariant?.id || null,
           productVariantName: selectedVariant ? formatPizzaSizeLabel(selectedVariant.size) : null,
           selectedSize,
-          productName
+          productName,
+          productionReady: saleState.saleAllowed
         })
         if (result.error) throw new Error(result.message || result.error.message)
       }
@@ -2567,6 +2601,8 @@ function POS() {
       setConfiguracionPendiente({ variantId: "", modifierKeys: [], customNote: "" })
     }
     if (!itemSaved) return false
+    const skipWarning = getInventorySkipWarning(productToAdd, deductionMode, migrationModeEnabled)
+    if (skipWarning) showToast(skipWarning, "warning", 4500)
     setOrdenMessage("Producto agregado.")
     setOrdenError("")
     posDebug("orderItem creado", {
@@ -2724,7 +2760,16 @@ function POS() {
 
       showToast("Orden enviada correctamente a cocina.", "success", 1500)
 
-      let finalMessage = `Orden enviada a producción. Inventario descontado. Tickets creados: ${ticketIds.length}.`
+      let finalMessage = `Orden enviada a producción. Tickets creados: ${ticketIds.length}.`
+      const skipped = Number(result.data?.inventory_skipped_count || 0)
+      const deducted = Number(result.data?.inventory_deducted_count || 0)
+      if (deducted > 0 && skipped > 0) {
+        finalMessage = `${finalMessage} Inventario descontado en ${deducted} línea(s); omitido en ${skipped}.`
+      } else if (deducted > 0) {
+        finalMessage = `${finalMessage} Inventario descontado.`
+      } else {
+        finalMessage = `${finalMessage} Sin descarga de inventario (modo implementación).`
+      }
       if (salesChannel === "delivery") {
         const refreshedDelivery = await getOrderWithItems(orderId)
         if (refreshedDelivery.error) throw new Error(refreshedDelivery.message || refreshedDelivery.error.message)

@@ -5,6 +5,7 @@ import { canManageRoleCatalog, normalizeRole } from "../utils/profilePermissions
 import BrandingAppearanceSettings from "../components/branding/BrandingAppearanceSettings"
 import LoginSecurityAudit from "../components/auth/LoginSecurityAudit"
 import InventoryMigrationModeSettings from "../components/inventory/InventoryMigrationModeSettings"
+import InventoryDeductionModeSettings from "../components/inventory/InventoryDeductionModeSettings"
 import {
   PRINT_JOB_TYPES,
   buildTestPrintPayload,
@@ -88,7 +89,12 @@ function Settings() {
         {activeTab === "branding" && <BrandingAppearanceSettings />}
         {activeTab === "printers" && canManagePrinters && <PrinterSettings />}
         {activeTab === "login-security" && canManageLoginSecurity && <LoginSecurityAudit />}
-        {activeTab === "operacion" && canManageMigrationMode && <InventoryMigrationModeSettings />}
+        {activeTab === "operacion" && canManageMigrationMode && (
+          <>
+            <InventoryDeductionModeSettings />
+            <InventoryMigrationModeSettings />
+          </>
+        )}
       </div>
     </section>
   )

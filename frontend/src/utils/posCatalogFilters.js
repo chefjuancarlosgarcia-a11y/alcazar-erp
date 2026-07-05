@@ -12,14 +12,15 @@ export function matchesCatalogFilters(item, filters, getState) {
   }
   if (status === "active" && !state.active) return false
   if (status === "inactive" && state.active) return false
-  if (status === "ready" && !state.productionReady) return false
-  if (status === "pending" && !(state.active && !state.productionReady)) return false
+  if (status === "ready" && !(state.saleAllowed ?? state.productionReady)) return false
+  if (status === "pending" && !(state.active && !(state.saleAllowed ?? state.productionReady))) return false
   return true
 }
 
 export function catalogStatusLabel(state) {
   if (!state.active) return "Inactivo"
-  if (state.productionReady) return "Listo KDS"
+  if (state.inventoryWillDeduct) return "Venta + inventario"
+  if (state.saleAllowed ?? state.productionReady) return "Venta sin inventario"
   return "Pendiente KDS"
 }
 

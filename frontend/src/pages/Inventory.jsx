@@ -8,6 +8,7 @@ import InventoryCategoriesManagement from "./InventoryCategoriesManagement"
 import InventoryDuplicatesManagement from "./InventoryDuplicatesManagement"
 import RequisitionsSupabase from "./RequisitionsSupabase"
 import RecipesSupabase from "./RecipesSupabase"
+import PosImplementationDashboard from "../components/inventory/PosImplementationDashboard"
 import { lazy, Suspense } from "react"
 import { TEST_FLOW_FILTER } from "../utils/testFlowMode"
 
@@ -27,7 +28,8 @@ const allowedSections = new Set([
   "rendimientos",
   "auditoriasRendimiento",
   "categorias",
-  "duplicados"
+  "duplicados",
+  "implementacionPos"
 ])
 
 function Inventory() {
@@ -91,6 +93,10 @@ function Inventory() {
 
   if (initialSeccion === "duplicados") {
     return <InventoryDuplicatesManagement />
+  }
+
+  if (initialSeccion === "implementacionPos") {
+    return <PosImplementationDashboard />
   }
 
   return (

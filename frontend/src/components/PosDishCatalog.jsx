@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { catalogStatusLabel, matchesCatalogFilters } from "../utils/posCatalogFilters"
+import PosProductImplementationBadges from "./PosProductImplementationBadges"
 
 const readyBadgeStyle = { padding: "5px 8px", borderRadius: "999px", background: "var(--erp-success-soft)", color: "var(--erp-success)", fontSize: ".76rem", fontWeight: 800 }
 const invalidBadgeStyle = { padding: "5px 8px", borderRadius: "999px", background: "color-mix(in srgb, var(--erp-danger) 18%, #1a0f12)", color: "#fecaca", border: "1px solid color-mix(in srgb, var(--erp-danger) 55%, #334155)", fontSize: ".76rem", fontWeight: 800 }
@@ -80,10 +81,10 @@ export default function PosDishCatalog({
   const statusCounts = useMemo(() => ({
     all: items.length,
     active: items.filter((item) => getItemState(item).active).length,
-    ready: items.filter((item) => getItemState(item).productionReady).length,
+    ready: items.filter((item) => getItemState(item).saleAllowed ?? getItemState(item).productionReady).length,
     pending: items.filter((item) => {
       const state = getItemState(item)
-      return state.active && !state.productionReady
+      return state.active && !(state.saleAllowed ?? state.productionReady)
     }).length,
     inactive: items.filter((item) => !getItemState(item).active).length
   }), [items, getItemState])
@@ -216,7 +217,7 @@ export default function PosDishCatalog({
                 <th>Precio</th>
                 <th>Área</th>
                 <th>Estado</th>
-                <th>KDS</th>
+                <th>Receta / Inventario</th>
                 <th>Acciones</th>
               </tr>
             </thead>
@@ -235,8 +236,10 @@ export default function PosDishCatalog({
                     <td>{item.categoria}</td>
                     <td>{price}</td>
                     <td>{productionAreas.find((area) => area.id === productProductionAreaId(item))?.name || "—"}</td>
-                    <td><span className={`pos-dish-status-badge ${state.active ? (state.productionReady ? "ready" : "pending") : "inactive"}`}>{catalogStatusLabel(state)}</span></td>
-                    <td>{state.productionReady ? "Listo" : state.issues?.slice(0, 2).join(", ") || "Pendiente"}</td>
+                    <td><span className={`pos-dish-status-badge ${state.active ? ((state.saleAllowed ?? state.productionReady) ? "ready" : "pending") : "inactive"}`}>{catalogStatusLabel(state)}</span></td>
+                    <td>
+                      <PosProductImplementationBadges state={state} product={item} />
+                    </td>
                     <td>
                       <div className="pos-dish-table-actions">
                         <button type="button" onClick={() => onEditItem(item)} style={secondaryButtonStyle}>Editar</button>
@@ -256,16 +259,17 @@ export default function PosDishCatalog({
           {filteredItems.map((item) => {
             const state = getItemState(item)
             return (
-              <article className={`pos-dish-card${state.active ? "" : " is-inactive"}${state.productionReady ? " is-ready" : ""}`} key={item.id}>
+              <article className={`pos-dish-card${state.active ? "" : " is-inactive"}${(state.saleAllowed ?? state.productionReady) ? " is-ready" : ""}`} key={item.id}>
                 {item.imagen ? <img src={item.imagen} alt={item.nombre} style={thumbStyle} /> : <div className="pos-dish-card-placeholder">{productInitials(item.nombre)}</div>}
                 <div className="pos-dish-card-copy">
                   <div className="pos-dish-card-head">
                     <span className="pos-product-category">{item.categoria}</span>
                     {!state.active && <span className="pos-dish-status-badge inactive">Inactivo</span>}
-                    {state.active && !state.productionReady && <span className="pos-dish-status-badge pending">Pendiente KDS</span>}
-                    {state.productionReady && <span className="pos-dish-status-badge ready">Listo KDS</span>}
+                    {state.active && !(state.saleAllowed ?? state.productionReady) && <span className="pos-dish-status-badge pending">Pendiente KDS</span>}
+                    {(state.saleAllowed ?? state.productionReady) && <span className="pos-dish-status-badge ready">{catalogStatusLabel(state)}</span>}
                   </div>
                   <h3>{item.nombre}</h3>
+                  <PosProductImplementationBadges state={state} product={item} />
                   {isTestProduct(item) && <span className="pos-test-badge">Prueba KDS</span>}
                   <p className="pos-dish-card-meta">
                     {productionAreas.find((area) => area.id === productProductionAreaId(item))?.name || "Sin área"}

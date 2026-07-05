@@ -93,6 +93,12 @@ export function mapPOSProductFromSupabase(row) {
     active: row.active === true,
     estado: row.active === true ? "activo" : "inactivo",
     productionReady: row.production_ready === true,
+    inventoryTrackingEnabled: row.inventory_tracking_enabled === true,
+    inventory_tracking_enabled: row.inventory_tracking_enabled === true,
+    recipeRequiredForSale: row.recipe_required_for_sale === true,
+    recipe_required_for_sale: row.recipe_required_for_sale === true,
+    recipeStatus: row.recipe_status || "missing",
+    recipe_status: row.recipe_status || "missing",
     isTestItem: row.is_test_item === true,
     is_test_item: row.is_test_item === true,
     productType: row.product_type || "simple",
@@ -120,11 +126,15 @@ function serializeProduct(product) {
     recipe_id: product.recipeId || product.recipe_id || null,
     production_area_id: product.productionAreaId || product.areaProduccion || product.production_area_id || null,
     is_test_item: product.isTestItem === true || product.is_test_item === true,
+    inventory_tracking_enabled: product.inventoryTrackingEnabled === true || product.inventory_tracking_enabled === true,
+    recipe_required_for_sale: product.recipeRequiredForSale === true || product.recipe_required_for_sale === true,
     product_type: product.productType || product.product_type || "simple",
     allow_kitchen_notes: product.allowKitchenNotes === true || product.allow_kitchen_notes === true,
     prep_time_minutes: Number(product.prepTimeMinutes ?? product.prep_time_minutes ?? product.tiempoPreparacion ?? 0),
     active: product.active ?? product.estado === "activo",
-    sort_order: Number(product.sortOrder ?? product.sort_order ?? 0)
+    sort_order: Number(product.sortOrder ?? product.sort_order ?? 0),
+    inventory_tracking_enabled: product.inventoryTrackingEnabled === true || product.inventory_tracking_enabled === true,
+    recipe_required_for_sale: product.recipeRequiredForSale === true || product.recipe_required_for_sale === true
   }
 }
 
@@ -223,19 +233,20 @@ export async function savePOSCatalogProduct(product, variants = [], modifiers = 
   return getPOSProductById(productId)
 }
 
-export function validatePOSProduct(product) {
+export function validatePOSProduct(product, { strictRecipe = false } = {}) {
   const errors = []
   const productType = product.productType || product.product_type || "simple"
   const active = product.active ?? product.estado === "activo"
   if (!String(product.name || product.nombre || "").trim()) errors.push("Falta nombre.")
   if (Number(product.price ?? product.precio ?? 0) < 0) errors.push("El precio no es valido.")
   if (active && !(product.productionAreaId || product.production_area_id || product.areaProduccion)) errors.push("Falta area de produccion.")
-  if (active && !product.isTestItem && !product.is_test_item && productType !== "pizza" && !(product.recipeId || product.recipe_id)) errors.push("Falta receta.")
+  const recipeRequired = strictRecipe || product.recipeRequiredForSale === true || product.recipe_required_for_sale === true
+  if (active && recipeRequired && !product.isTestItem && !product.is_test_item && productType !== "pizza" && !(product.recipeId || product.recipe_id)) errors.push("Falta receta.")
   if (active && productType === "pizza") {
     const activeVariants = (product.variants || []).filter((variant) => variant.isActive === true || variant.is_active === true)
     if (activeVariants.length === 0) {
       errors.push("Falta al menos una variante activa.")
-    } else if (activeVariants.some((variant) => Number(variant.price || 0) <= 0 || !(variant.recipeId || variant.recipe_id))) {
+    } else if (activeVariants.some((variant) => Number(variant.price || 0) <= 0 || (strictRecipe && !(variant.recipeId || variant.recipe_id)))) {
       errors.push("Hay variantes activas sin precio o receta.")
     }
   }
