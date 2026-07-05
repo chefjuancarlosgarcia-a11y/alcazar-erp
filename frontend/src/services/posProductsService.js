@@ -1,6 +1,24 @@
 import { supabase } from "../lib/supabase"
 import { CACHE_KEYS, CACHE_TTL } from "./cacheConfig"
 import { cachedQuery, invalidateQueryCache } from "./queryCache"
+import {
+  serializeConfigurableGroupsForSave,
+  validateConfigurableCatalogForm
+} from "../utils/posConfigurableProduct"
+
+const optionChoiceSelect = `
+  id,
+  group_id,
+  name,
+  sort_order,
+  price_mode,
+  price,
+  recipe_id,
+  is_active,
+  created_at,
+  updated_at,
+  recipe:standard_recipes(id, name, recipe_type, production_area_id, active)
+`
 
 const productSelect = `
   *,
@@ -31,6 +49,20 @@ const productSelect = `
     sort_order,
     created_at,
     updated_at
+  ),
+  option_groups:pos_option_groups(
+    id,
+    product_id,
+    name,
+    sort_order,
+    required,
+    selection_mode,
+    min_selections,
+    max_selections,
+    is_active,
+    created_at,
+    updated_at,
+    choices:pos_option_choices(${optionChoiceSelect})
   )
 `
 
@@ -61,6 +93,40 @@ function mapModifierFromSupabase(modifier) {
   }
 }
 
+function mapOptionChoiceFromSupabase(choice) {
+  if (!choice) return null
+  return {
+    ...choice,
+    price: Number(choice.price || 0),
+    priceMode: choice.price_mode || "none",
+    price_mode: choice.price_mode || "none",
+    recipeId: choice.recipe_id || "",
+    is_active: choice.is_active !== false,
+    isActive: choice.is_active !== false,
+    sortOrder: Number(choice.sort_order || 0)
+  }
+}
+
+function mapOptionGroupFromSupabase(group) {
+  if (!group) return null
+  const choices = Array.isArray(group.choices)
+    ? [...group.choices]
+        .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0))
+        .map(mapOptionChoiceFromSupabase)
+    : []
+  return {
+    ...group,
+    selectionMode: group.selection_mode || "single",
+    selection_mode: group.selection_mode || "single",
+    minSelections: Number(group.min_selections ?? 0),
+    maxSelections: group.max_selections ?? null,
+    is_active: group.is_active !== false,
+    isActive: group.is_active !== false,
+    sortOrder: Number(group.sort_order || 0),
+    choices
+  }
+}
+
 export function mapPOSProductFromSupabase(row) {
   if (!row) return row
   const variants = Array.isArray(row.variants)
@@ -72,6 +138,11 @@ export function mapPOSProductFromSupabase(row) {
     ? [...row.modifier_options]
         .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0))
         .map(mapModifierFromSupabase)
+    : []
+  const optionGroups = Array.isArray(row.option_groups)
+    ? [...row.option_groups]
+        .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0))
+        .map(mapOptionGroupFromSupabase)
     : []
   return {
     ...row,
@@ -111,7 +182,9 @@ export function mapPOSProductFromSupabase(row) {
     productionArea: row.production_area,
     variants,
     modifierOptions,
-    modifiers: modifierOptions
+    modifiers: modifierOptions,
+    optionGroups,
+    option_groups: optionGroups
   }
 }
 
@@ -132,9 +205,7 @@ function serializeProduct(product) {
     allow_kitchen_notes: product.allowKitchenNotes === true || product.allow_kitchen_notes === true,
     prep_time_minutes: Number(product.prepTimeMinutes ?? product.prep_time_minutes ?? product.tiempoPreparacion ?? 0),
     active: product.active ?? product.estado === "activo",
-    sort_order: Number(product.sortOrder ?? product.sort_order ?? 0),
-    inventory_tracking_enabled: product.inventoryTrackingEnabled === true || product.inventory_tracking_enabled === true,
-    recipe_required_for_sale: product.recipeRequiredForSale === true || product.recipe_required_for_sale === true
+    sort_order: Number(product.sortOrder ?? product.sort_order ?? 0)
   }
 }
 
@@ -216,15 +287,24 @@ export async function activatePOSProduct(id) {
   return invalidateAfterProductMutation({ data: mapPOSProductFromSupabase(result.data), error: result.error })
 }
 
-export async function savePOSCatalogProduct(product, variants = [], modifiers = []) {
+export async function savePOSCatalogProduct(product, variants = [], modifiers = [], optionGroups = []) {
   const payload = serializeProduct(product)
-  const variantPayload = (Array.isArray(variants) ? variants : []).map((variant, index) => serializeVariant(variant, index, payload.name))
-  const modifierPayload = (Array.isArray(modifiers) ? modifiers : []).map((modifier, index) => serializeModifier(modifier, index))
+  const productType = payload.product_type || "simple"
+  const variantPayload = productType === "pizza"
+    ? (Array.isArray(variants) ? variants : []).map((variant, index) => serializeVariant(variant, index, payload.name))
+    : []
+  const modifierPayload = productType === "pizza"
+    ? (Array.isArray(modifiers) ? modifiers : []).map((modifier, index) => serializeModifier(modifier, index))
+    : []
+  const optionGroupPayload = productType === "configurable"
+    ? serializeConfigurableGroupsForSave(optionGroups)
+    : []
   const { data, error } = await supabase.rpc("save_pos_catalog_product", {
     p_product_id: product.id || product.productId || null,
     p_product: payload,
     p_variants: variantPayload,
-    p_modifiers: modifierPayload
+    p_modifiers: modifierPayload,
+    p_option_groups: optionGroupPayload
   })
   if (error) return { data: null, error }
   invalidatePOSProductsCache()
@@ -241,7 +321,9 @@ export function validatePOSProduct(product, { strictRecipe = false } = {}) {
   if (Number(product.price ?? product.precio ?? 0) < 0) errors.push("El precio no es valido.")
   if (active && !(product.productionAreaId || product.production_area_id || product.areaProduccion)) errors.push("Falta area de produccion.")
   const recipeRequired = strictRecipe || product.recipeRequiredForSale === true || product.recipe_required_for_sale === true
-  if (active && recipeRequired && !product.isTestItem && !product.is_test_item && productType !== "pizza" && !(product.recipeId || product.recipe_id)) errors.push("Falta receta.")
+  if (active && recipeRequired && !product.isTestItem && !product.is_test_item && productType !== "pizza" && productType !== "configurable" && !(product.recipeId || product.recipe_id)) {
+    errors.push("Falta receta.")
+  }
   if (active && productType === "pizza") {
     const activeVariants = (product.variants || []).filter((variant) => variant.isActive === true || variant.is_active === true)
     if (activeVariants.length === 0) {
@@ -250,7 +332,17 @@ export function validatePOSProduct(product, { strictRecipe = false } = {}) {
       errors.push("Hay variantes activas sin precio o receta.")
     }
   }
+  if (active && productType === "configurable") {
+    const { errors: configurableErrors } = validateConfigurableCatalog(product)
+    errors.push(...configurableErrors)
+  }
   return { valid: errors.length === 0, errors }
+}
+
+function validateConfigurableCatalog(product) {
+  return validateConfigurableCatalogForm(product.optionGroups || product.option_groups || [], {
+    active: product.active ?? product.estado === "activo"
+  })
 }
 
 export async function createOrUpdatePOSProductFromRecipe(recipe, productId = null) {

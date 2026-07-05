@@ -788,7 +788,49 @@
   color: #ecfeff;
 }
 
+.pos-configurable-groups {
+  display: grid;
+  gap: 14px;
+}
+
+.pos-configurable-group {
+  border: 1px solid #dbe4ee;
+  border-radius: 14px;
+  padding: 14px;
+  background: #f8fafc;
+}
+
+.pos-configurable-group.active {
+  border-color: #14b8a6;
+  background: #f0fdfa;
+}
+
+.pos-configurable-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.pos-configurable-choices {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.pos-configurable-choice-row {
+  display: grid;
+  grid-template-columns: auto 1.4fr 1fr 0.8fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
 @media (max-width: 860px) {
+  .pos-configurable-choice-row {
+    grid-template-columns: 1fr;
+  }
+
   .pos-modifier-row {
     grid-template-columns: 1fr;
   }

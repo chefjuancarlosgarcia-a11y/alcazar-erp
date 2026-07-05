@@ -266,12 +266,19 @@ export default function PosDishCatalog({
                   <p className="pos-dish-card-meta">
                     {productionAreas.find((area) => area.id === productProductionAreaId(item))?.name || "Sin área"}
                     {" · "}
-                    {(item.productType || item.product_type) === "pizza"
+                    {(item.productType || item.product_type) === "pizza" || (item.productType || item.product_type) === "configurable"
                       ? `Desde Q${getProductBasePrice(item).toFixed(2)}`
                       : `Q${Number(item.precio || 0).toFixed(2)}`}
                     {" · "}
                     {formatProductTypeLabel(item.productType || item.product_type || "simple")}
                   </p>
+                  {(item.productType || item.product_type) === "configurable" && (
+                    <small className="pos-dish-card-meta">
+                      {(item.optionGroups || item.option_groups || []).filter((group) => group.isActive !== false).length} grupo(s) de opciones
+                      {" · "}
+                      Venta mesero: Fase 2
+                    </small>
+                  )}
                   {(item.productType || item.product_type) === "pizza" && (
                     <small className="pos-dish-card-meta">
                       {getActiveProductVariants(item).map((variant) => formatPizzaSizeLabel(variant.size)).join(", ") || "Sin tamaños activos"}

@@ -13,6 +13,17 @@ import {
   productHasInventoryTracking,
   productRequiresRecipeForSale
 } from "../utils/posImplementationMode"
+import {
+  createEmptyOptionChoice,
+  createEmptyOptionGroup,
+  getActiveOptionGroups,
+  getConfigurableDisplayPrice,
+  normalizeOptionChoiceDraft,
+  normalizeOptionGroupDraft,
+  OPTION_PRICE_MODES,
+  OPTION_SELECTION_MODES,
+  validateConfigurableCatalogForm
+} from "../utils/posConfigurableProduct"
 import { createStockRequisition } from "../utils/posProduction"
 import { createPreBillFromPOSOrder, createSplitBill, printPreBill as markPreBillPrinted, sendPreBillToCashier } from "../utils/cashier"
 import { getProductionAreas } from "../services/areasService"
@@ -109,6 +120,7 @@ const CATEGORY_QUICK_OPTIONS = [
 
 const PRODUCT_TYPE_OPTIONS = [
   { id: "pizza", label: "Pizza", hint: "Producto padre con tamanos y extras para POS." },
+  { id: "configurable", label: "Configurable", hint: "Producto padre con grupos de opciones (ej. Alitas)." },
   { id: "simple", label: "Platillo simple", hint: "Un solo precio y una sola receta." },
   { id: "beverage", label: "Bebida", hint: "Refrescos, cafe y bebidas de barra." },
   { id: "dessert", label: "Postre", hint: "Postres listos o de preparacion simple." },
@@ -214,9 +226,13 @@ function getActiveProductModifiers(product) {
 }
 
 function getProductBasePrice(product) {
+  const productType = product?.productType || product?.product_type
   const variants = getActiveProductVariants(product)
-  if ((product?.productType || product?.product_type) === "pizza" && variants.length > 0) {
+  if (productType === "pizza" && variants.length > 0) {
     return Math.min(...variants.map((variant) => Number(variant.price || 0)))
+  }
+  if (productType === "configurable") {
+    return getConfigurableDisplayPrice(product)
   }
   return Number(product?.precio ?? product?.price ?? 0)
 }
@@ -338,7 +354,7 @@ function formInventoryTrackingEnabled(form) {
 function formRequiresRecipeConnection(form, deductionMode) {
   if (form?.estado !== "activo") return false
   const productType = form?.productType || "simple"
-  if (isTestProduct(form) || productType === "manual_test") return false
+  if (isTestProduct(form) || productType === "manual_test" || productType === "configurable") return false
   return deductionMode === "strict" || formInventoryTrackingEnabled(form)
 }
 
@@ -354,19 +370,27 @@ function getProductProductionState(product, recipes, areas, categories) {
   const active = product?.estado === "activo" || product?.active === true
   const testItem = isTestProduct(product)
   const activeVariants = getActiveProductVariants(product)
+  const activeOptionGroups = getActiveOptionGroups(product)
   const tracksInventory = productHasInventoryTracking(product)
   const recipeRequired = productRequiresRecipeForSale(product)
   const needsRecipe = tracksInventory || recipeRequired
   const issues = []
-  if (!testItem && productType !== "pizza" && !recipe && needsRecipe) issues.push("Sin receta válida")
+  if (!testItem && productType !== "pizza" && productType !== "configurable" && !recipe && needsRecipe) issues.push("Sin receta válida")
   if (productType === "pizza" && activeVariants.length === 0) issues.push("Sin tamaños activos")
   if (productType === "pizza" && activeVariants.some((variant) => {
     if (Number(variant.price || 0) <= 0) return true
     return needsRecipe && !variant.recipeId
   })) issues.push("Variantes incompletas")
+  if (productType === "configurable") {
+    const { valid, errors } = validateConfigurableCatalogForm(product?.optionGroups || product?.option_groups || [], { active })
+    if (!valid) issues.push(...errors)
+  }
   if (!area) issues.push("Sin área válida")
   if (!category) issues.push("Sin categoría activa")
-  if (active && product?.productionReady !== true && needsRecipe) issues.push("No validado para producción")
+  if (active && productType !== "configurable" && product?.productionReady !== true && needsRecipe) issues.push("No validado para producción")
+  if (active && productType === "configurable" && product?.productionReady !== true && issues.length === 0) {
+    issues.push("Configuración de opciones incompleta")
+  }
   return {
     active,
     productType,
@@ -379,6 +403,7 @@ function getProductProductionState(product, recipes, areas, categories) {
     category,
     testItem,
     variants: activeVariants,
+    optionGroups: activeOptionGroups,
     issues,
     productionReady: active && product?.productionReady === true && issues.length === 0
   }
@@ -433,6 +458,7 @@ const emptyItemForm = {
   allowKitchenNotes: false,
   modifierNotesPlaceholder: "Ej. sin cebolla, bien tostada, cortar en 8.",
   modifiers: [],
+  optionGroups: [createEmptyOptionGroup()],
   variants: PIZZA_VARIANT_OPTIONS.map((option) => createEmptyPizzaVariant(option.size, option.label))
 }
 
@@ -880,6 +906,8 @@ function POS() {
   const selectedRecipe = finalRecipes.find((recipe) => String(recipe.id) === String(productRecipeId(form)))
   const selectedProductionArea = productionAreas.find((area) => area.id === productProductionAreaId(form))
   const activeFormVariants = (form.variants || []).filter((variant) => variant.isActive === true)
+  const activeFormOptionGroups = (form.optionGroups || []).filter((group) => group.isActive !== false)
+  const configurableFormValid = validateConfigurableCatalogForm(form.optionGroups || [], { active: form.estado === "activo" }).valid
   const formRequiresRecipe = formRequiresRecipeConnection(form, deductionMode)
   const formReadyForValidation = Boolean(
     form.estado !== "activo"
@@ -895,7 +923,9 @@ function POS() {
                 && variant.prepTimeMinutes
                 && (!formRequiresRecipe || variant.recipeId)
               ))
-              : (!formRequiresRecipe || selectedRecipe)
+              : formProductType === "configurable"
+                ? activeFormOptionGroups.length > 0 && configurableFormValid
+                : (!formRequiresRecipe || selectedRecipe)
           )
         )
       )
@@ -2156,15 +2186,130 @@ function POS() {
       productType,
       isTestItem: productType === "manual_test",
       inventoryTrackingEnabled: productType === "manual_test" ? false : actual.inventoryTrackingEnabled,
-      recipeId: productType === "pizza" || productType === "manual_test" ? "" : actual.recipeId,
-      precio: productType === "pizza" ? "" : actual.precio,
-      modifiers: productType === "pizza" ? (actual.modifiers?.length ? actual.modifiers : createDefaultModifiers()) : (actual.modifiers || []),
+      recipeId: productType === "pizza" || productType === "manual_test" || productType === "configurable" ? "" : actual.recipeId,
+      precio: productType === "pizza" || productType === "configurable" ? "" : actual.precio,
+      modifiers: productType === "pizza" ? (actual.modifiers?.length ? actual.modifiers : createDefaultModifiers()) : [],
+      optionGroups: productType === "configurable"
+        ? (actual.optionGroups?.length ? actual.optionGroups : [createEmptyOptionGroup()])
+        : [createEmptyOptionGroup()],
       variants: productType === "pizza"
         ? (actual.variants?.length
             ? actual.variants
             : PIZZA_VARIANT_OPTIONS.map((option) => createEmptyPizzaVariant(option.size, option.label, fallbackArea, actual.nombre)))
         : PIZZA_VARIANT_OPTIONS.map((option) => createEmptyPizzaVariant(option.size, option.label, fallbackArea, actual.nombre)),
-      allowKitchenNotes: productType === "pizza" ? true : actual.allowKitchenNotes
+      allowKitchenNotes: productType === "pizza" || productType === "configurable" ? true : actual.allowKitchenNotes
+    }))
+  }
+
+  function actualizarGrupoOpcion(groupIndex, campo, valor) {
+    setForm((actual) => ({
+      ...actual,
+      optionGroups: (actual.optionGroups || []).map((group, index) => {
+        if (index !== groupIndex) return group
+        const next = { ...group, [campo]: valor }
+        if (campo === "selectionMode" && valor === "single") {
+          next.maxSelections = 1
+          next.minSelections = Math.max(1, Number(next.minSelections || 1))
+        }
+        return next
+      })
+    }))
+  }
+
+  function actualizarOpcionConfigurables(groupIndex, choiceIndex, campo, valor) {
+    setForm((actual) => ({
+      ...actual,
+      optionGroups: (actual.optionGroups || []).map((group, index) => {
+        if (index !== groupIndex) return group
+        return {
+          ...group,
+          choices: (group.choices || []).map((choice, choiceIdx) =>
+            choiceIdx === choiceIndex ? { ...choice, [campo]: valor } : choice
+          )
+        }
+      })
+    }))
+  }
+
+  function agregarGrupoOpcion() {
+    setForm((actual) => ({
+      ...actual,
+      optionGroups: [...(actual.optionGroups || []), createEmptyOptionGroup((actual.optionGroups || []).length)]
+    }))
+  }
+
+  function eliminarGrupoOpcion(groupIndex) {
+    setForm((actual) => ({
+      ...actual,
+      optionGroups: (actual.optionGroups || [])
+        .filter((_, index) => index !== groupIndex)
+        .map((group, index) => ({ ...group, sortOrder: index }))
+    }))
+  }
+
+  function agregarOpcionConfigurable(groupIndex) {
+    setForm((actual) => ({
+      ...actual,
+      optionGroups: (actual.optionGroups || []).map((group, index) => {
+        if (index !== groupIndex) return group
+        const choices = group.choices || []
+        return {
+          ...group,
+          choices: [...choices, createEmptyOptionChoice(choices.length)]
+        }
+      })
+    }))
+  }
+
+  function eliminarOpcionConfigurable(groupIndex, choiceIndex) {
+    setForm((actual) => ({
+      ...actual,
+      optionGroups: (actual.optionGroups || []).map((group, index) => {
+        if (index !== groupIndex) return group
+        const choices = (group.choices || []).filter((_, choiceIdx) => choiceIdx !== choiceIndex)
+        return {
+          ...group,
+          choices: choices.length ? choices.map((choice, choiceIdx) => ({ ...choice, sortOrder: choiceIdx })) : [createEmptyOptionChoice(0)]
+        }
+      })
+    }))
+  }
+
+  function cargarPresetAlitas() {
+    setForm((actual) => ({
+      ...actual,
+      nombre: actual.nombre || "Alitas",
+      productType: "configurable",
+      precio: "",
+      allowKitchenNotes: true,
+      optionGroups: [
+        {
+          ...createEmptyOptionGroup(0),
+          name: "Presentación",
+          required: true,
+          selectionMode: "single",
+          minSelections: 1,
+          maxSelections: 1,
+          isActive: true,
+          choices: [
+            { ...createEmptyOptionChoice(0), name: "10 unidades", priceMode: "absolute", price: "90", isActive: true },
+            { ...createEmptyOptionChoice(1), name: "20 unidades", priceMode: "absolute", price: "160", isActive: true }
+          ]
+        },
+        {
+          ...createEmptyOptionGroup(1),
+          name: "Salsa",
+          required: true,
+          selectionMode: "single",
+          minSelections: 1,
+          maxSelections: 1,
+          isActive: true,
+          choices: [
+            { ...createEmptyOptionChoice(0), name: "BBQ", priceMode: "none", price: "0", isActive: true },
+            { ...createEmptyOptionChoice(1), name: "Buffalo", priceMode: "none", price: "0", isActive: true }
+          ]
+        }
+      ]
     }))
   }
 
@@ -2247,17 +2392,17 @@ function POS() {
     if (!form.nombre.trim()) faltantes.nombre = "Nombre del platillo"
     if (!form.categoriaId) faltantes.categoria = "Categoría POS"
     if (form.estado === "activo" && !activeCategories.some((category) => category.id === form.categoriaId)) faltantes.categoria = "Categoría POS activa"
-    if (productType !== "pizza" && (!form.precio || Number(form.precio) <= 0)) faltantes.precio = "Precio de venta"
+    if (productType !== "pizza" && productType !== "configurable" && (!form.precio || Number(form.precio) <= 0)) faltantes.precio = "Precio de venta"
     if (!form.descripcion.trim()) faltantes.descripcion = "Descripción"
     if (!form.estado) faltantes.estado = "Estado"
     if (!productionAreaId || (form.estado === "activo" && !productionAreas.some((area) => area.id === productionAreaId))) faltantes.areaProduccion = "Área de producción válida"
     if (!form.tiempoPreparacion.trim()) faltantes.tiempoPreparacion = "Tiempo estimado de preparación"
     const requiresRecipe = formRequiresRecipeConnection(form, deductionMode)
-    if (requiresRecipe && productType !== "pizza" && !finalRecipes.some((recipe) => String(recipe.id) === String(recipeId))) {
+    if (requiresRecipe && productType !== "pizza" && productType !== "configurable" && !finalRecipes.some((recipe) => String(recipe.id) === String(recipeId))) {
       faltantes.recipeId = "Receta final activa válida"
     }
     const recipe = finalRecipes.find((entry) => String(entry.id) === String(recipeId))
-    if (requiresRecipe && productType !== "pizza" && recipe && recipe.production_area_id !== productionAreaId) {
+    if (requiresRecipe && productType !== "pizza" && productType !== "configurable" && recipe && recipe.production_area_id !== productionAreaId) {
       faltantes.areaProduccion = "Área que coincida con la receta"
     }
     if (productType === "pizza" && form.estado === "activo") {
@@ -2277,6 +2422,10 @@ function POS() {
       })) {
         faltantes.variants = "Las recetas por tamaño deben coincidir con el área"
       }
+    }
+    if (productType === "configurable" && form.estado === "activo") {
+      const { valid, errors } = validateConfigurableCatalogForm(form.optionGroups || [], { active: true })
+      if (!valid) faltantes.optionGroups = errors[0] || "Configuración de opciones incompleta"
     }
     return faltantes
   }
@@ -2337,24 +2486,28 @@ function POS() {
           sortOrder: index
         }))
       : []
-    const modifiers = (form.modifiers || [])
-      .filter((modifier) => String(modifier.name || "").trim())
-      .map((modifier, index) => ({
-        ...modifier,
-        priceDelta: Number(modifier.priceDelta || 0),
-        modifierType: modifier.modifierType || "remove",
-        isActive: modifier.isActive !== false,
-        sortOrder: index
-      }))
+    const modifiers = productType === "pizza"
+      ? (form.modifiers || [])
+          .filter((modifier) => String(modifier.name || "").trim())
+          .map((modifier, index) => ({
+            ...modifier,
+            priceDelta: Number(modifier.priceDelta || 0),
+            modifierType: modifier.modifierType || "remove",
+            isActive: modifier.isActive !== false,
+            sortOrder: index
+          }))
+      : []
+    const optionGroups = productType === "configurable" ? (form.optionGroups || []) : []
     posDebug("producto a guardar", {
       item,
       variants,
       modifiers,
+      optionGroups,
       recipeId: productRecipeId(item),
       productionAreaId: productProductionAreaId(item)
     })
 
-    const savedResult = await savePOSCatalogProduct(item, variants, modifiers)
+    const savedResult = await savePOSCatalogProduct(item, variants, modifiers, optionGroups)
     if (savedResult.error) {
       console.error("Supabase POS product save error:", savedResult.error)
       setOrdenError(`Producto no guardado: ${savedResult.error.message}`)
@@ -2423,6 +2576,11 @@ function POS() {
         : productType === "pizza"
           ? createDefaultModifiers()
           : [],
+      optionGroups: (item.optionGroups || item.option_groups || []).length
+        ? (item.optionGroups || item.option_groups || []).map(normalizeOptionGroupDraft)
+        : productType === "configurable"
+          ? [createEmptyOptionGroup()]
+          : [createEmptyOptionGroup()],
       variants: PIZZA_VARIANT_OPTIONS.map((option, index) => {
         const variant = (item.variants || []).find((entry) => entry.size === option.size)
         return variant
@@ -3505,7 +3663,7 @@ function POS() {
                     <option value="inactivo">Inactivo</option>
                   </select>
                   <input placeholder="Tiempo base de preparación (minutos)" value={form.tiempoPreparacion} onChange={(e) => actualizarCampo("tiempoPreparacion", e.target.value)} style={errores.tiempoPreparacion ? inputErrorStyle : inputStyle} />
-                  {formProductType !== "pizza" && (
+                  {formProductType !== "pizza" && formProductType !== "configurable" && (
                     <input type="number" min="0" step="0.01" placeholder="Precio de venta" value={form.precio} onChange={(e) => actualizarCampo("precio", e.target.value)} style={errores.precio ? inputErrorStyle : inputStyle} />
                   )}
                 </div>
@@ -3571,7 +3729,7 @@ function POS() {
                       Este producto no descontará inventario al venderse.
                     </div>
                   )}
-                  {formProductType !== "pizza" && (form.inventoryTrackingEnabled || formRequiresRecipe) && (
+                  {formProductType !== "pizza" && formProductType !== "configurable" && (form.inventoryTrackingEnabled || formRequiresRecipe) && (
                     <div style={formGridStyle}>
                       <select
                         value={form.recipeId}
@@ -3592,9 +3750,14 @@ function POS() {
                       </select>
                     </div>
                   )}
-                  {selectedRecipe && formProductType !== "pizza" && (form.inventoryTrackingEnabled || formRequiresRecipe) && (
+                  {selectedRecipe && formProductType !== "pizza" && formProductType !== "configurable" && (form.inventoryTrackingEnabled || formRequiresRecipe) && (
                     <div className="pos-catalog-note">
                       Receta conectada: <strong>{selectedRecipe.name}</strong>. El costo operativo debe venir desde la receta estandarizada, no desde este formulario.
+                    </div>
+                  )}
+                  {formProductType === "configurable" && (
+                    <div className="pos-catalog-note">
+                      El precio de venta se calcula desde las opciones con precio base. La venta en mesero llegará en la Fase 2.
                     </div>
                   )}
                   {formProductType === "pizza" && (form.inventoryTrackingEnabled || formRequiresRecipe) && (
@@ -3602,6 +3765,64 @@ function POS() {
                       Con control de inventario activo, configura la receta de cada tamaño activo en la sección de pizza.
                     </div>
                   )}
+                </section>
+              )}
+
+              {formProductType === "configurable" && (
+                <section className="pos-catalog-section">
+                  <div className="pos-catalog-section-head">
+                    <strong>4. Configuración de venta</strong>
+                    <small>Grupos de opciones que el mesero elegirá al agregar el producto.</small>
+                  </div>
+                  {errores.optionGroups && <div style={errorBoxStyle}>{errores.optionGroups}</div>}
+                  <div style={buttonRowStyle}>
+                    <button type="button" onClick={agregarGrupoOpcion} style={secondaryButtonStyle}>+ Nuevo grupo</button>
+                    <button type="button" onClick={cargarPresetAlitas} style={secondaryButtonStyle}>Cargar ejemplo Alitas</button>
+                  </div>
+                  <div className="pos-configurable-groups">
+                    {(form.optionGroups || []).map((group, groupIndex) => (
+                      <article key={`option-group-${groupIndex}`} className={`pos-configurable-group ${group.isActive !== false ? "active" : ""}`}>
+                        <div className="pos-configurable-group-head">
+                          <label className="pos-inline-toggle">
+                            <input type="checkbox" checked={group.isActive !== false} onChange={(event) => actualizarGrupoOpcion(groupIndex, "isActive", event.target.checked)} />
+                            <span><strong>Grupo activo</strong></span>
+                          </label>
+                          <button type="button" onClick={() => eliminarGrupoOpcion(groupIndex)} style={dangerMiniButtonStyle}>Eliminar grupo</button>
+                        </div>
+                        <div style={formGridStyle}>
+                          <input placeholder="Nombre del grupo (ej. Presentación)" value={group.name || ""} onChange={(event) => actualizarGrupoOpcion(groupIndex, "name", event.target.value)} style={inputStyle} />
+                          <label className="pos-inline-toggle">
+                            <input type="checkbox" checked={group.required === true} onChange={(event) => actualizarGrupoOpcion(groupIndex, "required", event.target.checked)} />
+                            <span><strong>Obligatorio</strong></span>
+                          </label>
+                          <select value={group.selectionMode || "single"} onChange={(event) => actualizarGrupoOpcion(groupIndex, "selectionMode", event.target.value)} style={inputStyle}>
+                            {OPTION_SELECTION_MODES.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+                          </select>
+                        </div>
+                        <div className="pos-configurable-choices">
+                          <strong>Opciones</strong>
+                          {(group.choices || []).map((choice, choiceIndex) => (
+                            <div key={`choice-${groupIndex}-${choiceIndex}`} className="pos-configurable-choice-row">
+                              <label className="pos-inline-toggle">
+                                <input type="checkbox" checked={choice.isActive !== false} onChange={(event) => actualizarOpcionConfigurables(groupIndex, choiceIndex, "isActive", event.target.checked)} />
+                                <span>Activa</span>
+                              </label>
+                              <input placeholder="Nombre (ej. 10 unidades)" value={choice.name || ""} onChange={(event) => actualizarOpcionConfigurables(groupIndex, choiceIndex, "name", event.target.value)} style={inputStyle} />
+                              <select value={choice.priceMode || "none"} onChange={(event) => actualizarOpcionConfigurables(groupIndex, choiceIndex, "priceMode", event.target.value)} style={inputStyle}>
+                                {OPTION_PRICE_MODES.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+                              </select>
+                              <input type="number" min="0" step="0.01" placeholder="Precio" value={choice.price ?? ""} onChange={(event) => actualizarOpcionConfigurables(groupIndex, choiceIndex, "price", event.target.value)} style={inputStyle} disabled={(choice.priceMode || "none") === "none"} />
+                              <button type="button" onClick={() => eliminarOpcionConfigurable(groupIndex, choiceIndex)} style={dangerMiniButtonStyle}>Quitar</button>
+                            </div>
+                          ))}
+                          <button type="button" onClick={() => agregarOpcionConfigurable(groupIndex)} style={secondaryButtonStyle}>+ Opción</button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                  <div className="pos-catalog-note">
+                    Ejemplo: <strong>{form.nombre || "Alitas"}</strong> con grupos Presentación (10 u Q90 / 20 u Q160) y Salsa (BBQ / Buffalo).
+                  </div>
                 </section>
               )}
 
@@ -3683,6 +3904,8 @@ function POS() {
                   <strong>
                     {formProductType === "pizza"
                       ? "6. Imagen y validación"
+                      : formProductType === "configurable"
+                        ? "5. Imagen y validación"
                       : formProductType === "manual_test" || form.isTestItem
                         ? "3. Imagen y validación"
                         : "4. Imagen y validación"}
@@ -3700,6 +3923,8 @@ function POS() {
                   )}
                   {formProductType === "pizza"
                     ? <span style={activeFormVariants.length > 0 ? availableStyle : unavailableStyle}>{activeFormVariants.length > 0 ? `✓ ${activeFormVariants.length} tamaños activos configurados` : "✗ Sin tamaños activos"}</span>
+                    : formProductType === "configurable"
+                      ? <span style={activeFormOptionGroups.length > 0 && configurableFormValid ? availableStyle : unavailableStyle}>{activeFormOptionGroups.length > 0 && configurableFormValid ? `✓ ${activeFormOptionGroups.length} grupos configurados` : "✗ Configuración de opciones incompleta"}</span>
                     : form.isTestItem || formProductType === "manual_test"
                       ? <span className="pos-test-badge">🧪 PRUEBA · sin receta ni consumo</span>
                       : formRequiresRecipe

@@ -70,6 +70,12 @@ export function getCatalogProductionBadgeLines(state) {
       ok: count > 0,
       label: count > 0 ? `✓ ${count} tamaños activos` : "✗ Sin tamaños activos"
     }
+  } else if (productType === "configurable") {
+    const count = state?.optionGroups?.length || 0
+    recipeLine = {
+      ok: count > 0,
+      label: count > 0 ? `✓ ${count} grupos activos` : "✗ Sin grupos de opciones"
+    }
   } else if (saleWithoutInventory && !state?.recipe) {
     recipeLine = { ok: true, label: "✓ Receta no requerida" }
   } else if (state?.recipe) {
@@ -165,12 +171,15 @@ export function getProductSaleState(product, productionState, deductionMode) {
   if (!hasCategory) blockers.push("Sin categoría activa")
   if (!hasArea) blockers.push("Sin destino KDS")
 
-  if (strict || recipeRequired) {
+  const productType = productionState?.productType || product?.productType || product?.product_type || "simple"
+
+  if (productType === "configurable") {
+    blockers.push("Venta configurable disponible en la siguiente fase del POS")
+  } else if (strict || recipeRequired) {
     if (!productionState?.productionReady) {
       blockers.push(...(productionState?.issues || ["No validado para producción"]))
     }
   } else if (!testItem) {
-    const productType = productionState?.productType || "simple"
     if (productType === "pizza" && !(productionState?.variants?.length > 0)) {
       blockers.push("Sin tamaños activos")
     }
@@ -184,6 +193,7 @@ export function getProductSaleState(product, productionState, deductionMode) {
     ...productionState,
     saleAllowed,
     inventoryWillDeduct,
+    issues: blockers.length ? [...(productionState?.issues || []), ...blockers] : (productionState?.issues || []),
     skipInventoryWarning: saleAllowed
       ? getInventorySkipWarning(product, deductionMode)
       : "",
