@@ -13,16 +13,14 @@ import {
   BILLING_CONNECTION_STATUS,
   BILLING_ENVIRONMENTS,
   BILLING_PROVIDER_CODES,
-  FELPLEX_GT_DEFAULT_BASE_URLS
+  FELPLEX_GT_DEFAULT_BASE_URLS,
+  FELPLEX_GT_SECRET_ENV_VARS
 } from "../../utils/billingConstants"
 import { canManageBillingSettings } from "../../utils/billingPermissions"
 import "../inventory/MigrationModeBanner.css"
 import "./BillingSettingsPanel.css"
 
-const VAULT_SECRET_BY_ENV = {
-  [BILLING_ENVIRONMENTS.STAGE]: "billing_felplex_gt_stage",
-  [BILLING_ENVIRONMENTS.PRODUCTION]: "billing_felplex_gt_production"
-}
+const SECRET_ENV_VAR_BY_ENV = FELPLEX_GT_SECRET_ENV_VARS
 
 function connectionLabel(status) {
   if (status === BILLING_CONNECTION_STATUS.HEALTHY) return "Conectado"
@@ -106,7 +104,7 @@ export default function BillingSettingsPanel() {
       provider_code: BILLING_PROVIDER_CODES.FELPLEX_GT,
       environment,
       entity_id: entityId.trim(),
-      vault_secret_name: VAULT_SECRET_BY_ENV[environment],
+      secret_env_var: SECRET_ENV_VAR_BY_ENV[environment],
       base_url: FELPLEX_GT_DEFAULT_BASE_URLS[environment],
       is_default: true,
       is_active: true,

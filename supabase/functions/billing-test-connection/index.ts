@@ -78,7 +78,7 @@ Deno.serve(async (req) => {
   const config = configJson as ProviderConfigRow
 
   try {
-    const billing = await BillingService.fromProviderConfig(serviceClient, config)
+    const billing = BillingService.fromProviderConfig(serviceClient, config)
     const result = await billing.testConnection(config, authData.user.id)
 
     if (!result.ok) {

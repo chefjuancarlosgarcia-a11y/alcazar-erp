@@ -101,7 +101,7 @@ export interface ProviderConfigRow {
   provider_code: string
   environment: string
   entity_id: string
-  vault_secret_name: string
+  secret_env_var: string
   base_url: string | null
   adapter_version: string
   adapter_key: string

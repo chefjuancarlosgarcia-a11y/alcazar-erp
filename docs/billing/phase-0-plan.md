@@ -11,7 +11,7 @@
 | Dominio | Completamente agnóstico del certificador (`CanonicalInvoice`, campos de certificación genéricos) |
 | Proveedor | Campos aislados: `provider_reference_id`, `provider_document_type`, `provider_response` |
 | Multiempresa | `billing_legal_entities` desde Fase 0; FK en configs y documents |
-| Credenciales | Supabase Vault únicamente — nunca API Keys en tablas ni env públicos |
+| Credenciales | Edge Function Secrets (`FELPLEX_GT_*_API_KEY`) — nunca API Keys en tablas ni env públicos |
 | Emisión | Deshabilitada en Fase 0 (`emission_enabled` bloqueado) |
 | Regresión | Cero cambios en POS, Caja, Inventario, Catering, Reportes, Producción |
 
@@ -82,7 +82,7 @@ Antes de cada commit: **auditoría de impacto** — verificar que ningún módul
 - `frontend/src/pages/Settings.jsx` — tab Facturación electrónica (único archivo existente tocado)
 
 ### Docs
-- `docs/billing/vault-setup.md`
+- `docs/billing/edge-secrets-setup.md`
 
 ### Ajustes aprobados reflejados
 
@@ -96,9 +96,9 @@ Antes de cada commit: **auditoría de impacto** — verificar que ningún módul
 | Panel admin | Estado, última prueba, créditos, pendientes/fallidos |
 | Cero regresión | Sin cambios POS/Caja/Inventario/Catering/Reportes/Producción |
 
-1. Migración 159 + rollback en repo
-2. Vault: `billing_felplex_gt_stage`
+1. Migración 159 + 160 en Supabase stage
+2. Edge Function Secret: `FELPLEX_GT_STAGE_API_KEY`
 3. Seed config provider (entity_id manual)
-4. Deploy Edge Function
+4. Deploy Edge Function `billing-test-connection`
 5. Panel Settings → Probar conexión
 6. Regresión operativa

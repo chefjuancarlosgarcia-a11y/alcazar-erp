@@ -1,4 +1,5 @@
 import { createFelplexGuatemalaAdapter } from "./FelplexGuatemalaAdapter.ts"
+import { resolveBillingApiKey } from "./secrets.ts"
 import type { CertificationProvider, ProviderFactory } from "./CertificationProvider.ts"
 import type { ProviderConfigRow, RecordAttemptPayload, TestConnectionResult } from "./types.ts"
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2"
@@ -13,22 +14,12 @@ export class BillingService {
     private readonly apiKey: string
   ) {}
 
-  static async fromProviderConfig(
+  static fromProviderConfig(
     supabase: SupabaseClient,
     config: ProviderConfigRow
-  ): Promise<BillingService> {
-    const { data: secret, error } = await supabase.rpc("get_billing_vault_secret", {
-      p_secret_name: config.vault_secret_name
-    })
-
-    if (error) {
-      throw new Error(error.message || "No se pudo leer el secreto del certificador.")
-    }
-    if (!secret) {
-      throw new Error(`Secreto Vault vacio: ${config.vault_secret_name}`)
-    }
-
-    return new BillingService(supabase, secret)
+  ): BillingService {
+    const apiKey = resolveBillingApiKey(config)
+    return new BillingService(supabase, apiKey)
   }
 
   resolveProvider(config: ProviderConfigRow): CertificationProvider {

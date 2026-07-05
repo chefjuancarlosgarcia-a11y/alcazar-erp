@@ -26,7 +26,7 @@ export class FelplexGuatemalaAdapter implements CertificationProvider {
       throw new BillingError("entity_id de FELplex no configurado.", "BILLING_CONFIG")
     }
     if (!this.apiKey) {
-      throw new BillingError("API Key no disponible en Vault.", "BILLING_SECRET")
+      throw new BillingError("API Key no disponible en Edge Function Secrets.", "BILLING_SECRET")
     }
   }
 

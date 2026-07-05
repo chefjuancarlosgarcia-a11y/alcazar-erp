@@ -1,5 +1,5 @@
 export const BILLING_MIGRATION_HINT =
-  "Aplica la migracion 159_billing_foundation.sql en Supabase."
+  "Aplica las migraciones 159_billing_foundation.sql y 160_billing_edge_secrets.sql en Supabase."
 
 export const BILLING_PROVIDER_CODES = {
   FELPLEX_GT: "felplex_gt"
@@ -45,4 +45,9 @@ export const DEFAULT_BILLING_SETTINGS = {
 export const FELPLEX_GT_DEFAULT_BASE_URLS = {
   stage: "https://felplex.stage.plex.lat",
   production: "https://app.felplex.com"
+}
+
+export const FELPLEX_GT_SECRET_ENV_VARS = {
+  [BILLING_ENVIRONMENTS.STAGE]: "FELPLEX_GT_STAGE_API_KEY",
+  [BILLING_ENVIRONMENTS.PRODUCTION]: "FELPLEX_GT_PRODUCTION_API_KEY"
 }
