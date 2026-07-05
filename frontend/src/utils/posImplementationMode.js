@@ -29,6 +29,79 @@ export function productHasInventoryTracking(product) {
     || product?.inventory_tracking_enabled === true
 }
 
+export function productRequiresRecipeForSale(product) {
+  return product?.recipeRequiredForSale === true
+    || product?.recipe_required_for_sale === true
+}
+
+/** Producto activo vendible sin descarga de inventario (modo implementación). */
+export function isCatalogSaleWithoutInventory(state) {
+  return Boolean(
+    state?.active
+    && state?.saleAllowed
+    && !state?.inventoryTrackingEnabled
+    && !state?.inventoryWillDeduct
+    && !state?.testItem
+  )
+}
+
+/** Líneas de checklist para cards del catálogo POS (solo UI). */
+export function getCatalogProductionBadgeLines(state) {
+  if (state?.testItem) {
+    return [
+      {
+        ok: Boolean(state.area),
+        label: state.area ? "✓ Destino KDS configurado" : "✗ Sin destino KDS"
+      },
+      {
+        ok: Boolean(state.productionReady),
+        label: state.productionReady ? "✓ Envío KDS sin consumo" : "✗ Pendiente validación KDS"
+      }
+    ]
+  }
+
+  const saleWithoutInventory = isCatalogSaleWithoutInventory(state)
+  const productType = state?.productType || "simple"
+
+  let recipeLine
+  if (productType === "pizza") {
+    const count = state?.variants?.length || 0
+    recipeLine = {
+      ok: count > 0,
+      label: count > 0 ? `✓ ${count} tamaños activos` : "✗ Sin tamaños activos"
+    }
+  } else if (saleWithoutInventory && !state?.recipe) {
+    recipeLine = { ok: true, label: "✓ Receta no requerida" }
+  } else if (state?.recipe) {
+    recipeLine = { ok: true, label: "✓ Receta conectada" }
+  } else {
+    recipeLine = { ok: false, label: "✗ Sin receta" }
+  }
+
+  const areaLine = {
+    ok: Boolean(state?.area),
+    label: state?.area ? "✓ Área producción configurada" : "✗ Sin área"
+  }
+
+  let statusLine
+  if (saleWithoutInventory) {
+    statusLine = {
+      ok: Boolean(state?.saleAllowed && state?.area && state?.category),
+      label: state?.saleAllowed && state?.area && state?.category
+        ? "✓ Listo para venta sin inventario"
+        : "✗ Pendiente configuración KDS"
+    }
+  } else if (state?.productionReady) {
+    statusLine = { ok: true, label: "✓ Listo para producción" }
+  } else if (state?.saleAllowed && !state?.inventoryWillDeduct) {
+    statusLine = { ok: true, label: "✓ Listo para venta sin inventario" }
+  } else {
+    statusLine = { ok: false, label: "✗ Pendiente validación" }
+  }
+
+  return [recipeLine, areaLine, statusLine]
+}
+
 export function willSkipInventoryDeduction(product, deductionMode, migrationModeEnabled = false) {
   if (migrationModeEnabled && deductionMode === INVENTORY_DEDUCTION_MODES.ACTIVE_RECIPES_ONLY) {
     return true

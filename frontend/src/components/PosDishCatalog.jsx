@@ -1,27 +1,19 @@
 import { useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { catalogStatusLabel, matchesCatalogFilters } from "../utils/posCatalogFilters"
+import { getCatalogProductionBadgeLines } from "../utils/posImplementationMode"
 import PosProductImplementationBadges from "./PosProductImplementationBadges"
 
 const readyBadgeStyle = { padding: "5px 8px", borderRadius: "999px", background: "var(--erp-success-soft)", color: "var(--erp-success)", fontSize: ".76rem", fontWeight: 800 }
 const invalidBadgeStyle = { padding: "5px 8px", borderRadius: "999px", background: "color-mix(in srgb, var(--erp-danger) 18%, #1a0f12)", color: "#fecaca", border: "1px solid color-mix(in srgb, var(--erp-danger) 55%, #334155)", fontSize: ".76rem", fontWeight: 800 }
 
 function ProductionBadges({ state }) {
-  if (state.testItem) {
-    return (
-      <div className="pos-readiness-badges">
-        <span style={state.area ? readyBadgeStyle : invalidBadgeStyle}>{state.area ? "✓ Destino KDS configurado" : "✗ Sin destino KDS"}</span>
-        <span style={state.productionReady ? readyBadgeStyle : invalidBadgeStyle}>{state.productionReady ? "✓ Envío KDS sin consumo" : "✗ Pendiente validación KDS"}</span>
-      </div>
-    )
-  }
+  const lines = getCatalogProductionBadgeLines(state)
   return (
     <div className="pos-readiness-badges">
-      <span style={state.productType === "pizza" ? (state.variants?.length ? readyBadgeStyle : invalidBadgeStyle) : (state.recipe ? readyBadgeStyle : invalidBadgeStyle)}>
-        {state.productType === "pizza" ? (state.variants?.length ? `✓ ${state.variants.length} tamaños activos` : "✗ Sin tamaños activos") : (state.recipe ? "✓ Receta conectada" : "✗ Sin receta")}
-      </span>
-      <span style={state.area ? readyBadgeStyle : invalidBadgeStyle}>{state.area ? "✓ Área producción configurada" : "✗ Sin área"}</span>
-      <span style={state.productionReady ? readyBadgeStyle : invalidBadgeStyle}>{state.productionReady ? "✓ Listo para producción" : "✗ Pendiente validación"}</span>
+      {lines.map((line) => (
+        <span key={line.label} style={line.ok ? readyBadgeStyle : invalidBadgeStyle}>{line.label}</span>
+      ))}
     </div>
   )
 }

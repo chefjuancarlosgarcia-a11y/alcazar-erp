@@ -8,7 +8,10 @@ import { ToastContainer } from "../components/ToastContainer"
 import { useInventoryDeductionMode } from "../context/InventoryMigrationModeProvider"
 import {
   getProductSaleState,
-  getInventorySkipWarning
+  getInventorySkipWarning,
+  isCatalogSaleWithoutInventory,
+  productHasInventoryTracking,
+  productRequiresRecipeForSale
 } from "../utils/posImplementationMode"
 import { createStockRequisition } from "../utils/posProduction"
 import { createPreBillFromPOSOrder, createSplitBill, printPreBill as markPreBillPrinted, sendPreBillToCashier } from "../utils/cashier"
@@ -328,6 +331,17 @@ function isTestProduct(product) {
   return product?.isTestItem === true || product?.is_test_item === true
 }
 
+function formInventoryTrackingEnabled(form) {
+  return form?.inventoryTrackingEnabled === true
+}
+
+function formRequiresRecipeConnection(form, deductionMode) {
+  if (form?.estado !== "activo") return false
+  const productType = form?.productType || "simple"
+  if (isTestProduct(form) || productType === "manual_test") return false
+  return deductionMode === "strict" || formInventoryTrackingEnabled(form)
+}
+
 function getProductProductionState(product, recipes, areas, categories) {
   const recipeId = productRecipeId(product)
   const areaId = productProductionAreaId(product)
@@ -340,13 +354,19 @@ function getProductProductionState(product, recipes, areas, categories) {
   const active = product?.estado === "activo" || product?.active === true
   const testItem = isTestProduct(product)
   const activeVariants = getActiveProductVariants(product)
+  const tracksInventory = productHasInventoryTracking(product)
+  const recipeRequired = productRequiresRecipeForSale(product)
+  const needsRecipe = tracksInventory || recipeRequired
   const issues = []
-  if (!testItem && productType !== "pizza" && !recipe) issues.push("Sin receta válida")
+  if (!testItem && productType !== "pizza" && !recipe && needsRecipe) issues.push("Sin receta válida")
   if (productType === "pizza" && activeVariants.length === 0) issues.push("Sin tamaños activos")
-  if (productType === "pizza" && activeVariants.some((variant) => !variant.recipeId || Number(variant.price || 0) <= 0)) issues.push("Variantes incompletas")
+  if (productType === "pizza" && activeVariants.some((variant) => {
+    if (Number(variant.price || 0) <= 0) return true
+    return needsRecipe && !variant.recipeId
+  })) issues.push("Variantes incompletas")
   if (!area) issues.push("Sin área válida")
   if (!category) issues.push("Sin categoría activa")
-  if (active && product?.productionReady !== true) issues.push("No validado para producción")
+  if (active && product?.productionReady !== true && needsRecipe) issues.push("No validado para producción")
   return {
     active,
     productType,
@@ -408,6 +428,7 @@ const emptyItemForm = {
   areaProduccion: "cocina",
   tiempoPreparacion: "",
   recipeId: "",
+  inventoryTrackingEnabled: false,
   isTestItem: false,
   allowKitchenNotes: false,
   modifierNotesPlaceholder: "Ej. sin cebolla, bien tostada, cortar en 8.",
@@ -859,6 +880,7 @@ function POS() {
   const selectedRecipe = finalRecipes.find((recipe) => String(recipe.id) === String(productRecipeId(form)))
   const selectedProductionArea = productionAreas.find((area) => area.id === productProductionAreaId(form))
   const activeFormVariants = (form.variants || []).filter((variant) => variant.isActive === true)
+  const formRequiresRecipe = formRequiresRecipeConnection(form, deductionMode)
   const formReadyForValidation = Boolean(
     form.estado !== "activo"
       || (
@@ -868,8 +890,12 @@ function POS() {
           || formProductType === "manual_test"
           || (
             formProductType === "pizza"
-              ? activeFormVariants.length > 0 && activeFormVariants.every((variant) => Number(variant.price || 0) > 0 && (deductionMode === "strict" ? variant.recipeId : true))
-              : (deductionMode !== "strict" || selectedRecipe)
+              ? activeFormVariants.length > 0 && activeFormVariants.every((variant) => (
+                Number(variant.price || 0) > 0
+                && variant.prepTimeMinutes
+                && (!formRequiresRecipe || variant.recipeId)
+              ))
+              : (!formRequiresRecipe || selectedRecipe)
           )
         )
       )
@@ -2104,6 +2130,24 @@ function POS() {
     })
   }
 
+  function actualizarControlInventario(enabled) {
+    setForm((actual) => ({
+      ...actual,
+      inventoryTrackingEnabled: enabled,
+      recipeId: enabled ? actual.recipeId : "",
+      variants: enabled
+        ? actual.variants
+        : (actual.variants || []).map((variant) => ({ ...variant, recipeId: "" }))
+    }))
+    setErrores((actual) => {
+      const next = { ...actual }
+      delete next.recipeId
+      delete next.variants
+      delete next.areaProduccion
+      return next
+    })
+  }
+
   function actualizarTipoProducto(productType) {
     const selectedCategory = posCategories.find((category) => category.id === form.categoriaId)
     const fallbackArea = selectedCategory?.productionAreaId || form.areaProduccion || "cocina"
@@ -2111,6 +2155,7 @@ function POS() {
       ...actual,
       productType,
       isTestItem: productType === "manual_test",
+      inventoryTrackingEnabled: productType === "manual_test" ? false : actual.inventoryTrackingEnabled,
       recipeId: productType === "pizza" || productType === "manual_test" ? "" : actual.recipeId,
       precio: productType === "pizza" ? "" : actual.precio,
       modifiers: productType === "pizza" ? (actual.modifiers?.length ? actual.modifiers : createDefaultModifiers()) : (actual.modifiers || []),
@@ -2207,19 +2252,26 @@ function POS() {
     if (!form.estado) faltantes.estado = "Estado"
     if (!productionAreaId || (form.estado === "activo" && !productionAreas.some((area) => area.id === productionAreaId))) faltantes.areaProduccion = "Área de producción válida"
     if (!form.tiempoPreparacion.trim()) faltantes.tiempoPreparacion = "Tiempo estimado de preparación"
-    if (!form.isTestItem && productType !== "manual_test" && productType !== "pizza" && form.estado === "activo" && !finalRecipes.some((recipe) => String(recipe.id) === String(recipeId))) {
+    const requiresRecipe = formRequiresRecipeConnection(form, deductionMode)
+    if (requiresRecipe && productType !== "pizza" && !finalRecipes.some((recipe) => String(recipe.id) === String(recipeId))) {
       faltantes.recipeId = "Receta final activa válida"
     }
     const recipe = finalRecipes.find((entry) => String(entry.id) === String(recipeId))
-    if (!form.isTestItem && productType !== "manual_test" && productType !== "pizza" && form.estado === "activo" && recipe && recipe.production_area_id !== productionAreaId) {
+    if (requiresRecipe && productType !== "pizza" && recipe && recipe.production_area_id !== productionAreaId) {
       faltantes.areaProduccion = "Área que coincida con la receta"
     }
     if (productType === "pizza" && form.estado === "activo") {
       if (activeVariants.length === 0) {
         faltantes.variants = "Activa al menos un tamaño"
-      } else if (activeVariants.some((variant) => !variant.recipeId || Number(variant.price || 0) <= 0 || !variant.prepTimeMinutes)) {
-        faltantes.variants = "Completa precio, receta y tiempo en cada tamaño activo"
-      } else if (activeVariants.some((variant) => {
+      } else if (activeVariants.some((variant) => (
+        Number(variant.price || 0) <= 0
+        || !variant.prepTimeMinutes
+        || (requiresRecipe && !variant.recipeId)
+      ))) {
+        faltantes.variants = requiresRecipe
+          ? "Completa precio, receta y tiempo en cada tamaño activo"
+          : "Completa precio y tiempo en cada tamaño activo"
+      } else if (requiresRecipe && activeVariants.some((variant) => {
         const variantRecipe = finalRecipes.find((entry) => String(entry.id) === String(variant.recipeId))
         return variantRecipe && variantRecipe.production_area_id !== productionAreaId
       })) {
@@ -2235,7 +2287,10 @@ function POS() {
     setErrores(faltantes)
     if (Object.keys(faltantes).length > 0) return
 
-    const recipeId = productRecipeId(form)
+    const requiresRecipe = formRequiresRecipeConnection(form, deductionMode)
+    const tracksInventory = formInventoryTrackingEnabled(form)
+    const rawRecipeId = productRecipeId(form)
+    const recipeId = requiresRecipe || tracksInventory ? rawRecipeId : ""
     const productionAreaId = productProductionAreaId(form)
     const categoryId = productCategoryId(form)
     const productType = form.productType || "simple"
@@ -2251,6 +2306,10 @@ function POS() {
       price: Number(form.precio || 0),
       recipeId,
       recipe_id: recipeId,
+      inventoryTrackingEnabled: tracksInventory,
+      inventory_tracking_enabled: tracksInventory,
+      recipeRequiredForSale: tracksInventory,
+      recipe_required_for_sale: tracksInventory,
       productionAreaId,
       production_area_id: productionAreaId,
       areaProduccion: productionAreaId,
@@ -2270,7 +2329,7 @@ function POS() {
       ? (form.variants || []).map((variant, index) => ({
           ...variant,
           name: form.nombre,
-          recipeId: variant.recipeId || "",
+          recipeId: requiresRecipe || tracksInventory ? (variant.recipeId || "") : "",
           prepTimeMinutes: Number(variant.prepTimeMinutes || 0),
           price: Number(variant.price || 0),
           productionAreaId,
@@ -2324,7 +2383,9 @@ function POS() {
         ? "Platillo de prueba guardado. Se enviará a KDS sin consumir inventario."
         : savedState.inventoryWillDeduct
           ? "Platillo guardado y validado para producción con descarga de inventario."
-          : "Platillo guardado. Disponible para venta; inventario se activará cuando complete receta y control.")
+          : tracksInventory
+            ? "Platillo guardado. Disponible para venta; conecta una receta activa para habilitar la descarga de inventario."
+            : "Platillo guardado. Este producto no descontará inventario al venderse.")
     } else {
       const needsRecipe = savedState.issues.some((issue) => /receta|tamaño|variante/i.test(issue))
       setPostSaveHint({
@@ -2353,6 +2414,7 @@ function POS() {
       productionAreaId,
       production_area_id: productionAreaId,
       isTestItem: isTestProduct(item),
+      inventoryTrackingEnabled: item.inventoryTrackingEnabled === true || item.inventory_tracking_enabled === true,
       productType,
       allowKitchenNotes: item.allowKitchenNotes === true || item.allow_kitchen_notes === true,
       modifierNotesPlaceholder: item.modifierNotesPlaceholder || emptyItemForm.modifierNotesPlaceholder,
@@ -2889,16 +2951,20 @@ function POS() {
     const [productResult, linkResult] = await Promise.all([getPOSProductById(item.id), getPOSRecipeLink(item.id)])
     const officialProduct = productResult.data || item
     const localState = getProductProductionState(officialProduct, finalRecipes, productionAreas, activeCategories)
+    const saleState = getProductSaleState(officialProduct, localState, deductionMode)
+    const saleWithoutInventory = isCatalogSaleWithoutInventory(saleState)
     const officialRecipe = officialProduct.recipe || localState.recipe
-    const valid = Boolean(
-      localState.active &&
-      officialProduct.productionReady &&
-      officialRecipe?.active &&
-      String(officialRecipe?.id) === String(localState.recipeId) &&
-      officialRecipe?.production_area_id === localState.areaId &&
-      localState.area &&
-      localState.category
-    )
+    const valid = saleWithoutInventory
+      ? Boolean(saleState.active && saleState.area && saleState.category && saleState.saleAllowed)
+      : Boolean(
+        localState.active &&
+        officialProduct.productionReady &&
+        officialRecipe?.active &&
+        String(officialRecipe?.id) === String(localState.recipeId) &&
+        officialRecipe?.production_area_id === localState.areaId &&
+        localState.area &&
+        localState.category
+      )
     const result = {
       productId: officialProduct.id,
       productName: officialProduct.nombre,
@@ -2906,11 +2972,14 @@ function POS() {
       recipeId: productRecipeId(officialProduct) || "Sin receta",
       productionAreaId: productProductionAreaId(officialProduct) || "Sin área",
       posRecipeLink: linkResult.data ? `Encontrado (${linkResult.data.id})` : "No encontrado",
-      recipe: officialRecipe?.name || "No encontrada",
+      recipe: saleWithoutInventory && !officialRecipe
+        ? "No requerida (venta sin inventario)"
+        : (officialRecipe?.name || "No encontrada"),
       category: localState.category?.name || "No encontrada",
       area: localState.area?.name || "No encontrada",
       error: productResult.error?.message || linkResult.error?.message || "",
-      issues: localState.issues,
+      issues: saleWithoutInventory ? [] : localState.issues,
+      saleWithoutInventory,
       valid
     }
     posDebug("diagnóstico producto POS", result)
@@ -3405,6 +3474,11 @@ function POS() {
                 <div style={buttonRowStyle}>
                   <span className="pos-test-badge">{formatProductTypeLabel(formProductType)}</span>
                   {formProductType === "manual_test" && <span className="pos-test-badge">🧪 Sin receta ni consumo</span>}
+                  {formProductType !== "manual_test" && !form.isTestItem && (
+                    <span className={`pos-inventory-status-badge ${form.inventoryTrackingEnabled ? "is-active" : "is-inactive"}`}>
+                      {form.inventoryTrackingEnabled ? "✅ Controla inventario" : "⚪ No controla inventario"}
+                    </span>
+                  )}
                 </div>
               </div>
               {Object.keys(errores).length > 0 && (
@@ -3436,38 +3510,13 @@ function POS() {
                   )}
                 </div>
                 <textarea placeholder="Descripción para POS / KDS" value={form.descripcion} onChange={(e) => actualizarCampo("descripcion", e.target.value)} style={errores.descripcion ? textAreaErrorStyle : textAreaStyle} />
-                <div style={formGridStyle}>
-                  <select
-                    value={form.recipeId}
-                    disabled={formProductType === "pizza" || formProductType === "manual_test"}
-                    onChange={(e) => {
-                      const recipe = finalRecipes.find((entry) => String(entry.id) === e.target.value)
-                      setForm((actual) => ({ ...actual, recipeId: e.target.value, areaProduccion: recipe?.production_area_id || actual.areaProduccion }))
-                      setErrores((actual) => {
-                        const next = { ...actual }
-                        delete next.recipeId
-                        delete next.areaProduccion
-                        return next
-                      })
-                    }}
-                    style={errores.recipeId ? inputErrorStyle : inputStyle}
-                  >
-                    <option value="">{formProductType === "pizza" ? "La pizza usa recetas por tamaño" : formProductType === "manual_test" ? "No requiere receta estandarizada" : "Receta estandarizada conectada"}</option>
-                    {finalRecipes.map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.name}</option>)}
-                  </select>
-                  <label className="pos-inline-toggle">
-                    <input type="checkbox" checked={form.allowKitchenNotes === true} onChange={(event) => actualizarCampo("allowKitchenNotes", event.target.checked)} />
-                    <span>
-                      <strong>Permitir observaciones de cocina</strong>
-                      <small>Ej. bien tostada, cortar en 8, salsa aparte.</small>
-                    </span>
-                  </label>
-                </div>
-                {selectedRecipe && formProductType !== "pizza" && (
-                  <div className="pos-catalog-note">
-                    Receta conectada: <strong>{selectedRecipe.name}</strong>. El costo operativo debe venir desde la receta estandarizada, no desde este formulario.
-                  </div>
-                )}
+                <label className="pos-inline-toggle">
+                  <input type="checkbox" checked={form.allowKitchenNotes === true} onChange={(event) => actualizarCampo("allowKitchenNotes", event.target.checked)} />
+                  <span>
+                    <strong>Permitir observaciones de cocina</strong>
+                    <small>Ej. bien tostada, cortar en 8, salsa aparte.</small>
+                  </span>
+                </label>
               </section>
 
               <section className="pos-catalog-section">
@@ -3490,11 +3539,77 @@ function POS() {
                 </div>
               </section>
 
+              {formProductType !== "manual_test" && !form.isTestItem && (
+                <section className={`pos-catalog-section pos-inventory-control-section ${form.inventoryTrackingEnabled ? "is-tracking-on" : "is-tracking-off"}`}>
+                  <div className="pos-catalog-section-head">
+                    <strong>3. Control de inventario</strong>
+                    <span className={`pos-inventory-status-badge ${form.inventoryTrackingEnabled ? "is-active" : "is-inactive"}`}>
+                      {form.inventoryTrackingEnabled ? "✅ Controla inventario" : "⚪ No controla inventario"}
+                    </span>
+                  </div>
+                  <label className="pos-inline-toggle pos-inventory-control-toggle">
+                    <input
+                      type="checkbox"
+                      checked={form.inventoryTrackingEnabled === true}
+                      onChange={(event) => actualizarControlInventario(event.target.checked)}
+                    />
+                    <span>
+                      <strong>Controlar inventario mediante receta estandarizada</strong>
+                      <small>
+                        Si está activado, este producto descontará inventario usando una receta estandarizada.
+                        Si está desactivado, podrá venderse normalmente sin afectar existencias.
+                      </small>
+                    </span>
+                  </label>
+                  {deductionMode === "strict" && (
+                    <div className="pos-catalog-note">
+                      Modo estricto activo: la receta es obligatoria para productos activos, independientemente de este switch.
+                    </div>
+                  )}
+                  {!form.inventoryTrackingEnabled && !formRequiresRecipe && (
+                    <div className="pos-inventory-control-note">
+                      Este producto no descontará inventario al venderse.
+                    </div>
+                  )}
+                  {formProductType !== "pizza" && (form.inventoryTrackingEnabled || formRequiresRecipe) && (
+                    <div style={formGridStyle}>
+                      <select
+                        value={form.recipeId}
+                        onChange={(e) => {
+                          const recipe = finalRecipes.find((entry) => String(entry.id) === e.target.value)
+                          setForm((actual) => ({ ...actual, recipeId: e.target.value, areaProduccion: recipe?.production_area_id || actual.areaProduccion }))
+                          setErrores((actual) => {
+                            const next = { ...actual }
+                            delete next.recipeId
+                            delete next.areaProduccion
+                            return next
+                          })
+                        }}
+                        style={errores.recipeId ? inputErrorStyle : inputStyle}
+                      >
+                        <option value="">Receta estandarizada conectada</option>
+                        {finalRecipes.map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.name}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  {selectedRecipe && formProductType !== "pizza" && (form.inventoryTrackingEnabled || formRequiresRecipe) && (
+                    <div className="pos-catalog-note">
+                      Receta conectada: <strong>{selectedRecipe.name}</strong>. El costo operativo debe venir desde la receta estandarizada, no desde este formulario.
+                    </div>
+                  )}
+                  {formProductType === "pizza" && (form.inventoryTrackingEnabled || formRequiresRecipe) && (
+                    <div className="pos-catalog-note">
+                      Con control de inventario activo, configura la receta de cada tamaño activo en la sección de pizza.
+                    </div>
+                  )}
+                </section>
+              )}
+
               {formProductType === "pizza" && (
                 <>
                   <section className="pos-catalog-section">
                     <div className="pos-catalog-section-head">
-                      <strong>3. Configuración de pizza</strong>
+                      <strong>{formProductType !== "manual_test" && !form.isTestItem ? "4. Configuración de pizza" : "3. Configuración de pizza"}</strong>
                       <small>Un producto padre con tamaños, precios y recetas por tamaño.</small>
                     </div>
                     {errores.variants && <div style={errorBoxStyle}>{errores.variants}</div>}
@@ -3512,15 +3627,17 @@ function POS() {
                             <input type="number" min="0" step="0.01" placeholder="Precio de venta" value={variant.price} onChange={(event) => actualizarVariantePizza(variant.size, "price", event.target.value)} style={inputStyle} disabled={!variant.isActive} />
                             <input type="number" min="0" step="1" placeholder="Tiempo preparación (min)" value={variant.prepTimeMinutes} onChange={(event) => actualizarVariantePizza(variant.size, "prepTimeMinutes", event.target.value)} style={inputStyle} disabled={!variant.isActive} />
                           </div>
-                          <select
-                            value={variant.recipeId}
-                            onChange={(event) => actualizarVariantePizza(variant.size, "recipeId", event.target.value)}
-                            style={inputStyle}
-                            disabled={!variant.isActive}
-                          >
-                            <option value="">Receta conectada para {variant.label.toLowerCase()}</option>
-                            {finalRecipes.map((recipe) => <option key={`${variant.size}-${recipe.id}`} value={recipe.id}>{recipe.name}</option>)}
-                          </select>
+                          {(form.inventoryTrackingEnabled || formRequiresRecipe) && (
+                            <select
+                              value={variant.recipeId}
+                              onChange={(event) => actualizarVariantePizza(variant.size, "recipeId", event.target.value)}
+                              style={inputStyle}
+                              disabled={!variant.isActive}
+                            >
+                              <option value="">Receta conectada para {variant.label.toLowerCase()}</option>
+                              {finalRecipes.map((recipe) => <option key={`${variant.size}-${recipe.id}`} value={recipe.id}>{recipe.name}</option>)}
+                            </select>
+                          )}
                         </article>
                       ))}
                     </div>
@@ -3531,7 +3648,7 @@ function POS() {
 
                   <section className="pos-catalog-section">
                     <div className="pos-catalog-section-head">
-                      <strong>4. Modificadores para POS</strong>
+                      <strong>5. Modificadores para POS</strong>
                       <small>Define lo que el mesero puede quitar, agregar o anotar.</small>
                     </div>
                     <div style={buttonRowStyle}>
@@ -3563,20 +3680,36 @@ function POS() {
 
               <section className="pos-catalog-section">
                 <div className="pos-catalog-section-head">
-                  <strong>{formProductType === "pizza" ? "5. Imagen y validación" : "3. Imagen y validación"}</strong>
+                  <strong>
+                    {formProductType === "pizza"
+                      ? "6. Imagen y validación"
+                      : formProductType === "manual_test" || form.isTestItem
+                        ? "3. Imagen y validación"
+                        : "4. Imagen y validación"}
+                  </strong>
                   <small>Último repaso antes de guardar.</small>
                 </div>
                 <input type="file" accept="image/*" onChange={cargarImagen} style={inputStyle} />
                 {form.imagen ? <img src={form.imagen} alt={form.nombre || "Platillo"} style={previewStyle} /> : <div className="pos-dish-image-empty">{productInitials(form.nombre)}</div>}
                 <div style={readinessPanelStyle}>
                   <strong>Estado producción</strong>
+                  {formProductType !== "manual_test" && !form.isTestItem && (
+                    <span className={`pos-inventory-status-badge ${form.inventoryTrackingEnabled ? "is-active" : "is-inactive"}`}>
+                      {form.inventoryTrackingEnabled ? "✅ Controla inventario" : "⚪ No controla inventario"}
+                    </span>
+                  )}
                   {formProductType === "pizza"
                     ? <span style={activeFormVariants.length > 0 ? availableStyle : unavailableStyle}>{activeFormVariants.length > 0 ? `✓ ${activeFormVariants.length} tamaños activos configurados` : "✗ Sin tamaños activos"}</span>
-                    : form.isTestItem
+                    : form.isTestItem || formProductType === "manual_test"
                       ? <span className="pos-test-badge">🧪 PRUEBA · sin receta ni consumo</span>
-                      : <span style={selectedRecipe ? availableStyle : unavailableStyle}>{selectedRecipe ? `✓ Receta conectada: ${selectedRecipe.name}` : "✗ Sin receta válida"}</span>}
-                  <span style={selectedProductionArea ? availableStyle : unavailableStyle}>{selectedProductionArea ? `✓ ${form.isTestItem ? "Destino KDS" : "Área producción"}: ${selectedProductionArea.name}` : "✗ Sin área válida"}</span>
-                  <span style={formReadyForValidation ? availableStyle : unavailableStyle}>{formReadyForValidation ? "✓ Se validará vínculo Supabase al guardar" : "✗ Configuración incompleta"}</span>
+                      : formRequiresRecipe
+                        ? <span style={selectedRecipe ? availableStyle : unavailableStyle}>{selectedRecipe ? `✓ Receta conectada: ${selectedRecipe.name}` : "✗ Receta requerida"}</span>
+                        : <span style={availableStyle}>✓ Receta opcional (sin control de inventario)</span>}
+                  {!formRequiresRecipe && formProductType !== "manual_test" && !form.isTestItem && !form.inventoryTrackingEnabled && (
+                    <span style={availableStyle}>✓ No descontará inventario al venderse</span>
+                  )}
+                  <span style={selectedProductionArea ? availableStyle : unavailableStyle}>{selectedProductionArea ? `✓ ${form.isTestItem || formProductType === "manual_test" ? "Destino KDS" : "Área producción"}: ${selectedProductionArea.name}` : "✗ Sin área válida"}</span>
+                  <span style={formReadyForValidation ? availableStyle : unavailableStyle}>{formReadyForValidation ? "✓ Listo para guardar" : "✗ Configuración incompleta"}</span>
                 </div>
               </section>
 
@@ -4183,7 +4316,9 @@ function POS() {
         <div style={modalOverlayStyle}>
           <div style={modifierModalStyle}>
             <h2 style={{ marginTop: 0 }}>Diagnóstico producto POS</h2>
-            <p><strong>{productDiagnostic.productName}</strong> · {productDiagnostic.valid ? "Válido" : "Inválido"}</p>
+            <p><strong>{productDiagnostic.productName}</strong> · {productDiagnostic.valid
+              ? (productDiagnostic.saleWithoutInventory ? "Válido para venta sin inventario" : "Válido")
+              : "Inválido"}</p>
             <p>Fuente catálogo: <strong>{productDiagnostic.source}</strong></p>
             <p>productId: <strong>{String(productDiagnostic.productId)}</strong></p>
             <p>recipeId: <strong>{String(productDiagnostic.recipeId)}</strong></p>
@@ -4195,7 +4330,11 @@ function POS() {
             {productDiagnostic.error && <div style={errorBoxStyle}>{productDiagnostic.error}</div>}
             {!productDiagnostic.valid && !productDiagnostic.error && <div style={errorBoxStyle}>{productDiagnostic.issues.join(", ") || "El vínculo Supabase no coincide con el producto."}</div>}
             <div style={productDiagnostic.valid ? successInlineStyle : errorBoxStyle}>
-              Estado final: {productDiagnostic.valid ? "Válido y listo para producción" : "Inválido; no se enviará al KDS"}
+              Estado final: {productDiagnostic.valid
+                ? (productDiagnostic.saleWithoutInventory
+                  ? "Válido para venta sin inventario; se enviará a KDS sin descontar existencias"
+                  : "Válido y listo para producción")
+                : "Inválido; no se enviará al KDS"}
             </div>
             <button type="button" onClick={() => setProductDiagnostic(null)} style={secondaryButtonStyle}>Cerrar</button>
           </div>
