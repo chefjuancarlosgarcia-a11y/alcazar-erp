@@ -1,0 +1,50 @@
+.billing-settings-panel .billing-status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.billing-settings-panel .billing-status-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.billing-settings-panel .billing-status-card strong {
+  font-size: 1.1rem;
+}
+
+.billing-settings-panel .billing-status-card span {
+  color: var(--erp-text-secondary, #64748b);
+  font-size: 0.9rem;
+}
+
+.billing-settings-panel .billing-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.billing-settings-panel .billing-form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+}
+
+.billing-settings-panel .billing-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.billing-settings-panel .billing-config-form {
+  margin-top: 1rem;
+}
+
+.billing-settings-panel .migration-mode-feedback.warning {
+  color: var(--erp-danger, #dc2626);
+}
