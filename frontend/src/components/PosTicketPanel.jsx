@@ -182,6 +182,10 @@ export function PosTicketPanel({
                 <span className="pos-ticket-line-note">{noteText}</span>
               )}
 
+              {Array.isArray(item.modifiers) && item.modifiers.length > 0 && (
+                <span className="pos-ticket-line-note">{item.modifiers.join(" · ")}</span>
+              )}
+
               {isDraft && !isEditingNote && (
                 <button
                   type="button"

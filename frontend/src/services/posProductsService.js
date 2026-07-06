@@ -434,6 +434,14 @@ async function reloadCatalogProductById(productId) {
   }
 }
 
+/**
+ * Guarda un platillo del catálogo POS vía RPC `save_pos_catalog_product`.
+ * Persistencia Supabase:
+ * - pos_products (fila principal)
+ * - pos_option_groups + pos_option_choices (tipo configurable)
+ * - pos_product_variants + pos_product_modifiers (tipo pizza)
+ * - pos_recipe_links (platillos simples con receta)
+ */
 export async function savePOSCatalogProduct(product, variants = [], modifiers = [], optionGroups = []) {
   const payload = serializeProduct(product)
   const productType = payload.product_type || "simple"

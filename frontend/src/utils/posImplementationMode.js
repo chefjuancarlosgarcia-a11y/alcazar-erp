@@ -203,7 +203,9 @@ export function getProductSaleState(product, productionState, deductionMode) {
   const productType = productionState?.productType || product?.productType || product?.product_type || "simple"
 
   if (productType === "configurable") {
-    blockers.push("Venta configurable disponible en la siguiente fase del POS")
+    if (!productionState?.productionReady) {
+      blockers.push(...(productionState?.issues || ["Configuración de opciones incompleta"]))
+    }
   } else if (strict || recipeRequired) {
     if (!productionState?.productionReady) {
       blockers.push(...(productionState?.issues || ["No validado para producción"]))
@@ -236,7 +238,10 @@ export function catalogImplementationStatusLabel(state) {
   if (!state?.active) return "Inactivo"
   if (productType === "configurable") {
     if (!state?.area) return "Pendiente KDS"
-    if (state?.productionReady) return "Configurable · Fase 2"
+    if (state?.productionReady && state?.saleAllowed) {
+      return state?.inventoryWillDeduct ? "Venta + inventario" : "Configurable"
+    }
+    if (state?.productionReady) return "Listo para venta"
     return "Configuración incompleta"
   }
   if (!state?.saleAllowed && !state?.productionReady) return "Pendiente KDS"

@@ -15,7 +15,10 @@ export function catalogStatusLabel(state) {
   if (!state?.active) return "Inactivo"
   if (isConfigurableCatalogState(state)) {
     if (!state?.area) return "Pendiente KDS"
-    if (state.productionReady) return "Configurable · Fase 2"
+    if (state.productionReady && state.saleAllowed) {
+      return state.inventoryWillDeduct ? "Venta + inventario" : "Configurable"
+    }
+    if (state.productionReady) return "Listo para venta"
     return "Configuración incompleta"
   }
   if (state.inventoryWillDeduct) return "Venta + inventario"

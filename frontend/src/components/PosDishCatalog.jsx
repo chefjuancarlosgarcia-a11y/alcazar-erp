@@ -277,8 +277,6 @@ export default function PosDishCatalog({
                   {(item.productType || item.product_type) === "configurable" && (
                     <small className="pos-dish-card-meta">
                       {(item.optionGroups || item.option_groups || []).filter((group) => group.isActive !== false).length} grupo(s) de opciones
-                      {" · "}
-                      Venta mesero: Fase 2
                     </small>
                   )}
                   {(item.productType || item.product_type) === "pizza" && (

@@ -27,6 +27,8 @@ function mapOrderItem(row) {
     productVariantId: row.product_variant_id || "",
     productVariantName: row.product_variant_name || "",
     selectedSize: row.selected_size || "",
+    selectedOptions: row.selected_options || [],
+    selected_options: row.selected_options || [],
     modificaciones: row.notes || "",
     modifiers: row.modifiers || []
   }
@@ -204,6 +206,7 @@ export async function addItemToOrder(orderId, product, quantity = 1, notesOrOpti
     : (notesOrOptions || {})
   const unitPrice = Number(options.unitPrice ?? product.price ?? product.precio ?? 0)
   const modifiers = Array.isArray(options.modifiers) ? options.modifiers.filter(Boolean) : []
+  const selectedOptions = Array.isArray(options.selectedOptions) ? options.selectedOptions : []
   const { data, error } = await withTimeout(
     supabase.from("pos_order_items").insert({
       order_id: orderId,
@@ -218,6 +221,7 @@ export async function addItemToOrder(orderId, product, quantity = 1, notesOrOpti
       is_test_item: product.isTestItem === true || product.is_test_item === true,
       notes: options.notes || null,
       modifiers,
+      selected_options: selectedOptions,
       product_variant_id: options.productVariantId || null,
       product_variant_name: options.productVariantName || null,
       selected_size: options.selectedSize || null

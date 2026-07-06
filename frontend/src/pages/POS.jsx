@@ -7,25 +7,33 @@ import { useToast } from "../hooks/useToast"
 import { ToastContainer } from "../components/ToastContainer"
 import { useInventoryDeductionMode } from "../context/InventoryMigrationModeProvider"
 import {
-  CONFIGURABLE_SALE_PHASE2_MESSAGE,
   getProductSaleState,
   getInventorySkipWarning,
   isCatalogSaleWithoutInventory,
-  isConfigurableMeseroPreview,
   isMeseroCatalogVisible,
   productHasInventoryTracking,
   productRequiresRecipeForSale
 } from "../utils/posImplementationMode"
 import {
+  buildConfigurableProductName,
+  buildDefaultOptionSelections,
+  computeConfigurableUnitPrice,
   createEmptyOptionChoice,
   createEmptyOptionGroup,
+  formatConfigurableModifierLabels,
+  getActiveOptionChoices,
   getActiveOptionGroups,
   getConfigurableDisplayPrice,
+  getOptionGroupKey,
+  getSelectedChoiceIdsForGroup,
   normalizeOptionChoiceDraft,
   normalizeOptionGroupDraft,
+  optionSelectionsSignature,
   OPTION_PRICE_MODES,
   OPTION_SELECTION_MODES,
-  validateConfigurableCatalogForm
+  serializeSelectedOptionsForOrder,
+  validateConfigurableCatalogForm,
+  validateConfigurableSaleSelections
 } from "../utils/posConfigurableProduct"
 import { createStockRequisition } from "../utils/posProduction"
 import { createPreBillFromPOSOrder, createSplitBill, printPreBill as markPreBillPrinted, sendPreBillToCashier } from "../utils/cashier"
@@ -805,7 +813,7 @@ function POS() {
   const [mesaDestinoId, setMesaDestinoId] = useState("")
   const [tick, setTick] = useState(() => Date.now())
   const [itemPendiente, setItemPendiente] = useState(null)
-  const [configuracionPendiente, setConfiguracionPendiente] = useState({ variantId: "", modifierKeys: [], customNote: "" })
+  const [configuracionPendiente, setConfiguracionPendiente] = useState({ variantId: "", modifierKeys: [], customNote: "", optionSelections: {} })
   const [editandoModificacionLineId, setEditandoModificacionLineId] = useState(null)
   const [modificacionActualTexto, setModificacionActualTexto] = useState("")
   const [edicionEnviada, setEdicionEnviada] = useState(null)
@@ -2737,18 +2745,21 @@ function POS() {
   }
 
   function abrirConfiguracionProducto(item) {
+    const productType = item?.productType || item?.product_type
     const variants = getActiveProductVariants(item)
     setItemPendiente(item)
     setConfiguracionPendiente({
       variantId: variants[0]?.id || "",
       modifierKeys: [],
-      customNote: ""
+      customNote: "",
+      optionSelections: productType === "configurable" ? buildDefaultOptionSelections(item) : {}
     })
   }
 
   function productNeedsQuickConfiguration(item) {
     const type = item?.productType || item?.product_type
     return type === "pizza"
+      || (type === "configurable" && getActiveOptionGroups(item).length > 0)
       || getActiveProductModifiers(item).length > 0
       || item?.allowKitchenNotes === true
       || item?.allow_kitchen_notes === true
@@ -2766,10 +2777,6 @@ function POS() {
     }
     const productionState = getProductProductionState(product, finalRecipes, productionAreas, activeCategories)
     const saleState = getProductSaleState(product, productionState, deductionMode)
-    if (isConfigurableMeseroPreview(saleState)) {
-      showToast(CONFIGURABLE_SALE_PHASE2_MESSAGE, "info", 4500)
-      return false
-    }
     if (!saleState.saleAllowed) {
       setOrdenError(`Producto ${product.nombre} no está disponible: ${saleState.issues?.join(", ") || "configuración incompleta"}.`)
       return false
@@ -2796,10 +2803,6 @@ function POS() {
     }
     const productionState = getProductProductionState(item, finalRecipes, productionAreas, activeCategories)
     const saleState = getProductSaleState(item, productionState, deductionMode)
-    if (isConfigurableMeseroPreview(saleState)) {
-      showToast(CONFIGURABLE_SALE_PHASE2_MESSAGE, "info", 4500)
-      return
-    }
     if (!saleState.saleAllowed) {
       setOrdenError(`Producto ${item.nombre} no está disponible: ${saleState.issues?.join(", ") || "configuración incompleta"}.`)
       return
@@ -2826,26 +2829,57 @@ function POS() {
       setOrdenError("Selecciona una mesa o tipo de orden antes de agregar productos.")
       return false
     }
-    const selectedVariant = (productToAdd.variants || []).find((variant) => String(variant.id) === String(configuracionPendiente.variantId))
-    if ((productToAdd.productType || productToAdd.product_type) === "pizza" && !selectedVariant) {
-      setOrdenError("Selecciona un tamaño de pizza antes de agregarla.")
-      return false
-    }
+
+    const productType = productToAdd.productType || productToAdd.product_type || "simple"
     const assignment = selectedAssignment || "Mesa completa"
-    const selectedModifiers = getActiveProductModifiers(productToAdd).filter((modifier) => configuracionPendiente.modifierKeys.includes(String(modifier.id || `${modifier.modifierType}-${modifier.name}`)))
-    const modifierLabels = selectedModifiers.map(formatModifierDisplay)
     const instructions = configuracionPendiente.customNote.trim()
     const notesParts = []
     if (assignment !== "Mesa completa") notesParts.push(`[Para: ${assignment}]`)
     if (instructions) notesParts.push(instructions)
     const notas = notesParts.join(" ").trim()
-    const variantPrice = selectedVariant ? Number(selectedVariant.price || 0) : Number(productToAdd.price ?? productToAdd.precio ?? 0)
-    const modifiersTotal = getSelectedModifiersTotal(selectedModifiers)
-    const finalUnitPrice = variantPrice + modifiersTotal
-    const effectiveRecipeId = selectedVariant?.recipeId || selectedVariant?.recipe_id || productRecipeId(productToAdd)
-    const effectiveAreaId = selectedVariant?.productionAreaId || selectedVariant?.production_area_id || productProductionAreaId(productToAdd)
-    const selectedSize = selectedVariant?.size || ""
-    const productName = selectedVariant ? `${productToAdd.nombre} - ${formatPizzaSizeLabel(selectedVariant.size)}` : productToAdd.nombre
+
+    let selectedVariant = null
+    let selectedOptions = []
+    let modifierLabels = []
+    let finalUnitPrice = Number(productToAdd.price ?? productToAdd.precio ?? 0)
+    let effectiveRecipeId = productRecipeId(productToAdd)
+    let effectiveAreaId = productProductionAreaId(productToAdd)
+    let selectedSize = ""
+    let productName = productToAdd.nombre
+    let dedupSignature = ""
+
+    if (productType === "configurable") {
+      const selectionValidation = validateConfigurableSaleSelections(
+        productToAdd,
+        configuracionPendiente.optionSelections || {}
+      )
+      if (!selectionValidation.valid) {
+        setOrdenError(selectionValidation.errors.join(" "))
+        return false
+      }
+      selectedOptions = serializeSelectedOptionsForOrder(productToAdd, configuracionPendiente.optionSelections)
+      finalUnitPrice = computeConfigurableUnitPrice(productToAdd, configuracionPendiente.optionSelections)
+      modifierLabels = formatConfigurableModifierLabels(selectedOptions)
+      productName = buildConfigurableProductName(productToAdd, selectedOptions)
+      effectiveRecipeId = selectedOptions.find((option) => option.recipe_id)?.recipe_id || effectiveRecipeId
+      dedupSignature = optionSelectionsSignature(selectedOptions)
+    } else {
+      selectedVariant = (productToAdd.variants || []).find((variant) => String(variant.id) === String(configuracionPendiente.variantId))
+      if (productType === "pizza" && !selectedVariant) {
+        setOrdenError("Selecciona un tamaño de pizza antes de agregarla.")
+        return false
+      }
+      const selectedModifiers = getActiveProductModifiers(productToAdd).filter((modifier) => configuracionPendiente.modifierKeys.includes(String(modifier.id || `${modifier.modifierType}-${modifier.name}`)))
+      modifierLabels = selectedModifiers.map(formatModifierDisplay)
+      const variantPrice = selectedVariant ? Number(selectedVariant.price || 0) : Number(productToAdd.price ?? productToAdd.precio ?? 0)
+      finalUnitPrice = variantPrice + getSelectedModifiersTotal(selectedModifiers)
+      effectiveRecipeId = selectedVariant?.recipeId || selectedVariant?.recipe_id || effectiveRecipeId
+      effectiveAreaId = selectedVariant?.productionAreaId || selectedVariant?.production_area_id || effectiveAreaId
+      selectedSize = selectedVariant?.size || ""
+      productName = selectedVariant ? `${productToAdd.nombre} - ${formatPizzaSizeLabel(selectedVariant.size)}` : productToAdd.nombre
+      dedupSignature = JSON.stringify(modifierLabels)
+    }
+
     let itemSaved = false
     try {
       let orderId = activeOrderId
@@ -2879,12 +2913,14 @@ function POS() {
         if (channelResult.error) throw new Error(channelResult.message || channelResult.error.message)
         setCurrentOrder(channelResult.data)
       }
-      const modifierKey = JSON.stringify(modifierLabels)
+
       const existe = orden.find((ordenItem) =>
         ordenItem.id === productToAdd.id
         && (ordenItem.modificaciones || "") === notas
         && String(ordenItem.productVariantId || "") === String(selectedVariant?.id || "")
-        && JSON.stringify((ordenItem.modifiers || []).filter((entry) => !String(entry || "").startsWith("[Para: "))) === modifierKey
+        && (productType === "configurable"
+          ? optionSelectionsSignature(ordenItem.selectedOptions || ordenItem.selected_options || []) === dedupSignature
+          : JSON.stringify((ordenItem.modifiers || []).filter((entry) => !String(entry || "").startsWith("[Para: "))) === dedupSignature)
         && ordenItem.status === "draft"
       )
       if (existe) {
@@ -2902,6 +2938,7 @@ function POS() {
         }, safeQuantity, {
           notes: notas,
           modifiers: modifierLabels,
+          selectedOptions,
           unitPrice: finalUnitPrice,
           recipeId: effectiveRecipeId,
           productionAreaId: effectiveAreaId,
@@ -2909,7 +2946,7 @@ function POS() {
           productVariantName: selectedVariant ? formatPizzaSizeLabel(selectedVariant.size) : null,
           selectedSize,
           productName,
-          productionReady: saleState.saleAllowed
+          productionReady: productToAdd.productionReady === true || saleState.productionReady === true
         })
         if (result.error) throw new Error(result.message || result.error.message)
       }
@@ -2920,7 +2957,7 @@ function POS() {
       setOrdenError(`No se pudo agregar el producto: ${error.message}`)
     } finally {
       setItemPendiente(null)
-      setConfiguracionPendiente({ variantId: "", modifierKeys: [], customNote: "" })
+      setConfiguracionPendiente({ variantId: "", modifierKeys: [], customNote: "", optionSelections: {} })
     }
     if (!itemSaved) return false
     const skipWarning = getInventorySkipWarning(productToAdd, deductionMode, migrationModeEnabled)
@@ -3869,7 +3906,7 @@ function POS() {
                   )}
                   {formProductType === "configurable" && (
                     <div className="pos-catalog-note">
-                      El precio de venta se calcula desde las opciones con precio base. La venta en mesero llegará en la Fase 2.
+                      El precio de venta se calcula desde las opciones con precio base. En mesero, el mesero elige las opciones al agregar a la orden.
                     </div>
                   )}
                   {formProductType === "pizza" && (form.inventoryTrackingEnabled || formRequiresRecipe) && (
@@ -4574,10 +4611,15 @@ function POS() {
                   <div>
                     <strong>{itemPendiente.nombre}</strong>
                     <p style={mutedStyle}>
-                      {(itemPendiente.productType || itemPendiente.product_type) === "pizza"
+                      {(itemPendiente.productType || itemPendiente.product_type) === "pizza" || (itemPendiente.productType || itemPendiente.product_type) === "configurable"
                         ? `Desde Q${getProductBasePrice(itemPendiente).toFixed(2)}`
                         : `Q${Number(itemPendiente.precio || 0).toFixed(2)}`}
                     </p>
+                    {(itemPendiente.productType || itemPendiente.product_type) === "configurable" && (
+                      <p style={mutedStyle}>
+                        Total seleccionado: Q{computeConfigurableUnitPrice(itemPendiente, configuracionPendiente.optionSelections || {}).toFixed(2)}
+                      </p>
+                    )}
                   </div>
                 </div>
                 <label className="pos-assignment-select">
@@ -4587,6 +4629,54 @@ function POS() {
                     {seatNames.map((name, index) => <option key={`assignment-${index}`} value={name || `Persona ${index + 1}`}>{name || `Persona ${index + 1}`}</option>)}
                   </select>
                 </label>
+                {(itemPendiente.productType || itemPendiente.product_type) === "configurable" && getActiveOptionGroups(itemPendiente).map((group) => {
+                  const groupKey = getOptionGroupKey(group)
+                  const selectionMode = group.selectionMode || group.selection_mode || "single"
+                  const selectedIds = getSelectedChoiceIdsForGroup(configuracionPendiente.optionSelections || {}, group)
+                  return (
+                    <div className="pos-modal-section" key={groupKey}>
+                      <strong>
+                        {group.name || "Opción"}
+                        {group.required ? " *" : ""}
+                      </strong>
+                      <div className="pos-size-chip-row">
+                        {getActiveOptionChoices(group).map((choice) => {
+                          const choiceKey = String(choice.id || choice.name)
+                          const selected = selectedIds.includes(choiceKey)
+                          const priceMode = choice.priceMode || choice.price_mode || "none"
+                          const price = Number(choice.price || 0)
+                          const priceLabel = priceMode === "absolute" && price > 0
+                            ? `Q${price.toFixed(2)}`
+                            : priceMode === "delta" && price > 0
+                              ? `+Q${price.toFixed(2)}`
+                              : ""
+                          return (
+                            <button
+                              key={choiceKey}
+                              type="button"
+                              className={`pos-size-chip ${selected ? "active" : ""}`}
+                              onClick={() => setConfiguracionPendiente((current) => {
+                                const currentSelections = { ...(current.optionSelections || {}) }
+                                if (selectionMode === "single") {
+                                  currentSelections[groupKey] = choiceKey
+                                } else {
+                                  const existing = getSelectedChoiceIdsForGroup(currentSelections, group)
+                                  currentSelections[groupKey] = selected
+                                    ? existing.filter((entry) => entry !== choiceKey)
+                                    : [...existing, choiceKey]
+                                }
+                                return { ...current, optionSelections: currentSelections }
+                              })}
+                            >
+                              <span>{choice.name}</span>
+                              {priceLabel && <strong>{priceLabel}</strong>}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })}
                 {(itemPendiente.productType || itemPendiente.product_type) === "pizza" && (
                   <div className="pos-modal-section">
                     <strong>Tamaño</strong>
@@ -4631,7 +4721,7 @@ function POS() {
                     </div>
                   </div>
                 )}
-                {itemPendiente.allowKitchenNotes === true || itemPendiente.allow_kitchen_notes === true || (itemPendiente.productType || itemPendiente.product_type) === "pizza" ? (
+                {itemPendiente.allowKitchenNotes === true || itemPendiente.allow_kitchen_notes === true || (itemPendiente.productType || itemPendiente.product_type) === "pizza" || (itemPendiente.productType || itemPendiente.product_type) === "configurable" ? (
                   <textarea
                     value={configuracionPendiente.customNote}
                     onChange={(e) => setConfiguracionPendiente((current) => ({ ...current, customNote: e.target.value }))}
@@ -4641,7 +4731,7 @@ function POS() {
                 ) : null}
                 <div style={buttonRowStyle}>
                   <button type="button" onClick={() => confirmarAgregarItem()} style={primaryButtonStyle}>Agregar a la orden</button>
-                  <button type="button" onClick={() => { setItemPendiente(null); setConfiguracionPendiente({ variantId: "", modifierKeys: [], customNote: "" }) }} style={dangerButtonStyle}>Cancelar</button>
+                  <button type="button" onClick={() => { setItemPendiente(null); setConfiguracionPendiente({ variantId: "", modifierKeys: [], customNote: "", optionSelections: {} }) }} style={dangerButtonStyle}>Cancelar</button>
                 </div>
               </div>
             </div>
