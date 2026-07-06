@@ -726,7 +726,7 @@ function TableWithChairs({ table, selected = false, editing = false, zoom = 1, o
 
 function POS() {
   const location = useLocation()
-  const { user } = useAuth()
+  const { user, loading: authLoading } = useAuth()
   const params = new URLSearchParams(location.search)
   const section = params.get("section") || "pos"
   const { toasts, showToast, dismissToast } = useToast()
@@ -734,6 +734,7 @@ function POS() {
 
   const [items, setItems] = useState([])
   const [itemsLoading, setItemsLoading] = useState(true)
+  const [catalogLoadError, setCatalogLoadError] = useState("")
   const [migratingLocalProducts, setMigratingLocalProducts] = useState(false)
   const [mostrarFormulario, setMostrarFormulario] = useState(false)
   const [postSaveHint, setPostSaveHint] = useState(null)
@@ -1098,7 +1099,22 @@ function POS() {
   }, [])
 
   useEffect(() => {
+    if (authLoading) return undefined
+
     let mounted = true
+
+    if (!user) {
+      setItems([])
+      setItemsLoading(false)
+      setCatalogLoadError("")
+      setProductionAreas([])
+      setStandardRecipes([])
+      return undefined
+    }
+
+    setItemsLoading(true)
+    invalidatePOSProductsCache()
+
     getProductionAreas().then(({ data, error }) => {
       if (!mounted) return
       if (error) {
@@ -1119,18 +1135,23 @@ function POS() {
     getPOSProducts().then(({ data, error }) => {
       if (!mounted) return
       if (error) {
-        setOrdenError(`No se pudo cargar el catálogo POS desde Supabase: ${error.message}`)
+        const message = error.message || "Error desconocido"
+        setCatalogLoadError(message)
+        setOrdenError(`No se pudo cargar el catálogo POS desde Supabase: ${message}`)
         setItems([])
       } else {
+        setCatalogLoadError("")
         setItems(data || [])
         setPosCategories(loadPosCategories(data || []))
+        posDebug("catálogo POS cargado", { count: (data || []).length, userId: user.id })
       }
       setItemsLoading(false)
     })
+
     return () => {
       mounted = false
     }
-  }, [])
+  }, [authLoading, user?.id])
 
   useEffect(() => {
     async function refreshProducts() {
@@ -3719,7 +3740,8 @@ function POS() {
         <PosDishCatalog
           user={user}
           items={items}
-          itemsLoading={itemsLoading}
+          itemsLoading={itemsLoading || authLoading}
+          catalogLoadError={catalogLoadError}
           posCategories={posCategories}
           productionAreas={productionAreas}
           getItemState={getCatalogItemState}

@@ -27,6 +27,7 @@ export default function PosDishCatalog({
   user,
   items,
   itemsLoading,
+  catalogLoadError = "",
   posCategories,
   productionAreas,
   getItemState,
@@ -295,7 +296,20 @@ export default function PosDishCatalog({
         </div>
       )}
 
-      {!itemsLoading && items.length === 0 && <div className="pos-friendly-empty">No hay platillos registrados.</div>}
+      {!itemsLoading && items.length === 0 && (
+        <div className="pos-friendly-empty">
+          <p>No hay platillos en el catálogo de Supabase (`public.pos_products`).</p>
+          {catalogLoadError ? (
+            <p>Error al cargar: {catalogLoadError}</p>
+          ) : (
+            <p>
+              Si acabas de guardar platillos y desaparecieron tras recargar, revisa que estés en el mismo entorno
+              (localhost vs Vercel) y la misma base Supabase. Los datos no se guardan en el navegador: persisten en
+              Supabase y se vuelven a leer al iniciar sesión.
+            </p>
+          )}
+        </div>
+      )}
       {!itemsLoading && items.length > 0 && filteredItems.length === 0 && (
         <div className="pos-friendly-empty">Ningún platillo coincide con los filtros actuales.</div>
       )}
