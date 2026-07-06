@@ -7,9 +7,12 @@ import { useToast } from "../hooks/useToast"
 import { ToastContainer } from "../components/ToastContainer"
 import { useInventoryDeductionMode } from "../context/InventoryMigrationModeProvider"
 import {
+  CONFIGURABLE_SALE_PHASE2_MESSAGE,
   getProductSaleState,
   getInventorySkipWarning,
   isCatalogSaleWithoutInventory,
+  isConfigurableMeseroPreview,
+  isMeseroCatalogVisible,
   productHasInventoryTracking,
   productRequiresRecipeForSale
 } from "../utils/posImplementationMode"
@@ -136,7 +139,6 @@ const MODIFIER_TYPE_OPTIONS = [
   { id: "extra", label: "Extra" },
   { id: "note", label: "Nota" }
 ]
-const DEFAULT_REMOVE_MODIFIERS = ["Cebolla", "Pesto", "Aceitunas", "Champinones", "Jalapenos", "Chile pimiento", "Espinaca", "Tomate", "Queso feta"]
 const DEFAULT_EXTRA_MODIFIERS = [
   { name: "Extra queso", priceDelta: "" },
   { name: "Extra pepperoni", priceDelta: "" },
@@ -144,6 +146,15 @@ const DEFAULT_EXTRA_MODIFIERS = [
   { name: "Extra salsa", priceDelta: "" },
   { name: "Extra jalapenos", priceDelta: "" }
 ]
+
+function isBillableExtraModifier(modifier) {
+  return (modifier.modifierType || modifier.modifier_type || "remove") === "extra"
+}
+
+function isLegacyModifier(modifier) {
+  const type = modifier.modifierType || modifier.modifier_type || "remove"
+  return type === "remove" || type === "note"
+}
 
 function normalizeId(value) {
   return String(value || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
@@ -177,7 +188,7 @@ function createEmptyPizzaVariant(size, label, fallbackArea = "pizzeria", fallbac
   }
 }
 
-function createModifierDraft(name = "", modifierType = "remove", priceDelta = "", isActive = true) {
+function createModifierDraft(name = "", modifierType = "extra", priceDelta = "", isActive = true) {
   return {
     id: "",
     name,
@@ -199,18 +210,9 @@ function normalizeModifierDraft(modifier, index = 0) {
   }
 }
 
-function createDefaultModifiers() {
-  return [
-    ...DEFAULT_REMOVE_MODIFIERS.map((name, index) => ({ ...createModifierDraft(name, "remove"), sortOrder: index })),
-    ...DEFAULT_EXTRA_MODIFIERS.map((modifier, index) => ({
-      ...createModifierDraft(modifier.name, "extra", modifier.priceDelta),
-      sortOrder: DEFAULT_REMOVE_MODIFIERS.length + index
-    }))
-  ]
-}
-
 function formatProductTypeLabel(productType) {
-  return PRODUCT_TYPE_OPTIONS.find((option) => option.id === productType)?.label || "Platillo"
+  const normalized = productType || "simple"
+  return PRODUCT_TYPE_OPTIONS.find((option) => option.id === normalized)?.label || "Platillo simple"
 }
 
 function formatPizzaSizeLabel(size) {
@@ -732,6 +734,9 @@ function POS() {
   const [form, setForm] = useState(emptyItemForm)
   const [editandoId, setEditandoId] = useState(null)
   const [errores, setErrores] = useState({})
+  const [savingCatalogItem, setSavingCatalogItem] = useState(false)
+  const [catalogSaveMessage, setCatalogSaveMessage] = useState(null)
+  const [showLegacyPizzaModifiers, setShowLegacyPizzaModifiers] = useState(false)
   const [posCategories, setPosCategories] = useState(() => loadPosCategories())
   const [productionAreas, setProductionAreas] = useState([])
   const [standardRecipes, setStandardRecipes] = useState([])
@@ -834,18 +839,46 @@ function POS() {
     [tick]
   )
   const finalRecipes = standardRecipes.filter((recipe) => recipe.recipe_type === "final_product" && recipe.active !== false)
-  const itemsCategoria = useMemo(
-    () => items.filter((item) => {
-      if (productCategoryId(item) !== categoriaActiva) return false
-      const saleState = getProductSaleState(
-        item,
-        getProductProductionState(item, finalRecipes, productionAreas, activeCategories),
-        deductionMode
-      )
-      return saleState.saleAllowed
-    }),
-    [items, categoriaActiva, finalRecipes, productionAreas, activeCategories, deductionMode]
-  )
+  const itemsCategoria = useMemo(() => {
+    if (POS_DEBUG) {
+      console.log("POS RAW", items.length)
+    }
+
+    const byCategory = items.filter((item) => String(productCategoryId(item)) === String(categoriaActiva))
+
+    if (POS_DEBUG) {
+      console.log("POS after category", byCategory.length, { categoriaActiva })
+    }
+
+    const visible = byCategory.filter((item) => {
+      const productionState = getProductProductionState(item, finalRecipes, productionAreas, activeCategories)
+      const saleState = getProductSaleState(item, productionState, deductionMode)
+      const meseroVisible = isMeseroCatalogVisible(saleState)
+
+      if (POS_DEBUG) {
+        console.log("POS mesero item", {
+          nombre: item.nombre || item.name,
+          product_type: item.productType || item.product_type || "simple",
+          active: saleState.active,
+          production_ready: item.productionReady ?? item.production_ready,
+          saleAllowed: saleState.saleAllowed,
+          isMeseroCatalogVisible: meseroVisible,
+          category: productCategoryId(item),
+          production_area: productProductionAreaId(item),
+          recipe_required_for_sale: item.recipeRequiredForSale ?? item.recipe_required_for_sale,
+          issues: saleState.issues
+        })
+      }
+
+      return meseroVisible
+    })
+
+    if (POS_DEBUG) {
+      console.log("POS after mesero visible", visible.length)
+    }
+
+    return visible
+  }, [items, categoriaActiva, finalRecipes, productionAreas, activeCategories, deductionMode])
   const getSearchRecipe = useCallback((product) => {
     const recipeId = productRecipeId(product)
     return finalRecipes.find((recipe) => String(recipe.id) === String(recipeId)) || product.recipe || null
@@ -900,9 +933,17 @@ function POS() {
   ), [finalRecipes, productionAreas, activeCategories, deductionMode])
   const invalidActiveProducts = items.filter((item) => {
     const state = getCatalogItemState(item)
+    const productType = item.productType || item.product_type || "simple"
+    if (productType === "configurable") return false
     return state.active && !state.saleAllowed
   })
-  const formProductType = form.productType || "simple"
+  const formProductType = form.productType || form.product_type || "simple"
+  const billableExtraModifiers = (form.modifiers || [])
+    .map((modifier, index) => ({ modifier, index }))
+    .filter(({ modifier }) => isBillableExtraModifier(modifier))
+  const legacyModifiers = (form.modifiers || [])
+    .map((modifier, index) => ({ modifier, index }))
+    .filter(({ modifier }) => isLegacyModifier(modifier))
   const selectedRecipe = finalRecipes.find((recipe) => String(recipe.id) === String(productRecipeId(form)))
   const selectedProductionArea = productionAreas.find((area) => area.id === productProductionAreaId(form))
   const activeFormVariants = (form.variants || []).filter((variant) => variant.isActive === true)
@@ -2188,7 +2229,7 @@ function POS() {
       inventoryTrackingEnabled: productType === "manual_test" ? false : actual.inventoryTrackingEnabled,
       recipeId: productType === "pizza" || productType === "manual_test" || productType === "configurable" ? "" : actual.recipeId,
       precio: productType === "pizza" || productType === "configurable" ? "" : actual.precio,
-      modifiers: productType === "pizza" ? (actual.modifiers?.length ? actual.modifiers : createDefaultModifiers()) : [],
+      modifiers: productType === "pizza" ? (actual.modifiers || []) : [],
       optionGroups: productType === "configurable"
         ? (actual.optionGroups?.length ? actual.optionGroups : [createEmptyOptionGroup()])
         : [createEmptyOptionGroup()],
@@ -2346,11 +2387,21 @@ function POS() {
     }))
   }
 
-  function agregarPresetModificadores() {
-    setForm((actual) => ({
-      ...actual,
-      modifiers: actual.modifiers?.length ? actual.modifiers : createDefaultModifiers()
-    }))
+  function agregarPresetExtrasCobrables() {
+    setForm((actual) => {
+      const existing = actual.modifiers || []
+      const existingNames = new Set(existing.map((modifier) => normalizeText(modifier.name)))
+      const toAdd = DEFAULT_EXTRA_MODIFIERS
+        .filter((modifier) => !existingNames.has(normalizeText(modifier.name)))
+        .map((modifier, index) => ({
+          ...createModifierDraft(modifier.name, "extra", modifier.priceDelta),
+          sortOrder: existing.length + index
+        }))
+      return {
+        ...actual,
+        modifiers: [...existing, ...toAdd]
+      }
+    })
   }
 
   function eliminarModificador(index) {
@@ -2425,130 +2476,150 @@ function POS() {
     }
     if (productType === "configurable" && form.estado === "activo") {
       const { valid, errors } = validateConfigurableCatalogForm(form.optionGroups || [], { active: true })
-      if (!valid) faltantes.optionGroups = errors[0] || "Configuración de opciones incompleta"
+      if (!valid) faltantes.optionGroups = errors.join(" · ")
     }
     return faltantes
   }
 
   async function guardarItem(event) {
     event.preventDefault()
+    setCatalogSaveMessage(null)
     const faltantes = validarItem()
     setErrores(faltantes)
-    if (Object.keys(faltantes).length > 0) return
-
-    const requiresRecipe = formRequiresRecipeConnection(form, deductionMode)
-    const tracksInventory = formInventoryTrackingEnabled(form)
-    const rawRecipeId = productRecipeId(form)
-    const recipeId = requiresRecipe || tracksInventory ? rawRecipeId : ""
-    const productionAreaId = productProductionAreaId(form)
-    const categoryId = productCategoryId(form)
-    const productType = form.productType || "simple"
-    const selectedCategoryName = posCategories.find((category) => category.id === categoryId)?.name || form.categoria
-    const item = {
-      ...form,
-      categoriaId: categoryId,
-      categoryId,
-      category_id: categoryId,
-      categoria: selectedCategoryName,
-      id: editandoId || null,
-      precio: Number(form.precio || 0),
-      price: Number(form.precio || 0),
-      recipeId,
-      recipe_id: recipeId,
-      inventoryTrackingEnabled: tracksInventory,
-      inventory_tracking_enabled: tracksInventory,
-      recipeRequiredForSale: tracksInventory,
-      recipe_required_for_sale: tracksInventory,
-      productionAreaId,
-      production_area_id: productionAreaId,
-      areaProduccion: productionAreaId,
-      productType,
-      product_type: productType,
-      isTestItem: form.isTestItem === true || productType === "manual_test",
-      is_test_item: form.isTestItem === true || productType === "manual_test",
-      allowKitchenNotes: form.allowKitchenNotes === true,
-      allow_kitchen_notes: form.allowKitchenNotes === true,
-      prepTimeMinutes: Number(form.tiempoPreparacion || 0),
-      prep_time_minutes: Number(form.tiempoPreparacion || 0),
-      active: form.estado === "activo",
-      productionReady: false,
-      actualizadoEn: new Date().toLocaleString()
-    }
-    const variants = productType === "pizza"
-      ? (form.variants || []).map((variant, index) => ({
-          ...variant,
-          name: form.nombre,
-          recipeId: requiresRecipe || tracksInventory ? (variant.recipeId || "") : "",
-          prepTimeMinutes: Number(variant.prepTimeMinutes || 0),
-          price: Number(variant.price || 0),
-          productionAreaId,
-          isActive: variant.isActive === true,
-          sortOrder: index
-        }))
-      : []
-    const modifiers = productType === "pizza"
-      ? (form.modifiers || [])
-          .filter((modifier) => String(modifier.name || "").trim())
-          .map((modifier, index) => ({
-            ...modifier,
-            priceDelta: Number(modifier.priceDelta || 0),
-            modifierType: modifier.modifierType || "remove",
-            isActive: modifier.isActive !== false,
-            sortOrder: index
-          }))
-      : []
-    const optionGroups = productType === "configurable" ? (form.optionGroups || []) : []
-    posDebug("producto a guardar", {
-      item,
-      variants,
-      modifiers,
-      optionGroups,
-      recipeId: productRecipeId(item),
-      productionAreaId: productProductionAreaId(item)
-    })
-
-    const savedResult = await savePOSCatalogProduct(item, variants, modifiers, optionGroups)
-    if (savedResult.error) {
-      console.error("Supabase POS product save error:", savedResult.error)
-      setOrdenError(`Producto no guardado: ${savedResult.error.message}`)
+    if (Object.keys(faltantes).length > 0) {
+      showToast(`Revisa el formulario: ${Object.values(faltantes).join(" · ")}`, "error", 6000)
       return
     }
-    const savedProduct = savedResult.data
-    const nextItems = editandoId
-      ? items.map((actual) => (actual.id === editandoId ? savedProduct : actual))
-      : [savedProduct, ...items]
-    setItems(nextItems)
-    setPosCategories(loadPosCategories(nextItems))
-    posDebug("producto POS guardado en Supabase", savedProduct)
-    setForm(emptyActiveItemForm())
-    setEditandoId(null)
-    setMostrarFormulario(false)
-    setErrores({})
-    const savedState = getProductSaleState(
-      savedProduct,
-      getProductProductionState(savedProduct, finalRecipes, productionAreas, activeCategories),
-      deductionMode
-    )
-    if (savedState.saleAllowed) {
-      setPostSaveHint(null)
-      setCatalogFeedbackTone("success")
-      setOrdenError(item.isTestItem
-        ? "Platillo de prueba guardado. Se enviará a KDS sin consumir inventario."
-        : savedState.inventoryWillDeduct
-          ? "Platillo guardado y validado para producción con descarga de inventario."
-          : tracksInventory
-            ? "Platillo guardado. Disponible para venta; conecta una receta activa para habilitar la descarga de inventario."
-            : "Platillo guardado. Este producto no descontará inventario al venderse.")
-    } else {
-      const needsRecipe = savedState.issues.some((issue) => /receta|tamaño|variante/i.test(issue))
-      setPostSaveHint({
-        title: "Platillo guardado — pasos pendientes",
-        message: "El producto está en Supabase pero aún no puede venderse en POS hasta completar la configuración de producción.",
-        issues: savedState.issues,
-        needsRecipe
+
+    setSavingCatalogItem(true)
+    try {
+      const requiresRecipe = formRequiresRecipeConnection(form, deductionMode)
+      const tracksInventory = formInventoryTrackingEnabled(form)
+      const rawRecipeId = productRecipeId(form)
+      const recipeId = requiresRecipe || tracksInventory ? rawRecipeId : ""
+      const productionAreaId = productProductionAreaId(form)
+      const categoryId = productCategoryId(form)
+      const productType = form.productType || form.product_type || "simple"
+      const selectedCategoryName = posCategories.find((category) => category.id === categoryId)?.name || form.categoria
+      const item = {
+        ...form,
+        categoriaId: categoryId,
+        categoryId,
+        category_id: categoryId,
+        categoria: selectedCategoryName,
+        id: editandoId || null,
+        precio: Number(form.precio || 0),
+        price: Number(form.precio || 0),
+        recipeId,
+        recipe_id: recipeId,
+        inventoryTrackingEnabled: tracksInventory,
+        inventory_tracking_enabled: tracksInventory,
+        recipeRequiredForSale: tracksInventory,
+        recipe_required_for_sale: tracksInventory,
+        productionAreaId,
+        production_area_id: productionAreaId,
+        areaProduccion: productionAreaId,
+        productType,
+        product_type: productType,
+        isTestItem: form.isTestItem === true || productType === "manual_test",
+        is_test_item: form.isTestItem === true || productType === "manual_test",
+        allowKitchenNotes: form.allowKitchenNotes === true,
+        allow_kitchen_notes: form.allowKitchenNotes === true,
+        prepTimeMinutes: Number(form.tiempoPreparacion || 0),
+        prep_time_minutes: Number(form.tiempoPreparacion || 0),
+        active: form.estado === "activo",
+        productionReady: false,
+        actualizadoEn: new Date().toLocaleString()
+      }
+      const variants = productType === "pizza"
+        ? (form.variants || []).map((variant, index) => ({
+            ...variant,
+            name: form.nombre,
+            recipeId: requiresRecipe || tracksInventory ? (variant.recipeId || "") : "",
+            prepTimeMinutes: Number(variant.prepTimeMinutes || 0),
+            price: Number(variant.price || 0),
+            productionAreaId,
+            isActive: variant.isActive === true,
+            sortOrder: index
+          }))
+        : []
+      const modifiers = productType === "pizza"
+        ? (form.modifiers || [])
+            .filter((modifier) => String(modifier.name || "").trim())
+            .map((modifier, index) => ({
+              ...modifier,
+              priceDelta: Number(modifier.priceDelta || 0),
+              modifierType: modifier.modifierType || "extra",
+              isActive: modifier.isActive !== false,
+              sortOrder: index
+            }))
+        : []
+      const optionGroups = productType === "configurable" ? (form.optionGroups || []) : []
+      posDebug("producto a guardar", {
+        item,
+        variants,
+        modifiers,
+        optionGroups,
+        recipeId: productRecipeId(item),
+        productionAreaId: productProductionAreaId(item)
       })
-      setCatalogFeedbackTone("warning")
-      setOrdenError("")
+
+      const savedResult = await savePOSCatalogProduct(item, variants, modifiers, optionGroups)
+      if (savedResult.error) {
+        const msg = savedResult.error.message || "Error desconocido al guardar"
+        console.error("Supabase POS product save error:", savedResult.error)
+        setCatalogSaveMessage({ tone: "error", text: `Producto no guardado: ${msg}` })
+        setCatalogFeedbackTone("error")
+        setOrdenError(`Producto no guardado: ${msg}`)
+        showToast(`Producto no guardado: ${msg}`, "error", 6000)
+        return
+      }
+      const savedProduct = savedResult.data
+      const nextItems = editandoId
+        ? items.map((actual) => (actual.id === editandoId ? savedProduct : actual))
+        : [savedProduct, ...items]
+      setItems(nextItems)
+      setPosCategories(loadPosCategories(nextItems))
+      posDebug("producto POS guardado en Supabase", savedProduct)
+      setForm(emptyActiveItemForm())
+      setEditandoId(null)
+      setMostrarFormulario(false)
+      setErrores({})
+      showToast("Producto guardado correctamente.", "success", 3000)
+      const savedState = getProductSaleState(
+        savedProduct,
+        getProductProductionState(savedProduct, finalRecipes, productionAreas, activeCategories),
+        deductionMode
+      )
+      if (savedState.saleAllowed) {
+        setPostSaveHint(null)
+        setCatalogFeedbackTone("success")
+        setOrdenError(item.isTestItem
+          ? "Platillo de prueba guardado. Se enviará a KDS sin consumir inventario."
+          : savedState.inventoryWillDeduct
+            ? "Platillo guardado y validado para producción con descarga de inventario."
+            : tracksInventory
+              ? "Platillo guardado. Disponible para venta; conecta una receta activa para habilitar la descarga de inventario."
+              : "Platillo guardado. Este producto no descontará inventario al venderse.")
+      } else {
+        const needsRecipe = savedState.issues.some((issue) => /receta|tamaño|variante/i.test(issue))
+        setPostSaveHint({
+          title: "Platillo guardado — pasos pendientes",
+          message: "El producto está en Supabase pero aún no puede venderse en POS hasta completar la configuración de producción.",
+          issues: savedState.issues,
+          needsRecipe
+        })
+        setCatalogFeedbackTone("warning")
+        setOrdenError("")
+      }
+    } catch (error) {
+      const msg = error?.message || "Error inesperado al guardar el producto"
+      console.error("POS catalog save failed:", error)
+      setCatalogSaveMessage({ tone: "error", text: msg })
+      setCatalogFeedbackTone("error")
+      showToast(msg, "error", 6000)
+    } finally {
+      setSavingCatalogItem(false)
     }
   }
 
@@ -2573,9 +2644,7 @@ function POS() {
       modifierNotesPlaceholder: item.modifierNotesPlaceholder || emptyItemForm.modifierNotesPlaceholder,
       modifiers: (item.modifierOptions || item.modifiers || []).length
         ? (item.modifierOptions || item.modifiers || []).map(normalizeModifierDraft)
-        : productType === "pizza"
-          ? createDefaultModifiers()
-          : [],
+        : [],
       optionGroups: (item.optionGroups || item.option_groups || []).length
         ? (item.optionGroups || item.option_groups || []).map(normalizeOptionGroupDraft)
         : productType === "configurable"
@@ -2600,20 +2669,45 @@ function POS() {
     setEditandoId(item.id)
     setMostrarFormulario(true)
     setErrores({})
+    setCatalogSaveMessage(null)
+    setShowLegacyPizzaModifiers(
+      (item.modifierOptions || item.modifiers || []).some((modifier) => isLegacyModifier(normalizeModifierDraft(modifier)))
+    )
+  }
+
+  async function sacarDelMenuDesdeFormulario() {
+    if (!editandoId) return
+    const name = form.nombre || "este producto"
+    if (!window.confirm(`¿Seguro que deseas sacar "${name}" del menú?`)) return
+    await desactivarItem({ id: editandoId, nombre: name, name })
+    setMostrarFormulario(false)
+    setEditandoId(null)
+    setForm(emptyActiveItemForm())
+    setErrores({})
+  }
+
+  async function reactivarDesdeFormulario() {
+    if (!editandoId) return
+    const name = form.nombre || "este producto"
+    await reactivarItem({ id: editandoId, nombre: name, name })
+    setForm((actual) => ({ ...actual, estado: "activo" }))
   }
 
   async function desactivarItem(item) {
-    if (!window.confirm(`¿Desactivar "${item.nombre}" del catálogo POS?`)) return
+    const name = item.nombre || item.name || "este producto"
+    if (!window.confirm(`¿Seguro que deseas sacar "${name}" del menú?`)) return
     const result = await deactivatePOSProduct(item.id)
     if (result.error) {
       setCatalogFeedbackTone("error")
-      setOrdenError(`No se pudo desactivar el producto: ${result.error.message}`)
+      setOrdenError(`No se pudo sacar del menú: ${result.error.message}`)
+      showToast(`No se pudo sacar del menú: ${result.error.message}`, "error", 5000)
       return
     }
     setItems((current) => current.map((entry) => entry.id === item.id ? result.data : entry))
     setPostSaveHint(null)
     setCatalogFeedbackTone("success")
-    setOrdenError("Producto POS desactivado.")
+    setOrdenError(`"${name}" fue sacado del menú.`)
+    showToast("Producto sacado del menú", "success", 3000)
   }
 
   async function reactivarItem(item) {
@@ -2672,6 +2766,10 @@ function POS() {
     }
     const productionState = getProductProductionState(product, finalRecipes, productionAreas, activeCategories)
     const saleState = getProductSaleState(product, productionState, deductionMode)
+    if (isConfigurableMeseroPreview(saleState)) {
+      showToast(CONFIGURABLE_SALE_PHASE2_MESSAGE, "info", 4500)
+      return false
+    }
     if (!saleState.saleAllowed) {
       setOrdenError(`Producto ${product.nombre} no está disponible: ${saleState.issues?.join(", ") || "configuración incompleta"}.`)
       return false
@@ -2698,6 +2796,10 @@ function POS() {
     }
     const productionState = getProductProductionState(item, finalRecipes, productionAreas, activeCategories)
     const saleState = getProductSaleState(item, productionState, deductionMode)
+    if (isConfigurableMeseroPreview(saleState)) {
+      showToast(CONFIGURABLE_SALE_PHASE2_MESSAGE, "info", 4500)
+      return
+    }
     if (!saleState.saleAllowed) {
       setOrdenError(`Producto ${item.nombre} no está disponible: ${saleState.issues?.join(", ") || "configuración incompleta"}.`)
       return
@@ -3607,6 +3709,8 @@ function POS() {
             setErrores({})
             setOrdenError("")
             setPostSaveHint(null)
+            setCatalogSaveMessage(null)
+            setShowLegacyPizzaModifiers(false)
           }}
           onEditItem={editarItem}
           onDeactivateItem={desactivarItem}
@@ -3630,15 +3734,23 @@ function POS() {
                   <h2>{form.nombre || "Configura un producto pensado para pizzería"}</h2>
                 </div>
                 <div style={buttonRowStyle}>
-                  <span className="pos-test-badge">{formatProductTypeLabel(formProductType)}</span>
+                  <span className={`pos-product-type-badge pos-product-type-badge--${formProductType}`}>
+                    {formatProductTypeLabel(formProductType)}
+                  </span>
                   {formProductType === "manual_test" && <span className="pos-test-badge">🧪 Sin receta ni consumo</span>}
                   {formProductType !== "manual_test" && !form.isTestItem && (
                     <span className={`pos-inventory-status-badge ${form.inventoryTrackingEnabled ? "is-active" : "is-inactive"}`}>
                       {form.inventoryTrackingEnabled ? "✅ Controla inventario" : "⚪ No controla inventario"}
                     </span>
                   )}
+                  {form.estado === "inactivo" && <span className="pos-test-badge">Inactivo en menú</span>}
                 </div>
               </div>
+              {catalogSaveMessage && (
+                <div style={catalogSaveMessage.tone === "error" ? errorBoxStyle : successInlineStyle}>
+                  {catalogSaveMessage.text}
+                </div>
+              )}
               {Object.keys(errores).length > 0 && (
                 <div style={errorBoxStyle}>Faltan campos requeridos: {Object.values(errores).join(", ")}.</div>
               )}
@@ -3772,32 +3884,42 @@ function POS() {
                 <section className="pos-catalog-section">
                   <div className="pos-catalog-section-head">
                     <strong>4. Configuración de venta</strong>
-                    <small>Grupos de opciones que el mesero elegirá al agregar el producto.</small>
+                    <small>Define las decisiones que el mesero deberá seleccionar al vender este producto.</small>
                   </div>
                   {errores.optionGroups && <div style={errorBoxStyle}>{errores.optionGroups}</div>}
                   <div style={buttonRowStyle}>
-                    <button type="button" onClick={agregarGrupoOpcion} style={secondaryButtonStyle}>+ Nuevo grupo</button>
+                    <button type="button" onClick={agregarGrupoOpcion} style={secondaryButtonStyle}>+ Agregar decisión</button>
                     <button type="button" onClick={cargarPresetAlitas} style={secondaryButtonStyle}>Cargar ejemplo Alitas</button>
                   </div>
                   <div className="pos-configurable-groups">
                     {(form.optionGroups || []).map((group, groupIndex) => (
                       <article key={`option-group-${groupIndex}`} className={`pos-configurable-group ${group.isActive !== false ? "active" : ""}`}>
                         <div className="pos-configurable-group-head">
-                          <label className="pos-inline-toggle">
-                            <input type="checkbox" checked={group.isActive !== false} onChange={(event) => actualizarGrupoOpcion(groupIndex, "isActive", event.target.checked)} />
-                            <span><strong>Grupo activo</strong></span>
-                          </label>
-                          <button type="button" onClick={() => eliminarGrupoOpcion(groupIndex)} style={dangerMiniButtonStyle}>Eliminar grupo</button>
+                          <div>
+                            <p className="pos-configurable-group-title">
+                              Decisión: {group.name?.trim() || `Sin nombre ${groupIndex + 1}`}
+                            </p>
+                            <div className="pos-configurable-group-meta">
+                              <span>Obligatoria: {group.required === true ? "sí" : "no"}</span>
+                              <span>Tipo: {OPTION_SELECTION_MODES.find((option) => option.id === (group.selectionMode || "single"))?.label || "Selección única"}</span>
+                              <span>{group.isActive !== false ? "Activa" : "Inactiva"}</span>
+                            </div>
+                          </div>
+                          <button type="button" onClick={() => eliminarGrupoOpcion(groupIndex)} style={dangerMiniButtonStyle}>Eliminar decisión</button>
                         </div>
                         <div style={formGridStyle}>
-                          <input placeholder="Nombre del grupo (ej. Presentación)" value={group.name || ""} onChange={(event) => actualizarGrupoOpcion(groupIndex, "name", event.target.value)} style={inputStyle} />
+                          <input placeholder="Nombre de la decisión (ej. Presentación)" value={group.name || ""} onChange={(event) => actualizarGrupoOpcion(groupIndex, "name", event.target.value)} style={inputStyle} />
                           <label className="pos-inline-toggle">
                             <input type="checkbox" checked={group.required === true} onChange={(event) => actualizarGrupoOpcion(groupIndex, "required", event.target.checked)} />
-                            <span><strong>Obligatorio</strong></span>
+                            <span><strong>Obligatoria</strong></span>
                           </label>
                           <select value={group.selectionMode || "single"} onChange={(event) => actualizarGrupoOpcion(groupIndex, "selectionMode", event.target.value)} style={inputStyle}>
                             {OPTION_SELECTION_MODES.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
                           </select>
+                          <label className="pos-inline-toggle">
+                            <input type="checkbox" checked={group.isActive !== false} onChange={(event) => actualizarGrupoOpcion(groupIndex, "isActive", event.target.checked)} />
+                            <span><strong>Decisión activa</strong></span>
+                          </label>
                         </div>
                         <div className="pos-configurable-choices">
                           <strong>Opciones</strong>
@@ -3807,21 +3929,30 @@ function POS() {
                                 <input type="checkbox" checked={choice.isActive !== false} onChange={(event) => actualizarOpcionConfigurables(groupIndex, choiceIndex, "isActive", event.target.checked)} />
                                 <span>Activa</span>
                               </label>
-                              <input placeholder="Nombre (ej. 10 unidades)" value={choice.name || ""} onChange={(event) => actualizarOpcionConfigurables(groupIndex, choiceIndex, "name", event.target.value)} style={inputStyle} />
+                              <input placeholder="Respuesta (ej. 10 unidades)" value={choice.name || ""} onChange={(event) => actualizarOpcionConfigurables(groupIndex, choiceIndex, "name", event.target.value)} style={inputStyle} />
                               <select value={choice.priceMode || "none"} onChange={(event) => actualizarOpcionConfigurables(groupIndex, choiceIndex, "priceMode", event.target.value)} style={inputStyle}>
                                 {OPTION_PRICE_MODES.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
                               </select>
-                              <input type="number" min="0" step="0.01" placeholder="Precio" value={choice.price ?? ""} onChange={(event) => actualizarOpcionConfigurables(groupIndex, choiceIndex, "price", event.target.value)} style={inputStyle} disabled={(choice.priceMode || "none") === "none"} />
-                              <button type="button" onClick={() => eliminarOpcionConfigurable(groupIndex, choiceIndex)} style={dangerMiniButtonStyle}>Quitar</button>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                placeholder={(choice.priceMode || "none") === "absolute" ? "Precio base" : (choice.priceMode || "none") === "delta" ? "Cargo adicional" : "Sin cargo"}
+                                value={choice.price ?? ""}
+                                onChange={(event) => actualizarOpcionConfigurables(groupIndex, choiceIndex, "price", event.target.value)}
+                                style={inputStyle}
+                                disabled={(choice.priceMode || "none") === "none"}
+                              />
+                              <button type="button" onClick={() => eliminarOpcionConfigurable(groupIndex, choiceIndex)} style={dangerMiniButtonStyle}>Eliminar opción</button>
                             </div>
                           ))}
-                          <button type="button" onClick={() => agregarOpcionConfigurable(groupIndex)} style={secondaryButtonStyle}>+ Opción</button>
+                          <button type="button" onClick={() => agregarOpcionConfigurable(groupIndex)} style={secondaryButtonStyle}>+ Agregar opción</button>
                         </div>
                       </article>
                     ))}
                   </div>
                   <div className="pos-catalog-note">
-                    Ejemplo: <strong>{form.nombre || "Alitas"}</strong> con grupos Presentación (10 u Q90 / 20 u Q160) y Salsa (BBQ / Buffalo).
+                    Ejemplo: <strong>{form.nombre || "Alitas"}</strong> con decisiones Presentación (10 u Q90 / 20 u Q160) y Salsa (BBQ / Buffalo sin cargo).
                   </div>
                 </section>
               )}
@@ -3869,32 +4000,69 @@ function POS() {
 
                   <section className="pos-catalog-section">
                     <div className="pos-catalog-section-head">
-                      <strong>5. Modificadores para POS</strong>
-                      <small>Define lo que el mesero puede quitar, agregar o anotar.</small>
+                      <strong>5. Extras cobrables para POS</strong>
+                      <small>Agrega únicamente extras que aumentan el precio. Las instrucciones como “sin cebolla” o “bien tostada” se escriben como observación de cocina al vender.</small>
                     </div>
                     <div style={buttonRowStyle}>
-                      <button type="button" onClick={agregarPresetModificadores} style={secondaryButtonStyle}>Cargar sugeridos de pizza</button>
-                      <button type="button" onClick={agregarModificador} style={secondaryButtonStyle}>+ Nuevo modificador</button>
+                      <button type="button" onClick={agregarPresetExtrasCobrables} style={secondaryButtonStyle}>Cargar extras sugeridos</button>
+                      <button type="button" onClick={agregarModificador} style={secondaryButtonStyle}>+ Agregar extra</button>
                     </div>
                     <div className="pos-modifier-list">
-                      {(form.modifiers || []).map((modifier, index) => (
-                        <div key={`${modifier.name}-${index}`} className="pos-modifier-row">
+                      {billableExtraModifiers.length === 0 && (
+                        <div className="pos-catalog-note">Sin extras cobrables. Agrega uno manualmente o carga los sugeridos.</div>
+                      )}
+                      {billableExtraModifiers.map(({ modifier, index }) => (
+                        <div key={`extra-${modifier.id || modifier.name}-${index}`} className="pos-modifier-row">
                           <label className="pos-inline-toggle">
                             <input type="checkbox" checked={modifier.isActive !== false} onChange={(event) => actualizarModificador(index, "isActive", event.target.checked)} />
                             <span>
                               <strong>Activo</strong>
-                              <small>{modifier.isActive !== false ? "Disponible en POS" : "Oculto en POS"}</small>
+                              <small>{modifier.isActive !== false ? "Visible en POS" : "Oculto en POS"}</small>
                             </span>
                           </label>
-                          <input placeholder="Nombre del modificador" value={modifier.name} onChange={(event) => actualizarModificador(index, "name", event.target.value)} style={inputStyle} />
-                          <select value={modifier.modifierType || "remove"} onChange={(event) => actualizarModificador(index, "modifierType", event.target.value)} style={inputStyle}>
-                            {MODIFIER_TYPE_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
-                          </select>
-                          <input type="number" min="0" step="0.01" placeholder="Precio extra opcional" value={modifier.priceDelta} onChange={(event) => actualizarModificador(index, "priceDelta", event.target.value)} style={inputStyle} disabled={(modifier.modifierType || "remove") === "remove"} />
-                          <button type="button" onClick={() => eliminarModificador(index)} style={dangerMiniButtonStyle}>Quitar</button>
+                          <input placeholder="Nombre del extra (ej. Extra queso)" value={modifier.name} onChange={(event) => actualizarModificador(index, "name", event.target.value)} style={inputStyle} />
+                          <input type="number" min="0" step="0.01" placeholder="Cargo adicional (Q)" value={modifier.priceDelta} onChange={(event) => actualizarModificador(index, "priceDelta", event.target.value)} style={inputStyle} />
+                          <span className="pos-configurable-group-meta">Extra cobrable</span>
+                          <button type="button" onClick={() => eliminarModificador(index)} style={dangerMiniButtonStyle}>Eliminar</button>
                         </div>
                       ))}
                     </div>
+                    {legacyModifiers.length > 0 && (
+                      <div className="pos-legacy-modifiers-panel">
+                        <button
+                          type="button"
+                          className="pos-legacy-modifiers-toggle"
+                          onClick={() => setShowLegacyPizzaModifiers((actual) => !actual)}
+                        >
+                          <span>Modificadores legacy / no recomendados ({legacyModifiers.length})</span>
+                          <span>{showLegacyPizzaModifiers ? "Ocultar" : "Mostrar"}</span>
+                        </button>
+                        <p className="pos-legacy-modifiers-warning">
+                          Para instrucciones sin precio usa observaciones de cocina al vender. Estos modificadores se conservan por historial pero no se recomiendan.
+                        </p>
+                        {showLegacyPizzaModifiers && (
+                          <div className="pos-modifier-list">
+                            {legacyModifiers.map(({ modifier, index }) => (
+                              <div key={`legacy-${modifier.id || modifier.name}-${index}`} className="pos-modifier-row">
+                                <label className="pos-inline-toggle">
+                                  <input type="checkbox" checked={modifier.isActive !== false} onChange={(event) => actualizarModificador(index, "isActive", event.target.checked)} />
+                                  <span>
+                                    <strong>Activo</strong>
+                                    <small>{modifier.isActive !== false ? "Visible en POS" : "Oculto en POS"}</small>
+                                  </span>
+                                </label>
+                                <input placeholder="Nombre del modificador" value={modifier.name} onChange={(event) => actualizarModificador(index, "name", event.target.value)} style={inputStyle} />
+                                <select value={modifier.modifierType || "remove"} onChange={(event) => actualizarModificador(index, "modifierType", event.target.value)} style={inputStyle}>
+                                  {MODIFIER_TYPE_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+                                </select>
+                                <input type="number" min="0" step="0.01" placeholder="Precio extra opcional" value={modifier.priceDelta} onChange={(event) => actualizarModificador(index, "priceDelta", event.target.value)} style={inputStyle} disabled={(modifier.modifierType || "remove") === "remove"} />
+                                <button type="button" onClick={() => eliminarModificador(index)} style={dangerMiniButtonStyle}>Eliminar</button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </section>
                 </>
               )}
@@ -3924,7 +4092,7 @@ function POS() {
                   {formProductType === "pizza"
                     ? <span style={activeFormVariants.length > 0 ? availableStyle : unavailableStyle}>{activeFormVariants.length > 0 ? `✓ ${activeFormVariants.length} tamaños activos configurados` : "✗ Sin tamaños activos"}</span>
                     : formProductType === "configurable"
-                      ? <span style={activeFormOptionGroups.length > 0 && configurableFormValid ? availableStyle : unavailableStyle}>{activeFormOptionGroups.length > 0 && configurableFormValid ? `✓ ${activeFormOptionGroups.length} grupos configurados` : "✗ Configuración de opciones incompleta"}</span>
+                      ? <span style={activeFormOptionGroups.length > 0 && configurableFormValid ? availableStyle : unavailableStyle}>{activeFormOptionGroups.length > 0 && configurableFormValid ? `✓ ${activeFormOptionGroups.length} decisiones configuradas` : "✗ Configuración de venta incompleta"}</span>
                     : form.isTestItem || formProductType === "manual_test"
                       ? <span className="pos-test-badge">🧪 PRUEBA · sin receta ni consumo</span>
                       : formRequiresRecipe
@@ -3939,8 +4107,20 @@ function POS() {
               </section>
 
               <div style={buttonRowStyle}>
-                <button type="submit" style={primaryButtonStyle}>{editandoId ? "Guardar cambios" : "Agregar platillo"}</button>
-                <button type="button" onClick={() => { setMostrarFormulario(false); setEditandoId(null); setForm(emptyActiveItemForm()); setErrores({}) }} style={secondaryButtonStyle}>Cancelar</button>
+                <button type="submit" style={primaryButtonStyle} disabled={savingCatalogItem}>
+                  {savingCatalogItem ? "Guardando..." : (editandoId ? "Guardar cambios" : "Agregar platillo")}
+                </button>
+                {editandoId && form.estado === "activo" && (
+                  <button type="button" onClick={sacarDelMenuDesdeFormulario} style={dangerMiniButtonStyle} disabled={savingCatalogItem}>
+                    Sacar del menú
+                  </button>
+                )}
+                {editandoId && form.estado === "inactivo" && (
+                  <button type="button" onClick={reactivarDesdeFormulario} style={secondaryButtonStyle} disabled={savingCatalogItem}>
+                    Reactivar en menú
+                  </button>
+                )}
+                <button type="button" onClick={() => { setMostrarFormulario(false); setEditandoId(null); setForm(emptyActiveItemForm()); setErrores({}); setCatalogSaveMessage(null); setShowLegacyPizzaModifiers(false) }} style={secondaryButtonStyle} disabled={savingCatalogItem}>Cancelar</button>
               </div>
             </form>
           )}

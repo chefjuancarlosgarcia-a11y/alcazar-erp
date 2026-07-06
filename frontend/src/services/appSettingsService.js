@@ -1,5 +1,6 @@
 import { BRANDING } from "../branding"
 import { supabase } from "../lib/supabase"
+import { logBrandingQueryFailure } from "../utils/authProfileDiagnostics"
 import { DEFAULT_THEME_TOKENS, normalizeBrandingDraft, PRESET_THEMES } from "../utils/brandingTheme"
 import { CACHE_KEYS, CACHE_TTL } from "./cacheConfig"
 import { cachedQuery, invalidateQueryCache } from "./queryCache"
@@ -58,12 +59,20 @@ export function getBrandingSettings() {
   return cachedQuery(CACHE_KEYS.BRANDING, async () => {
     const fallback = readLocalBranding()
     if (!supabase) return { data: fallback, error: null, source: "local" }
+    const brandingQuery = `from("app_settings").select("value").eq("key", "${BRANDING_SETTINGS_KEY}").maybeSingle()`
     const { data, error } = await supabase
       .from("app_settings")
       .select("value")
       .eq("key", BRANDING_SETTINGS_KEY)
       .maybeSingle()
     if (error) {
+      logBrandingQueryFailure({
+        sourceFunction: "appSettingsService.getBrandingSettings",
+        table: "app_settings",
+        queryDescription: brandingQuery,
+        note: "Independiente de AuthContext.loadProfileForSession; usa fallback local y no bloquea login.",
+        error
+      })
       console.warn("[Settings] No se pudo leer branding desde Supabase.", error)
       return { data: fallback, error, source: "local" }
     }

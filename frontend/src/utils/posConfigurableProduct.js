@@ -1,6 +1,12 @@
+/*
+ * FUTURE — Mitad y mitad (venta configurable, sin schema aún):
+ * Pizza: tamaño; completa vs mitad y mitad; mitad izq/der sabor; precio; receta proporcional por mitad.
+ * Alitas: cantidad; un sabor vs mitad y mitad; ej. 10 alitas = 5 BBQ + 5 Buffalo; receta proporcional por sabor.
+ */
+
 export const OPTION_SELECTION_MODES = [
-  { id: "single", label: "Única" },
-  { id: "multiple", label: "Múltiple" }
+  { id: "single", label: "Selección única" },
+  { id: "multiple", label: "Selección múltiple" }
 ]
 
 export const OPTION_PRICE_MODES = [
@@ -94,12 +100,12 @@ export function validateConfigurableCatalogForm(optionGroups = [], { active = tr
 
   const groups = (optionGroups || []).filter((group) => group.isActive !== false)
   if (groups.length === 0) {
-    errors.push("Activa al menos un grupo de opciones.")
+    errors.push("Agrega al menos una decisión activa.")
     return { valid: false, errors }
   }
 
   groups.forEach((group, groupIndex) => {
-    const label = group.name?.trim() || `Grupo ${groupIndex + 1}`
+    const label = group.name?.trim() || `Decisión ${groupIndex + 1}`
     const selectionMode = group.selectionMode || group.selection_mode || "single"
     const activeChoices = (group.choices || []).filter((choice) => {
       if (choice.isActive === false) return false

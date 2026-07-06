@@ -20,6 +20,7 @@ const optionChoiceSelect = `
   recipe:standard_recipes(id, name, recipe_type, production_area_id, active)
 `
 
+/** Detalle individual (edición/diagnóstico) — incluye recetas anidadas. */
 const productSelect = `
   *,
   recipe:standard_recipes(id, name, recipe_type, production_area_id, active),
@@ -65,6 +66,106 @@ const productSelect = `
     choices:pos_option_choices(${optionChoiceSelect})
   )
 `
+
+const IN_CHUNK_SIZE = 80
+
+const productListSelect = `
+  *,
+  recipe:standard_recipes(id, name, recipe_type, production_area_id, active),
+  production_area:areas(id, name, active, is_production_area)
+`
+
+const variantListColumns = "id, product_id, name, size, price, recipe_id, production_area_id, prep_time_minutes, is_active, sort_order"
+const modifierListColumns = "id, product_id, name, modifier_type, price_delta, is_active, sort_order"
+const optionGroupListColumns = 'id, product_id, name, sort_order, "required", selection_mode, min_selections, max_selections, is_active'
+const optionChoiceListColumns = "id, group_id, name, sort_order, price_mode, price, recipe_id, is_active"
+
+function isMissingRelationError(error) {
+  const message = String(error?.message || "")
+  return /does not exist|could not find|schema cache|PGRST/i.test(message)
+}
+
+function isHeavyQueryError(error) {
+  const message = String(error?.message || "")
+  return /timeout|canceling statement|57014|internal server error/i.test(message)
+}
+
+function groupRowsByKey(rows, key) {
+  const map = new Map()
+  for (const row of rows || []) {
+    const groupKey = row?.[key]
+    if (groupKey == null) continue
+    if (!map.has(groupKey)) map.set(groupKey, [])
+    map.get(groupKey).push(row)
+  }
+  return map
+}
+
+async function queryInChunks(table, columns, filterColumn, ids, orderColumn = "sort_order") {
+  if (!ids.length) return { data: [], error: null }
+  const allRows = []
+  for (let index = 0; index < ids.length; index += IN_CHUNK_SIZE) {
+    const chunk = ids.slice(index, index + IN_CHUNK_SIZE)
+    const { data, error } = await supabase
+      .from(table)
+      .select(columns)
+      .in(filterColumn, chunk)
+      .order(orderColumn, { ascending: true })
+    if (error) return { data: [], error }
+    allRows.push(...(data || []))
+  }
+  return { data: allRows, error: null }
+}
+
+async function loadCatalogChildren(productIds) {
+  const [variantsResult, modifiersResult, groupsResult] = await Promise.all([
+    queryInChunks("pos_product_variants", variantListColumns, "product_id", productIds),
+    queryInChunks("pos_product_modifiers", modifierListColumns, "product_id", productIds),
+    queryInChunks("pos_option_groups", optionGroupListColumns, "product_id", productIds)
+  ])
+
+  if (variantsResult.error) return { error: variantsResult.error }
+  if (modifiersResult.error) return { error: modifiersResult.error }
+
+  let optionGroups = groupsResult.data || []
+  if (groupsResult.error) {
+    if (!isMissingRelationError(groupsResult.error)) return { error: groupsResult.error }
+    optionGroups = []
+  }
+
+  let optionChoices = []
+  const groupIds = optionGroups.map((group) => group.id).filter(Boolean)
+  if (groupIds.length) {
+    const choicesResult = await queryInChunks("pos_option_choices", optionChoiceListColumns, "group_id", groupIds)
+    if (choicesResult.error) {
+      if (!isMissingRelationError(choicesResult.error)) return { error: choicesResult.error }
+    } else {
+      optionChoices = choicesResult.data || []
+    }
+  }
+
+  const choicesByGroup = groupRowsByKey(optionChoices, "group_id")
+  const groupsWithChoices = optionGroups.map((group) => ({
+    ...group,
+    choices: choicesByGroup.get(group.id) || []
+  }))
+
+  return {
+    error: null,
+    variantsByProduct: groupRowsByKey(variantsResult.data, "product_id"),
+    modifiersByProduct: groupRowsByKey(modifiersResult.data, "product_id"),
+    groupsByProduct: groupRowsByKey(groupsWithChoices, "product_id")
+  }
+}
+
+function mergeCatalogProducts(products, children) {
+  return (products || []).map((product) => ({
+    ...product,
+    variants: children.variantsByProduct.get(product.id) || [],
+    modifier_options: children.modifiersByProduct.get(product.id) || [],
+    option_groups: children.groupsByProduct.get(product.id) || []
+  }))
+}
 
 function mapVariantFromSupabase(variant) {
   if (!variant) return null
@@ -234,11 +335,29 @@ function serializeModifier(modifier = {}, index = 0) {
 }
 
 async function queryProducts(filters = {}) {
-  let query = supabase.from("pos_products").select(productSelect)
+  let query = supabase.from("pos_products").select(productListSelect)
   if (filters.active) query = query.eq("active", true)
   if (filters.productionReady) query = query.eq("production_ready", true)
-  const { data, error } = await query.order("sort_order", { ascending: true }).order("name", { ascending: true })
-  return { data: (data || []).map(mapPOSProductFromSupabase), error }
+  let { data: products, error } = await query.order("sort_order", { ascending: true }).order("name", { ascending: true })
+
+  if (error) {
+    let bareQuery = supabase.from("pos_products").select("*")
+    if (filters.active) bareQuery = bareQuery.eq("active", true)
+    if (filters.productionReady) bareQuery = bareQuery.eq("production_ready", true)
+    const fallback = await bareQuery.order("sort_order", { ascending: true }).order("name", { ascending: true })
+    if (fallback.error) return { data: [], error: fallback.error }
+    products = fallback.data
+    error = null
+  }
+
+  const productIds = (products || []).map((product) => product.id).filter(Boolean)
+  const children = await loadCatalogChildren(productIds)
+  if (children.error) {
+    console.warn("[POS] Catálogo: productos cargados sin variantes/modificadores:", children.error.message)
+    return { data: (products || []).map(mapPOSProductFromSupabase), error: null }
+  }
+
+  return { data: mergeCatalogProducts(products, children).map(mapPOSProductFromSupabase), error: null }
 }
 
 export function invalidatePOSProductsCache() {
@@ -264,7 +383,15 @@ export function getProductionReadyPOSProducts() {
 
 export async function getPOSProductById(id) {
   const { data, error } = await supabase.from("pos_products").select(productSelect).eq("id", id).maybeSingle()
-  return { data: mapPOSProductFromSupabase(data), error }
+  if (!error && data) return { data: mapPOSProductFromSupabase(data), error: null }
+  if (!isHeavyQueryError(error)) return { data: mapPOSProductFromSupabase(data), error }
+
+  const { data: base, error: baseError } = await supabase.from("pos_products").select(productListSelect).eq("id", id).maybeSingle()
+  if (baseError || !base) return { data: mapPOSProductFromSupabase(data), error: error || baseError }
+
+  const children = await loadCatalogChildren([id])
+  if (children.error) return { data: mapPOSProductFromSupabase(base), error: null }
+  return { data: mapPOSProductFromSupabase(mergeCatalogProducts([base], children)[0]), error: null }
 }
 
 export async function createPOSProduct(product) {
@@ -287,6 +414,26 @@ export async function activatePOSProduct(id) {
   return invalidateAfterProductMutation({ data: mapPOSProductFromSupabase(result.data), error: result.error })
 }
 
+async function reloadCatalogProductById(productId) {
+  const { data: base, error: baseError } = await supabase
+    .from("pos_products")
+    .select(productListSelect)
+    .eq("id", productId)
+    .maybeSingle()
+  if (baseError) return { data: null, error: baseError }
+  if (!base) return { data: null, error: { message: "Producto guardado pero no encontrado al recargar." } }
+
+  const children = await loadCatalogChildren([productId])
+  if (children.error) {
+    console.warn("[POS] Producto guardado; recarga ligera de hijos falló:", children.error.message)
+    return { data: mapPOSProductFromSupabase(base), error: null }
+  }
+  return {
+    data: mapPOSProductFromSupabase(mergeCatalogProducts([base], children)[0]),
+    error: null
+  }
+}
+
 export async function savePOSCatalogProduct(product, variants = [], modifiers = [], optionGroups = []) {
   const payload = serializeProduct(product)
   const productType = payload.product_type || "simple"
@@ -299,6 +446,17 @@ export async function savePOSCatalogProduct(product, variants = [], modifiers = 
   const optionGroupPayload = productType === "configurable"
     ? serializeConfigurableGroupsForSave(optionGroups)
     : []
+
+  if (import.meta.env.DEV) {
+    console.log("[POS save] RPC save_pos_catalog_product", {
+      productType,
+      name: payload.name,
+      optionGroups: optionGroupPayload.length,
+      variants: variantPayload.length,
+      modifiers: modifierPayload.length
+    })
+  }
+
   const { data, error } = await supabase.rpc("save_pos_catalog_product", {
     p_product_id: product.id || product.productId || null,
     p_product: payload,
@@ -306,11 +464,17 @@ export async function savePOSCatalogProduct(product, variants = [], modifiers = 
     p_modifiers: modifierPayload,
     p_option_groups: optionGroupPayload
   })
-  if (error) return { data: null, error }
+  if (error) {
+    console.error("[POS save] RPC error:", error)
+    return { data: null, error }
+  }
+
   invalidatePOSProductsCache()
+  window.dispatchEvent(new CustomEvent("pos-products-updated"))
+
   const productId = data?.id || product.id || product.productId
   if (!productId) return { data: mapPOSProductFromSupabase(data), error: null }
-  return getPOSProductById(productId)
+  return reloadCatalogProductById(productId)
 }
 
 export function validatePOSProduct(product, { strictRecipe = false } = {}) {

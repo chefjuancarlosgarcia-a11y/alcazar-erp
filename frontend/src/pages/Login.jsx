@@ -16,6 +16,12 @@ import {
   recordLoginAttempt,
   verifyLoginCaptcha
 } from "../services/loginSecurityService"
+import {
+  getSupabaseConfigStatus,
+  probeSupabaseAuthHealth,
+  probeSupabaseLoginSecurityRpc,
+  probeSupabaseRest
+} from "../services/supabaseConnectivity"
 
 function Login() {
   const { user, session, loading, profileError, login, logout, getDefaultPath } = useAuth()
@@ -33,6 +39,7 @@ function Login() {
   const [captchaToken, setCaptchaToken] = useState("")
   const [captchaSessionId, setCaptchaSessionId] = useState(null)
   const [captchaResetKey, setCaptchaResetKey] = useState(0)
+  const [connectivityWarning, setConnectivityWarning] = useState("")
   const [securityMessage] = useState(() => {
     const message = sessionStorage.getItem("auth:autoLogoutMessage") || ""
     if (message) sessionStorage.removeItem("auth:autoLogoutMessage")
@@ -61,7 +68,12 @@ function Login() {
     const timer = window.setTimeout(async () => {
       const ip = await getClientIpAddress()
       const result = await checkLoginSecurity(normalizedEmail, ip)
-      if (cancelled || result.error) return
+      if (cancelled) return
+      if (result.error) {
+        setConnectivityWarning("")
+        return
+      }
+      setConnectivityWarning(result.warning || "")
       setSecurityStatus(result.data)
       setShowCaptcha(isCaptchaRequired(result.data))
     }, 350)
@@ -120,6 +132,8 @@ function Login() {
       setError(securityResult.error)
       return
     }
+
+    setConnectivityWarning(securityResult.warning || "")
 
     const status = securityResult.data || {}
     setSecurityStatus(status)
@@ -193,24 +207,60 @@ function Login() {
   async function debugSupabaseAuth() {
     setDebugging(true)
     setDebugResult(null)
-    const credentials = {
-      email: normalizedEmail,
-      password: password
+    setError("")
+
+    const config = getSupabaseConfigStatus()
+    if (import.meta.env.DEV) {
+      const { getSupabaseClientAuditSnapshot } = await import("../lib/supabase")
+      console.log("[Supabase audit] client snapshot:", getSupabaseClientAuditSnapshot())
     }
-    const { data, error: loginError } = await supabase.auth.signInWithPassword(credentials)
-    if (loginError) {
-      console.error("Supabase login error:", {
-        message: loginError?.message,
-        status: loginError?.status,
-        name: loginError?.name,
-        fullError: loginError
-      })
+    const [restProbe, authProbe, rpcProbe] = await Promise.all([
+      probeSupabaseRest(),
+      probeSupabaseAuthHealth(),
+      probeSupabaseLoginSecurityRpc()
+    ])
+
+    let loginError = null
+    let loginData = null
+    if (config.configured && authProbe.ok) {
+      try {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: normalizedEmail,
+          password
+        })
+        loginData = data
+        loginError = error
+        if (error) {
+          console.error("Supabase login error:", {
+            message: error?.message,
+            status: error?.status,
+            name: error?.name,
+            fullError: error
+          })
+        }
+      } catch (error) {
+        loginError = error
+        console.error("Supabase login exception:", error)
+      }
     }
+
     setDebugResult({
-      url: import.meta.env.VITE_SUPABASE_URL || "No configurada",
-      hasAnonKey: Boolean(import.meta.env.VITE_SUPABASE_ANON_KEY),
-      error: loginError ? { message: loginError.message, status: loginError.status, name: loginError.name } : null,
-      user: data?.user ? { id: data.user.id, email: data.user.email } : null
+      url: config.url || "No configurada",
+      projectRef: config.projectRef || "N/A",
+      hasAnonKey: config.hasAnonKey,
+      keyType: config.keyType,
+      keyProjectRef: config.keyProjectRef || "N/A",
+      keyProjectMatch: config.keyProjectMatch,
+      devWarnings: config.devWarnings || [],
+      probes: { rest: restProbe, auth: authProbe, rpc: rpcProbe },
+      error: loginError
+        ? {
+            message: loginError.message || String(loginError),
+            status: loginError.status,
+            name: loginError.name
+          }
+        : null,
+      user: loginData?.user ? { id: loginData.user.id, email: loginData.user.email } : null
     })
     setDebugging(false)
   }
@@ -272,6 +322,7 @@ function Login() {
             ) : null}
 
             {securityMessage && <p style={successStyle}>{securityMessage}</p>}
+            {connectivityWarning ? <p style={warningStyle}>{connectivityWarning}</p> : null}
             {(error || profileError) && <p style={errorStyle}>{error || profileError}</p>}
             {isDevelopment && authError && (
               <p style={debugErrorStyle}>Supabase: {authError.message} {authError.status ? `(status ${authError.status})` : ""}</p>
@@ -292,11 +343,20 @@ function Login() {
                 {debugResult && (
                   <div style={debugDetailsStyle}>
                     <p><strong>URL configurada:</strong> {debugResult.url}</p>
+                    <p><strong>Proyecto:</strong> {debugResult.projectRef}</p>
                     <p><strong>Anon key existe:</strong> {debugResult.hasAnonKey ? "Sí" : "No"}</p>
+                    <p><strong>Tipo de key:</strong> {debugResult.keyType}</p>
+                    <p><strong>JWT ref / URL ref:</strong> {debugResult.keyProjectRef} / {debugResult.projectRef} {debugResult.keyProjectMatch == null ? "(no verificado)" : debugResult.keyProjectMatch ? "✓" : "≠ (solo dev)"}</p>
+                    {debugResult.devWarnings?.length ? debugResult.devWarnings.map((warning) => (
+                      <p key={warning}><strong>Dev:</strong> {warning}</p>
+                    )) : null}
+                    <p><strong>REST:</strong> {debugResult.probes.rest.ok ? "OK" : "FALLA"} — {debugResult.probes.rest.message}</p>
+                    <p><strong>Auth:</strong> {debugResult.probes.auth.ok ? "OK" : "FALLA"} — {debugResult.probes.auth.message}</p>
+                    <p><strong>RPC check_login_security:</strong> {debugResult.probes.rpc.ok ? "OK" : "FALLA"} — {debugResult.probes.rpc.message}</p>
                     {debugResult.error ? (
-                      <p><strong>Error real:</strong> {debugResult.error.message} {debugResult.error.status ? `(status ${debugResult.error.status})` : ""}</p>
+                      <p><strong>Login real:</strong> {debugResult.error.message} {debugResult.error.status ? `(status ${debugResult.error.status})` : ""}</p>
                     ) : (
-                      <p><strong>data.user:</strong> {debugResult.user ? `${debugResult.user.email} (${debugResult.user.id})` : "Sin usuario"}</p>
+                      <p><strong>data.user:</strong> {debugResult.user ? `${debugResult.user.email} (${debugResult.user.id})` : "Sin usuario (probes OK; credenciales no probadas o inválidas)"}</p>
                     )}
                   </div>
                 )}
@@ -423,6 +483,14 @@ const successStyle = {
   borderRadius: "8px",
   background: "#123427",
   color: "#86efac"
+}
+
+const warningStyle = {
+  padding: "10px 12px",
+  borderRadius: "8px",
+  background: "#422006",
+  color: "#fde68a",
+  lineHeight: 1.45
 }
 
 const debugErrorStyle = {

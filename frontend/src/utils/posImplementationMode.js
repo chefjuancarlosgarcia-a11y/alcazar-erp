@@ -35,6 +35,27 @@ export function productRequiresRecipeForSale(product) {
 }
 
 /** Producto activo vendible sin descarga de inventario (modo implementación). */
+export const CONFIGURABLE_SALE_PHASE2_MESSAGE = "Venta configurable disponible en la siguiente fase."
+
+export function isConfigurableProductType(stateOrProduct) {
+  return (stateOrProduct?.productType || stateOrProduct?.product_type || "simple") === "configurable"
+}
+
+/** Visible en grid mesero (Fase 1): preview sin venta real. */
+export function isMeseroCatalogVisible(saleState) {
+  const hasArea = Boolean(saleState?.area || saleState?.areaId)
+  const hasCategory = Boolean(saleState?.category || saleState?.categoryId)
+  if (!saleState?.active || !hasArea || !hasCategory) return false
+  if (saleState.saleAllowed) return true
+  if (isConfigurableProductType(saleState) && saleState.productionReady) return true
+  return false
+}
+
+export function isConfigurableMeseroPreview(saleState) {
+  return isConfigurableProductType(saleState) && isMeseroCatalogVisible(saleState) && !saleState?.saleAllowed
+}
+
+/** Producto activo vendible sin descarga de inventario (modo implementación). */
 export function isCatalogSaleWithoutInventory(state) {
   return Boolean(
     state?.active
@@ -74,7 +95,7 @@ export function getCatalogProductionBadgeLines(state) {
     const count = state?.optionGroups?.length || 0
     recipeLine = {
       ok: count > 0,
-      label: count > 0 ? `✓ ${count} grupos activos` : "✗ Sin grupos de opciones"
+      label: count > 0 ? `✓ ${count} grupos activos` : "✗ Sin grupos activos"
     }
   } else if (saleWithoutInventory && !state?.recipe) {
     recipeLine = { ok: true, label: "✓ Receta no requerida" }
@@ -90,7 +111,15 @@ export function getCatalogProductionBadgeLines(state) {
   }
 
   let statusLine
-  if (saleWithoutInventory) {
+  if (productType === "configurable") {
+    if (state?.productionReady) {
+      statusLine = { ok: true, label: "✓ Listo para producción" }
+    } else if (!state?.area) {
+      statusLine = { ok: false, label: "✗ Pendiente configuración KDS" }
+    } else {
+      statusLine = { ok: false, label: "✗ Configuración incompleta" }
+    }
+  } else if (saleWithoutInventory) {
     statusLine = {
       ok: Boolean(state?.saleAllowed && state?.area && state?.category),
       label: state?.saleAllowed && state?.area && state?.category
@@ -161,8 +190,8 @@ export function getProductSaleState(product, productionState, deductionMode) {
   const strict = isStrictDeductionMode(deductionMode)
   const testItem = productionState?.testItem
   const active = productionState?.active
-  const hasArea = Boolean(productionState?.area)
-  const hasCategory = Boolean(productionState?.category)
+  const hasArea = Boolean(productionState?.area || productionState?.areaId)
+  const hasCategory = Boolean(productionState?.category || productionState?.categoryId)
   const recipeRequired = product?.recipeRequiredForSale === true
     || product?.recipe_required_for_sale === true
 
@@ -203,9 +232,15 @@ export function getProductSaleState(product, productionState, deductionMode) {
 }
 
 export function catalogImplementationStatusLabel(state) {
+  const productType = state?.productType || "simple"
   if (!state?.active) return "Inactivo"
-  if (state?.saleAllowed === false && !state?.productionReady) return "Pendiente"
+  if (productType === "configurable") {
+    if (!state?.area) return "Pendiente KDS"
+    if (state?.productionReady) return "Configurable · Fase 2"
+    return "Configuración incompleta"
+  }
+  if (!state?.saleAllowed && !state?.productionReady) return "Pendiente KDS"
   if (state?.inventoryWillDeduct) return "Venta + inventario"
-  if (state?.saleAllowed) return "Venta sin inventario"
+  if (state?.saleAllowed || state?.productionReady) return "Venta sin inventario"
   return "Pendiente KDS"
 }

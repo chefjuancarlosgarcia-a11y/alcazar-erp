@@ -92,7 +92,7 @@ const PosProductQuickSearch = forwardRef(function PosProductQuickSearch({
 
   function formatPrice(product) {
     const productType = product.productType || product.product_type
-    if (productType === "pizza") {
+    if (productType === "pizza" || productType === "configurable") {
       return `Desde Q${Number(getProductBasePrice(product) || 0).toFixed(2)}`
     }
     return `Q${Number(product.precio ?? product.price ?? 0).toFixed(2)}`

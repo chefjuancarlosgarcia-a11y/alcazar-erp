@@ -2,6 +2,12 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import { supabase } from "../lib/supabase"
 import { normalizeRole as normalizeProfileRoleKey } from "../utils/profilePermissions"
+import { describeSupabaseError } from "../services/supabaseConnectivity"
+import {
+  logProfileLoadOutcome,
+  logSupabaseQueryAttempt,
+  logSupabaseQueryFailure
+} from "../utils/authProfileDiagnostics"
 
 const isSupabaseConfigured = Boolean(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY)
 
@@ -158,6 +164,9 @@ function friendlyAuthError(error) {
   if (message.includes("invalid api key")) return "La clave pública de Supabase no es válida para este proyecto. Revisa VITE_SUPABASE_ANON_KEY."
   if (error?.status === 401) return "Credenciales incorrectas o contraseña inválida."
   if (message.includes("email not confirmed")) return "Confirma tu correo electrónico antes de ingresar."
+  const described = describeSupabaseError(error, "Autenticación de Supabase", { fromAuth: true })
+  if (described.isApiKeyMismatch) return described.userMessage
+  if (described.isNetwork) return described.userMessage
   if (message.includes("failed to fetch") || message.includes("network")) return "No fue posible conectar con el servicio de autenticación."
   return "No se pudo iniciar sesión. Intenta nuevamente."
 }
@@ -202,6 +211,7 @@ export function AuthProvider({ children }) {
 
   const loadProfileForSession = useCallback(async (activeSession) => {
     const sessionUserId = activeSession?.user?.id || null
+    const sessionEmail = activeSession?.user?.email || null
     setSession(activeSession || null)
     if (!sessionUserId) {
       setProfile(null)
@@ -212,6 +222,15 @@ export function AuthProvider({ children }) {
       return { ok: true, user: null, profile: null }
     }
 
+    const profileQuery = 'from("profiles").select("*").eq("id", sessionUserId).maybeSingle()'
+    logSupabaseQueryAttempt({
+      sourceFunction: "AuthContext.loadProfileForSession",
+      table: "profiles",
+      queryDescription: profileQuery,
+      authUserId: sessionUserId,
+      authEmail: sessionEmail
+    })
+
     const { data, error } = await supabase
       .from("profiles")
       .select("*")
@@ -219,12 +238,28 @@ export function AuthProvider({ children }) {
       .maybeSingle()
 
     if (error) {
+      logSupabaseQueryFailure({
+        sourceFunction: "AuthContext.loadProfileForSession",
+        table: "profiles",
+        queryDescription: profileQuery,
+        authUserId: sessionUserId,
+        authEmail: sessionEmail,
+        sessionPresent: Boolean(activeSession?.access_token),
+        error
+      })
       if (userRef.current?.id === sessionUserId && profileRef.current) {
         console.warn("Profile reload failed; keeping current session.", error)
         setSession(activeSession)
         setProfileError("")
         return { ok: true, user: userRef.current, profile: profileRef.current }
       }
+      logProfileLoadOutcome({
+        sourceFunction: "AuthContext.loadProfileForSession",
+        authUserId: sessionUserId,
+        authEmail: sessionEmail,
+        outcome: "error_shown_to_user",
+        error
+      })
       setProfile(null)
       setUser(null)
       setProfileError("No se pudo cargar tu perfil. Contacta administración.")
@@ -235,6 +270,12 @@ export function AuthProvider({ children }) {
       return { ok: false, message: "No se pudo cargar tu perfil. Contacta administración." }
     }
     if (!data) {
+      logProfileLoadOutcome({
+        sourceFunction: "AuthContext.loadProfileForSession",
+        authUserId: sessionUserId,
+        authEmail: sessionEmail,
+        outcome: "missing_row"
+      })
       setProfile(null)
       setUser(null)
       setProfileError("Tu usuario no tiene perfil configurado. Contacta administración.")
@@ -258,6 +299,14 @@ export function AuthProvider({ children }) {
 
     const currentUser = normalizeProfileToCurrentUser(data, activeSession.user)
     const hasChecklistAccess = await probeChecklistModuleAccess(currentUser)
+    logProfileLoadOutcome({
+      sourceFunction: "AuthContext.loadProfileForSession",
+      authUserId: sessionUserId,
+      authEmail: sessionEmail,
+      outcome: "success",
+      profileId: data.id,
+      profileStatus: data.status
+    })
     setProfile(data)
     setUser(currentUser)
     setChecklistModuleAccess(hasChecklistAccess)
@@ -325,18 +374,24 @@ export function AuthProvider({ children }) {
       email: email.trim().toLowerCase(),
       password: password
     }
-    const { data, error } = await supabase.auth.signInWithPassword(credentials)
-    if (error) {
-      console.error("Supabase login error:", {
-        message: error?.message,
-        status: error?.status,
-        name: error?.name,
-        fullError: error
-      })
-      return { ok: false, message: friendlyAuthError(error), error }
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword(credentials)
+      if (error) {
+        console.error("Supabase login error:", {
+          message: error?.message,
+          status: error?.status,
+          name: error?.name,
+          fullError: error
+        })
+        return { ok: false, message: friendlyAuthError(error), error }
+      }
+      const result = await loadProfileForSession(data.session)
+      return result
+    } catch (error) {
+      const described = describeSupabaseError(error, "Autenticación de Supabase", { fromAuth: true })
+      console.error("Supabase login exception:", described.technical || error)
+      return { ok: false, message: described.userMessage, error }
     }
-    const result = await loadProfileForSession(data.session)
-    return result
   }, [loadProfileForSession])
 
   const logout = useCallback(async (reason = "manual_logout") => {

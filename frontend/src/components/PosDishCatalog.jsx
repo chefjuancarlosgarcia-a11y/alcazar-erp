@@ -1,6 +1,11 @@
 import { useMemo, useState } from "react"
 import { Link } from "react-router-dom"
-import { catalogStatusLabel, matchesCatalogFilters } from "../utils/posCatalogFilters"
+import {
+  catalogStatusBadgeClass,
+  catalogStatusLabel,
+  isCatalogCardReady,
+  matchesCatalogFilters
+} from "../utils/posCatalogFilters"
 import { getCatalogProductionBadgeLines } from "../utils/posImplementationMode"
 import PosProductImplementationBadges from "./PosProductImplementationBadges"
 
@@ -60,7 +65,7 @@ export default function PosDishCatalog({
 }) {
   const [catalogFilter, setCatalogFilter] = useState("")
   const [categoryFilter, setCategoryFilter] = useState("")
-  const [statusFilter, setStatusFilter] = useState("all")
+  const [statusFilter, setStatusFilter] = useState("active")
   const [viewMode, setViewMode] = useState("grid")
   const isAdmin = user?.role === "admin"
 
@@ -73,11 +78,6 @@ export default function PosDishCatalog({
   const statusCounts = useMemo(() => ({
     all: items.length,
     active: items.filter((item) => getItemState(item).active).length,
-    ready: items.filter((item) => getItemState(item).saleAllowed ?? getItemState(item).productionReady).length,
-    pending: items.filter((item) => {
-      const state = getItemState(item)
-      return state.active && !(state.saleAllowed ?? state.productionReady)
-    }).length,
     inactive: items.filter((item) => !getItemState(item).active).length
   }), [items, getItemState])
 
@@ -183,13 +183,17 @@ export default function PosDishCatalog({
             <option key={category.id} value={category.id}>{category.name}</option>
           ))}
         </select>
-        <select className="pos-dish-catalog-select" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-          <option value="all">Todos ({statusCounts.all})</option>
-          <option value="active">Activos ({statusCounts.active})</option>
-          <option value="ready">Listos KDS ({statusCounts.ready})</option>
-          <option value="pending">Pendientes KDS ({statusCounts.pending})</option>
-          <option value="inactive">Inactivos ({statusCounts.inactive})</option>
-        </select>
+        <div className="pos-dish-status-filter" role="group" aria-label="Estado del catálogo">
+          <button type="button" className={statusFilter === "active" ? "active" : ""} onClick={() => setStatusFilter("active")}>
+            Activos ({statusCounts.active})
+          </button>
+          <button type="button" className={statusFilter === "inactive" ? "active" : ""} onClick={() => setStatusFilter("inactive")}>
+            Inactivos ({statusCounts.inactive})
+          </button>
+          <button type="button" className={statusFilter === "all" ? "active" : ""} onClick={() => setStatusFilter("all")}>
+            Todos ({statusCounts.all})
+          </button>
+        </div>
         <div className="pos-dish-view-toggle" role="group" aria-label="Vista del catálogo">
           <button type="button" className={viewMode === "grid" ? "active" : ""} onClick={() => setViewMode("grid")}>Tarjetas</button>
           {isAdmin && <button type="button" className={viewMode === "table" ? "active" : ""} onClick={() => setViewMode("table")}>Tabla</button>}
@@ -216,7 +220,7 @@ export default function PosDishCatalog({
             <tbody>
               {filteredItems.map((item) => {
                 const state = getItemState(item)
-                const price = (item.productType || item.product_type) === "pizza"
+                const price = (item.productType || item.product_type) === "pizza" || (item.productType || item.product_type) === "configurable"
                   ? `Desde Q${getProductBasePrice(item).toFixed(2)}`
                   : `Q${Number(item.precio || 0).toFixed(2)}`
                 return (
@@ -228,7 +232,7 @@ export default function PosDishCatalog({
                     <td>{item.categoria}</td>
                     <td>{price}</td>
                     <td>{productionAreas.find((area) => area.id === productProductionAreaId(item))?.name || "—"}</td>
-                    <td><span className={`pos-dish-status-badge ${state.active ? ((state.saleAllowed ?? state.productionReady) ? "ready" : "pending") : "inactive"}`}>{catalogStatusLabel(state)}</span></td>
+                    <td><span className={`pos-dish-status-badge ${catalogStatusBadgeClass(state)}`}>{catalogStatusLabel(state)}</span></td>
                     <td>
                       <PosProductImplementationBadges state={state} product={item} />
                     </td>
@@ -251,14 +255,12 @@ export default function PosDishCatalog({
           {filteredItems.map((item) => {
             const state = getItemState(item)
             return (
-              <article className={`pos-dish-card${state.active ? "" : " is-inactive"}${(state.saleAllowed ?? state.productionReady) ? " is-ready" : ""}`} key={item.id}>
+              <article className={`pos-dish-card${state.active ? "" : " is-inactive"}${isCatalogCardReady(state) ? " is-ready" : ""}`} key={item.id}>
                 {item.imagen ? <img src={item.imagen} alt={item.nombre} style={thumbStyle} /> : <div className="pos-dish-card-placeholder">{productInitials(item.nombre)}</div>}
                 <div className="pos-dish-card-copy">
                   <div className="pos-dish-card-head">
                     <span className="pos-product-category">{item.categoria}</span>
-                    {!state.active && <span className="pos-dish-status-badge inactive">Inactivo</span>}
-                    {state.active && !(state.saleAllowed ?? state.productionReady) && <span className="pos-dish-status-badge pending">Pendiente KDS</span>}
-                    {(state.saleAllowed ?? state.productionReady) && <span className="pos-dish-status-badge ready">{catalogStatusLabel(state)}</span>}
+                    <span className={`pos-dish-status-badge ${catalogStatusBadgeClass(state)}`}>{catalogStatusLabel(state)}</span>
                   </div>
                   <h3>{item.nombre}</h3>
                   <PosProductImplementationBadges state={state} product={item} />

@@ -352,7 +352,7 @@ export function PosProductGrid({
           <span className="pos-classic-product-name">{item.nombre}</span>
           {isTestProduct(item) && <span className="pos-test-badge">Prueba</span>}
           <strong className="pos-classic-product-price">
-            {(item.productType || item.product_type) === "pizza"
+            {(item.productType || item.product_type) === "pizza" || (item.productType || item.product_type) === "configurable"
               ? `Desde Q${getProductBasePrice(item).toFixed(2)}`
               : `Q${Number(item.precio || 0).toFixed(2)}`}
           </strong>
