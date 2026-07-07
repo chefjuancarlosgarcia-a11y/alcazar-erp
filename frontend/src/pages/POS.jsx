@@ -22,7 +22,9 @@ import {
   createEmptyOptionGroup,
   formatConfigurableModifierLabels,
   getActiveOptionChoices,
+  evaluateConfigurableCatalogReadiness,
   getActiveOptionGroups,
+  getActiveOptionGroupsCount,
   getConfigurableDisplayPrice,
   getOptionGroupKey,
   getSelectedChoiceIdsForGroup,
@@ -402,6 +404,9 @@ function getProductProductionState(product, recipes, areas, categories) {
   const testItem = isTestProduct(product)
   const activeVariants = getActiveProductVariants(product)
   const activeOptionGroups = getActiveOptionGroups(product)
+  const configurableReadiness = productType === "configurable"
+    ? evaluateConfigurableCatalogReadiness(product, { active })
+    : null
   const tracksInventory = productHasInventoryTracking(product)
   const recipeRequired = productRequiresRecipeForSale(product)
   const needsRecipe = tracksInventory || recipeRequired
@@ -412,16 +417,13 @@ function getProductProductionState(product, recipes, areas, categories) {
     if (Number(variant.price || 0) <= 0) return true
     return needsRecipe && !variant.recipeId
   })) issues.push("Variantes incompletas")
-  if (productType === "configurable") {
-    const { valid, errors } = validateConfigurableCatalogForm(product?.optionGroups || product?.option_groups || [], { active })
-    if (!valid) issues.push(...errors)
-  }
+  if (configurableReadiness) issues.push(...configurableReadiness.issues)
   if (!area) issues.push("Sin área válida")
   if (!category) issues.push("Sin categoría activa")
   if (active && productType !== "configurable" && product?.productionReady !== true && needsRecipe) issues.push("No validado para producción")
-  if (active && productType === "configurable" && product?.productionReady !== true && issues.length === 0) {
-    issues.push("Configuración de opciones incompleta")
-  }
+  const productionReady = productType === "configurable"
+    ? Boolean(configurableReadiness?.productionReady && issues.length === 0)
+    : active && product?.productionReady === true && issues.length === 0
   return {
     active,
     productType,
@@ -435,8 +437,10 @@ function getProductProductionState(product, recipes, areas, categories) {
     testItem,
     variants: activeVariants,
     optionGroups: activeOptionGroups,
+    activeOptionGroupsCount: configurableReadiness?.activeOptionGroupsCount ?? getActiveOptionGroupsCount(product),
+    optionGroupsHydrated: configurableReadiness?.optionGroupsHydrated ?? true,
     issues,
-    productionReady: active && product?.productionReady === true && issues.length === 0
+    productionReady
   }
 }
 
@@ -3094,7 +3098,7 @@ function POS() {
   function productNeedsQuickConfiguration(item) {
     const type = item?.productType || item?.product_type
     return type === "pizza"
-      || (type === "configurable" && getActiveOptionGroups(item).length > 0)
+      || (type === "configurable" && getActiveOptionGroupsCount(item) > 0)
       || getActiveProductModifiers(item).length > 0
       || item?.allowKitchenNotes === true
       || item?.allow_kitchen_notes === true

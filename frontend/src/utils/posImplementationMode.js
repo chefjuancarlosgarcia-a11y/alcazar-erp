@@ -92,10 +92,10 @@ export function getCatalogProductionBadgeLines(state) {
       label: count > 0 ? `✓ ${count} tamaños activos` : "✗ Sin tamaños activos"
     }
   } else if (productType === "configurable") {
-    const count = state?.optionGroups?.length || 0
+    const count = state?.activeOptionGroupsCount ?? state?.optionGroups?.length ?? 0
     recipeLine = {
       ok: count > 0,
-      label: count > 0 ? `✓ ${count} grupos activos` : "✗ Sin grupos activos"
+      label: count > 0 ? `✓ ${count} decisiones activas` : "✗ Sin decisiones activas"
     }
   } else if (saleWithoutInventory && !state?.recipe) {
     recipeLine = { ok: true, label: "✓ Receta no requerida" }

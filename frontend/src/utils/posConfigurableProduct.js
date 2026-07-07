@@ -83,6 +83,65 @@ export function getActiveOptionGroups(product) {
   return groups.filter((group) => group.isActive !== false && group.is_active !== false)
 }
 
+/** Conteo de decisiones activas: hijos en memoria o resumen del listado paginado (RPC). */
+export function getActiveOptionGroupsCount(product) {
+  const hydratedCount = getActiveOptionGroups(product).length
+  if (hydratedCount > 0) return hydratedCount
+  const serverCount = product?.activeOptionGroupsCount ?? product?.active_option_groups_count
+  if (serverCount != null) return Number(serverCount) || 0
+  return hydratedCount
+}
+
+/**
+ * El listado paginado no carga pos_option_groups; solo filas base de pos_products.
+ * Sin este check, validateConfigurableCatalogForm([]) marca todo como incompleto.
+ */
+export function areOptionGroupsHydrated(product) {
+  const groups = product?.optionGroups || product?.option_groups || []
+  if (groups.length > 0) return true
+  const serverCount = product?.activeOptionGroupsCount ?? product?.active_option_groups_count
+  if (serverCount != null) return serverCount === 0
+  return product?.optionGroupsHydrated === true || product?.option_groups_hydrated === true
+}
+
+/**
+ * Diagnóstico de catálogo configurable: validación completa si hay hijos cargados;
+ * si no, confía en production_ready (pos_configurable_catalog_is_valid en BD).
+ */
+export function evaluateConfigurableCatalogReadiness(product, { active = true } = {}) {
+  const optionGroups = product?.optionGroups || product?.option_groups || []
+  const hydrated = areOptionGroupsHydrated(product)
+  const dbProductionReady = product?.productionReady === true || product?.production_ready === true
+  const activeOptionGroupsCount = getActiveOptionGroupsCount(product)
+  const issues = []
+
+  if (hydrated) {
+    const { valid, errors } = validateConfigurableCatalogForm(optionGroups, { active })
+    if (!valid) issues.push(...errors)
+    return {
+      issues,
+      productionReady: active && dbProductionReady && issues.length === 0,
+      activeOptionGroupsCount,
+      optionGroupsHydrated: true
+    }
+  }
+
+  if (active && !dbProductionReady) {
+    if (activeOptionGroupsCount === 0) {
+      issues.push("Agrega al menos una decisión activa.")
+    } else {
+      issues.push("Configuración de opciones incompleta")
+    }
+  }
+
+  return {
+    issues,
+    productionReady: active && dbProductionReady && issues.length === 0,
+    activeOptionGroupsCount,
+    optionGroupsHydrated: false
+  }
+}
+
 export function getActiveOptionChoices(group) {
   return (group?.choices || []).filter((choice) => {
     if (choice.isActive === false || choice.is_active === false) return false
