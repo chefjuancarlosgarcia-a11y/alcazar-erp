@@ -58,6 +58,14 @@ export function saveEmployeeSchedule(schedule) {
   return supabase.rpc("save_employee_schedule", { p_data: schedule })
 }
 
+export function duplicateScheduleWeek(sourceWeekStart, targetWeekStart, options = {}) {
+  return supabase.rpc("duplicate_schedule_week", {
+    p_source_week_start: sourceWeekStart,
+    p_target_week_start: targetWeekStart,
+    p_options: options
+  })
+}
+
 export function deleteEmployeeSchedule(id) {
   return supabase.rpc("delete_employee_schedule", { p_schedule_id: id })
 }

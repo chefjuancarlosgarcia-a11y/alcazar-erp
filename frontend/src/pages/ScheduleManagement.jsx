@@ -24,6 +24,7 @@ import { getActiveAreas } from "../services/areasService"
 import {
   deleteEmployeeSchedule,
   deleteShiftType,
+  duplicateScheduleWeek,
   getEmployeeSchedules,
   getScheduleAttendanceDetails,
   getScheduleAttendanceSummary,
@@ -83,6 +84,7 @@ function ScheduleManagement() {
   const canPublish = PUBLISHER_ROLES.includes(user?.role)
   const [weekStart, setWeekStart] = useState(() => getMonday(new Date()))
   const [schedules, setSchedules] = useState([])
+  const [sourceWeekSchedules, setSourceWeekSchedules] = useState([])
   const [profiles, setProfiles] = useState([])
   const [areas, setAreas] = useState([])
   const [templates, setTemplates] = useState([])
@@ -115,7 +117,13 @@ function ScheduleManagement() {
   const [shiftTypesOpen, setShiftTypesOpen] = useState(false)
   const [shiftTypeForm, setShiftTypeForm] = useState(null)
   const [exportModalOpen, setExportModalOpen] = useState(false)
+  const [duplicateModalOpen, setDuplicateModalOpen] = useState(false)
+  const [duplicatePreview, setDuplicatePreview] = useState(null)
+  const [duplicatePreviewLoading, setDuplicatePreviewLoading] = useState(false)
+  const [duplicating, setDuplicating] = useState(false)
   const weekEnd = addDays(weekStart, 6)
+  const sourceWeekStart = addDays(weekStart, -7)
+  const sourceWeekEnd = addDays(sourceWeekStart, 6)
   const weekDates = DAYS.map((label, index) => ({ label, date: addDays(weekStart, index) }))
   const areaChoices = [...new Set([...DEFAULT_AREAS, ...areas.map((area) => area.name).filter(Boolean)])]
   const activeShiftTypes = shiftTypes.filter((type) => type.status === "active")
@@ -193,8 +201,9 @@ function ScheduleManagement() {
     const profilePromise = canEdit
       ? getAttendanceTerminalProfiles()
       : Promise.resolve({ data: [{ id: user.id, full_name: user.name, area_name: user.areaName }], error: null })
-    const [scheduleResult, profileResult, areaResult, templateResult, shiftTypeResult] = await Promise.all([
+    const [scheduleResult, sourceScheduleResult, profileResult, areaResult, templateResult, shiftTypeResult] = await Promise.all([
       getEmployeeSchedules(weekStart, weekEnd),
+      canEdit ? getEmployeeSchedules(sourceWeekStart, sourceWeekEnd) : Promise.resolve({ data: [], error: null }),
       profilePromise,
       getActiveAreas(),
       getShiftTemplates(),
@@ -205,6 +214,7 @@ function ScheduleManagement() {
     }
     if (profileResult.error) setError("No se pudieron cargar los colaboradores activos.")
     setSchedules(scheduleResult.data || [])
+    setSourceWeekSchedules(sourceScheduleResult.data || [])
     setProfiles((profileResult.data || []).map((profile) => ({
       id: profile.id,
       name: profile.full_name || user.name || "Colaborador",
@@ -218,7 +228,7 @@ function ScheduleManagement() {
     setTemplates(templateResult.data || [])
     setShiftTypes(shiftTypeResult.data || [])
     setLoading(false)
-  }, [canEdit, user, weekEnd, weekStart])
+  }, [canEdit, sourceWeekEnd, sourceWeekStart, user, weekEnd, weekStart])
 
   useEffect(() => {
     const timeoutId = window.setTimeout(loadData, 0)
@@ -259,6 +269,10 @@ function ScheduleManagement() {
 
   const alerts = buildAlerts(visibleSchedules, profiles, weekDates, shiftTypes)
   const summary = buildSummary(visibleSchedules, payroll, shiftTypes)
+  const publishCoverageGaps = useMemo(
+    () => buildPublishCoverageGaps(weekDates, sourceWeekSchedules, schedules),
+    [schedules, sourceWeekSchedules, weekDates]
+  )
   const isPublishedWeek = schedules.some((schedule) => schedule.status === "published")
   const drafts = schedules.filter((schedule) => schedule.status === "draft").length
   const isLocked = isPublishedWeek && !editingPublished
@@ -385,29 +399,98 @@ function ScheduleManagement() {
     await loadData()
   }
 
-  async function duplicatePreviousWeek() {
-    if (!window.confirm("Se copiaran los turnos de la semana anterior como borradores. ¿Continuar?")) return
-    const previousStart = addDays(weekStart, -7)
-    const previousResult = await getEmployeeSchedules(previousStart, addDays(previousStart, 6))
-    if (previousResult.error) {
-      setError("No se pudo leer la semana anterior.")
+  async function openDuplicateWeekModal() {
+    if (!canEdit || isLocked) return
+    setDuplicateModalOpen(true)
+    setDuplicatePreview(null)
+    setError("")
+    setMessage("")
+    setDuplicatePreviewLoading(true)
+    const { data, error: previewError } = await duplicateScheduleWeek(sourceWeekStart, weekStart, {
+      destination_mode: "replace_drafts",
+      dry_run: true
+    })
+    setDuplicatePreviewLoading(false)
+    if (previewError) {
+      setError(previewError.message || "No se pudo preparar la vista previa de duplicacion.")
+      setDuplicatePreview(null)
       return
     }
-    for (const schedule of previousResult.data || []) {
-      const copy = getCopyPayload(schedule)
-      const shiftedDate = addDays(schedule.shift_date, 7)
-      const result = await saveEmployeeSchedule({ ...copy, shift_date: shiftedDate, status: "draft" })
-      if (result.error) {
-        setError(result.error.message || "No se pudo duplicar toda la semana.")
-        return
-      }
+    setDuplicatePreview(data)
+    if (data?.ok === false && Array.isArray(data?.errors) && data.errors.length) {
+      setError(data.errors.map((entry) => entry.message).join(" · "))
     }
-    setMessage("Semana anterior duplicada como borrador.")
+  }
+
+  function closeDuplicateWeekModal() {
+    if (duplicating) return
+    setDuplicateModalOpen(false)
+    setDuplicatePreview(null)
+  }
+
+  function formatDuplicateDayCounts(byDay = {}, weekStartDate) {
+    return DAYS.map((label, index) => {
+      const date = addDays(weekStartDate, index)
+      return { label, date, count: Number(byDay?.[date] || 0) }
+    })
+  }
+
+  function buildDuplicateSuccessMessage(result) {
+    const copied = Number(result?.copied_count || 0)
+    const skipped = Number(result?.skipped_count || 0)
+    const deleted = Number(result?.deleted_draft_count || 0)
+    const dayCount = Object.keys(result?.copied_by_day || {}).filter((day) => Number(result.copied_by_day[day]) > 0).length
+    let text = `Se copiaron ${copied} bloques en ${dayCount} dia(s) (${formatShortDate(result?.target_week_start || weekStart)} – ${formatShortDate(addDays(result?.target_week_start || weekStart, 6))}).`
+    if (deleted > 0) text += ` Se reemplazaron ${deleted} borradores previos.`
+    if (skipped > 0) text += ` Se omitieron ${skipped} bloque(s).`
+    const sourceDays = Object.keys(result?.source_by_day || {}).filter((day) => Number(result.source_by_day[day]) > 0).length
+    const copiedDays = Object.keys(result?.copied_by_day || {}).filter((day) => Number(result.copied_by_day[day]) > 0).length
+    if (sourceDays > 0 && copiedDays < sourceDays) {
+      text += " Advertencia: la copia no cubre todos los dias planificados en la semana origen."
+    }
+    if (Array.isArray(result?.warnings) && result.warnings.length) {
+      text += ` ${result.warnings.map((warning) => warning.message).join(" ")}`
+    }
+    return text
+  }
+
+  async function confirmDuplicateWeek() {
+    if (!duplicatePreview?.ok) return
+    setDuplicating(true)
+    setError("")
+    const { data, error: duplicateError } = await duplicateScheduleWeek(sourceWeekStart, weekStart, {
+      destination_mode: "replace_drafts",
+      dry_run: false
+    })
+    setDuplicating(false)
+    if (duplicateError) {
+      setError(duplicateError.message || "No se pudo duplicar la semana.")
+      return
+    }
+    if (!data?.ok) {
+      const details = Array.isArray(data?.errors) ? data.errors.map((entry) => entry.message).join(" · ") : ""
+      setError(details || "No se duplico la semana. No se guardo ningun cambio.")
+      setDuplicatePreview(data)
+      return
+    }
+    setDuplicateModalOpen(false)
+    setDuplicatePreview(null)
+    setStatusFilter("")
+    const firstDayIndex = weekDates.findIndex((day) => Number(data?.copied_by_day?.[day.date]) > 0)
+    if (firstDayIndex >= 0) setMobileDay(firstDayIndex)
+    setMessage(`${buildDuplicateSuccessMessage(data)} En movil, usa las pestanas de dia para revisar toda la semana.`)
     await loadData()
   }
 
+  async function duplicatePreviousWeek() {
+    await openDuplicateWeekModal()
+  }
+
   async function publishWeek() {
-    if (!window.confirm("Al publicar, los colaboradores recibiran una notificacion y se bloquearan cambios accidentales. ¿Publicar?")) return
+    const coverageWarning = publishCoverageGaps.length
+      ? `\n\nAdvertencia: la semana anterior tenia turnos en ${publishCoverageGaps.join(", ")} pero esta semana esos dias estan vacios.`
+      : ""
+    if (!window.confirm(`Al publicar, los colaboradores recibiran una notificacion y se bloquearan cambios accidentales.${coverageWarning}\n\n¿Publicar?`)) return
     const { data, error: publishError } = await publishScheduleWeek(weekStart)
     if (publishError) {
       setError(publishError.message || "No se pudo publicar el horario.")
@@ -522,7 +605,7 @@ function ScheduleManagement() {
         </div>
         {canEdit && (
           <div className="schedule-header-actions">
-            <button className="schedule-secondary" type="button" onClick={duplicatePreviousWeek} disabled={isLocked}>Duplicar semana anterior</button>
+            <button className="schedule-secondary" type="button" onClick={duplicatePreviousWeek} disabled={isLocked || duplicating || duplicatePreviewLoading}>Duplicar semana anterior</button>
             {canPublish && <button className="schedule-secondary" type="button" onClick={() => setShiftTypesOpen(true)}>Tipos de turno</button>}
             {canPublish && drafts > 0 && <button className="schedule-primary" type="button" onClick={publishWeek}>Publicar horario</button>}
             {canPublish && isPublishedWeek && (
@@ -536,6 +619,11 @@ function ScheduleManagement() {
 
       {message && <div className="schedule-success">{message}</div>}
       {error && <div className="schedule-error">{error}</div>}
+      {canEdit && drafts > 0 && publishCoverageGaps.length > 0 && (
+        <div className="schedule-warning">
+          La semana anterior tenia turnos en {publishCoverageGaps.join(", ")}, pero esta semana esos dias estan vacios. Revisa el calendario antes de publicar.
+        </div>
+      )}
 
       <div className="schedule-summary">
         <SummaryCard label="Colaboradores programados" value={summary.employees} />
@@ -807,6 +895,98 @@ function ScheduleManagement() {
         shiftTypes={shiftTypes}
       />
 
+      {duplicateModalOpen && (
+        <div className="schedule-modal-overlay">
+          <div className="schedule-modal duplicate-week-modal">
+            <header>
+              <div>
+                <p className="schedule-eyebrow">Planificacion semanal</p>
+                <h2>Duplicar semana anterior</h2>
+              </div>
+              <button type="button" onClick={closeDuplicateWeekModal} disabled={duplicating}>Cerrar</button>
+            </header>
+
+            <div className="duplicate-week-summary">
+              <p><strong>Origen:</strong> {formatShortDate(sourceWeekStart)} – {formatShortDate(sourceWeekEnd)}</p>
+              <p><strong>Destino:</strong> {formatShortDate(weekStart)} – {formatShortDate(weekEnd)}</p>
+              <p className="schedule-muted">En movil, la vista muestra un dia a la vez. Usa las pestanas para revisar toda la semana.</p>
+            </div>
+
+            {duplicatePreviewLoading && <div className="schedule-empty">Preparando vista previa...</div>}
+
+            {!duplicatePreviewLoading && duplicatePreview && (
+              <>
+                <div className="duplicate-week-stats">
+                  <span>Origen: <strong>{Number(duplicatePreview.total_source || 0)}</strong> bloques</span>
+                  <span>Se copiaran: <strong>{Number(duplicatePreview.copied_count || 0)}</strong></span>
+                  {Number(duplicatePreview.skipped_count || 0) > 0 && (
+                    <span>Se omitiran: <strong>{Number(duplicatePreview.skipped_count)}</strong></span>
+                  )}
+                  {Number(duplicatePreview.deleted_draft_count || 0) > 0 && (
+                    <span>Se reemplazaran: <strong>{Number(duplicatePreview.deleted_draft_count)}</strong> borradores</span>
+                  )}
+                </div>
+
+                <div className="duplicate-week-days">
+                  <div className="duplicate-week-days-head">
+                    <span>Dia</span>
+                    <span>Origen</span>
+                    <span>Destino</span>
+                  </div>
+                  {formatDuplicateDayCounts(duplicatePreview.source_by_day, sourceWeekStart).map((sourceDay, index) => {
+                    const targetDay = formatDuplicateDayCounts(duplicatePreview.copied_by_day, weekStart)[index]
+                    return (
+                      <div className="duplicate-week-days-row" key={sourceDay.date}>
+                        <span>{sourceDay.label}</span>
+                        <span>{sourceDay.count}</span>
+                        <span>{targetDay.count}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                {Number(duplicatePreview.target_existing_before?.draft || 0) > 0 && (
+                  <div className="schedule-warning">
+                    La semana destino ya tiene {Number(duplicatePreview.target_existing_before.draft)} borrador(es). Se reemplazaran al confirmar. Los publicados no se tocan.
+                  </div>
+                )}
+
+                {Array.isArray(duplicatePreview.warnings) && duplicatePreview.warnings.length > 0 && (
+                  <div className="duplicate-week-warnings">
+                    {duplicatePreview.warnings.map((warning, index) => (
+                      <p key={`${warning.code || "warning"}-${index}`}>{warning.message}</p>
+                    ))}
+                  </div>
+                )}
+
+                {duplicatePreview.ok === false && Array.isArray(duplicatePreview.errors) && duplicatePreview.errors.length > 0 && (
+                  <div className="duplicate-week-errors">
+                    <strong>No se pudo duplicar la semana. No se guardo ningun cambio.</strong>
+                    <ol>
+                      {duplicatePreview.errors.map((entry, index) => (
+                        <li key={`${entry.code || "error"}-${index}`}>{entry.message}</li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+              </>
+            )}
+
+            <footer>
+              <button className="schedule-secondary" type="button" onClick={closeDuplicateWeekModal} disabled={duplicating}>Cancelar</button>
+              <button
+                className="schedule-primary"
+                type="button"
+                onClick={confirmDuplicateWeek}
+                disabled={duplicating || duplicatePreviewLoading || !duplicatePreview?.ok}
+              >
+                {duplicating ? "Duplicando..." : "Duplicar semana"}
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
+
       {shiftTypeForm && (
         <div className="schedule-modal-overlay">
           <form className="schedule-modal" onSubmit={persistShiftType}>
@@ -878,6 +1058,18 @@ function getCopyPayload(schedule) {
   delete copy.updated_at
   delete copy.published_at
   return copy
+}
+
+function buildPublishCoverageGaps(weekDates, sourceSchedules, currentSchedules) {
+  return weekDates
+    .map((day) => {
+      const sourceDate = addDays(day.date, -7)
+      const sourceCount = sourceSchedules.filter((schedule) => schedule.shift_date === sourceDate).length
+      const currentCount = currentSchedules.filter((schedule) => schedule.shift_date === day.date).length
+      if (sourceCount > 0 && currentCount === 0) return day.label
+      return null
+    })
+    .filter(Boolean)
 }
 
 function buildAlerts(schedules, profiles, weekDates, shiftTypes = []) {
