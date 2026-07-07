@@ -817,10 +817,11 @@ export function validatePOSProduct(product, { strictRecipe = false } = {}) {
   const errors = []
   const productType = product.productType || product.product_type || "simple"
   const active = product.active ?? product.estado === "activo"
+  const tracksInventory = product.inventoryTrackingEnabled === true || product.inventory_tracking_enabled === true
   if (!String(product.name || product.nombre || "").trim()) errors.push("Falta nombre.")
   if (Number(product.price ?? product.precio ?? 0) < 0) errors.push("El precio no es valido.")
   if (active && !(product.productionAreaId || product.production_area_id || product.areaProduccion)) errors.push("Falta area de produccion.")
-  const recipeRequired = strictRecipe || product.recipeRequiredForSale === true || product.recipe_required_for_sale === true
+  const recipeRequired = strictRecipe || tracksInventory || product.recipeRequiredForSale === true || product.recipe_required_for_sale === true
   if (active && recipeRequired && !product.isTestItem && !product.is_test_item && productType !== "pizza" && productType !== "configurable" && !(product.recipeId || product.recipe_id)) {
     errors.push("Falta receta.")
   }
@@ -828,8 +829,10 @@ export function validatePOSProduct(product, { strictRecipe = false } = {}) {
     const activeVariants = (product.variants || []).filter((variant) => variant.isActive === true || variant.is_active === true)
     if (activeVariants.length === 0) {
       errors.push("Falta al menos una variante activa.")
-    } else if (activeVariants.some((variant) => Number(variant.price || 0) <= 0 || (strictRecipe && !(variant.recipeId || variant.recipe_id)))) {
-      errors.push("Hay variantes activas sin precio o receta.")
+    } else if (activeVariants.some((variant) => Number(variant.price || 0) <= 0 || (recipeRequired && !(variant.recipeId || variant.recipe_id)))) {
+      errors.push(recipeRequired
+        ? "Hay variantes activas sin precio o receta (receta requerida porque el producto controla inventario)."
+        : "Hay variantes activas sin precio.")
     }
   }
   if (active && productType === "configurable") {

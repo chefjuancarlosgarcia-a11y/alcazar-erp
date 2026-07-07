@@ -4499,7 +4499,20 @@ function POS() {
                     </span>
                   )}
                   {formProductType === "pizza"
-                    ? <span style={activeFormVariants.length > 0 ? availableStyle : unavailableStyle}>{activeFormVariants.length > 0 ? `✓ ${activeFormVariants.length} tamaños activos configurados` : "✗ Sin tamaños activos"}</span>
+                    ? (
+                      <>
+                        <span style={activeFormVariants.length > 0 ? availableStyle : unavailableStyle}>{activeFormVariants.length > 0 ? `✓ ${activeFormVariants.length} tamaños activos configurados` : "✗ Sin tamaños activos"}</span>
+                        {formRequiresRecipe
+                          ? (
+                            <span style={activeFormVariants.every((variant) => !variant.isActive || variant.recipeId) ? availableStyle : unavailableStyle}>
+                              {activeFormVariants.every((variant) => !variant.isActive || variant.recipeId)
+                                ? "✓ Receta requerida porque el producto controla inventario"
+                                : "✗ Receta requerida en cada tamaño activo (controla inventario)"}
+                            </span>
+                          )
+                          : <span style={availableStyle}>✓ No requiere receta porque no controla inventario</span>}
+                      </>
+                    )
                     : formProductType === "configurable"
                       ? <span style={activeFormOptionGroups.length > 0 && configurableFormValid ? availableStyle : unavailableStyle}>{activeFormOptionGroups.length > 0 && configurableFormValid ? `✓ ${activeFormOptionGroups.length} decisiones configuradas` : "✗ Configuración de venta incompleta"}</span>
                     : form.isTestItem || formProductType === "manual_test"
