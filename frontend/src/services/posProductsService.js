@@ -2,9 +2,20 @@ import { supabase } from "../lib/supabase"
 import { CACHE_KEYS, CACHE_TTL } from "./cacheConfig"
 import { cachedQuery, invalidateQueryCache } from "./queryCache"
 import {
+  classifyCatalogError,
+  logCatalogLoadResult,
+  logCatalogSaveAttempt,
+  logCatalogSaveResult,
+  logCatalogVerifyResult,
+  measureInlineImage
+} from "../utils/posCatalogDiagnostics"
+import {
   serializeConfigurableGroupsForSave,
   validateConfigurableCatalogForm
 } from "../utils/posConfigurableProduct"
+
+const CATALOG_PAGE_SIZE_DEFAULT = 50
+const SALE_PRODUCTS_LIMIT = 500
 
 const optionChoiceSelect = `
   id,
@@ -69,6 +80,36 @@ const productSelect = `
 
 const IN_CHUNK_SIZE = 80
 
+/** Listado admin/mesero — sin image_url ni description (evita timeout por base64). */
+const PRODUCT_LIST_COLUMNS = [
+  "id",
+  "name",
+  "price",
+  "category_id",
+  "category_name",
+  "recipe_id",
+  "production_area_id",
+  "active",
+  "production_ready",
+  "sort_order",
+  "product_type",
+  "is_test_item",
+  "inventory_tracking_enabled",
+  "recipe_required_for_sale",
+  "recipe_status",
+  "allow_kitchen_notes",
+  "prep_time_minutes",
+  "created_at",
+  "updated_at"
+].join(",")
+
+/** Detalle individual — incluye columnas pesadas solo para 1 producto. */
+const PRODUCT_DETAIL_COLUMNS = [
+  ...PRODUCT_LIST_COLUMNS.split(","),
+  "description",
+  "image_url"
+].join(",")
+
 const productListSelect = `
   *,
   recipe:standard_recipes(id, name, recipe_type, production_area_id, active),
@@ -111,18 +152,163 @@ async function queryInChunks(table, columns, filterColumn, ids, orderColumn = "s
       .select(columns)
       .in(filterColumn, chunk)
       .order(orderColumn, { ascending: true })
-    if (error) return { data: [], error }
+    if (error) {
+      if (isHeavyQueryError(error)) {
+        console.warn(`[POS] ${table}: timeout al cargar hijos del catálogo, se omite`, error.message)
+        return { data: allRows, error: null }
+      }
+      return { data: [], error }
+    }
     allRows.push(...(data || []))
   }
   return { data: allRows, error: null }
 }
 
+async function fetchProductRows(filters = {}, { columns = PRODUCT_LIST_COLUMNS, limit = null } = {}) {
+  let query = supabase.from("pos_products").select(columns, limit != null ? { count: "exact" } : undefined)
+  if (filters.active === true) query = query.eq("active", true)
+  if (filters.active === false) query = query.eq("active", false)
+  if (filters.productionReady) query = query.eq("production_ready", true)
+  if (filters.categoryId) query = query.eq("category_id", filters.categoryId)
+  if (filters.search) {
+    const term = `%${filters.search.trim()}%`
+    query = query.or(`name.ilike.${term},category_name.ilike.${term}`)
+  }
+  query = query.order("sort_order", { ascending: true }).order("name", { ascending: true })
+  if (limit != null) query = query.range(0, Math.max(0, limit - 1))
+  return query
+}
+
+function mapListRowFromSupabase(row) {
+  if (!row) return row
+  const mapped = mapPOSProductFromSupabase({
+    ...row,
+    description: row.description || "",
+    image_url: row.image_url || "",
+    variants: row.variants || [],
+    modifier_options: row.modifier_options || [],
+    option_groups: row.option_groups || []
+  })
+  mapped.hasImage = row.has_image === true || Boolean(row.has_image)
+  mapped.imageInlineBytes = row.image_inline_bytes ?? null
+  return mapped
+}
+
+export async function diagnosePOSCatalogHealth() {
+  const { data, error } = await supabase.rpc("diagnose_pos_catalog_health")
+  return { data, error, errorKind: error ? classifyCatalogError(error) : null }
+}
+
+export async function getPOSCatalogPage({
+  page = 1,
+  pageSize = CATALOG_PAGE_SIZE_DEFAULT,
+  search = "",
+  categoryId = "",
+  active = null
+} = {}) {
+  const limit = Math.min(100, Math.max(1, Number(pageSize) || CATALOG_PAGE_SIZE_DEFAULT))
+  const offset = Math.max(0, (Math.max(1, Number(page)) - 1) * limit)
+  const started = performance.now()
+
+  const { data, error } = await supabase.rpc("list_pos_catalog_page", {
+    p_limit: limit,
+    p_offset: offset,
+    p_search: search?.trim() || null,
+    p_category_id: categoryId || null,
+    p_active: active
+  })
+
+  if (!error && data) {
+    const items = (data.items || []).map(mapListRowFromSupabase)
+    logCatalogLoadResult({
+      source: "rpc:list_pos_catalog_page",
+      count: items.length,
+      total: data.total,
+      page,
+      ms: Math.round(performance.now() - started)
+    })
+    return {
+      data: items,
+      total: Number(data.total || 0),
+      limit: Number(data.limit || limit),
+      offset: Number(data.offset || offset),
+      error: null,
+      errorKind: null
+    }
+  }
+
+  if (error && !isMissingRelationError(error)) {
+    const errorKind = classifyCatalogError(error)
+    logCatalogLoadResult({
+      source: "rpc:list_pos_catalog_page",
+      error: error.message,
+      errorKind,
+      ms: Math.round(performance.now() - started)
+    })
+    return { data: [], total: 0, limit, offset, error, errorKind }
+  }
+
+  const fallback = await fetchProductRows(
+    { active, categoryId: categoryId || undefined, search: search?.trim() || undefined },
+    { limit: limit + offset }
+  )
+  if (fallback.error) {
+    const errorKind = classifyCatalogError(fallback.error)
+    return { data: [], total: 0, limit, offset, error: fallback.error, errorKind }
+  }
+
+  const allRows = (fallback.data || []).map(mapListRowFromSupabase)
+  const pageRows = allRows.slice(offset, offset + limit)
+  logCatalogLoadResult({
+    source: "rest:pos_products:list_columns",
+    count: pageRows.length,
+    total: allRows.length,
+    page,
+    ms: Math.round(performance.now() - started)
+  })
+  return {
+    data: pageRows,
+    total: allRows.length,
+    limit,
+    offset,
+    error: null,
+    errorKind: null
+  }
+}
+
+async function queryProductsForSale() {
+  const started = performance.now()
+  const { data: products, error } = await fetchProductRows({ active: true }, { limit: SALE_PRODUCTS_LIMIT })
+
+  if (error) {
+    logCatalogLoadResult({
+      source: "sale_products",
+      error: error.message,
+      errorKind: classifyCatalogError(error),
+      ms: Math.round(performance.now() - started)
+    })
+    return { data: [], error, errorKind: classifyCatalogError(error) }
+  }
+
+  const productIds = (products || []).map((product) => product.id).filter(Boolean)
+  const children = await loadCatalogChildren(productIds)
+  const merged = children.error
+    ? (products || []).map(mapPOSProductFromSupabase)
+    : mergeCatalogProducts(products, children).map(mapPOSProductFromSupabase)
+
+  logCatalogLoadResult({
+    source: "sale_products",
+    count: merged.length,
+    ms: Math.round(performance.now() - started),
+    childrenError: children.error?.message || null
+  })
+  return { data: merged, error: null, errorKind: null }
+}
+
 async function loadCatalogChildren(productIds) {
-  const [variantsResult, modifiersResult, groupsResult] = await Promise.all([
-    queryInChunks("pos_product_variants", variantListColumns, "product_id", productIds),
-    queryInChunks("pos_product_modifiers", modifierListColumns, "product_id", productIds),
-    queryInChunks("pos_option_groups", optionGroupListColumns, "product_id", productIds)
-  ])
+  const variantsResult = await queryInChunks("pos_product_variants", variantListColumns, "product_id", productIds)
+  const modifiersResult = await queryInChunks("pos_product_modifiers", modifierListColumns, "product_id", productIds)
+  const groupsResult = await queryInChunks("pos_option_groups", optionGroupListColumns, "product_id", productIds)
 
   if (variantsResult.error) return { error: variantsResult.error }
   if (modifiersResult.error) return { error: modifiersResult.error }
@@ -334,32 +520,6 @@ function serializeModifier(modifier = {}, index = 0) {
   }
 }
 
-async function queryProducts(filters = {}) {
-  let query = supabase.from("pos_products").select(productListSelect)
-  if (filters.active) query = query.eq("active", true)
-  if (filters.productionReady) query = query.eq("production_ready", true)
-  let { data: products, error } = await query.order("sort_order", { ascending: true }).order("name", { ascending: true })
-
-  if (error) {
-    let bareQuery = supabase.from("pos_products").select("*")
-    if (filters.active) bareQuery = bareQuery.eq("active", true)
-    if (filters.productionReady) bareQuery = bareQuery.eq("production_ready", true)
-    const fallback = await bareQuery.order("sort_order", { ascending: true }).order("name", { ascending: true })
-    if (fallback.error) return { data: [], error: fallback.error }
-    products = fallback.data
-    error = null
-  }
-
-  const productIds = (products || []).map((product) => product.id).filter(Boolean)
-  const children = await loadCatalogChildren(productIds)
-  if (children.error) {
-    console.warn("[POS] Catálogo: productos cargados sin variantes/modificadores:", children.error.message)
-    return { data: (products || []).map(mapPOSProductFromSupabase), error: null }
-  }
-
-  return { data: mergeCatalogProducts(products, children).map(mapPOSProductFromSupabase), error: null }
-}
-
 export function invalidatePOSProductsCache() {
   invalidateQueryCache(CACHE_KEYS.POS_PRODUCTS_PREFIX)
 }
@@ -370,28 +530,88 @@ function invalidateAfterProductMutation(result) {
 }
 
 export function getPOSProducts() {
-  return cachedQuery(CACHE_KEYS.POS_PRODUCTS_ALL, () => queryProducts(), CACHE_TTL.CATALOG)
+  return cachedQuery(CACHE_KEYS.POS_PRODUCTS_ALL, () => queryProductsForSale(), CACHE_TTL.CATALOG)
 }
 
 export function getActivePOSProducts() {
-  return cachedQuery(CACHE_KEYS.POS_PRODUCTS_ACTIVE, () => queryProducts({ active: true }), CACHE_TTL.CATALOG)
+  return cachedQuery(CACHE_KEYS.POS_PRODUCTS_ACTIVE, () => queryProductsForSale(), CACHE_TTL.CATALOG)
 }
 
 export function getProductionReadyPOSProducts() {
-  return cachedQuery(CACHE_KEYS.POS_PRODUCTS_PRODUCTION, () => queryProducts({ active: true, productionReady: true }), CACHE_TTL.CATALOG)
+  return cachedQuery(
+    CACHE_KEYS.POS_PRODUCTS_PRODUCTION,
+    async () => {
+      const result = await queryProductsForSale()
+      if (result.error) return result
+      return {
+        ...result,
+        data: (result.data || []).filter((product) => product.productionReady === true)
+      }
+    },
+    CACHE_TTL.CATALOG
+  )
+}
+
+export async function getPOSProductDetail(id) {
+  const started = performance.now()
+  const { data: base, error: baseError } = await supabase
+    .from("pos_products")
+    .select(PRODUCT_DETAIL_COLUMNS)
+    .eq("id", id)
+    .maybeSingle()
+
+  if (baseError) {
+    const errorKind = classifyCatalogError(baseError)
+    logCatalogLoadResult({ source: "detail:pos_products", id, error: baseError.message, errorKind, ms: Math.round(performance.now() - started) })
+    return { data: null, error: baseError, errorKind }
+  }
+  if (!base) {
+    return { data: null, error: { message: "Platillo no encontrado." }, errorKind: "other" }
+  }
+
+  const children = await loadCatalogChildren([id])
+  const merged = children.error
+    ? mapPOSProductFromSupabase(base)
+    : mapPOSProductFromSupabase(mergeCatalogProducts([base], children)[0])
+
+  logCatalogLoadResult({ source: "detail:pos_products", id, ms: Math.round(performance.now() - started) })
+  return { data: merged, error: null, errorKind: null }
+}
+
+export async function getPOSProductImage(id) {
+  const { data, error } = await supabase.rpc("get_pos_product_image_url", { p_id: id })
+  if (!error && data != null) return { data: String(data), error: null }
+
+  const fallback = await supabase.from("pos_products").select("image_url").eq("id", id).maybeSingle()
+  return { data: fallback.data?.image_url || "", error: fallback.error || error }
+}
+
+export async function verifyPOSProductPersisted(id) {
+  const { data, error } = await supabase.rpc("verify_pos_product_exists", { p_id: id })
+  if (!error && data) {
+    logCatalogVerifyResult({ id, ok: data.ok === true, source: "rpc" })
+    return { data, error: null }
+  }
+
+  const fallback = await supabase
+    .from("pos_products")
+    .select("id, name, active, created_at")
+    .eq("id", id)
+    .maybeSingle()
+
+  const result = {
+    ok: Boolean(fallback.data?.id),
+    id: fallback.data?.id || id,
+    name: fallback.data?.name || null,
+    active: fallback.data?.active ?? null,
+    created_at: fallback.data?.created_at || null
+  }
+  logCatalogVerifyResult({ id, ok: result.ok, source: "rest", error: fallback.error?.message || error?.message || null })
+  return { data: result, error: fallback.error || error }
 }
 
 export async function getPOSProductById(id) {
-  const { data, error } = await supabase.from("pos_products").select(productSelect).eq("id", id).maybeSingle()
-  if (!error && data) return { data: mapPOSProductFromSupabase(data), error: null }
-  if (!isHeavyQueryError(error)) return { data: mapPOSProductFromSupabase(data), error }
-
-  const { data: base, error: baseError } = await supabase.from("pos_products").select(productListSelect).eq("id", id).maybeSingle()
-  if (baseError || !base) return { data: mapPOSProductFromSupabase(data), error: error || baseError }
-
-  const children = await loadCatalogChildren([id])
-  if (children.error) return { data: mapPOSProductFromSupabase(base), error: null }
-  return { data: mapPOSProductFromSupabase(mergeCatalogProducts([base], children)[0]), error: null }
+  return getPOSProductDetail(id)
 }
 
 export async function createPOSProduct(product) {
@@ -415,23 +635,7 @@ export async function activatePOSProduct(id) {
 }
 
 async function reloadCatalogProductById(productId) {
-  const { data: base, error: baseError } = await supabase
-    .from("pos_products")
-    .select(productListSelect)
-    .eq("id", productId)
-    .maybeSingle()
-  if (baseError) return { data: null, error: baseError }
-  if (!base) return { data: null, error: { message: "Producto guardado pero no encontrado al recargar." } }
-
-  const children = await loadCatalogChildren([productId])
-  if (children.error) {
-    console.warn("[POS] Producto guardado; recarga ligera de hijos falló:", children.error.message)
-    return { data: mapPOSProductFromSupabase(base), error: null }
-  }
-  return {
-    data: mapPOSProductFromSupabase(mergeCatalogProducts([base], children)[0]),
-    error: null
-  }
+  return getPOSProductDetail(productId)
 }
 
 /**
@@ -445,6 +649,7 @@ async function reloadCatalogProductById(productId) {
 export async function savePOSCatalogProduct(product, variants = [], modifiers = [], optionGroups = []) {
   const payload = serializeProduct(product)
   const productType = payload.product_type || "simple"
+  const imageMeta = measureInlineImage(payload.image_url)
   const variantPayload = productType === "pizza"
     ? (Array.isArray(variants) ? variants : []).map((variant, index) => serializeVariant(variant, index, payload.name))
     : []
@@ -455,15 +660,15 @@ export async function savePOSCatalogProduct(product, variants = [], modifiers = 
     ? serializeConfigurableGroupsForSave(optionGroups)
     : []
 
-  if (import.meta.env.DEV) {
-    console.log("[POS save] RPC save_pos_catalog_product", {
-      productType,
-      name: payload.name,
-      optionGroups: optionGroupPayload.length,
-      variants: variantPayload.length,
-      modifiers: modifierPayload.length
-    })
-  }
+  logCatalogSaveAttempt({
+    productId: product.id || product.productId || null,
+    productType,
+    name: payload.name,
+    imageMeta,
+    optionGroups: optionGroupPayload.length,
+    variants: variantPayload.length,
+    modifiers: modifierPayload.length
+  })
 
   const { data, error } = await supabase.rpc("save_pos_catalog_product", {
     p_product_id: product.id || product.productId || null,
@@ -472,17 +677,27 @@ export async function savePOSCatalogProduct(product, variants = [], modifiers = 
     p_modifiers: modifierPayload,
     p_option_groups: optionGroupPayload
   })
+
   if (error) {
-    console.error("[POS save] RPC error:", error)
-    return { data: null, error }
+    logCatalogSaveResult({ ok: false, error: error.message, errorKind: classifyCatalogError(error) })
+    return { data: null, error, verify: null }
   }
 
   invalidatePOSProductsCache()
   window.dispatchEvent(new CustomEvent("pos-products-updated"))
 
   const productId = data?.id || product.id || product.productId
-  if (!productId) return { data: mapPOSProductFromSupabase(data), error: null }
-  return reloadCatalogProductById(productId)
+  const verify = productId ? await verifyPOSProductPersisted(productId) : { data: null, error: null }
+  logCatalogSaveResult({
+    ok: true,
+    productId,
+    verified: verify.data?.ok === true,
+    verifyError: verify.error?.message || null
+  })
+
+  if (!productId) return { data: mapPOSProductFromSupabase(data), error: null, verify }
+  const reloaded = await reloadCatalogProductById(productId)
+  return { ...reloaded, verify }
 }
 
 export function validatePOSProduct(product, { strictRecipe = false } = {}) {

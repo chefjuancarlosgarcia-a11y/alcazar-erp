@@ -45,11 +45,15 @@ import {
   createPOSProduct,
   deactivatePOSProduct,
   activatePOSProduct,
+  getPOSCatalogPage,
+  getPOSProductDetail,
+  getPOSProductImage,
   getPOSProductById,
   getPOSProducts,
   invalidatePOSProductsCache,
   savePOSCatalogProduct
 } from "../services/posProductsService"
+import { catalogErrorUserMessage } from "../utils/posCatalogDiagnostics"
 import { getProductionTickets } from "../services/productionTicketsService"
 import {
   addItemToOrder,
@@ -90,6 +94,8 @@ const POS_LAYOUT_SYNC_EVENT = "pos-layout-updated"
 const DEFAULT_LAYOUT_SETTINGS = { snapToGrid: true, gridSize: 24, zoom: 1 }
 const OPERATIONAL_TABLE_FIELDS = ["orderTotal", "orderCreatedAt", "activeMinutes", "readyCount"]
 const TABLE_TIME_THRESHOLDS = { normalMinutes: 60, criticalMinutes: 90 }
+const CATALOG_PAGE_SIZE = 50
+const CATALOG_SEARCH_DEBOUNCE_MS = 400
 const SALES_CHANNELS = [
   { id: "dine_in", label: "Salón", tableLabel: "Mesa" },
   { id: "delivery", label: "Delivery", tableLabel: "Delivery" },
@@ -734,7 +740,17 @@ function POS() {
 
   const [items, setItems] = useState([])
   const [itemsLoading, setItemsLoading] = useState(true)
+  const [catalogItems, setCatalogItems] = useState([])
+  const [catalogLoading, setCatalogLoading] = useState(false)
   const [catalogLoadError, setCatalogLoadError] = useState("")
+  const [catalogErrorKind, setCatalogErrorKind] = useState(null)
+  const [catalogTotal, setCatalogTotal] = useState(null)
+  const [catalogPage, setCatalogPage] = useState(1)
+  const [catalogSearch, setCatalogSearch] = useState("")
+  const [catalogSearchInput, setCatalogSearchInput] = useState("")
+  const [catalogCategoryFilter, setCatalogCategoryFilter] = useState("")
+  const [catalogStatusFilter, setCatalogStatusFilter] = useState("active")
+  const catalogSearchDebounceRef = useRef(null)
   const [migratingLocalProducts, setMigratingLocalProducts] = useState(false)
   const [mostrarFormulario, setMostrarFormulario] = useState(false)
   const [postSaveHint, setPostSaveHint] = useState(null)
@@ -1106,7 +1122,11 @@ function POS() {
     if (!user) {
       setItems([])
       setItemsLoading(false)
+      setCatalogItems([])
+      setCatalogLoading(false)
       setCatalogLoadError("")
+      setCatalogErrorKind(null)
+      setCatalogTotal(null)
       setProductionAreas([])
       setStandardRecipes([])
       return undefined
@@ -1136,14 +1156,12 @@ function POS() {
       if (!mounted) return
       if (error) {
         const message = error.message || "Error desconocido"
-        setCatalogLoadError(message)
-        setOrdenError(`No se pudo cargar el catálogo POS desde Supabase: ${message}`)
+        setOrdenError(`No se pudo cargar el catálogo POS para venta: ${message}`)
         setItems([])
       } else {
-        setCatalogLoadError("")
         setItems(data || [])
         setPosCategories(loadPosCategories(data || []))
-        posDebug("catálogo POS cargado", { count: (data || []).length, userId: user.id })
+        posDebug("catálogo POS venta cargado", { count: (data || []).length, userId: user.id })
       }
       setItemsLoading(false)
     })
@@ -1152,6 +1170,61 @@ function POS() {
       mounted = false
     }
   }, [authLoading, user?.id])
+
+  useEffect(() => {
+    if (authLoading || !user || section !== "agregar-item") return undefined
+
+    let mounted = true
+    const active = catalogStatusFilter === "active"
+      ? true
+      : catalogStatusFilter === "inactive"
+        ? false
+        : null
+
+    async function loadCatalogPage() {
+      setCatalogLoading(true)
+      setCatalogLoadError("")
+      setCatalogErrorKind(null)
+
+      const result = await getPOSCatalogPage({
+        page: catalogPage,
+        pageSize: CATALOG_PAGE_SIZE,
+        search: catalogSearch,
+        categoryId: catalogCategoryFilter,
+        active
+      })
+
+      if (!mounted) return
+
+      if (result.error) {
+        const kind = result.errorKind || "other"
+        setCatalogLoadError(catalogErrorUserMessage(kind, result.error.message))
+        setCatalogErrorKind(kind)
+        setCatalogItems([])
+        setCatalogTotal(null)
+      } else {
+        setCatalogItems(result.data || [])
+        setCatalogTotal(result.total)
+        setCatalogLoadError("")
+        setCatalogErrorKind(null)
+        posDebug("catálogo POS admin cargado", {
+          page: catalogPage,
+          count: (result.data || []).length,
+          total: result.total
+        })
+      }
+      setCatalogLoading(false)
+    }
+
+    loadCatalogPage()
+    return () => {
+      mounted = false
+    }
+  }, [authLoading, user?.id, section, catalogPage, catalogSearch, catalogCategoryFilter, catalogStatusFilter])
+
+  useEffect(() => () => {
+    if (catalogSearchDebounceRef.current) window.clearTimeout(catalogSearchDebounceRef.current)
+  }, [])
 
   useEffect(() => {
     async function refreshProducts() {
@@ -1164,10 +1237,36 @@ function POS() {
       setItems(data || [])
       setPosCategories(loadPosCategories(data || []))
       posDebug("catálogo POS sincronizado", { source: "Supabase: pos_products", items: data })
+
+      if (section !== "agregar-item") return
+      const active = catalogStatusFilter === "active"
+        ? true
+        : catalogStatusFilter === "inactive"
+          ? false
+          : null
+      const pageResult = await getPOSCatalogPage({
+        page: catalogPage,
+        pageSize: CATALOG_PAGE_SIZE,
+        search: catalogSearch,
+        categoryId: catalogCategoryFilter,
+        active
+      })
+      if (pageResult.error) {
+        const kind = pageResult.errorKind || "other"
+        setCatalogLoadError(catalogErrorUserMessage(kind, pageResult.error.message))
+        setCatalogErrorKind(kind)
+        setCatalogItems([])
+        setCatalogTotal(null)
+      } else {
+        setCatalogItems(pageResult.data || [])
+        setCatalogTotal(pageResult.total)
+        setCatalogLoadError("")
+        setCatalogErrorKind(null)
+      }
     }
     window.addEventListener("pos-products-updated", refreshProducts)
     return () => window.removeEventListener("pos-products-updated", refreshProducts)
-  }, [])
+  }, [section, catalogPage, catalogSearch, catalogCategoryFilter, catalogStatusFilter])
 
   useEffect(() => {
     localStorage.setItem(POS_CATEGORIES_KEY, JSON.stringify(posCategories))
@@ -2604,11 +2703,44 @@ function POS() {
         return
       }
       const savedProduct = savedResult.data
-      const nextItems = editandoId
-        ? items.map((actual) => (actual.id === editandoId ? savedProduct : actual))
-        : [savedProduct, ...items]
-      setItems(nextItems)
-      setPosCategories(loadPosCategories(nextItems))
+
+      if (savedResult.verify?.data?.ok === false) {
+        showToast(
+          "El RPC reportó guardado, pero no se verificó en SELECT. Revisa la consola [POS catalog] y Supabase.",
+          "warning",
+          7000
+        )
+      }
+
+      invalidatePOSProductsCache()
+      const saleRefresh = await getPOSProducts()
+      if (!saleRefresh.error) {
+        setItems(saleRefresh.data || [])
+        setPosCategories(loadPosCategories(saleRefresh.data || []))
+      }
+
+      if (section === "agregar-item") {
+        setCatalogPage(1)
+        const active = catalogStatusFilter === "active"
+          ? true
+          : catalogStatusFilter === "inactive"
+            ? false
+            : null
+        const pageResult = await getPOSCatalogPage({
+          page: 1,
+          pageSize: CATALOG_PAGE_SIZE,
+          search: catalogSearch,
+          categoryId: catalogCategoryFilter,
+          active
+        })
+        if (!pageResult.error) {
+          setCatalogItems(pageResult.data || [])
+          setCatalogTotal(pageResult.total)
+          setCatalogLoadError("")
+          setCatalogErrorKind(null)
+        }
+      }
+
       posDebug("producto POS guardado en Supabase", savedProduct)
       setForm(emptyActiveItemForm())
       setEditandoId(null)
@@ -2652,7 +2784,7 @@ function POS() {
     }
   }
 
-  function editarItem(item) {
+  function populateEditForm(item) {
     const recipeId = productRecipeId(item)
     const productionAreaId = productProductionAreaId(item)
     const productType = item.productType || item.product_type || "simple"
@@ -2704,6 +2836,75 @@ function POS() {
     )
   }
 
+  async function editarItem(item) {
+    setCatalogLoading(true)
+    const { data, error } = await getPOSProductDetail(item.id)
+    if (error || !data) {
+      setCatalogLoading(false)
+      showToast(error?.message || "No se pudo cargar el platillo para editar.", "error", 6000)
+      return
+    }
+
+    let imagen = data.imagen || data.image || ""
+    if (!imagen && (data.hasImage || item.hasImage)) {
+      const imageResult = await getPOSProductImage(item.id)
+      imagen = imageResult.data || ""
+    }
+
+    setCatalogLoading(false)
+    populateEditForm({ ...data, imagen, image: imagen })
+  }
+
+  function handleCatalogSearchChange(value) {
+    setCatalogSearchInput(value)
+    if (catalogSearchDebounceRef.current) window.clearTimeout(catalogSearchDebounceRef.current)
+    catalogSearchDebounceRef.current = window.setTimeout(() => {
+      setCatalogSearch(value)
+      setCatalogPage(1)
+    }, CATALOG_SEARCH_DEBOUNCE_MS)
+  }
+
+  function handleCatalogCategoryChange(value) {
+    setCatalogCategoryFilter(value)
+    setCatalogPage(1)
+  }
+
+  function handleCatalogStatusChange(value) {
+    setCatalogStatusFilter(value)
+    setCatalogPage(1)
+  }
+
+  function handleCatalogPageChange(nextPage) {
+    setCatalogPage(Math.max(1, nextPage))
+  }
+
+  async function refreshCatalogAdminPage() {
+    const active = catalogStatusFilter === "active"
+      ? true
+      : catalogStatusFilter === "inactive"
+        ? false
+        : null
+    const pageResult = await getPOSCatalogPage({
+      page: catalogPage,
+      pageSize: CATALOG_PAGE_SIZE,
+      search: catalogSearch,
+      categoryId: catalogCategoryFilter,
+      active
+    })
+    if (pageResult.error) {
+      const kind = pageResult.errorKind || "other"
+      setCatalogLoadError(catalogErrorUserMessage(kind, pageResult.error.message))
+      setCatalogErrorKind(kind)
+      setCatalogItems([])
+      setCatalogTotal(null)
+      return
+    }
+    setCatalogItems(pageResult.data || [])
+    setCatalogTotal(pageResult.total)
+    setCatalogLoadError("")
+    setCatalogErrorKind(null)
+  }
+
   async function sacarDelMenuDesdeFormulario() {
     if (!editandoId) return
     const name = form.nombre || "este producto"
@@ -2733,6 +2934,7 @@ function POS() {
       return
     }
     setItems((current) => current.map((entry) => entry.id === item.id ? result.data : entry))
+    await refreshCatalogAdminPage()
     setPostSaveHint(null)
     setCatalogFeedbackTone("success")
     setOrdenError(`"${name}" fue sacado del menú.`)
@@ -2748,6 +2950,7 @@ function POS() {
       return
     }
     setItems((current) => current.map((entry) => entry.id === item.id ? result.data : entry))
+    await refreshCatalogAdminPage()
     const state = getProductProductionState(result.data, finalRecipes, productionAreas, activeCategories)
     if (!state.productionReady) {
       setPostSaveHint({
@@ -3375,6 +3578,7 @@ function POS() {
     }
     setItems(data || [])
     setPosCategories(loadPosCategories(data || []))
+    if (section === "agregar-item") await refreshCatalogAdminPage()
     setOrdenError(failures.length
       ? `Migración parcial: ${created} producto(s) creados; errores: ${failures.join(" | ")}`
       : `Migración completada: ${created} producto(s) creados en Supabase; ${incomplete} quedaron inactivos por configuración incompleta.`)
@@ -3739,9 +3943,20 @@ function POS() {
       {section === "agregar-item" ? (
         <PosDishCatalog
           user={user}
-          items={items}
-          itemsLoading={itemsLoading || authLoading}
+          items={catalogItems}
+          itemsLoading={catalogLoading || authLoading}
           catalogLoadError={catalogLoadError}
+          catalogErrorKind={catalogErrorKind}
+          catalogTotal={catalogTotal}
+          catalogPage={catalogPage}
+          catalogPageSize={CATALOG_PAGE_SIZE}
+          catalogSearch={catalogSearchInput}
+          catalogCategoryFilter={catalogCategoryFilter}
+          catalogStatusFilter={catalogStatusFilter}
+          onCatalogSearchChange={handleCatalogSearchChange}
+          onCatalogCategoryChange={handleCatalogCategoryChange}
+          onCatalogStatusChange={handleCatalogStatusChange}
+          onCatalogPageChange={handleCatalogPageChange}
           posCategories={posCategories}
           productionAreas={productionAreas}
           getItemState={getCatalogItemState}

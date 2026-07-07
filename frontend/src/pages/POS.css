@@ -576,6 +576,24 @@
   justify-content: space-between;
 }
 
+.pos-dish-catalog-pagination {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 8px 0 16px;
+  font-size: 0.9rem;
+}
+
+.pos-catalog-load-error {
+  margin: 12px 0;
+}
+
+.pos-catalog-load-error-detail {
+  font-size: 0.85rem;
+  opacity: 0.85;
+  margin-top: 6px;
+}
+
 .pos-dish-catalog-search {
   flex: 1 1 280px;
   min-height: 44px;
