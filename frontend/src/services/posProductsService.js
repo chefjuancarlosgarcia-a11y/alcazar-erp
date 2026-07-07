@@ -10,6 +10,7 @@ import {
   measureInlineImage
 } from "../utils/posCatalogDiagnostics"
 import { isInlineImageValue } from "../utils/posProductImage"
+import { estimatePayloadBytes, logPosCatalogPerf } from "../utils/posCatalogPerformance"
 import { resolvePOSProductImageForSave } from "./posProductImagesService"
 import {
   serializeConfigurableGroupsForSave,
@@ -209,6 +210,9 @@ export async function getPOSCatalogPage({
 } = {}) {
   const limit = Math.min(100, Math.max(1, Number(pageSize) || CATALOG_PAGE_SIZE_DEFAULT))
   const offset = Math.max(0, (Math.max(1, Number(page)) - 1) * limit)
+  const resourceBaseline = typeof performance !== "undefined"
+    ? performance.getEntriesByType("resource").length
+    : 0
   const started = performance.now()
 
   const { data, error } = await supabase.rpc("list_pos_catalog_page", {
@@ -218,24 +222,45 @@ export async function getPOSCatalogPage({
     p_category_id: categoryId || null,
     p_active: active
   })
+  const rpcMs = Math.round(performance.now() - started)
+  const perfBase = {
+    rpc_ms: rpcMs,
+    payload_bytes: estimatePayloadBytes(data),
+    request_count: 1 + (typeof performance !== "undefined"
+      ? Math.max(0, performance.getEntriesByType("resource").length - resourceBaseline)
+      : 0),
+    source: "rpc:list_pos_catalog_page"
+  }
 
   if (!error && data) {
     const items = (data.items || []).map(mapListRowFromSupabase)
-    logCatalogLoadResult({
-      source: "rpc:list_pos_catalog_page",
-      count: items.length,
-      total: data.total,
-      page,
-      ms: Math.round(performance.now() - started)
-    })
-    return {
+    const result = {
       data: items,
       total: Number(data.total || 0),
       limit: Number(data.limit || limit),
       offset: Number(data.offset || offset),
       error: null,
-      errorKind: null
+      errorKind: null,
+      perf: perfBase
     }
+    logCatalogLoadResult({
+      source: "rpc:list_pos_catalog_page",
+      count: items.length,
+      total: data.total,
+      page,
+      ms: rpcMs
+    })
+    logPosCatalogPerf({
+      phase: "catalog_list_rpc",
+      page,
+      catalog_size: result.total,
+      rpc_ms: rpcMs,
+      payload_bytes: perfBase.payload_bytes,
+      request_count: perfBase.request_count,
+      images_loaded: 0,
+      source: perfBase.source
+    })
+    return result
   }
 
   if (error && !isMissingRelationError(error)) {
@@ -244,11 +269,23 @@ export async function getPOSCatalogPage({
       source: "rpc:list_pos_catalog_page",
       error: error.message,
       errorKind,
-      ms: Math.round(performance.now() - started)
+      ms: rpcMs
     })
-    return { data: [], total: 0, limit, offset, error, errorKind }
+    logPosCatalogPerf({
+      phase: "catalog_list_rpc_error",
+      page,
+      catalog_size: 0,
+      rpc_ms: rpcMs,
+      payload_bytes: 0,
+      images_loaded: 0,
+      source: perfBase.source,
+      error: error.message,
+      timeout: errorKind === "timeout"
+    })
+    return { data: [], total: 0, limit, offset, error, errorKind, perf: perfBase }
   }
 
+  const fallbackStarted = performance.now()
   const fallback = await fetchProductRows(
     { active, categoryId: categoryId || undefined, search: search?.trim() || undefined },
     { limit: limit + offset }
@@ -267,13 +304,21 @@ export async function getPOSCatalogPage({
     page,
     ms: Math.round(performance.now() - started)
   })
+  const fallbackMs = Math.round(performance.now() - fallbackStarted)
+  const fallbackPerf = {
+    rpc_ms: fallbackMs,
+    payload_bytes: estimatePayloadBytes(fallback.data),
+    request_count: 1,
+    source: "rest:pos_products:list_columns"
+  }
   return {
     data: pageRows,
     total: allRows.length,
     limit,
     offset,
     error: null,
-    errorKind: null
+    errorKind: null,
+    perf: fallbackPerf
   }
 }
 
@@ -582,11 +627,41 @@ export async function getPOSProductDetail(id) {
 }
 
 export async function getPOSProductImage(id) {
+  const started = performance.now()
   const { data, error } = await supabase.rpc("get_pos_product_image_url", { p_id: id })
-  if (!error && data != null) return { data: String(data), error: null }
+  const rpcMs = Math.round(performance.now() - started)
+  if (!error && data != null) {
+    const url = String(data)
+    logPosCatalogPerf({
+      phase: "product_image_lazy",
+      catalog_size: null,
+      rpc_ms: rpcMs,
+      render_ms: null,
+      payload_bytes: estimatePayloadBytes(url),
+      images_loaded: 1,
+      product_id: id,
+      is_inline: isInlineImageValue(url),
+      source: "rpc:get_pos_product_image_url"
+    })
+    return { data: url, error: null, perf: { rpc_ms: rpcMs, payload_bytes: estimatePayloadBytes(url) } }
+  }
 
   const fallback = await supabase.from("pos_products").select("image_url").eq("id", id).maybeSingle()
-  return { data: fallback.data?.image_url || "", error: fallback.error || error }
+  const url = fallback.data?.image_url || ""
+  logPosCatalogPerf({
+    phase: "product_image_lazy_fallback",
+    rpc_ms: Math.round(performance.now() - started),
+    payload_bytes: estimatePayloadBytes(url),
+    images_loaded: url ? 1 : 0,
+    product_id: id,
+    is_inline: isInlineImageValue(url),
+    source: "rest:pos_products:image_url"
+  })
+  return {
+    data: url,
+    error: fallback.error || error,
+    perf: { rpc_ms: Math.round(performance.now() - started), payload_bytes: estimatePayloadBytes(url) }
+  }
 }
 
 export async function verifyPOSProductPersisted(id) {

@@ -61,6 +61,14 @@ import {
   POS_IMAGE_HEAVY_WARNING_BYTES,
   revokePosImagePreview
 } from "../utils/posProductImage"
+import {
+  countImagesLoadedInCatalog,
+  countPosProductImageNetworkRequests,
+  logPosCatalogPerf,
+  measureRenderMs,
+  runCatalogPerfAudit,
+  exportPerfLogJson
+} from "../utils/posCatalogPerformance"
 import { getProductionTickets } from "../services/productionTicketsService"
 import {
   addItemToOrder,
@@ -1195,6 +1203,7 @@ function POS() {
       setCatalogLoading(true)
       setCatalogLoadError("")
       setCatalogErrorKind(null)
+      const renderStarted = performance.now()
 
       const result = await getPOSCatalogPage({
         page: catalogPage,
@@ -1224,6 +1233,23 @@ function POS() {
         })
       }
       setCatalogLoading(false)
+
+      const renderMs = await measureRenderMs(renderStarted)
+      logPosCatalogPerf({
+        phase: "catalog_render",
+        page: catalogPage,
+        catalog_size: result.total ?? 0,
+        rpc_ms: result.perf?.rpc_ms ?? null,
+        render_ms: renderMs,
+        payload_bytes: result.perf?.payload_bytes ?? null,
+        images_loaded: countImagesLoadedInCatalog(),
+        image_network_requests: countPosProductImageNetworkRequests(3000),
+        request_count: result.perf?.request_count ?? null,
+        memory_usage: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1024 / 1024 * 100) / 100 : null,
+        source: result.perf?.source || null,
+        error: result.error?.message || null,
+        timeout: /timeout|canceling statement|57014/i.test(String(result.error?.message || ""))
+      })
     }
 
     loadCatalogPage()
@@ -1235,6 +1261,32 @@ function POS() {
   useEffect(() => () => {
     if (catalogSearchDebounceRef.current) window.clearTimeout(catalogSearchDebounceRef.current)
   }, [])
+
+  useEffect(() => {
+    if (section !== "agregar-item") return undefined
+
+    window.runPOSCatalogPerfAudit = async (options = {}) => runCatalogPerfAudit({
+      pages: options.pages || [1, 2, 3],
+      delayMs: options.delayMs ?? 500,
+      loadPage: async (page) => getPOSCatalogPage({
+        page,
+        pageSize: CATALOG_PAGE_SIZE,
+        search: catalogSearch,
+        categoryId: catalogCategoryFilter,
+        active: catalogStatusFilter === "active"
+          ? true
+          : catalogStatusFilter === "inactive"
+            ? false
+            : null
+      })
+    })
+    window.exportPOSCatalogPerfLog = exportPerfLogJson
+
+    return () => {
+      delete window.runPOSCatalogPerfAudit
+      delete window.exportPOSCatalogPerfLog
+    }
+  }, [section, catalogSearch, catalogCategoryFilter, catalogStatusFilter])
 
   useEffect(() => {
     async function refreshProducts() {
