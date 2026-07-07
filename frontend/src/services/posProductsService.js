@@ -9,6 +9,8 @@ import {
   logCatalogVerifyResult,
   measureInlineImage
 } from "../utils/posCatalogDiagnostics"
+import { isInlineImageValue } from "../utils/posProductImage"
+import { resolvePOSProductImageForSave } from "./posProductImagesService"
 import {
   serializeConfigurableGroupsForSave,
   validateConfigurableCatalogForm
@@ -103,11 +105,10 @@ const PRODUCT_LIST_COLUMNS = [
   "updated_at"
 ].join(",")
 
-/** Detalle individual — incluye columnas pesadas solo para 1 producto. */
+/** Detalle individual — description only; image_url se carga lazy al editar. */
 const PRODUCT_DETAIL_COLUMNS = [
   ...PRODUCT_LIST_COLUMNS.split(","),
-  "description",
-  "image_url"
+  "description"
 ].join(",")
 
 const productListSelect = `
@@ -476,11 +477,13 @@ export function mapPOSProductFromSupabase(row) {
 }
 
 function serializeProduct(product) {
+  const rawImage = product.image_url || product.image || product.imagen || null
+  const imageUrl = isInlineImageValue(rawImage) ? null : (rawImage || null)
   return {
     name: String(product.name || product.nombre || "").trim(),
     description: String(product.description || product.descripcion || "").trim() || null,
     price: Number(product.price ?? product.precio ?? 0),
-    image_url: product.image_url || product.image || product.imagen || null,
+    image_url: imageUrl,
     category_id: product.categoryId || product.categoriaId || product.category_id || null,
     category_name: product.categoryName || product.categoria || product.category_name || null,
     recipe_id: product.recipeId || product.recipe_id || null,
@@ -646,9 +649,39 @@ async function reloadCatalogProductById(productId) {
  * - pos_product_variants + pos_product_modifiers (tipo pizza)
  * - pos_recipe_links (platillos simples con receta)
  */
-export async function savePOSCatalogProduct(product, variants = [], modifiers = [], optionGroups = []) {
-  const payload = serializeProduct(product)
+export async function savePOSCatalogProduct(product, variants = [], modifiers = [], optionGroups = [], imageOptions = {}) {
+  const productId = product.id || product.productId || null
+  const imageResolution = await resolvePOSProductImageForSave({
+    imageFile: imageOptions.imageFile || product.imageFile || null,
+    previewUrl: product.imagen || product.image || product.image_url || "",
+    productId,
+    removeImage: imageOptions.removeImage === true
+  })
+
+  if (imageResolution.error) {
+    logCatalogSaveResult({
+      ok: false,
+      error: imageResolution.error.message || String(imageResolution.error),
+      errorKind: "image_upload"
+    })
+    return { data: null, error: imageResolution.error, verify: null }
+  }
+
+  const productForSave = {
+    ...product,
+    imagen: imageResolution.url,
+    image: imageResolution.url,
+    image_url: imageResolution.url
+  }
+  const payload = serializeProduct(productForSave)
   const productType = payload.product_type || "simple"
+
+  if (isInlineImageValue(payload.image_url)) {
+    const inlineError = { message: "No se permite guardar imágenes base64 en pos_products. Vuelve a subir la imagen." }
+    logCatalogSaveResult({ ok: false, error: inlineError.message, errorKind: "inline_image_blocked" })
+    return { data: null, error: inlineError, verify: null }
+  }
+
   const imageMeta = measureInlineImage(payload.image_url)
   const variantPayload = productType === "pizza"
     ? (Array.isArray(variants) ? variants : []).map((variant, index) => serializeVariant(variant, index, payload.name))
@@ -661,17 +694,18 @@ export async function savePOSCatalogProduct(product, variants = [], modifiers = 
     : []
 
   logCatalogSaveAttempt({
-    productId: product.id || product.productId || null,
+    productId,
     productType,
     name: payload.name,
     imageMeta,
+    imageStorage: imageResolution.url ? (imageResolution.migratedFromInline ? "migrated" : "storage_url") : "none",
     optionGroups: optionGroupPayload.length,
     variants: variantPayload.length,
     modifiers: modifierPayload.length
   })
 
   const { data, error } = await supabase.rpc("save_pos_catalog_product", {
-    p_product_id: product.id || product.productId || null,
+    p_product_id: productId,
     p_product: payload,
     p_variants: variantPayload,
     p_modifiers: modifierPayload,
@@ -686,17 +720,18 @@ export async function savePOSCatalogProduct(product, variants = [], modifiers = 
   invalidatePOSProductsCache()
   window.dispatchEvent(new CustomEvent("pos-products-updated"))
 
-  const productId = data?.id || product.id || product.productId
-  const verify = productId ? await verifyPOSProductPersisted(productId) : { data: null, error: null }
+  const savedProductId = data?.id || productId
+  const verify = savedProductId ? await verifyPOSProductPersisted(savedProductId) : { data: null, error: null }
   logCatalogSaveResult({
     ok: true,
-    productId,
+    productId: savedProductId,
     verified: verify.data?.ok === true,
-    verifyError: verify.error?.message || null
+    verifyError: verify.error?.message || null,
+    imageUrl: payload.image_url || null
   })
 
-  if (!productId) return { data: mapPOSProductFromSupabase(data), error: null, verify }
-  const reloaded = await reloadCatalogProductById(productId)
+  if (!savedProductId) return { data: mapPOSProductFromSupabase(data), error: null, verify }
+  const reloaded = await reloadCatalogProductById(savedProductId)
   return { ...reloaded, verify }
 }
 

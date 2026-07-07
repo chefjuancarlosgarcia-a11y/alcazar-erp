@@ -53,7 +53,14 @@ import {
   invalidatePOSProductsCache,
   savePOSCatalogProduct
 } from "../services/posProductsService"
+import { resolvePOSProductImageForSave } from "../services/posProductImagesService"
 import { catalogErrorUserMessage } from "../utils/posCatalogDiagnostics"
+import {
+  compressPosProductImageFile,
+  formatImageBytes,
+  POS_IMAGE_HEAVY_WARNING_BYTES,
+  revokePosImagePreview
+} from "../utils/posProductImage"
 import { getProductionTickets } from "../services/productionTicketsService"
 import {
   addItemToOrder,
@@ -465,6 +472,7 @@ const emptyItemForm = {
   precio: "",
   descripcion: "",
   imagen: "",
+  imageFile: null,
   estado: "activo",
   areaProduccion: "cocina",
   tiempoPreparacion: "",
@@ -760,6 +768,8 @@ function POS() {
   const [editandoId, setEditandoId] = useState(null)
   const [errores, setErrores] = useState({})
   const [savingCatalogItem, setSavingCatalogItem] = useState(false)
+  const [imageUploading, setImageUploading] = useState(false)
+  const [imageMessage, setImageMessage] = useState("")
   const [catalogSaveMessage, setCatalogSaveMessage] = useState(null)
   const [showLegacyPizzaModifiers, setShowLegacyPizzaModifiers] = useState(false)
   const [posCategories, setPosCategories] = useState(() => loadPosCategories())
@@ -1926,8 +1936,8 @@ function POS() {
     if (orderResult.error) throw orderResult.error
     const order = orderResult.data || null
     if (includeHistory) {
-      const history = await getTableOrderHistory(tableData.mesaId)
-      if (history.error) throw history.error
+    const history = await getTableOrderHistory(tableData.mesaId)
+    if (history.error) throw history.error
       setOrdenesEnviadas(history.data || [])
     }
     const events = await getTableOrderEvents(tableData.mesaId)
@@ -2554,12 +2564,54 @@ function POS() {
     }
   }
 
-  function cargarImagen(event) {
+  function quitarImagenPlatillo() {
+    if (form.imagen?.startsWith("blob:")) revokePosImagePreview(form.imagen)
+    setForm((current) => ({ ...current, imagen: "", imageFile: null }))
+    setImageMessage("")
+  }
+
+  async function cargarImagen(event) {
     const file = event.target.files?.[0]
     if (!file) return
-    const reader = new FileReader()
-    reader.onload = (e) => actualizarCampo("imagen", e.target.result)
-    reader.readAsDataURL(file)
+    if (!file.type.startsWith("image/")) {
+      showToast("Selecciona un archivo de imagen válido.", "error", 4000)
+      return
+    }
+
+    setImageUploading(true)
+    setImageMessage("")
+    try {
+      let heavyWarning = false
+      if (file.size > POS_IMAGE_HEAVY_WARNING_BYTES) {
+        heavyWarning = true
+        const warning = "La imagen es pesada. El sistema la optimizará antes de guardarla."
+        setImageMessage(warning)
+        showToast(warning, "warning", 6000)
+      }
+
+      const result = await compressPosProductImageFile(file)
+      if (form.imagen?.startsWith("blob:")) revokePosImagePreview(form.imagen)
+
+      setForm((current) => ({
+        ...current,
+        imagen: result.previewUrl,
+        imageFile: result.file
+      }))
+
+      const extraWarnings = (result.warnings || []).filter(
+        (message) => message !== "La imagen es pesada. El sistema la optimizará antes de guardarla."
+      )
+      if (extraWarnings.length) {
+        setImageMessage(extraWarnings.join(" "))
+      } else if (!heavyWarning) {
+        setImageMessage(`Optimizada: ${formatImageBytes(result.originalSize)} → ${formatImageBytes(result.compressedSize)}`)
+      }
+    } catch (error) {
+      showToast(error?.message || "No se pudo optimizar la imagen.", "error", 6000)
+    } finally {
+      setImageUploading(false)
+      event.target.value = ""
+    }
   }
 
   function validarItem() {
@@ -2625,84 +2677,87 @@ function POS() {
       const tracksInventory = formInventoryTrackingEnabled(form)
       const rawRecipeId = productRecipeId(form)
       const recipeId = requiresRecipe || tracksInventory ? rawRecipeId : ""
-      const productionAreaId = productProductionAreaId(form)
-      const categoryId = productCategoryId(form)
+    const productionAreaId = productProductionAreaId(form)
+    const categoryId = productCategoryId(form)
       const productType = form.productType || form.product_type || "simple"
-      const selectedCategoryName = posCategories.find((category) => category.id === categoryId)?.name || form.categoria
-      const item = {
-        ...form,
-        categoriaId: categoryId,
-        categoryId,
-        category_id: categoryId,
-        categoria: selectedCategoryName,
-        id: editandoId || null,
-        precio: Number(form.precio || 0),
-        price: Number(form.precio || 0),
-        recipeId,
-        recipe_id: recipeId,
+    const selectedCategoryName = posCategories.find((category) => category.id === categoryId)?.name || form.categoria
+    const item = {
+      ...form,
+      categoriaId: categoryId,
+      categoryId,
+      category_id: categoryId,
+      categoria: selectedCategoryName,
+      id: editandoId || null,
+      precio: Number(form.precio || 0),
+      price: Number(form.precio || 0),
+      recipeId,
+      recipe_id: recipeId,
         inventoryTrackingEnabled: tracksInventory,
         inventory_tracking_enabled: tracksInventory,
         recipeRequiredForSale: tracksInventory,
         recipe_required_for_sale: tracksInventory,
-        productionAreaId,
-        production_area_id: productionAreaId,
-        areaProduccion: productionAreaId,
-        productType,
-        product_type: productType,
-        isTestItem: form.isTestItem === true || productType === "manual_test",
-        is_test_item: form.isTestItem === true || productType === "manual_test",
-        allowKitchenNotes: form.allowKitchenNotes === true,
-        allow_kitchen_notes: form.allowKitchenNotes === true,
-        prepTimeMinutes: Number(form.tiempoPreparacion || 0),
-        prep_time_minutes: Number(form.tiempoPreparacion || 0),
-        active: form.estado === "activo",
-        productionReady: false,
-        actualizadoEn: new Date().toLocaleString()
-      }
-      const variants = productType === "pizza"
-        ? (form.variants || []).map((variant, index) => ({
-            ...variant,
-            name: form.nombre,
+      productionAreaId,
+      production_area_id: productionAreaId,
+      areaProduccion: productionAreaId,
+      productType,
+      product_type: productType,
+      isTestItem: form.isTestItem === true || productType === "manual_test",
+      is_test_item: form.isTestItem === true || productType === "manual_test",
+      allowKitchenNotes: form.allowKitchenNotes === true,
+      allow_kitchen_notes: form.allowKitchenNotes === true,
+      prepTimeMinutes: Number(form.tiempoPreparacion || 0),
+      prep_time_minutes: Number(form.tiempoPreparacion || 0),
+      active: form.estado === "activo",
+      productionReady: false,
+      actualizadoEn: new Date().toLocaleString()
+    }
+    const variants = productType === "pizza"
+      ? (form.variants || []).map((variant, index) => ({
+          ...variant,
+          name: form.nombre,
             recipeId: requiresRecipe || tracksInventory ? (variant.recipeId || "") : "",
-            prepTimeMinutes: Number(variant.prepTimeMinutes || 0),
-            price: Number(variant.price || 0),
-            productionAreaId,
-            isActive: variant.isActive === true,
-            sortOrder: index
-          }))
-        : []
+          prepTimeMinutes: Number(variant.prepTimeMinutes || 0),
+          price: Number(variant.price || 0),
+          productionAreaId,
+          isActive: variant.isActive === true,
+          sortOrder: index
+        }))
+      : []
       const modifiers = productType === "pizza"
         ? (form.modifiers || [])
-            .filter((modifier) => String(modifier.name || "").trim())
-            .map((modifier, index) => ({
-              ...modifier,
-              priceDelta: Number(modifier.priceDelta || 0),
+      .filter((modifier) => String(modifier.name || "").trim())
+      .map((modifier, index) => ({
+        ...modifier,
+        priceDelta: Number(modifier.priceDelta || 0),
               modifierType: modifier.modifierType || "extra",
-              isActive: modifier.isActive !== false,
-              sortOrder: index
-            }))
+        isActive: modifier.isActive !== false,
+        sortOrder: index
+      }))
         : []
       const optionGroups = productType === "configurable" ? (form.optionGroups || []) : []
-      posDebug("producto a guardar", {
-        item,
-        variants,
-        modifiers,
+    posDebug("producto a guardar", {
+      item,
+      variants,
+      modifiers,
         optionGroups,
-        recipeId: productRecipeId(item),
-        productionAreaId: productProductionAreaId(item)
-      })
+      recipeId: productRecipeId(item),
+      productionAreaId: productProductionAreaId(item)
+    })
 
-      const savedResult = await savePOSCatalogProduct(item, variants, modifiers, optionGroups)
-      if (savedResult.error) {
+      const savedResult = await savePOSCatalogProduct(item, variants, modifiers, optionGroups, {
+        imageFile: form.imageFile || null,
+        removeImage: !form.imagen && !form.imageFile
+      })
+    if (savedResult.error) {
         const msg = savedResult.error.message || "Error desconocido al guardar"
-        console.error("Supabase POS product save error:", savedResult.error)
+      console.error("Supabase POS product save error:", savedResult.error)
         setCatalogSaveMessage({ tone: "error", text: `Producto no guardado: ${msg}` })
         setCatalogFeedbackTone("error")
         setOrdenError(`Producto no guardado: ${msg}`)
         showToast(`Producto no guardado: ${msg}`, "error", 6000)
-        return
-      }
-      const savedProduct = savedResult.data
+      return
+    }
+    const savedProduct = savedResult.data
 
       if (savedResult.verify?.data?.ok === false) {
         showToast(
@@ -2742,10 +2797,12 @@ function POS() {
       }
 
       posDebug("producto POS guardado en Supabase", savedProduct)
+      if (form.imagen?.startsWith("blob:")) revokePosImagePreview(form.imagen)
       setForm(emptyActiveItemForm())
-      setEditandoId(null)
-      setMostrarFormulario(false)
-      setErrores({})
+      setImageMessage("")
+    setEditandoId(null)
+    setMostrarFormulario(false)
+    setErrores({})
       showToast("Producto guardado correctamente.", "success", 3000)
       const savedState = getProductSaleState(
         savedProduct,
@@ -2805,7 +2862,7 @@ function POS() {
       modifierNotesPlaceholder: item.modifierNotesPlaceholder || emptyItemForm.modifierNotesPlaceholder,
       modifiers: (item.modifierOptions || item.modifiers || []).length
         ? (item.modifierOptions || item.modifiers || []).map(normalizeModifierDraft)
-        : [],
+          : [],
       optionGroups: (item.optionGroups || item.option_groups || []).length
         ? (item.optionGroups || item.option_groups || []).map(normalizeOptionGroupDraft)
         : productType === "configurable"
@@ -2825,12 +2882,14 @@ function POS() {
               sortOrder: Number(variant.sortOrder ?? variant.sort_order ?? index)
             }
           : createEmptyPizzaVariant(option.size, option.label, productionAreaId, item.nombre)
-      })
+      }),
+      imageFile: null
     })
     setEditandoId(item.id)
     setMostrarFormulario(true)
     setErrores({})
     setCatalogSaveMessage(null)
+    setImageMessage("")
     setShowLegacyPizzaModifiers(
       (item.modifierOptions || item.modifiers || []).some((modifier) => isLegacyModifier(normalizeModifierDraft(modifier)))
     )
@@ -3095,7 +3154,7 @@ function POS() {
       }
       const selectedModifiers = getActiveProductModifiers(productToAdd).filter((modifier) => configuracionPendiente.modifierKeys.includes(String(modifier.id || `${modifier.modifierType}-${modifier.name}`)))
       modifierLabels = selectedModifiers.map(formatModifierDisplay)
-      const variantPrice = selectedVariant ? Number(selectedVariant.price || 0) : Number(productToAdd.price ?? productToAdd.precio ?? 0)
+    const variantPrice = selectedVariant ? Number(selectedVariant.price || 0) : Number(productToAdd.price ?? productToAdd.precio ?? 0)
       finalUnitPrice = variantPrice + getSelectedModifiersTotal(selectedModifiers)
       effectiveRecipeId = selectedVariant?.recipeId || selectedVariant?.recipe_id || effectiveRecipeId
       effectiveAreaId = selectedVariant?.productionAreaId || selectedVariant?.production_area_id || effectiveAreaId
@@ -3478,14 +3537,14 @@ function POS() {
     const valid = saleWithoutInventory
       ? Boolean(saleState.active && saleState.area && saleState.category && saleState.saleAllowed)
       : Boolean(
-        localState.active &&
-        officialProduct.productionReady &&
-        officialRecipe?.active &&
-        String(officialRecipe?.id) === String(localState.recipeId) &&
-        officialRecipe?.production_area_id === localState.areaId &&
-        localState.area &&
-        localState.category
-      )
+      localState.active &&
+      officialProduct.productionReady &&
+      officialRecipe?.active &&
+      String(officialRecipe?.id) === String(localState.recipeId) &&
+      officialRecipe?.production_area_id === localState.areaId &&
+      localState.area &&
+      localState.category
+    )
     const result = {
       productId: officialProduct.id,
       productName: officialProduct.nombre,
@@ -3528,6 +3587,12 @@ function POS() {
         productionAreas.some((area) => area.id === areaId) &&
         Number(legacyProduct.precio ?? legacyProduct.price ?? 0) > 0
       )
+      let migratedImageUrl = null
+      const legacyImage = legacyProduct.imagen || legacyProduct.image || ""
+      if (legacyImage) {
+        const imageResolved = await resolvePOSProductImageForSave({ previewUrl: legacyImage })
+        if (!imageResolved.error) migratedImageUrl = imageResolved.url
+      }
       const result = validForProduction
         ? await createOrUpdatePOSProductFromRecipe({
             ...recipe,
@@ -3535,7 +3600,7 @@ function POS() {
             name: legacyProduct.nombre || legacyProduct.name,
             description: legacyProduct.descripcion || legacyProduct.description,
             salePrice: legacyProduct.precio ?? legacyProduct.price,
-            imageUrl: legacyProduct.imagen || legacyProduct.image,
+            imageUrl: migratedImageUrl || "",
             posCategoryId: productCategoryId(legacyProduct),
             categoryName: legacyProduct.categoria || productCategoryId(legacyProduct)
           })
@@ -3545,6 +3610,9 @@ function POS() {
             price: Number(legacyProduct.precio ?? legacyProduct.price ?? 0),
             recipeId: recipe?.id || "",
             productionAreaId: productionAreas.some((area) => area.id === areaId) ? areaId : "",
+            imagen: migratedImageUrl,
+            image: migratedImageUrl,
+            image_url: migratedImageUrl,
             active: false,
             estado: "inactivo"
           })
@@ -3651,22 +3719,22 @@ function POS() {
 
   async function solicitarCuenta(order) {
     await runBillingAction(async () => {
-      try {
-        if (draftItems.length) throw new Error("Envía o quita los productos nuevos antes de solicitar cobro.")
-        if (!deliveryDataReady) throw new Error("Completa los datos obligatorios de delivery antes de solicitar cobro.")
-        const result = order.status === "open" ? await requestOrderBill(order.id) : { error: null }
-        if (result.error) throw new Error(result.message || result.error.message)
-        const refreshed = await getOrderWithItems(order.id)
-        if (refreshed.error) throw new Error(refreshed.message || refreshed.error.message)
-        const preBill = createPreBillFromPOSOrder(buildCashierOrder(refreshed.data), user, { peopleCount: personasOrden })
-        if (!preBill.ok) throw new Error(preBill.message)
-        await cargarMesaDesdeSupabase(ordenMesa, order.id)
-        setOrdenMessage("Cobro solicitado. Puedes imprimir precuenta o enviar a caja.")
-        setOrdenError("")
-        showToast("Cobro solicitado.", "success", 1800)
-      } catch (error) {
-        setOrdenError(`No se pudo solicitar la cuenta: ${error.message}`)
-      }
+    try {
+      if (draftItems.length) throw new Error("Envía o quita los productos nuevos antes de solicitar cobro.")
+      if (!deliveryDataReady) throw new Error("Completa los datos obligatorios de delivery antes de solicitar cobro.")
+      const result = order.status === "open" ? await requestOrderBill(order.id) : { error: null }
+      if (result.error) throw new Error(result.message || result.error.message)
+      const refreshed = await getOrderWithItems(order.id)
+      if (refreshed.error) throw new Error(refreshed.message || refreshed.error.message)
+      const preBill = createPreBillFromPOSOrder(buildCashierOrder(refreshed.data), user, { peopleCount: personasOrden })
+      if (!preBill.ok) throw new Error(preBill.message)
+      await cargarMesaDesdeSupabase(ordenMesa, order.id)
+      setOrdenMessage("Cobro solicitado. Puedes imprimir precuenta o enviar a caja.")
+      setOrdenError("")
+      showToast("Cobro solicitado.", "success", 1800)
+    } catch (error) {
+      setOrdenError(`No se pudo solicitar la cuenta: ${error.message}`)
+    }
     })
   }
 
@@ -3685,17 +3753,17 @@ function POS() {
           return false
         }
 
-        if (draftItems.length) throw new Error("Envía o quita los productos nuevos antes de imprimir la precuenta.")
-        if (order.status === "open") {
-          const requested = await requestOrderBill(order.id)
-          if (requested.error) throw new Error(requested.message || requested.error.message)
-        }
-        const refreshed = await getOrderWithItems(order.id)
-        if (refreshed.error) throw new Error(refreshed.message || refreshed.error.message)
+      if (draftItems.length) throw new Error("Envía o quita los productos nuevos antes de imprimir la precuenta.")
+      if (order.status === "open") {
+        const requested = await requestOrderBill(order.id)
+        if (requested.error) throw new Error(requested.message || requested.error.message)
+      }
+      const refreshed = await getOrderWithItems(order.id)
+      if (refreshed.error) throw new Error(refreshed.message || refreshed.error.message)
         const cashierOrder = { ...buildCashierOrder(refreshed.data), peopleCount: personasOrden }
         const preBill = createPreBillFromPOSOrder(cashierOrder, user, { peopleCount: personasOrden })
-        if (!preBill.ok) throw new Error(preBill.message)
-        markPreBillPrinted(preBill.preBill.id, user)
+      if (!preBill.ok) throw new Error(preBill.message)
+      markPreBillPrinted(preBill.preBill.id, user)
         const { buildPrebillPrintPayload, createPrintJob } = await import("../services/printingService")
         const printJob = await createPrintJob({
           printerId: selectedPrinter.id,
@@ -3707,31 +3775,31 @@ function POS() {
           })
         })
         if (printJob.error) throw new Error(printJob.error.message)
-        await cargarMesaDesdeSupabase(ordenMesa, order.id)
+      await cargarMesaDesdeSupabase(ordenMesa, order.id)
         setOrdenMessage("Precuenta enviada a impresión.")
-        setOrdenError("")
+      setOrdenError("")
         showToast("Precuenta enviada a impresión.", "success", 1800)
         return true
-      } catch (error) {
+    } catch (error) {
         console.error("No se pudo enviar la precuenta a impresión.", error)
         setOrdenError("No se pudo enviar la precuenta a impresión.")
         showToast("No se pudo enviar la precuenta a impresión.", "error", 2400)
         return false
-      }
+    }
     })
   }
 
   async function enviarCuentaACaja(order) {
     await runBillingAction(async () => {
-      try {
-        await enviarCuentaACajaInterno(order)
-        await cargarMesaDesdeSupabase(ordenMesa, order.id)
-        setOrdenMessage("Solicitud enviada a caja. Estado: cobro solicitado.")
-        setOrdenError("")
-        showToast("Solicitud enviada a caja.", "success", 1800)
-      } catch (error) {
-        setOrdenError(`No se pudo enviar a caja: ${error.message}`)
-      }
+    try {
+      await enviarCuentaACajaInterno(order)
+      await cargarMesaDesdeSupabase(ordenMesa, order.id)
+      setOrdenMessage("Solicitud enviada a caja. Estado: cobro solicitado.")
+      setOrdenError("")
+      showToast("Solicitud enviada a caja.", "success", 1800)
+    } catch (error) {
+      setOrdenError(`No se pudo enviar a caja: ${error.message}`)
+    }
     })
   }
 
@@ -4116,31 +4184,31 @@ function POS() {
                     </div>
                   )}
                   {formProductType !== "pizza" && formProductType !== "configurable" && (form.inventoryTrackingEnabled || formRequiresRecipe) && (
-                    <div style={formGridStyle}>
-                      <select
-                        value={form.recipeId}
-                        onChange={(e) => {
-                          const recipe = finalRecipes.find((entry) => String(entry.id) === e.target.value)
-                          setForm((actual) => ({ ...actual, recipeId: e.target.value, areaProduccion: recipe?.production_area_id || actual.areaProduccion }))
-                          setErrores((actual) => {
-                            const next = { ...actual }
-                            delete next.recipeId
-                            delete next.areaProduccion
-                            return next
-                          })
-                        }}
-                        style={errores.recipeId ? inputErrorStyle : inputStyle}
-                      >
+                <div style={formGridStyle}>
+                  <select
+                    value={form.recipeId}
+                    onChange={(e) => {
+                      const recipe = finalRecipes.find((entry) => String(entry.id) === e.target.value)
+                      setForm((actual) => ({ ...actual, recipeId: e.target.value, areaProduccion: recipe?.production_area_id || actual.areaProduccion }))
+                      setErrores((actual) => {
+                        const next = { ...actual }
+                        delete next.recipeId
+                        delete next.areaProduccion
+                        return next
+                      })
+                    }}
+                    style={errores.recipeId ? inputErrorStyle : inputStyle}
+                  >
                         <option value="">Receta estandarizada conectada</option>
-                        {finalRecipes.map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.name}</option>)}
-                      </select>
-                    </div>
+                    {finalRecipes.map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.name}</option>)}
+                  </select>
+                </div>
                   )}
                   {selectedRecipe && formProductType !== "pizza" && formProductType !== "configurable" && (form.inventoryTrackingEnabled || formRequiresRecipe) && (
-                    <div className="pos-catalog-note">
-                      Receta conectada: <strong>{selectedRecipe.name}</strong>. El costo operativo debe venir desde la receta estandarizada, no desde este formulario.
-                    </div>
-                  )}
+                  <div className="pos-catalog-note">
+                    Receta conectada: <strong>{selectedRecipe.name}</strong>. El costo operativo debe venir desde la receta estandarizada, no desde este formulario.
+                  </div>
+                )}
                   {formProductType === "configurable" && (
                     <div className="pos-catalog-note">
                       El precio de venta se calcula desde las opciones con precio base. En mesero, el mesero elige las opciones al agregar a la orden.
@@ -4151,15 +4219,15 @@ function POS() {
                       Con control de inventario activo, configura la receta de cada tamaño activo en la sección de pizza.
                     </div>
                   )}
-                </section>
+              </section>
               )}
 
               {formProductType === "configurable" && (
-                <section className="pos-catalog-section">
-                  <div className="pos-catalog-section-head">
+              <section className="pos-catalog-section">
+                <div className="pos-catalog-section-head">
                     <strong>4. Configuración de venta</strong>
                     <small>Define las decisiones que el mesero deberá seleccionar al vender este producto.</small>
-                  </div>
+                </div>
                   {errores.optionGroups && <div style={errorBoxStyle}>{errores.optionGroups}</div>}
                   <div style={buttonRowStyle}>
                     <button type="button" onClick={agregarGrupoOpcion} style={secondaryButtonStyle}>+ Agregar decisión</button>
@@ -4227,8 +4295,8 @@ function POS() {
                   </div>
                   <div className="pos-catalog-note">
                     Ejemplo: <strong>{form.nombre || "Alitas"}</strong> con decisiones Presentación (10 u Q90 / 20 u Q160) y Salsa (BBQ / Buffalo sin cargo).
-                  </div>
-                </section>
+                </div>
+              </section>
               )}
 
               {formProductType === "pizza" && (
@@ -4254,15 +4322,15 @@ function POS() {
                             <input type="number" min="0" step="1" placeholder="Tiempo preparación (min)" value={variant.prepTimeMinutes} onChange={(event) => actualizarVariantePizza(variant.size, "prepTimeMinutes", event.target.value)} style={inputStyle} disabled={!variant.isActive} />
                           </div>
                           {(form.inventoryTrackingEnabled || formRequiresRecipe) && (
-                            <select
-                              value={variant.recipeId}
-                              onChange={(event) => actualizarVariantePizza(variant.size, "recipeId", event.target.value)}
-                              style={inputStyle}
-                              disabled={!variant.isActive}
-                            >
-                              <option value="">Receta conectada para {variant.label.toLowerCase()}</option>
-                              {finalRecipes.map((recipe) => <option key={`${variant.size}-${recipe.id}`} value={recipe.id}>{recipe.name}</option>)}
-                            </select>
+                          <select
+                            value={variant.recipeId}
+                            onChange={(event) => actualizarVariantePizza(variant.size, "recipeId", event.target.value)}
+                            style={inputStyle}
+                            disabled={!variant.isActive}
+                          >
+                            <option value="">Receta conectada para {variant.label.toLowerCase()}</option>
+                            {finalRecipes.map((recipe) => <option key={`${variant.size}-${recipe.id}`} value={recipe.id}>{recipe.name}</option>)}
+                          </select>
                           )}
                         </article>
                       ))}
@@ -4323,17 +4391,17 @@ function POS() {
                                   <span>
                                     <strong>Activo</strong>
                                     <small>{modifier.isActive !== false ? "Visible en POS" : "Oculto en POS"}</small>
-                                  </span>
-                                </label>
-                                <input placeholder="Nombre del modificador" value={modifier.name} onChange={(event) => actualizarModificador(index, "name", event.target.value)} style={inputStyle} />
-                                <select value={modifier.modifierType || "remove"} onChange={(event) => actualizarModificador(index, "modifierType", event.target.value)} style={inputStyle}>
-                                  {MODIFIER_TYPE_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
-                                </select>
-                                <input type="number" min="0" step="0.01" placeholder="Precio extra opcional" value={modifier.priceDelta} onChange={(event) => actualizarModificador(index, "priceDelta", event.target.value)} style={inputStyle} disabled={(modifier.modifierType || "remove") === "remove"} />
+                            </span>
+                          </label>
+                          <input placeholder="Nombre del modificador" value={modifier.name} onChange={(event) => actualizarModificador(index, "name", event.target.value)} style={inputStyle} />
+                          <select value={modifier.modifierType || "remove"} onChange={(event) => actualizarModificador(index, "modifierType", event.target.value)} style={inputStyle}>
+                            {MODIFIER_TYPE_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+                          </select>
+                          <input type="number" min="0" step="0.01" placeholder="Precio extra opcional" value={modifier.priceDelta} onChange={(event) => actualizarModificador(index, "priceDelta", event.target.value)} style={inputStyle} disabled={(modifier.modifierType || "remove") === "remove"} />
                                 <button type="button" onClick={() => eliminarModificador(index)} style={dangerMiniButtonStyle}>Eliminar</button>
-                              </div>
-                            ))}
-                          </div>
+                        </div>
+                      ))}
+                    </div>
                         )}
                       </div>
                     )}
@@ -4354,8 +4422,19 @@ function POS() {
                   </strong>
                   <small>Último repaso antes de guardar.</small>
                 </div>
-                <input type="file" accept="image/*" onChange={cargarImagen} style={inputStyle} />
-                {form.imagen ? <img src={form.imagen} alt={form.nombre || "Platillo"} style={previewStyle} /> : <div className="pos-dish-image-empty">{productInitials(form.nombre)}</div>}
+                <input type="file" accept="image/*" onChange={cargarImagen} style={inputStyle} disabled={imageUploading || savingCatalogItem} />
+                {imageUploading && <small className="pos-dish-image-message">Optimizando imagen...</small>}
+                {imageMessage && <small className="pos-dish-image-message">{imageMessage}</small>}
+                {form.imagen ? (
+                  <>
+                    <img src={form.imagen} alt={form.nombre || "Platillo"} style={previewStyle} />
+                    <button type="button" className="secondary" onClick={quitarImagenPlatillo} style={secondaryButtonStyle}>
+                      Quitar imagen
+                    </button>
+                  </>
+                ) : (
+                  <div className="pos-dish-image-empty">{productInitials(form.nombre)}</div>
+                )}
                 <div style={readinessPanelStyle}>
                   <strong>Estado producción</strong>
                   {formProductType !== "manual_test" && !form.isTestItem && (
@@ -4395,7 +4474,7 @@ function POS() {
                   </button>
                 )}
                 <button type="button" onClick={() => { setMostrarFormulario(false); setEditandoId(null); setForm(emptyActiveItemForm()); setErrores({}); setCatalogSaveMessage(null); setShowLegacyPizzaModifiers(false) }} style={secondaryButtonStyle} disabled={savingCatalogItem}>Cancelar</button>
-              </div>
+                </div>
             </form>
           )}
         />

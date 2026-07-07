@@ -120,12 +120,42 @@ Con catálogo grande (o tras importar varios):
 
 ---
 
+## Prueba 11 — Imagen grande de redes sociales
+
+1. Subir JPG/PNG de varios MB (foto de redes)
+2. Observar consola `[POS image]`
+
+**Esperado:**
+- `original_size` muestra tamaño original (ej. 4–8 MB)
+- `optimized_size` &lt; 300 KB ideal (o cercano tras reintentos)
+- `compression_ratio` alto
+- Toast/advertencia si original &gt; 5 MB: «La imagen es pesada…»
+- Al guardar: `image_url` en Supabase es URL de Storage, **no** `data:image…`
+
+## Prueba 12 — Auditoría SQL de imágenes
+
+```sql
+SELECT diagnose_pos_catalog_health();
+```
+
+Revisar campos:
+- `products_with_inline_image` / `products_with_data_image`
+- `max_image_url_bytes`, `avg_image_url_bytes`
+- `heaviest_images` (top 20)
+- `products_with_storage_image`
+
+**Esperado tras migración 165:** nuevos productos usan `products_with_storage_image`; base64 solo en registros legacy pendientes de re-guardar.
+
+---
+
 ## Logs de referencia
 
 | Fase | Prefijo consola | Campos clave |
 |------|-----------------|--------------|
-| Guardar | `save_attempt` | `name`, `imageMeta`, `productType` |
-| Guardar OK | `save_result` | `ok`, `verified`, `productId` |
+| Optimizar | `[POS image]` | `original_size`, `optimized_size`, `compression_ratio` |
+| Storage | `[POS image]` | `storage`, `uploaded` |
+| Guardar | `save_attempt` | `name`, `imageMeta`, `imageStorage` |
+| Guardar OK | `save_result` | `ok`, `verified`, `productId`, `imageUrl` |
 | Listar | `load_result` | `source`, `count`, `total`, `ms` |
 | Verificar | `verify_result` | `ok`, `source` |
 
@@ -134,4 +164,6 @@ Con catálogo grande (o tras importar varios):
 - Los platillos **persisten** tras hard refresh
 - Timeout muestra error explícito, no catálogo vacío falso
 - Listado admin paginado sin columnas pesadas (`image_url`, `description`)
+- `image_url` guarda URL pública de Storage, no base64 grande
+- Imagen visible al editar (carga lazy)
 - `npm run build` pasa sin errores

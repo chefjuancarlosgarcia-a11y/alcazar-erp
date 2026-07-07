@@ -291,6 +291,13 @@
   border-radius: 12px;
 }
 
+.pos-dish-image-message {
+  display: block;
+  margin: 6px 0 10px;
+  color: #cbd5e1;
+  font-size: 0.85rem;
+}
+
 .pos-dish-grid {
   grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
   gap: 16px !important;
