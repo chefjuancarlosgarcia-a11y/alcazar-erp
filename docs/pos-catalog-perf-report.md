@@ -24,7 +24,7 @@
 ## 2. Protocolo de prueba (150+ productos)
 
 ### Pre-requisitos
-1. Migraciones aplicadas: `164_pos_catalog_definitive.sql`, `165_pos_product_images_storage.sql`
+1. Migraciones aplicadas: `164`, `165`, y `167` (fix listado sin leer image_url). `166` solo auditoría.
 2. DevTools → Console → filtro `[POS PERF]`
 3. DevTools → Network → filtro `list_pos_catalog_page` y `pos-product-images`
 

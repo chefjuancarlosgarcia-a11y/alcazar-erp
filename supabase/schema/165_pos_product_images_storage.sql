@@ -1,5 +1,10 @@
 -- POS product images: Supabase Storage bucket + enhanced image diagnostics.
 -- Apply after 164_pos_catalog_definitive.sql.
+--
+-- Storage model (no separate images table):
+--   - Files live in storage bucket "pos-product-images"
+--   - public.pos_products.image_url stores the public URL string only
+--   - There is NO public.pos_product_images table
 
 -- ---------------------------------------------------------------------------
 -- Storage bucket (public read, managers write)
