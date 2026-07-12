@@ -8,8 +8,7 @@ import {
   safeErrorMessage
 } from "../_shared/userLifecycle.ts"
 
-const HISTORY_BLOCK_MESSAGE =
-  "Este usuario posee historial operativo y no puede eliminarse. Utilice \"Dar de baja\"."
+const DENIED_MESSAGE = "No tienes permisos para reactivar este usuario."
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders })
@@ -19,14 +18,13 @@ Deno.serve(async (req) => {
   if (!admin) return json({ error: "Funcion no configurada." }, 500)
 
   const token = req.headers.get("Authorization")?.replace("Bearer ", "")
-  const deniedMessage = "No tienes permisos para eliminar este usuario."
-  const authResult = await authenticateActor(admin, token, deniedMessage)
+  const authResult = await authenticateActor(admin, token, DENIED_MESSAGE)
   if (authResult.error) return authResult.error
 
   const body = await req.json().catch(() => null)
   const targetId = String(body?.user_id || "").trim()
   if (!targetId || targetId === authResult.authUserId) {
-    return json({ error: deniedMessage }, 403)
+    return json({ error: DENIED_MESSAGE }, 403)
   }
 
   const targetResult = await loadTargetProfile(admin, targetId)
@@ -37,21 +35,35 @@ Deno.serve(async (req) => {
   const actor = authResult.actor!
   const target = targetResult.target!
   if (!canManageTarget(actor.role, target.role)) {
-    return json({ error: deniedMessage }, 403)
+    return json({ error: DENIED_MESSAGE }, 403)
   }
 
-  const { data: hasHistory, error: historyError } = await admin.rpc("profile_has_operational_history", {
-    p_profile_id: targetId
+  if (target.status === "active") {
+    return json({
+      reactivated: true,
+      already_active: true,
+      user_id: targetId,
+      message: "El usuario ya estaba activo. Las credenciales de asistencia deben regenerarse manualmente."
+    })
+  }
+
+  const { error: updateError } = await admin
+    .from("profiles")
+    .update({
+      status: "active",
+      reactivated_at: new Date().toISOString(),
+      reactivated_by: actor.id,
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", targetId)
+
+  if (updateError) {
+    return json({ error: safeErrorMessage(updateError) }, 400)
+  }
+
+  return json({
+    reactivated: true,
+    user_id: targetId,
+    message: "Usuario reactivado. Regenera o habilita el PIN de asistencia de forma explicita."
   })
-  if (historyError) {
-    return json({ error: safeErrorMessage(historyError) }, 400)
-  }
-  if (hasHistory === true) {
-    return json({ error: HISTORY_BLOCK_MESSAGE }, 409)
-  }
-
-  const { error: deleteError } = await admin.auth.admin.deleteUser(targetId)
-  if (deleteError) return json({ error: safeErrorMessage(deleteError) }, 400)
-
-  return json({ deleted: true })
 })

@@ -21,6 +21,9 @@ import {
   canAssignUserRole,
   canCreateUserRole,
   canDeactivateUser,
+  canReactivateUser,
+  canHardDeleteUser,
+  EDITABLE_PROFILE_STATUSES,
   canEditUser,
   canEditUserRole,
   canManageAttendancePinForUser,
@@ -89,7 +92,7 @@ const ROLE_NAMES = {
 
 const STATUS_NAMES = {
   active: "Activo",
-  inactive: "Inactivo",
+  inactive: "Dado de baja",
   suspended: "Suspendido"
 }
 
@@ -125,6 +128,12 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
   const [createForm, setCreateForm] = useState(CREATE_FORM)
   const [resettingId, setResettingId] = useState("")
   const [deletingId, setDeletingId] = useState("")
+  const [deactivatingId, setDeactivatingId] = useState("")
+  const [reactivatingId, setReactivatingId] = useState("")
+  const [deactivateTarget, setDeactivateTarget] = useState(null)
+  const [deactivateReason, setDeactivateReason] = useState("")
+  const [deleteTarget, setDeleteTarget] = useState(null)
+  const [deleteConfirmText, setDeleteConfirmText] = useState("")
   const [pinConfigured, setPinConfigured] = useState({})
   const [showAttendancePin, setShowAttendancePin] = useState(false)
   const [pinActionMessage, setPinActionMessage] = useState("")
@@ -526,6 +535,10 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
       setModalError("No tienes permisos para editar este usuario.")
       return
     }
+    if (form.status === "inactive") {
+      setModalError("Para dar de baja utiliza la accion \"Dar de baja\" en la lista de usuarios.")
+      return
+    }
     if ((form.attendance_pin || form.authorized_attendance_device !== (editingProfile.authorized_attendance_device || "")) && !canManageCurrentPin) {
       setModalError("No tienes permisos para editar este usuario.")
       return
@@ -567,7 +580,9 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
       changes.hourly_rate = form.hourly_rate === "" ? null : Number(form.hourly_rate)
     }
     if (canEditUserRole(user, editingProfile)) changes.role = form.role
-    if (canDeactivateUser(user, editingProfile)) changes.status = form.status
+    if (canDeactivateUser(user, editingProfile) && EDITABLE_PROFILE_STATUSES.includes(form.status)) {
+      changes.status = form.status
+    }
     if (canManageSupervisorAssignment) {
       changes.supervisor_profile_id = form.supervisor_profile_id || null
     }
@@ -789,37 +804,105 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
     }, 700)
   }
 
-  async function toggleStatus(profile) {
-    if (!canDeactivateUser(user, profile)) return
-    const nextStatus = profile.status === "active" ? "inactive" : "active"
-    const { data, error: updateError } = await supabase
-      .from("profiles")
-      .update({ status: nextStatus })
-      .eq("id", profile.id)
-      .select("*")
-      .single()
-    if (updateError) {
-      setError(databaseError(updateError))
-      return
+  async function invokeUserLifecycleFunction(functionName, body) {
+    const { data, error } = await supabase.functions.invoke(functionName, { body })
+    if (error) {
+      let message = error.message || "Error al guardar en la base de datos."
+      try {
+        const response = error?.context
+        if (response && typeof response.json === "function") {
+          const payload = await response.json()
+          if (payload?.error) message = payload.error
+        }
+      } catch {
+        // keep default message
+      }
+      return { ok: false, message, data: null }
     }
-    setProfiles((current) => current.map((item) => item.id === data.id ? data : item))
-    setMessage(nextStatus === "active" ? "Usuario activado." : "Usuario desactivado.")
+    if (data?.error) {
+      return { ok: false, message: data.error, data: null }
+    }
+    return { ok: true, message: data?.message || "", data }
   }
 
-  async function deleteUser(profile) {
-    if (deletingId || !canDeactivateUser(user, profile)) return
-    const confirmed = window.confirm(`Eliminar definitivamente a ${profile.full_name || profile.username || "este usuario"}?`)
-    if (!confirmed) return
-    setDeletingId(profile.id)
-    const { error: deleteError } = await supabase.functions.invoke("delete-user", {
-      body: { user_id: profile.id }
-    })
-    setDeletingId("")
-    if (deleteError) {
-      setError(deleteError.message || "Error al guardar en la base de datos.")
+  function openDeactivateDialog(profile) {
+    if (!canDeactivateUser(user, profile) || deactivatingId) return
+    setDeactivateTarget(profile)
+    setDeactivateReason("")
+    setError("")
+  }
+
+  async function confirmDeactivate() {
+    if (!deactivateTarget || deactivatingId) return
+    const reason = deactivateReason.trim()
+    if (reason.length < 3 || reason.length > 500) {
+      setError("El motivo de baja es obligatorio (3 a 500 caracteres).")
       return
     }
-    setProfiles((current) => current.filter((item) => item.id !== profile.id))
+    setDeactivatingId(deactivateTarget.id)
+    setError("")
+    const result = await invokeUserLifecycleFunction("deactivate-user", {
+      user_id: deactivateTarget.id,
+      reason
+    })
+    setDeactivatingId("")
+    if (!result.ok) {
+      setError(result.message)
+      return
+    }
+    setDeactivateTarget(null)
+    setDeactivateReason("")
+    setMessage(result.data?.already_inactive ? "El usuario ya estaba dado de baja. Sesiones revocadas." : "Usuario dado de baja. Acceso y sesiones bloqueados.")
+    await loadProfiles({ silent: true })
+  }
+
+  async function reactivateUser(profile) {
+    if (!canReactivateUser(user, profile) || reactivatingId) return
+    const confirmed = window.confirm(
+      `Reactivar a ${profile.full_name || profile.username || "este usuario"}?\n\nDeberas regenerar o habilitar el PIN de asistencia manualmente.`
+    )
+    if (!confirmed) return
+    setReactivatingId(profile.id)
+    setError("")
+    const result = await invokeUserLifecycleFunction("reactivate-user", {
+      user_id: profile.id
+    })
+    setReactivatingId("")
+    if (!result.ok) {
+      setError(result.message)
+      return
+    }
+    setMessage(result.message || "Usuario reactivado.")
+    await loadProfiles({ silent: true })
+  }
+
+  function openDeleteDialog(profile) {
+    if (deletingId || !canHardDeleteUser(user, profile)) return
+    setDeleteTarget(profile)
+    setDeleteConfirmText("")
+    setError("")
+  }
+
+  async function confirmDeleteUser() {
+    if (!deleteTarget || deletingId) return
+    const expected = String(deleteTarget.username || deleteTarget.full_name || "").trim().toLowerCase()
+    if (!expected || deleteConfirmText.trim().toLowerCase() !== expected) {
+      setError("Escribe el usuario exacto para confirmar la eliminacion definitiva.")
+      return
+    }
+    setDeletingId(deleteTarget.id)
+    setError("")
+    const result = await invokeUserLifecycleFunction("delete-user", {
+      user_id: deleteTarget.id
+    })
+    setDeletingId("")
+    if (!result.ok) {
+      setError(result.message)
+      return
+    }
+    setDeleteTarget(null)
+    setDeleteConfirmText("")
+    setProfiles((current) => current.filter((item) => item.id !== deleteTarget.id))
     setMessage("Usuario eliminado correctamente.")
   }
 
@@ -935,13 +1018,28 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
                     {resettingId === profile.id ? "Enviando..." : "Recuperacion"}
                   </button>
                   {canDeactivateUser(user, profile) && (
-                    <button type="button" className="danger" onClick={() => toggleStatus(profile)}>
-                      {profile.status === "active" ? "Desactivar" : "Activar"}
+                    <button
+                      type="button"
+                      className="danger"
+                      onClick={() => openDeactivateDialog(profile)}
+                      disabled={deactivatingId === profile.id}
+                    >
+                      {deactivatingId === profile.id ? "Procesando..." : "Dar de baja"}
                     </button>
                   )}
-                  {canDeactivateUser(user, profile) && (
-                    <button type="button" className="danger" onClick={() => deleteUser(profile)} disabled={deletingId === profile.id}>
-                      {deletingId === profile.id ? "Eliminando..." : "Eliminar"}
+                  {canReactivateUser(user, profile) && (
+                    <button
+                      type="button"
+                      className="profiles-secondary"
+                      onClick={() => reactivateUser(profile)}
+                      disabled={reactivatingId === profile.id}
+                    >
+                      {reactivatingId === profile.id ? "Reactivando..." : "Reactivar"}
+                    </button>
+                  )}
+                  {canHardDeleteUser(user, profile) && (
+                    <button type="button" className="danger" onClick={() => openDeleteDialog(profile)} disabled={deletingId === profile.id}>
+                      {deletingId === profile.id ? "Eliminando..." : "Eliminar definitivamente"}
                     </button>
                   )}
                 </div>
@@ -998,12 +1096,36 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
                     </div>
                   </Field>
                   <Field label="Estado">
-                    <select value={form.status} onChange={(event) => updateField("status", event.target.value)} disabled={saving || !canDeactivateUser(user, editingProfile)}>
-                      {PROFILE_STATUSES.map((status) => <option key={status} value={status}>{STATUS_NAMES[status]}</option>)}
+                    <select
+                      value={editingProfile.status === "inactive" ? "inactive" : form.status}
+                      onChange={(event) => updateField("status", event.target.value)}
+                      disabled={saving || editingProfile.status === "inactive" || !canDeactivateUser(user, editingProfile)}
+                    >
+                      {editingProfile.status === "inactive" ? (
+                        <option value="inactive">{STATUS_NAMES.inactive}</option>
+                      ) : (
+                        EDITABLE_PROFILE_STATUSES.map((status) => (
+                          <option key={status} value={status}>{STATUS_NAMES[status]}</option>
+                        ))
+                      )}
                     </select>
                   </Field>
                 </div>
               </FormSection>
+
+              {editingProfile.status === "inactive" && (
+                <FormSection title="Baja registrada">
+                  <div className="profiles-form-grid">
+                    <Field label="Fecha de baja">
+                      <input value={formatDateTime(editingProfile.termination_date)} readOnly disabled />
+                    </Field>
+                    <Field label="Motivo">
+                      <textarea value={editingProfile.termination_reason || "Sin motivo registrado"} readOnly disabled rows={3} />
+                    </Field>
+                  </div>
+                  <p className="profiles-muted">Para reactivar, usa la accion &quot;Reactivar&quot; en la lista. El PIN de asistencia debe configurarse nuevamente.</p>
+                </FormSection>
+              )}
 
               <FormSection title="Horarios / informacion laboral">
                 <div className="profiles-form-grid">
@@ -1338,7 +1460,7 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
                   </Field>
                   <Field label="Estado">
                     <select value={createForm.status} onChange={(event) => updateCreateField("status", event.target.value)} disabled={creating}>
-                      {PROFILE_STATUSES.map((status) => <option key={status} value={status}>{STATUS_NAMES[status]}</option>)}
+                      {EDITABLE_PROFILE_STATUSES.map((status) => <option key={status} value={status}>{STATUS_NAMES[status]}</option>)}
                     </select>
                   </Field>
                 </div>
@@ -1378,6 +1500,77 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
               <button type="submit" className="profiles-primary" disabled={creating}>{creating ? "Guardando..." : "Guardar"}</button>
             </footer>
           </form>
+        </div>
+      )}
+
+      {deactivateTarget && (
+        <div className="profiles-modal-overlay">
+          <div className="profiles-modal">
+            <header className="profiles-modal-header">
+              <div>
+                <p className="profiles-eyebrow">Dar de baja</p>
+                <h2>{deactivateTarget.full_name || deactivateTarget.username || "Usuario"}</h2>
+              </div>
+              <button type="button" onClick={() => setDeactivateTarget(null)} disabled={Boolean(deactivatingId)}>Cerrar</button>
+            </header>
+            <div className="profiles-modal-body">
+              <p className="profiles-warning">
+                El acceso se bloqueara de inmediato, todas las sesiones se cerraran y el historial operativo se conservara.
+              </p>
+              <Field label="Motivo de baja (obligatorio)">
+                <textarea
+                  value={deactivateReason}
+                  onChange={(event) => setDeactivateReason(event.target.value)}
+                  rows={4}
+                  maxLength={500}
+                  placeholder="Describe el motivo de la baja..."
+                  disabled={Boolean(deactivatingId)}
+                />
+              </Field>
+            </div>
+            <div className="profiles-modal-actions">
+              <button type="button" className="profiles-secondary" onClick={() => setDeactivateTarget(null)} disabled={Boolean(deactivatingId)}>Cancelar</button>
+              <button type="button" className="profiles-primary danger" onClick={confirmDeactivate} disabled={Boolean(deactivatingId)}>
+                {deactivatingId ? "Procesando..." : "Confirmar baja"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteTarget && (
+        <div className="profiles-modal-overlay">
+          <div className="profiles-modal">
+            <header className="profiles-modal-header">
+              <div>
+                <p className="profiles-eyebrow">Eliminacion definitiva</p>
+                <h2>{deleteTarget.full_name || deleteTarget.username || "Usuario"}</h2>
+              </div>
+              <button type="button" onClick={() => setDeleteTarget(null)} disabled={Boolean(deletingId)}>Cerrar</button>
+            </header>
+            <div className="profiles-modal-body">
+              <p className="profiles-warning">
+                Accion excepcional solo para usuarios creados por error y sin actividad. Si el usuario tiene historial operativo, la eliminacion sera rechazada.
+              </p>
+              <p className="profiles-muted">
+                Escribe <strong>{deleteTarget.username || deleteTarget.full_name}</strong> para confirmar.
+              </p>
+              <Field label="Confirmacion">
+                <input
+                  value={deleteConfirmText}
+                  onChange={(event) => setDeleteConfirmText(event.target.value)}
+                  disabled={Boolean(deletingId)}
+                  autoComplete="off"
+                />
+              </Field>
+            </div>
+            <div className="profiles-modal-actions">
+              <button type="button" className="profiles-secondary" onClick={() => setDeleteTarget(null)} disabled={Boolean(deletingId)}>Cancelar</button>
+              <button type="button" className="profiles-primary danger" onClick={confirmDeleteUser} disabled={Boolean(deletingId)}>
+                {deletingId ? "Eliminando..." : "Eliminar definitivamente"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </section>
@@ -1427,6 +1620,19 @@ function emptyCustomSchedule(profileId) {
     notes: "",
     status: "active"
   }
+}
+
+function formatDateTime(value) {
+  if (!value) return "—"
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return String(value)
+  return date.toLocaleString("es-MX", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  })
 }
 
 function specialScheduleLabel(schedule) {

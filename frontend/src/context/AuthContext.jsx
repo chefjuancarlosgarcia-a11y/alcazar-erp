@@ -286,15 +286,18 @@ export function AuthProvider({ children }) {
       return { ok: false, message: "Tu usuario no tiene perfil configurado. Contacta administración." }
     }
     if (["inactive", "suspended"].includes(String(data.status || "").toLowerCase())) {
+      const statusMessage = String(data.status || "").toLowerCase() === "inactive"
+        ? "Tu usuario fue dado de baja. Contacta administración."
+        : "Tu usuario está suspendido. Contacta administración."
       setProfile(data)
       setUser(null)
-      setProfileError("Tu usuario está inactivo o suspendido. Contacta administración.")
+      setProfileError(statusMessage)
       window.dispatchEvent(new CustomEvent("auth:session-interrupted", {
         detail: { reason: "profile_inactive", message: data.status || "inactive" }
       }))
       await supabase.auth.signOut({ scope: "local" })
       syncLegacyUser(null)
-      return { ok: false, message: "Tu usuario está inactivo o suspendido. Contacta administración." }
+      return { ok: false, message: statusMessage }
     }
 
     const currentUser = normalizeProfileToCurrentUser(data, activeSession.user)

@@ -84,6 +84,12 @@
   color: #fca5a5;
 }
 
+.profiles-primary.danger {
+  border-color: #7f1d1d;
+  background: #991b1b;
+  color: #fee2e2;
+}
+
 .profiles-actions button:disabled {
   opacity: .55;
   cursor: not-allowed;

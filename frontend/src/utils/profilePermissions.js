@@ -303,8 +303,23 @@ export function canCreateUserRole(currentUser, nextRole) {
 }
 
 export function canDeactivateUser(currentUser, targetUser) {
+  if (!currentUser || !targetUser || String(currentUser.id) === String(targetUser.id)) return false
+  if (targetUser.status === "inactive") return false
   return canDeleteProfile(currentUser, targetUser)
 }
+
+export function canReactivateUser(currentUser, targetUser) {
+  if (!currentUser || !targetUser || String(currentUser.id) === String(targetUser.id)) return false
+  if (targetUser.status !== "inactive") return false
+  return canDeleteProfile(currentUser, targetUser)
+}
+
+export function canHardDeleteUser(currentUser, targetUser) {
+  if (!currentUser || !targetUser || String(currentUser.id) === String(targetUser.id)) return false
+  return normalizeRole(currentUser.role) === "admin"
+}
+
+export const EDITABLE_PROFILE_STATUSES = ["active", "suspended"]
 
 export function canManageAttendancePinForUser(currentUser, targetUser) {
   if (!canManageAttendancePin(currentUser)) return false
