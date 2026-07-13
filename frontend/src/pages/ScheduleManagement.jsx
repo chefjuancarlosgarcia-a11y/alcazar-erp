@@ -40,6 +40,11 @@ import "./ScheduleManagement.css"
 const EDITOR_ROLES = ["admin", "gerente_general", "recursos_humanos", "rrhh", "gerente"]
 const PUBLISHER_ROLES = ["admin", "gerente_general", "recursos_humanos", "rrhh"]
 const DAYS = ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado", "Domingo"]
+
+const DUPLICATE_WEEK_BASE_OPTIONS = {
+  destination_mode: "replace_drafts",
+  skip_inactive_employees: true
+}
 const DEFAULT_AREAS = ["Cocina", "Servicio", "Barra", "Cafeteria", "Panaderia", "Reposteria", "Mise en Place", "Almacen", "Caja", "Limpieza", "Administracion", "Otro"]
 const LEGACY_SHIFT_TYPES = {
   full: "Turno completo",
@@ -407,7 +412,7 @@ function ScheduleManagement() {
     setMessage("")
     setDuplicatePreviewLoading(true)
     const { data, error: previewError } = await duplicateScheduleWeek(sourceWeekStart, weekStart, {
-      destination_mode: "replace_drafts",
+      ...DUPLICATE_WEEK_BASE_OPTIONS,
       dry_run: true
     })
     setDuplicatePreviewLoading(false)
@@ -442,7 +447,9 @@ function ScheduleManagement() {
     const dayCount = Object.keys(result?.copied_by_day || {}).filter((day) => Number(result.copied_by_day[day]) > 0).length
     let text = `Se copiaron ${copied} bloques en ${dayCount} dia(s) (${formatShortDate(result?.target_week_start || weekStart)} – ${formatShortDate(addDays(result?.target_week_start || weekStart, 6))}).`
     if (deleted > 0) text += ` Se reemplazaron ${deleted} borradores previos.`
-    if (skipped > 0) text += ` Se omitieron ${skipped} bloque(s).`
+    if (skipped > 0) {
+      text += ` Se omitieron ${skipped} bloque(s) de colaboradores dados de baja o suspendidos.`
+    }
     const sourceDays = Object.keys(result?.source_by_day || {}).filter((day) => Number(result.source_by_day[day]) > 0).length
     const copiedDays = Object.keys(result?.copied_by_day || {}).filter((day) => Number(result.copied_by_day[day]) > 0).length
     if (sourceDays > 0 && copiedDays < sourceDays) {
@@ -459,7 +466,7 @@ function ScheduleManagement() {
     setDuplicating(true)
     setError("")
     const { data, error: duplicateError } = await duplicateScheduleWeek(sourceWeekStart, weekStart, {
-      destination_mode: "replace_drafts",
+      ...DUPLICATE_WEEK_BASE_OPTIONS,
       dry_run: false
     })
     setDuplicating(false)
@@ -909,6 +916,7 @@ function ScheduleManagement() {
             <div className="duplicate-week-summary">
               <p><strong>Origen:</strong> {formatShortDate(sourceWeekStart)} – {formatShortDate(sourceWeekEnd)}</p>
               <p><strong>Destino:</strong> {formatShortDate(weekStart)} – {formatShortDate(weekEnd)}</p>
+              <p className="schedule-muted">Los colaboradores dados de baja o suspendidos no se copian; sus turnos en la semana origen se omiten.</p>
               <p className="schedule-muted">En movil, la vista muestra un dia a la vez. Usa las pestanas para revisar toda la semana.</p>
             </div>
 
@@ -951,13 +959,18 @@ function ScheduleManagement() {
                   </div>
                 )}
 
-                {Array.isArray(duplicatePreview.warnings) && duplicatePreview.warnings.length > 0 && (
-                  <div className="duplicate-week-warnings">
-                    {duplicatePreview.warnings.map((warning, index) => (
-                      <p key={`${warning.code || "warning"}-${index}`}>{warning.message}</p>
-                    ))}
-                  </div>
-                )}
+                {Array.isArray(duplicatePreview.warnings) && duplicatePreview.warnings.length > 0 && (() => {
+                  const inactiveSummary = summarizeInactiveSkipWarnings(duplicatePreview.warnings)
+                  const otherWarnings = duplicatePreview.warnings.filter((warning) => warning.code !== "inactive_employee_skipped")
+                  return (
+                    <div className="duplicate-week-warnings">
+                      {inactiveSummary && <p><strong>{inactiveSummary}</strong></p>}
+                      {otherWarnings.map((warning, index) => (
+                        <p key={`${warning.code || "warning"}-${index}`}>{warning.message}</p>
+                      ))}
+                    </div>
+                  )
+                })()}
 
                 {duplicatePreview.ok === false && Array.isArray(duplicatePreview.errors) && duplicatePreview.errors.length > 0 && (
                   <div className="duplicate-week-errors">
@@ -1156,6 +1169,13 @@ function textMatches(value, filter) {
   const normalizedFilter = normalizeText(filter)
   if (!normalizedFilter) return true
   return normalizeText(value).includes(normalizedFilter)
+}
+
+function summarizeInactiveSkipWarnings(warnings = []) {
+  const inactiveWarnings = warnings.filter((warning) => warning.code === "inactive_employee_skipped")
+  if (!inactiveWarnings.length) return ""
+  const employees = new Set(inactiveWarnings.map((warning) => warning.employee_id || warning.message))
+  return `Se omitiran ${inactiveWarnings.length} bloque(s) de ${employees.size} colaborador(es) dado(s) de baja o suspendido(s).`
 }
 
 function profileMatchesArea(profile, filter) {
