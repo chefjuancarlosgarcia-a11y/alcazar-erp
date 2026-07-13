@@ -1,0 +1,6 @@
+-- 182: Work center evolution (apply after 181c, in order, ERP tabs closed)
+-- 1. 182a_task_work_center_schema.sql
+-- 2. 182b_task_work_center_helpers.sql
+-- 3. 182c_task_work_center_rpcs.sql
+-- 4. 182d_task_work_center_ops.sql
+-- Verify: supabase/tests/verify_operational_tasks_work_center.sql

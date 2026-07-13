@@ -318,6 +318,11 @@
   animation: cc-drawer-in .22s ease;
 }
 
+.cc-drawer--wide {
+  width: min(88vw, 1200px);
+  grid-template-rows: auto 1fr auto;
+}
+
 @keyframes cc-drawer-in {
   from { transform: translateX(100%); opacity: .6; }
   to { transform: translateX(0); opacity: 1; }
@@ -700,4 +705,5 @@
   .cc-insights--split { grid-template-columns: 1fr; }
   .cc-alert { grid-template-columns: 1fr; }
   .cc-drawer { width: 100vw; }
+  .cc-drawer--wide { width: 100vw; }
 }

@@ -59,7 +59,7 @@ const SalesGoalsSettings = lazyWithPerformanceLogging("sales_goals", () => impor
 const Settings = lazyWithPerformanceLogging("settings", () => import("../pages/Settings"))
 const TicketTemplateSettings = lazyWithPerformanceLogging("ticket_settings", () => import("../pages/TicketTemplateSettings"))
 const Account = lazyWithPerformanceLogging("account", () => import("../pages/Account"))
-const Tasks = lazyWithPerformanceLogging("tasks", () => import("../pages/Tasks"))
+const Tasks = lazyWithPerformanceLogging("tasks", () => import("../pages/TasksEntry"))
 const CateringDashboard = lazyWithPerformanceLogging("catering", () => import("../modules/catering/CateringDashboard"))
 const Finance = lazyWithPerformanceLogging("finance", () => import("../pages/Finance"))
 const OperationsCenter = lazyWithPerformanceLogging("operations_center", () => import("../pages/OperationsCenter"))
@@ -102,7 +102,7 @@ function AppRoutes() {
             <Route path="/kds" element={<ProtectedRoute module="production"><ProductionHub /></ProtectedRoute>} />
             <Route path="/kds/:areaId" element={<ProtectedRoute module="production"><ProductionLegacyRedirect /></ProtectedRoute>} />
             <Route path="/hr" element={<ProtectedRoute module="hr"><HR /></ProtectedRoute>} />
-            <Route path="/tasks" element={<ProtectedRoute module="tasks"><Tasks /></ProtectedRoute>} />
+            <Route path="/tasks/*" element={<ProtectedRoute module="tasks"><Tasks /></ProtectedRoute>} />
             <Route path="/reports" element={<ProtectedRoute module="reports"><Reports /></ProtectedRoute>} />
             <Route path="/reports/goals/settings" element={<ProtectedRoute module="reports"><SalesGoalsSettings /></ProtectedRoute>} />
             <Route path="/catering" element={<ProtectedRoute module="catering"><CateringDashboard /></ProtectedRoute>} />

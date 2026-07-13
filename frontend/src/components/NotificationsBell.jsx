@@ -126,7 +126,7 @@ function NotificationsBell({ currentUser }) {
     } else if (notification.entity_type === "recruitment_candidate") {
       navigate(notification.action_url || `/hr?section=reclutamiento&tab=pipeline&candidateId=${encodeURIComponent(notification.entity_id || "")}`)
     } else if (notification.entity_type === "task") {
-      navigate("/tasks?view=mine")
+      navigate(notification.action_url || `/tasks/trabajo/mi-trabajo?task=${encodeURIComponent(notification.entity_id || "")}`)
     }
   }
 

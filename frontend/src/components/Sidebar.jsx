@@ -19,7 +19,7 @@ const navigationItems = [
   { module: "bakery", to: "/bakery", label: "Panadería / Pastelería" },
   { module: "inventory", to: "/inventory", label: "Inventario", submenu: "inventory" },
   { module: "hr", to: "/hr", label: "Recursos Humanos", submenu: "hr" },
-  { module: "tasks", to: "/tasks", label: "Tareas" },
+  { module: "tasks", to: "/tasks?view=dashboard", label: "Tareas" },
   { module: "reports", to: "/reports", label: "Reportes" },
   { module: "finance", to: "/finance", label: "Finanzas", submenu: "finance" },
   { module: "catering", to: "/catering", label: "Catering" },

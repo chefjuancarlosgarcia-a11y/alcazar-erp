@@ -44,31 +44,6 @@ export const OPERATIONAL_SHIFTS = [
   { id: "evening", name: "Tarde / cierre", start: "17:00", end: "23:00" }
 ]
 
-const SEED_TASKS = [
-  ["Revisar temperaturas", "cocina", "Cocina", "Calidad", "high", "medium", 20, true, ["Medir cámaras frías", "Registrar temperatura", "Reportar desviaciones"]],
-  ["Preparar mise en place", "cocina", "Cocina", "Mise en place", "medium", "medium", 45, false, ["Preparar ingredientes", "Etiquetar recipientes"]],
-  ["Limpiar mesa fría", "cocina", "Cocina", "Limpieza", "high", "medium", 30, true, ["Retirar insumos", "Desinfectar superficie", "Tomar foto final"]],
-  ["Requisición de mozzarella", "cocina", "Cocina", "Inventario", "medium", "easy", 15, false, ["Validar existencia", "Enviar requisición"]],
-  ["Cierre de cocina", "cocina", "Cocina", "Cierre", "high", "hard", 35, true, ["Apagar equipo", "Limpiar estaciones", "Validar cierre"]],
-  ["Revisar hielo", "barra", "Barra", "Apertura", "medium", "easy", 10, false, ["Revisar nivel de hielo"]],
-  ["Preparar garnishes", "barra", "Barra", "Producción", "medium", "medium", 25, false, ["Cortar garnish", "Etiquetar producción"]],
-  ["Limpiar cristalería", "barra", "Barra", "Limpieza", "medium", "easy", 30, false, ["Lavar", "Pulir", "Ordenar"]],
-  ["Revisión de licores", "barra", "Barra", "Inventario", "high", "medium", 25, false, ["Contar botellas", "Reportar faltantes"]],
-  ["Calibrar molino", "cafeteria", "Cafetería", "Calidad", "high", "hard", 20, true, ["Pesar dosis", "Ajustar molienda", "Registrar resultado"]],
-  ["Revisar leche", "cafeteria", "Cafetería", "Calidad", "medium", "easy", 10, false, ["Validar fechas", "Rotar producto"]],
-  ["Limpieza de máquina espresso", "cafeteria", "Cafetería", "Limpieza", "high", "medium", 25, true, ["Purgar grupos", "Lavar accesorios", "Tomar evidencia"]],
-  ["Revisar salones", "mesas", "Mesas", "Apertura", "medium", "easy", 15, false, ["Revisar montaje", "Corregir faltantes"]],
-  ["Limpiar mesas", "mesas", "Mesas", "Limpieza", "medium", "easy", 25, false, ["Desinfectar mesas", "Ordenar sillas"]],
-  ["Revisar baños", "mesas", "Mesas", "Servicio", "high", "easy", 15, true, ["Revisar limpieza", "Reponer consumibles"]],
-  ["Reponer servilletas", "mesas", "Mesas", "Servicio", "low", "easy", 10, false, ["Reponer estaciones"]],
-  ["Limpieza baños", "limpieza", "Limpieza", "Limpieza", "critical", "medium", 30, true, ["Colocar señalización", "Limpiar", "Desinfectar", "Adjuntar foto"]],
-  ["Sacar basura", "limpieza", "Limpieza", "Cierre", "medium", "easy", 20, false, ["Clasificar residuos", "Retirar bolsas"]],
-  ["Trapear áreas comunes", "limpieza", "Limpieza", "Limpieza", "medium", "easy", 30, false, ["Colocar señalización", "Trapear áreas"]],
-  ["Revisar documentos pendientes", "administracion", "Administración", "Recursos Humanos", "medium", "medium", 30, false, ["Revisar vencimientos", "Notificar pendientes"]],
-  ["Confirmar capacitaciones", "administracion", "Administración", "Capacitación", "medium", "medium", 30, false, ["Validar agenda", "Confirmar participantes"]],
-  ["Publicar aviso interno", "administracion", "Administración", "Recursos Humanos", "low", "easy", 15, false, ["Redactar aviso", "Publicar"]]
-]
-
 function parseArray(key) {
   try {
     const parsed = JSON.parse(localStorage.getItem(key) || "[]")
@@ -87,36 +62,16 @@ function normalize(value) {
 }
 
 export function loadTaskTemplates() {
+  return purgeLegacyTaskTemplateSeeds()
+}
+
+export function purgeLegacyTaskTemplateSeeds() {
   const stored = parseArray(TASK_TEMPLATES_KEY)
-  if (stored.length) return stored
-  const now = new Date().toISOString()
-  const seeded = SEED_TASKS.map(([title, areaId, areaName, category, priority, difficulty, minutes, evidenceRequired, checklist], index) => ({
-    id: `seed-task-${index + 1}`,
-    title,
-    description: `Procedimiento operativo estandarizado: ${title}.`,
-    areaId,
-    areaName,
-    category,
-    priority,
-    difficulty,
-    estimatedMinutes: minutes,
-    requiredPeople: difficulty === "hard" ? 2 : 1,
-    recommendedRole: areaName,
-    requiredSkillLevel: difficulty === "hard" ? "senior" : difficulty === "medium" ? "intermediate" : "junior",
-    toolsNeeded: [],
-    materialsNeeded: [],
-    sopLink: "",
-    checklistItems: checklist.map((text, itemIndex) => ({ id: `step-${index}-${itemIndex}`, text })),
-    evidenceRequired,
-    recurrence: ["Cierre", "Apertura"].includes(category) ? "daily" : "none",
-    recommendedTimeBlock: category === "Cierre" ? "21:30" : "08:00",
-    active: true,
-    createdBy: "Sistema",
-    createdAt: now,
-    updatedAt: now
-  }))
-  saveTaskTemplates(seeded)
-  return seeded
+  const cleaned = stored.filter((template) => !String(template?.id || "").startsWith("seed-task-"))
+  if (cleaned.length !== stored.length) {
+    saveTaskTemplates(cleaned)
+  }
+  return cleaned
 }
 
 export function saveTaskTemplates(templates) {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, startTransition } from "react"
-import { useSearchParams } from "react-router-dom"
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
 import useSupabaseRealtime from "../hooks/useSupabaseRealtime"
 import { useActionGuard } from "../hooks/useActionGuard"
@@ -163,6 +163,7 @@ import {
   mergeOperationalEmployees,
   loadTaskNotifications,
   loadTaskTemplates,
+  purgeLegacyTaskTemplateSeeds,
   saveAssignedTasks,
   saveTaskTemplates,
   taskMatchesUser,
@@ -176,6 +177,8 @@ import ChecklistWizardStepBoundary from "../components/checklists/ChecklistWizar
 import PaginationControls from "../components/PaginationControls"
 import { pageItems } from "../utils/pagination"
 import { hasYieldAuditForTask } from "../services/yieldCostingService"
+import { isOperationalTasksV2Enabled } from "../config/operationalTasksConfig"
+import WorkRoutes from "./tasks/WorkRoutes"
 import "./Tasks.css"
 
 function guatemalaDateString(date = new Date()) {
@@ -198,17 +201,16 @@ function isChecklistAreaSupervisorRole(role) {
 }
 const OPERATIONAL_TASK_TABS = [
   ["checklists", "Mis checklists"],
+  ["trabajo", "Trabajo"],
   ["mine", "Mis tareas"],
   ["yieldForm", "Formulario rendimiento"]
 ]
 const ADMIN_TABS = [
   ["dashboard", "Dashboard"],
+  ["trabajo", "Trabajo"],
   ["checklists", "Checklists"],
   ["mine", "Mis tareas"],
-  ["bank", "Banco de tareas"],
-  ["assign", "Asignar tareas"],
-  ["calendar", "Calendario operativo"],
-  ["create", "Crear tarea nueva"],
+  ["bank", "Plantillas"],
   ["yieldForm", "Formulario rendimiento"],
   ["reports", "Reportes"]
 ]
@@ -635,12 +637,16 @@ function buildChecklistWizardForm(editingTemplate) {
 function Tasks() {
   const { user, canAccess, checklistModuleAccess, refreshChecklistModuleAccess } = useAuth()
   const [params, setParams] = useSearchParams()
+  const location = useLocation()
+  const navigate = useNavigate()
+  const showWorkV2 = isOperationalTasksV2Enabled()
+  const workActive = showWorkV2 && location.pathname.startsWith("/tasks/trabajo")
   const currentUserRole = normalizeRole(user?.role)
   const isManager = MANAGEMENT_ROLES.includes(currentUserRole)
   const canUseChecklists = canAccess("tasks")
     || CHECKLIST_SUPERVISOR_ROLES.has(currentUserRole)
     || checklistModuleAccess
-  const [templates, setTemplates] = useState(loadTaskTemplates)
+  const [templates, setTemplates] = useState(() => purgeLegacyTaskTemplateSeeds())
   const [editingTemplate, setEditingTemplate] = useState(null)
   const [assignedTasks, setAssignedTasks] = useState(loadAssignedTasks)
   const [areas, setAreas] = useState([])
@@ -648,7 +654,9 @@ function Tasks() {
   const [employeesLoading, setEmployeesLoading] = useState(false)
   const [assignmentTemplate, setAssignmentTemplate] = useState(null)
   const [assignmentFeedback, setAssignmentFeedback] = useState(null)
-  const requestedTab = params.get("tab") === "checklists"
+  const requestedTab = workActive
+    ? "trabajo"
+    : params.get("tab") === "checklists"
     ? "checklists"
     : params.get("view") || (isManager ? "dashboard" : canUseChecklists ? "checklists" : "mine")
   const tab = requestedTab === "checklists"
@@ -668,6 +676,25 @@ function Tasks() {
   const visibleTemplates = templates.filter((template) => mayUseTemplate(template, user, employees))
   const computedTasks = assignedTasks.map(withComputedTaskStatus)
   const permittedAreas = getPermittedAreas(areas, user, employees, visibleTemplates)
+  const managerTabs = ADMIN_TABS.filter(([id]) => id !== "trabajo" || showWorkV2)
+  const workerTabs = (canUseChecklists ? OPERATIONAL_TASK_TABS : [["mine", "Mis tareas"], ["yieldForm", "Formulario rendimiento"]])
+    .filter(([id]) => id !== "trabajo" || showWorkV2)
+
+  useEffect(() => {
+    if (!showWorkV2) return
+    const cleaned = purgeLegacyTaskTemplateSeeds()
+    setTemplates(cleaned)
+  }, [showWorkV2])
+
+  useEffect(() => {
+    if (!workActive) return
+    if (!params.get("view") && !params.get("tab")) return
+    const next = new URLSearchParams(params)
+    next.delete("view")
+    next.delete("tab")
+    const search = next.toString()
+    navigate({ pathname: location.pathname, search: search ? `?${search}` : "" }, { replace: true })
+  }, [workActive, location.pathname, params, navigate])
 
   useEffect(() => {
     refreshChecklistModuleAccess?.()
@@ -737,7 +764,15 @@ function Tasks() {
   }, [assignedTasks])
 
   function openTab(next) {
-    setParams({ view: next })
+    if (next === "trabajo" && showWorkV2) {
+      navigate("/tasks/trabajo/mi-trabajo")
+      return
+    }
+    if (next === "checklists") {
+      navigate({ pathname: "/tasks", search: "?tab=checklists" })
+      return
+    }
+    navigate({ pathname: "/tasks", search: `?view=${encodeURIComponent(next)}` })
   }
 
   function persistTasks(nextTasks) {
@@ -811,13 +846,15 @@ function Tasks() {
       </header>
 
       <nav className="tasks-tabs" aria-label="Tareas">
-        {(isManager ? ADMIN_TABS : canUseChecklists ? OPERATIONAL_TASK_TABS : [["mine", "Mis tareas"], ["yieldForm", "Formulario rendimiento"]]).map(([id, label]) => (
+        {(isManager ? managerTabs : workerTabs).map(([id, label]) => (
           <button key={id} type="button" className={tab === id ? "active" : ""} onClick={() => { if (id === "create") setEditingTemplate(null); openTab(id) }}>{label}</button>
         ))}
       </nav>
 
-      {tab === "dashboard" && <TasksDashboard tasks={computedTasks} areas={areas} employees={employees} onOpenTab={openTab} />}
-      {tab === "bank" && (
+      {workActive && showWorkV2 ? <WorkRoutes /> : null}
+
+      {!workActive && tab === "dashboard" && <TasksDashboard tasks={computedTasks} areas={areas} employees={employees} onOpenTab={openTab} />}
+      {!workActive && tab === "bank" && (
         <TaskBank
           templates={visibleTemplates}
           allTemplates={templates}
@@ -827,29 +864,19 @@ function Tasks() {
           onAssign={(template) => { setAssignmentFeedback(null); setAssignmentTemplate(template) }}
           onEdit={(template) => { setEditingTemplate(template); openTab("create") }}
           feedback={assignmentFeedback}
+          useNewTemplates={showWorkV2}
+          onOpenWork={() => openTab("trabajo")}
         />
       )}
-      {tab === "create" && <TaskTemplateForm key={editingTemplate?.id || "new"} templates={templates} setTemplates={setTemplates} areas={permittedAreas} currentUser={user} editingTemplate={editingTemplate} onFinished={() => { setEditingTemplate(null); openTab("bank") }} />}
-      {tab === "assign" && (
-        <TaskAssignment
-          templates={visibleTemplates}
-          tasks={computedTasks}
-          employees={employees}
-          areas={permittedAreas}
-          user={user}
-          onAssigned={(newTasks) => persistTasks([...newTasks, ...assignedTasks])}
-          onNotifyAssignedTasks={notifyAssignedTasks}
-        />
-      )}
-      {tab === "calendar" && <OperationalCalendar tasks={computedTasks} employees={employees} areas={areas} />}
-      {tab === "checklists" && <ChecklistsModule user={user} initialRunId={params.get("id") || ""} initialChecklistView={params.get("view") || ""} />}
-      {tab === "mine" && <MyTasks initialTaskId={taskFromQuery} tasks={computedTasks.filter((task) => taskMatchesUser(task, user))} user={user} persistAllTasks={persistTasks} allTasks={assignedTasks} />}
-      {tab === "yieldForm" && (
+      {!workActive && tab === "create" && <TaskTemplateForm key={editingTemplate?.id || "new"} templates={templates} setTemplates={setTemplates} areas={permittedAreas} currentUser={user} editingTemplate={editingTemplate} onFinished={() => { setEditingTemplate(null); openTab("bank") }} />}
+      {!workActive && tab === "checklists" && <ChecklistsModule user={user} initialRunId={params.get("id") || ""} initialChecklistView={params.get("view") || ""} />}
+      {!workActive && tab === "mine" && <MyTasks initialTaskId={taskFromQuery} tasks={computedTasks.filter((task) => taskMatchesUser(task, user))} user={user} persistAllTasks={persistTasks} allTasks={assignedTasks} />}
+      {!workActive && tab === "yieldForm" && (
         <article className="tasks-panel">
           <YieldAuditFormPanel />
         </article>
       )}
-      {tab === "reports" && <TaskReports tasks={computedTasks} employees={employees} areas={areas} />}
+      {!workActive && tab === "reports" && <TaskReports tasks={computedTasks} employees={employees} areas={areas} />}
       {assignmentTemplate && (
         <TaskAssignWizard
           template={assignmentTemplate}
@@ -910,7 +937,7 @@ function TasksDashboard({ tasks, areas, employees, onOpenTab }) {
       </div>
       <div className="tasks-dashboard-columns">
         <article className="tasks-panel">
-          <div className="tasks-panel-title"><h2>Progreso por área</h2><button type="button" onClick={() => onOpenTab("calendar")}>Ver calendario</button></div>
+          <div className="tasks-panel-title"><h2>Progreso por área</h2></div>
           {areas.map((area) => {
             const areaTasks = todayTasks.filter((task) => task.areaId === area.id)
             const done = areaTasks.filter((task) => task.status === "completed").length
@@ -919,7 +946,7 @@ function TasksDashboard({ tasks, areas, employees, onOpenTab }) {
           })}
         </article>
         <article className="tasks-panel">
-          <div className="tasks-panel-title"><h2>Próximas a vencer</h2><button type="button" onClick={() => onOpenTab("assign")}>Asignar</button></div>
+          <div className="tasks-panel-title"><h2>Próximas a vencer</h2><button type="button" onClick={() => onOpenTab("trabajo")}>Ir a Trabajo</button></div>
           {pending.slice(0, 5).map((task) => <CompactTask key={task.id} task={task} employees={employees} />)}
           {!pending.length && <Empty text="No hay pendientes para hoy." />}
         </article>
@@ -928,7 +955,7 @@ function TasksDashboard({ tasks, areas, employees, onOpenTab }) {
   )
 }
 
-function TaskBank({ templates, allTemplates, areas, setTemplates, canDeactivate, onAssign, onEdit, feedback }) {
+function TaskBank({ templates, allTemplates, areas, setTemplates, canDeactivate, onAssign, onEdit, feedback, useNewTemplates = false, onOpenWork }) {
   const [search, setSearch] = useState("")
   const [areaFilter, setAreaFilter] = useState("")
   const [category, setCategory] = useState("")
@@ -944,10 +971,35 @@ function TaskBank({ templates, allTemplates, areas, setTemplates, canDeactivate,
   }
   return (
     <article className="tasks-panel">
-      <div className="tasks-panel-title"><div><h2>Banco de tareas</h2><p className="tasks-muted">{filtered.length} procedimientos estandarizados activos</p></div></div>
+      <div className="tasks-panel-title">
+        <div>
+          <h2>Plantillas</h2>
+          <p className="tasks-muted">
+            {useNewTemplates
+              ? "Plantillas simplificadas para el módulo Trabajo (Supabase en fase siguiente)."
+              : `${filtered.length} procedimientos estandarizados activos`}
+          </p>
+        </div>
+        {useNewTemplates ? (
+          <button type="button" className="tasks-card-action-primary" onClick={onOpenWork}>
+            Ir a Trabajo
+          </button>
+        ) : null}
+      </div>
       {feedback?.text && <p className={feedback.tone === "warning" ? "tasks-warning" : "tasks-success"}>{feedback.text}</p>}
+      {useNewTemplates && !filtered.length ? (
+        <div className="tasks-panel">
+          <p className="tasks-muted">
+            Las plantillas semilla en localStorage fueron retiradas. Crea tareas rápidas en la pestaña
+            {" "}
+            <strong>Trabajo</strong>
+            {" "}
+            o conserva aquí plantillas personalizadas hasta migrar a Supabase.
+          </p>
+        </div>
+      ) : null}
       <div className="tasks-filters">
-        <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar tarea..." />
+        <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar plantilla..." />
         <select value={areaFilter} onChange={(event) => setAreaFilter(event.target.value)}><option value="">Todas las áreas</option>{areas.map((area) => <option value={area.id} key={area.id}>{area.name}</option>)}</select>
         <select value={category} onChange={(event) => setCategory(event.target.value)}><option value="">Todas las categorías</option>{TASK_CATEGORIES.map((item) => <option key={item}>{item}</option>)}</select>
       </div>
@@ -960,12 +1012,15 @@ function TaskBank({ templates, allTemplates, areas, setTemplates, canDeactivate,
             <div className="tasks-template-meta"><span>{template.areaName}</span><span>{template.category}</span><span>{template.estimatedMinutes} min</span><span>{template.requiredPeople} pers.</span></div>
             {template.evidenceRequired && <small className="tasks-evidence-tag">Requiere evidencia</small>}
             <div className="tasks-card-actions">
-              <button type="button" className="tasks-card-action-primary" onClick={() => onAssign(template)}>Asignar</button>
+              {!useNewTemplates ? (
+                <button type="button" className="tasks-card-action-primary" onClick={() => onAssign(template)}>Asignar</button>
+              ) : null}
               <button type="button" className="tasks-link" onClick={() => onEdit(template)}>Editar</button>
               {canDeactivate && <button type="button" className="tasks-link danger" onClick={() => toggle(template.id)}>Desactivar</button>}
             </div>
           </article>
         ))}
+        {!filtered.length && !useNewTemplates && <Empty text="No hay plantillas que coincidan con los filtros." />}
       </div>
     </article>
   )
@@ -6309,4 +6364,5 @@ function templateLibraryBadge(template, pendingRequest) {
   return { label: template.status || "Plantilla", className: "" }
 }
 
+export { ChecklistsModule }
 export default Tasks

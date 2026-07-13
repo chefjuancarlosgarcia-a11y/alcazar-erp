@@ -1,0 +1,10 @@
+-- Hotfix diagnóstico asistencia: errores visibles en section='error'.
+-- En Supabase SQL Editor ejecuta el archivo COMPLETO:
+--   supabase/schema/153_attendance_terminal_diagnostics.sql
+--
+-- Luego:
+--   select * from public.diagnose_attendance_employee_state('Osman', '2026-06-18', '2026-06-22');
+--   select * from public.diagnose_attendance_employee_state('Mois', '2026-06-18', current_date);
+--
+-- Si section='error', revisar columnas:
+--   observation, block_reason, detail, marking_state->error_message / error_detail / error_hint / error_context

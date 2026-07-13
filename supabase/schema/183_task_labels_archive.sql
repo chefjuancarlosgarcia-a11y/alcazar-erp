@@ -1,0 +1,5 @@
+-- 183: Labels + archive — apply after 182e (ERP tabs closed)
+-- 1. 183a_task_labels_schema.sql
+-- 2. 183b_task_labels_archive_rpcs.sql
+-- 3. 183c_task_labels_catalog_ops.sql
+-- Verify: supabase/tests/verify_operational_tasks_labels_archive.sql
