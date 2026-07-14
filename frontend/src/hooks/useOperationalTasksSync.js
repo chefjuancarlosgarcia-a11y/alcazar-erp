@@ -2,6 +2,8 @@ import { useEffect, useRef } from "react"
 
 const FOCUS_DEBOUNCE_MS = 2500
 const FOCUS_SETTLE_MS = 400
+const FOCUS_COOLDOWN_MS = 30000
+const MOUNT_GRACE_MS = 5000
 
 export function formatLastSyncedAt(value) {
   if (!value) return "Sin sincronizar"
@@ -24,17 +26,23 @@ export function isServerTaskNewer(serverUpdatedAt, baselineUpdatedAt) {
 
 /**
  * Debounced refetch when the browser tab becomes visible again.
+ * Skips if: unsaved edits, active refresh, mount grace, or synced < 30s ago.
  */
 export function useTaskFocusRefresh({
   enabled = true,
   onRefresh,
-  hasUnsavedEdits
+  hasUnsavedEdits,
+  isRefreshing,
+  lastSyncedAt
 }) {
   const lastRunRef = useRef(0)
+  const mountedAtRef = useRef(Date.now())
   const timerRef = useRef(null)
   const mountedRef = useRef(true)
   const onRefreshRef = useRef(onRefresh)
   const hasUnsavedRef = useRef(hasUnsavedEdits)
+  const isRefreshingRef = useRef(isRefreshing)
+  const lastSyncedRef = useRef(lastSyncedAt)
 
   useEffect(() => {
     onRefreshRef.current = onRefresh
@@ -43,6 +51,18 @@ export function useTaskFocusRefresh({
   useEffect(() => {
     hasUnsavedRef.current = hasUnsavedEdits
   }, [hasUnsavedEdits])
+
+  useEffect(() => {
+    isRefreshingRef.current = isRefreshing
+  }, [isRefreshing])
+
+  useEffect(() => {
+    lastSyncedRef.current = lastSyncedAt
+  }, [lastSyncedAt])
+
+  useEffect(() => {
+    mountedAtRef.current = Date.now()
+  }, [enabled])
 
   useEffect(() => {
     mountedRef.current = true
@@ -58,7 +78,19 @@ export function useTaskFocusRefresh({
     function runRefresh() {
       if (!mountedRef.current) return
       if (hasUnsavedRef.current?.()) return
+      if (isRefreshingRef.current) return
+
       const now = Date.now()
+      if (now - mountedAtRef.current < MOUNT_GRACE_MS) return
+
+      const syncedAt = lastSyncedRef.current
+      if (syncedAt) {
+        const syncMs = syncedAt instanceof Date
+          ? syncedAt.getTime()
+          : new Date(syncedAt).getTime()
+        if (!Number.isNaN(syncMs) && now - syncMs < FOCUS_COOLDOWN_MS) return
+      }
+
       if (now - lastRunRef.current < FOCUS_DEBOUNCE_MS) return
       lastRunRef.current = now
       onRefreshRef.current?.({ source: "focus" })

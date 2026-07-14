@@ -1,0 +1,2851 @@
+COLLECTION: PUBLIC - FELplex - Documentación
+DESC:  Somos la solución para emitir Facturas Electrónicas 
+ 
+
+VARIABLES:
+  entorno = {{entorno}}
+  api_key = {{api_key}}
+  empresa = {{empresa}}
+  dte_uuid = {{dte_uuid}}
+  fecha = {{YYYY-MM-DDThh:mm:ss}}
+  CUI = {{CUI}}
+  NIT = {{NIT}}
+
+[FOLDER] Guatemala
+Documentación API - FELplex Facturación Electrónica 📄 Documentación de nuestra API Encuentra todo lo que necesitas saber sobre la API de FELplex - Facturas Electrónicas para que puedas integrar tu software fácil, rápido y de forma segura. Para empezar a utilizar la integración API FELplex – Facturas electrónicas a tu software solamente debes seguir estos sencillos pasos: Verifica nuestra documentación API Regístrate en nuestro entorno de pruebas gratis, http://felplex.stage.plex.lat/ Solicita accesos de desarrollo al correo info@felplex.com Cuando termines de realizar la integración de tu software a FELplex, deberás regístrate en el entorno de producción y solicita tus credenciales nuevas enviando un correo a info@felplex.com Enviar Solicitud ¿Necesitas ayuda? Nuestro equipo de soporte está disponible: de lunes a viernes de 8 de la mañana a 5 de la tarde. info@felplex.com 2305-9700 💻 Endpoints disponibles Nuestros endpoint disponibles son los siguientes: Certificacion de documentos XML Json Envio de documentos: WhatsApp SMS Anulacion de documentos Validación de datos NIT CUI Solicitud de datos DTE disponibles Frases de exento Solicitar datos de DTE Reporte de documentos emitidos ✨Variables generales Variables a utilizar en Json Variables a utilizar en XML ⌨️ Ejemplos Factura Recibo Factura Cambiaria Recibo de donación Adendas Anular documento 👾 Errores comunes Error de credenciales Es muy comun que en ocaciones no se este realizando lo siguiente: Ingresar todos los caracte
+
+[FOLDER] Guatemala > Endpoints
+En esta sección se describiran los endpoints disponibles de: Certificacion Anulacion Metodos de envio Solicitud de datos Validacion de datos
+
+[FOLDER] Guatemala > Endpoints > Certificación de documentos
+En Felplex existe la posiblidad de poder enviar las peticiones de certificacion de la siguiente manera Json: con parametros especificos para el DTE, revisar campos en Variables Generales XML: Debe ser enviado en base 64 La certificacion de los documentos son de manera sincrona ya que espera la respuesta de la certificación Autorización Serie Número de documento
+
+[REQUEST] Guatemala > Endpoints > Certificación de documentos > Crear DTE Síncrono
+  METHOD: POST
+  URL: {{entorno}}/api/entity/{{empresa}}/invoices/await
+  DESC:  El DTE es enviado a certificar en el momento, esperando la respuesta de la misma y mostrando la información de autorización o el listado de errores producto de la verificación realizada por la SAT. 
+
+  BODY:
+{
+ "type": "FACT",
+ "currency": "GTQ",
+ "datetime_issue": {{YYYY-MM-DDThh:mm:ss}},
+ "external_id": "SI24G-0010",
+ "items": [
+ {
+ "qty": "4",
+ "type": "B",
+ "price": 449.12,
+ "description": "Vasos Plasticos",
+ "without_iva": 0,
+ "discount": 0,
+ "is_discount_percentage": 0,
+ "taxes": {
+ "quantity": null,
+ "tax_code": null,
+ "full_name": null,
+ "short_name": null,
+ "tax_amount": null,
+ "taxable_amount": null
+ }
+ },
+ {
+ "qty": "4",
+ "type": "B",
+ "price": 649.6,
+ "description": "Platos plasticos",
+ "without_iva": 0,
+ "discount": 0,
+ "is_discount_percentage": 0,
+ "taxes": {
+ "quantity": null,
+ "tax_code": null,
+ "full_name": null,
+ "short_name": null,
+ "tax_amount": null,
+ "taxable_amount": null
+ }
+ },
+ {
+ "qty": "2",
+ "type": "B",
+ "price": 422.24,
+ "description": "22M 0135 .0135 304 AN MALLA 39.125 X 94.5 OB",
+ "without_iva": 0,
+ "discount": 0,
+ "is_discount_percentage": 0,
+ "taxes": {
+ "quantity": null,
+ "tax_code": null,
+ "full_name": null,
+ "short_name": null,
+ "tax_amount": null,
+ "taxable_amount": null
+ }
+ },
+ {
+ "qty": "1",
+ "type": "S",
+ "price": 352.8,
+ "description": "Gastos de envío",
+ "without_iva": 0,
+ "discount": 0,
+ "is_discount_percentage": 0,
+ "taxes": {
+ "quantity": null,
+ "tax_code": null,
+ "full_name": null,
+ "short_name": null,
+ "tax_amount": null,
+ "taxable_amount": null
+ }
+ }
+ ],
+ "total": 5592.16,
+ "total_tax": 599.16,
+ "emails": [
+ {
+ "email": "mleiva@cari.net"
+ }
+ ],
+ "to_cf": 0,
+ "to": {
+ "tax_code_type": "NIT",
+ "tax_code": "7100531",
+ "tax_name": "PEGAMORTEROS DE GUATEMALA S.A.",
+ "address": {
+ "street": "KM. 29.3 CARRETERA CA-9 SUR",
+ "city": "Amatitlán",
+ "state": "GU",
+ "zip": "01067",
+ "country": "GT"
+ }
+ },
+ "exempt_phrase": null,
+ "custom_fields": [
+ {
+ "name": "IVA total incluido",
+ "value": "599.16"
+ },
+ {
+ "name": "Número de pedido del cliente",
+ "value": "4500977500"
+ },
+ {
+ "name": "Número de pedido",
+ "value": "S24G-0016"
+ },
+ {
+ "name": "Condiciones de pago",
+ "value": "Net 30 Days"
+ }
+ ]
+}
+  RESPONSE undefined Nuevo DTE Síncrono:
+{
+ "valid": true, /*True si se genero el documento, false si fallo por alguna razón */
+ "uuid": "71916AF3-73F6-480B-B3B3-6F6E3DABC334", /*Id interno de FELplex*/
+ "sat": { /*Datos de certificacion de SAT*/
+ "serie": "DD34F4A1",
+ "no": 1971864803,
+ "authorization": "DD34F4A1-7588-44E3-B609-1DDDA27AD3E0",
+ "certification_date": "2024-06-20T15:15:39"
+ },
+ "certifier": { /*Datos del certificador*/
+ "name": "CARI LATINOAMERICA, S.A.",
+ "tax_code": "96941243"
+ },
+ "errors": [], /*Si es que existe algun error en la generacion de los documentos*/
+ "invoice_url": "https://felplex.stage.plex.lat/pdf/71916AF3-73F6-480B-B3B3-6F6E3DABC334", /*URL del pdf del documento*/
+ "invoice_xml": "https://felplex.stage.plex.lat/xml/71916AF3-73F6-480B-B3B3-6F6E3DABC334" /*URL del XML del documento*/
+}
+
+[REQUEST] Guatemala > Endpoints > Certificación de documentos > Crear DTE a partir de XML
+  METHOD: POST
+  URL: {{entorno}}/api/entity/{{empresa}}/invoices/await
+  DESC:  Envía un documento a certificación utilizando un XML el cuál debe ser enviado codificado en base 64, adicionalmente se reciben emails para envío de documento a clientes 
+
+  BODY:
+{
+ "emails": [
+ {
+ "email": "test@cari.com"
+ }
+ ],
+ "emails_cc": [
+ {
+ "email": "test@cari.net"
+ }
+ ],
+ "xml": "PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxkdGU6R1REb2N1bWVudG8gVmVyc2lvbj0iMC4xIg0KICAgIHhtbG5zOmNleD0iaHR0cDovL3d3dy5zYXQuZ29iLmd0L2ZhY2UyL0NvbXBsZW1lbnRvRXhwb3J0YWNpb25lcy8wLjEuMCINCiAgICB4bWxuczpjZXhwcm92PSJodHRwOi8vd3d3LnNhdC5nb2IuZ3QvZmFjZTIvQ29tcGxlbWVudG9FeHBvcnRhY2lvblByb3Zpc2lvbmFsLzAuMS4wIg0KICAgIHhtbG5zOmNmYz0iaHR0cDovL3d3dy5zYXQuZ29iLmd0L2R0ZS9mZWwvQ29tcENhbWJpYXJpYS8wLjEuMCINCiAgICB4bWxuczpjZmU9Imh0dHA6Ly93d3cuc2F0LmdvYi5ndC9mYWNlMi9Db21wbGVtZW50b0ZhY3R1cmFFc3BlY2lhbC8wLjEuMCINCiAgICB4bWxuczpjbm89Imh0dHA6Ly93d3cuc2F0LmdvYi5ndC9mYWNlMi9Db21wbGVtZW50b1JlZmVyZW5jaWFOb3RhLzAuMS4wIg0KICAgIHhtbG5zOm5zMj0iaHR0cDovL3d3dy53My5vcmcvMjAwMC8wOS94bWxkc2lnIyIgeG1sbnM6ZHRlPSJodHRwOi8vd3d3LnNhdC5nb2IuZ3QvZHRlL2ZlbC8wLjIuMCINCiAgICB4bWxuczp4c2k9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hLWluc3RhbmNlIg0KICAgIHhzaTpzY2hlbWFMb2NhdGlvbj0iaHR0cDovL3d3dy5zYXQuZ29iLmd0L2R0ZS9mZWwvMC4yLjAgR1RfRG9jdW1lbnRvLTAuMi4wLnhzZCI+DQogICAgPGR0ZTpTQVQgQ2xhc2VEb2N1bWVudG89ImR0ZSI+DQogICAgICAgIDxkdGU6RFRFIElEPSJEYXRvc0NlcnRpZmljYWRvcyI+DQogICAgICAgICAgICA8ZHRlOkRhdG9zRW1pc2lvbiBJRD0iRGF0b3NFbWlzaW9uIj4NCiAgICAgICAgICAgICAgICA8ZHRlOkRhdG9zR2VuZXJhbGVzIENvZGlnb01vbmVkYT0iVVNEIiBGZWNoYUhvcmFFbWlzaW9uPSIyMDI0LTA5LTExVDEwOjAwOjU4Ig0KICAgICAgICAgICAgICAgICAgICBOdW1lcm9BY2Nlc289IjEwMTEyNTQ4NiIgVGlwbz0iRkNBTSI+PC9kdGU6RGF0b3NHZW5lcmFsZXM+DQogICAgICAgICAgICAgICAgPGR0ZTpFbWlzb3IgQWZpbGlhY2lvbklWQT0iR0VOIiBDb2RpZ29Fc3RhYmxlY2ltaWVudG89IjIiIENvcnJlb0VtaXNvcj0iIg0KICAgICAgICAgICAgICAgICAgICBOSVRFbWlzb3I9IjU4ODg0OTIiIE5vbWJyZUNvbWVyY2lhbD0iSU1QT1JUQURPUkEgUkxKSiwgUy5BLiINCiAgICAgICAgICAgICAgICAgICAgTm9tYnJlRW1pc29yPSJJTVBPUlRBRE9SQSBSTEpKLCBTT0NJRURBRCBBTk9OSU1BIj4NCiAgICAgICAgICAgICAgICAgICAgPGR0ZTpEaXJlY2Npb25FbWlzb3I+DQogICAgICAgICAgICAgICAgICAgICAgICA8ZHRlOkRpcmVjY2lvbj4xNCBDYWxsZSBOaXZlbCAyIEVkaWZpY2lvIFNZTSA0LTMyLCBab25hIDEwPC9kdGU6RGlyZWNjaW9uPg0KICAgICAgICAgICAgICAgICAgICAgICAgPGR0ZTpDb2RpZ29Qb3N0YWw+MDEwMDE8L2R0ZTpDb2RpZ29Qb3N0YWw+DQogICAgICAgICAgICAgICAgICAgICAgICA8ZHRlOk11bmljaXBpbz5HdWF0ZW1hbGE8L2R0ZTpNdW5pY2lwaW8+DQogICAgICAgICAgICAgICAgICAgICAgICA8ZHRlOkRlcGFydGFtZW50bz5HdWF0ZW1hbGE8L2R0ZTpEZXBhcnRhbWVudG8+DQogICAgICAgICAgICAgICAgICAgICAgICA8ZHRlOlBhaXM+R1Q8L2R0ZTpQYWlzPg0KICAgICAgICAgICAgICAgICAgICA8L2R0ZTpEaXJlY2Npb25FbWlzb3I+DQogICAgICAgICAgICAgICAgPC9kdGU6RW1pc29yPg0KICAgICAgICAgICAgICAgIDxkdGU6UmVjZXB0b3IgSURSZWNlcHRvcj0iNDAxNzIyNTIiIE5vbWJyZVJlY2VwdG9yPSJUUkFOU0FDVEVMIFNPQ0lFREFEIEFOT05JTUEiPg0KICAgICAgICAgICAgICAgICAgICA8ZHRlOkRpcmVjY2lvblJlY2VwdG9yPg0KICAgICAgICAgICAgICAgICAgICAgICAgPGR0ZTpEaXJlY2Npb24+MTggY2FsbGUgMjUtODYgem9uYSAxMCBlZGlmaWNpbyBUb3JyZSBQcmFkZXJhIG5pdmVsIDU8L2R0ZTpEaXJlY2Npb24+DQogICAgICAgICAgICAgICAgICAgICAgICA8ZHRlOkNvZGlnb1Bvc3RhbD4wMTAwMTwvZHRlOkNvZGlnb1Bvc3RhbD4NCiAgICAgICAgICAgICAgICAgICAgICAgIDxkdGU6TXVuaWNpcGlvPjwvZHRlOk11bmljaXBpbz4NCiAgICAgICAgICAgICAgICAgICAgICAgIDxkdGU6RGVwYXJ0YW1lbnRvPkd1YXRlbWFsYTwvZHRlOkRlcGFydGFtZW50bz4NCiAgICAgICAgICAgICAgICAgICAgICAgIDxkdGU6UGFpcz5HVDwvZHRlOlBhaXM+DQogICAgICAgICAgICAgICAgICAgIDwvZHRlOkRpcmVjY2lvblJlY2VwdG9yPg0KICAgICAgICAgICAgICAgIDwvZHRlOlJlY2VwdG9yPg0KICAgICAgICAgICAgICAgIDxkdGU6RnJhc2VzPg0KICAgICAgICAgICAgICAgICAgICA8ZHRlOkZyYXNlIFRpcG9GcmFzZT0iMSIgQ29kaWdvRXNjZW5hcmlvPSIxIj48L2R0ZTpGcmFzZT4NCiAgICAgICAgICAgICAgICAgICAgPGR0ZTpGcmFzZSBUaXBvRnJhc2U9IjIiIENvZGlnb0VzY2VuYXJpbz0iMSI+PC9kdGU6RnJhc2U+DQogICAgICAgICAgICAgICAgPC9kdGU6RnJhc2VzPg0KICAgICAgICAgICAgICAgIDxkdGU6SXRlbXM+DQogICAgICAgICAgICAgICAgICAgIDxkdGU6SXRlbSBCaWVuT1NlcnZpY2lvPSJCIiBOdW1lcm9MaW5lYT0iMSI+DQogICAgICAgICAgICAgICAgICAgICAgICA8ZHRlOkNhbnRpZGFkPjY8L2R0ZTpDYW50aWRhZD4NCiAgICAgICAgICAgICAgICAgICAgICAgIDxkdGU6RGVzY3JpcGNpb24+QW5jaG9yIFBsYXRlIEFkaGVzaXZlIFNlY3VyaXR5IFBsYXRlIHdpdGggU2xvdCBmb3IgQ2FibGVzDQogICAgdG8gTG9jayBEb3dubkxhcHRvcHMsIFRhYmxldHMsIE1vbml0b3JzLCBpUGhvbmUgU21hcnQgUGhvbmUsIE1hY0Jvb2sgUGFkIElwYWQsIFRhYmxldCwgT3RoZXINCiAgICBFbGVjdHJvbmljIFByb2R1Y3RzIChCbGFjayA1UGFjayk8L2R0ZTpEZXNjcmlwY2lvbj4NCiAgICAgICAgICAgICAgICAgICAgICAgIDxkdGU6UHJlY2lvVW5pdGFyaW8+MjMuNTIwMDAwPC9kdGU6UHJlY2lvVW5pdGFyaW8+DQogICAgICAgICAgICAgICAgICAgICAgICA8ZHRlOlByZWNpbz4xNDEuMTIwMDAwPC9kdGU6UHJlY2lvPg0KICAgICAgICAgICAgICAgICAgICAgICAgPGR0ZTpEZXNjdWVudG8+MC4wMDAwMDA8L2R0ZTpEZXNjdWVudG8+DQogICAgICAgICAgICAgICAgICAgICAgICA8ZHRlOkltcHVlc3Rvcz4NCiAgICAgICAgICAgICAgICAgICAgICAgICAgICA8ZHRlOkltcHVlc3RvPg0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA8ZHRlOk5vbWJyZUNvcnRvPklWQTwvZHRlOk5vbWJyZUNvcnRvPg0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA8ZHRlOkNvZGlnb1VuaWRhZEdyYXZhYmxlPjE8L2R0ZTpDb2RpZ29VbmlkYWRHcmF2YWJsZT4NCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgPGR0ZTpNb250b0dyYXZhYmxlPjEyNi4wMDAwMDA8L2R0ZTpNb250b0dyYXZhYmxlPg0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA8ZHRlOk1vbnRvSW1wdWVzdG8+MTUuMTIwMDAwPC9kdGU6TW9udG9JbXB1ZXN0bz4NCiAgICAgICAgICAgICAgICAgICAgICAgICAgICA8L2R0ZTpJbXB1ZXN0bz4NCiAgICAgICAgICAgICAgICAgICAgICAgIDwvZHRlOkltcHVlc3Rvcz4NCiAgICAgICAgICAgICAgICAgICAgICAgIDxkdGU6VG90YWw+MTQxLjEyMDAwMDwvZHRlOlRvdGFsPg0KICAgICAgICAgICAgICAgICAgICA8L2R0ZTpJdGVtPg0KICAgICAgICAgICAgICAgICAgICA8ZHRlOkl0ZW0gQmllbk9TZXJ2aWNpbz0iQiIgTnVtZXJvTGluZWE9IjIiPg0KICAgICAgICAgICAgICAgICAgICAgICAgPGR0ZTpDYW50aWRhZD42PC9kdGU6Q2FudGlkYWQ+DQogICAgICAgICAgICAgICAgICAgICAgICA8ZHRlOkRlc2NyaXBjaW9uPlN0YXJUZWNoLmNvbSBTZWN1cml0eSBTbG90IEFkYXB0ZXIgS2l0IC0gU2xpbSBBbnRpLVRoZWZ0DQogICAgSy1TbG90IExvY2sgUGxhdGUgQWRhcHRlciBmb3IgTWFjQm9vay9UYWJsZXQvaVBhZC9QaG9uZS9MYXB0b3AgLSBXb3JrcyB3LyBULUJhciAtIFNlY3VyZSBsYXB0b3AvDQogICAgdGFibGV0L21vbml0b3Igdy8gdGhpcyBzbGltbnNlY3VyaXR5IHNsb3QgYWRhcHRlciBraXQgdG8gYWRkIGEgS2Vuc2luZ3RvbiBTdHlsZSBLLVNsb3QgdG8NCiAgICBkZXZpY2VzIHdpdGhvdXQgYSBjYWJsZSBsb2NrIHNsb3QgLSBXb3JrcyB3LyBUdTAwMDJCYXIgLSBTZWN1cmUgTWFjQm9vay8NCiAgICBVbHRyYWJvb2svaVBhZC9DaHJvbWVib29rIC0gV2l0aHN0YW5kIDI5NmxicyBvZiBmb3JjZSAtIFRBQSBDb21wbGlhbnQgLSBTaWx2ZXI8L2R0ZTpEZXNjcmlwY2lvbj4NCiAgICAgICAgICAgICAgICAgICAgICAgIDxkdGU6UHJlY2lvVW5pdGFyaW8+MTkuMDQwMDAwPC9kdGU6UHJlY2lvVW5pdGFyaW8+DQogICAgICAgICAgICAgI
+  RESPONSE undefined Nuevo DTE a partir de XML:
+{
+ "valid": true, /*True si se genero el documento, false si fallo por alguna razón */
+ "uuid": "6558823E-E710-40B5-A227-658784945C08", /*Id interno de FELplex*/
+ "sat": { /*Datos de certificacion de SAT*/
+ "serie": "13B0D07E",
+ "no": 3951773309,
+ "authorization": "13B0D07E-EB8B-467D-8978-F31E6D9B1C2C",
+ "certification_date": "2024-06-20T15:40:04"
+ },
+ "certifier": { /*Datos del certificador*/
+ "name": "CARI LATINOAMERICA, S.A.",
+ "tax_code": "96941243"
+ },
+ "errors": [], /*Si es que existe algun error en la generacion de los documentos*/
+ "invoice_url": "https://felplex.stage.plex.lat/pdf/6558823E-E710-40B5-A227-658784945C08", /*URL del pdf del documento*/
+ "invoice_xml": "https://felplex.stage.plex.lat/xml/6558823E-E710-40B5-A227-658784945C08", /*URL del XML del documento*/
+ "xml": /*XML en base 64 firmado*/"PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxkdGU6R1REb2N1bWVudG8geG1sbnM6Y2V4PSJodHRwOi8vd3d3LnNhdC5nb2IuZ3QvZmFjZTIvQ29tcGxlbWVudG9FeHBvcnRhY2lvbmVzLzAuMS4wIiB4bWxuczpjZXhwcm92PSJodHRwOi8vd3d3LnNhdC5nb2IuZ3QvZmFjZTIvQ29tcGxlbWVudG9FeHBvcnRhY2lvblByb3Zpc2lvbmFsLzAuMS4wIiB4bWxuczpjZmM9Imh0dHA6Ly93d3cuc2F0LmdvYi5ndC9kdGUvZmVsL0NvbXBDYW1iaWFyaWEvMC4xLjAiIHhtbG5zOmNmZT0iaHR0cDovL3d3dy5zYXQuZ29iLmd0L2ZhY2UyL0NvbXBsZW1lbnRvRmFjdHVyYUVzcGVjaWFsLzAuMS4wIiB4bWxuczpjbm89Imh0dHA6Ly93d3cuc2F0LmdvYi5ndC9mYWNlMi9Db21wbGVtZW50b1JlZmVyZW5jaWFOb3RhLzAuMS4wIiB4bWxuczpuczI9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvMDkveG1sZHNpZyMiIHhtbG5zOmR0ZT0iaHR0cDovL3d3dy5zYXQuZ29iLmd0L2R0ZS9mZWwvMC4yLjAiIHhtbG5zOnhzaT0iaHR0cDovL3d3dy53My5vcmcvMjAwMS9YTUxTY2hlbWEtaW5zdGFuY2UiIFZlcnNpb249IjAuMSIgeHNpOnNjaGVtYUxvY2F0aW9uPSJodHRwOi8vd3d3LnNhdC5nb2IuZ3QvZHRlL2ZlbC8wLjIuMCBHVF9Eb2N1bWVudG8tMC4yLjAueHNkIj48ZHRlOlNBVCBDbGFzZURvY3VtZW50bz0iZHRlIj48ZHRlOkRURSBJRD0iRGF0b3NDZXJ0aWZpY2Fkb3MiPjxkdGU6RGF0b3NFbWlzaW9uIElEPSJEYXRvc0VtaXNpb24iPjxkdGU6RGF0b3NHZW5lcmFsZXMgQ29kaWdvTW9uZWRhPSJVU0QiIEZlY2hhSG9yYUVtaXNpb249IjIwMjQtMDYtMThUMDA6MDA6MDAiIE51bWVyb0FjY2Vzbz0iMTAxMTI3MDc5IiBUaXBvPSJGQUNUIi8+PGR0ZTpFbWlzb3IgQWZpbGlhY2lvbklWQT0iR0VOIiBDb2RpZ29Fc3RhYmxlY2ltaWVudG89IjIiIENvcnJlb0VtaXNvcj0idGVzdEB0ZXN0LmNvbS5ndCIgTklURW1pc29yPSI1ODg4NDkyIiBOb21icmVDb21lcmNpYWw9IkNhcmkgTGF0IiBOb21icmVFbWlzb3I9IklTTUFSIEJMQURJTUlSLCBQRVJFWiBQRVJFWiI+PGR0ZTpEaXJlY2Npb25FbWlzb3I+PGR0ZTpEaXJlY2Npb24+VG9ycmUgcHJhZGVyYSwgUXVldHphbHRlbmFuZ28sIFF1ZXR6YWx0ZW5hbmdvPC9kdGU6RGlyZWNjaW9uPjxkdGU6Q29kaWdvUG9zdGFsPjAxMDEwPC9kdGU6Q29kaWdvUG9zdGFsPjxkdGU6TXVuaWNpcGlvPlF1ZXR6YWx0ZW5hbmdvPC9kdGU6TXVuaWNpcGlvPjxkdGU6RGVwYXJ0YW1lbnRvPlF1ZXR6YWx0ZW5hbmdvPC9kdGU6RGVwYXJ0YW1lbnRvPjxkdGU6UGFpcz5HVDwvZHRlOlBhaXM+PC9kdGU6RGlyZWNjaW9uRW1pc29yPjwvZHRlOkVtaXNvcj48ZHRlOlJlY2VwdG9yIFRpcG9Fc3BlY2lhbD0iRVhUIiBJRFJlY2VwdG9yPSIxMTIxMjUzMzMxMSIgTm9tYnJlUmVjZXB0b3I9IkpvbmggRHVlIj48ZHRlOkRpcmVjY2lvblJlY2VwdG9yPjxkdGU6RGlyZWNjaW9uPkNpdWRhZDwvZHRlOkRpcmVjY2lvbj48ZHRlOkNvZGlnb1Bvc3RhbD4wMTAxMDwvZHRlOkNvZGlnb1Bvc3RhbD48ZHRlOk11bmljaXBpby8+PGR0ZTpEZXBhcnRhbWVudG8vPjxkdGU6UGFpcz5HVDwvZHRlOlBhaXM+PC9kdGU6RGlyZWNjaW9uUmVjZXB0b3I+PC9kdG
+
+[FOLDER] Guatemala > Endpoints > Envio de documentos
+Los documentos en FELplex tienen la posibilidad de además de ser enviados a los clientes por medio de correo electrónico, utilizar la opción de envio por medio de: SMS 📨: se un enviara el enlace con el cual pueden acceder al documento Whatsapp 📱: Se enviara el documento en PDF, asi como el total y tipo de documento Para esta opcion es necesario que el cliente posea creditos del tipo de medio de envio a utilizar
+
+[REQUEST] Guatemala > Endpoints > Envio de documentos > Envio de documentos por SMS
+  METHOD: POST
+  URL: {{entorno}}/api/entity/{{empresa}}/invoices/await
+  DESC:  Para enviar el DTE por SMS debemos agregar a nuestra petición: 
+ Para SMS el tipo es 1 
+ "phones": [ 
+ { 
+ "type": 1, 
+ "phone": "+502"
+ }
+]
+
+ 
+ En el arreglo podemos asociar más de un numeró de teléfono, siempre tomando en cuenta que debemos contar con los tokens de SMS necesarios para enviar el documento a cada uno de los numeros ingresados 
+ 
+  BODY:
+{
+ "type": "FACT",
+ "datetime_issue": {{YYYY-MM-DDThh:mm:ss}},
+ "items": [
+ {
+ "qty": 1,
+ "type": "B",
+ "price": 100,
+ "description": "Vasos plásticos",
+ "without_iva": 0,
+ "discount": 25,
+ "is_discount_percentage": 0,
+ "taxes": {
+ "qty": null,
+ "tax_code": null,
+ "full_name": null,
+ "short_name": null,
+ "tax_amount": null,
+ "taxable_amount": null
+ }
+ }
+ ],
+ "total": 75,
+ "total_tax": "4.70",
+ "emails": [
+ {
+ "email": "example@exammple.com"
+ }
+ ],
+ "emails_cc": [
+ {
+ "email": ""
+ }
+ ],
+ "phones": [ 
+ { 
+ "type": 1, 
+ "phone": "+502
+ }
+ ],
+ "to_cf": 0,
+ "to": {
+ "tax_code_type": "NIT",
+ "tax_code": "1607421",
+ "tax_name": "John Doe",
+ "address": {
+ "street": "1a Calle",
+ "city": "Mixco",
+ "state": "Guatemala",
+ "zip": "01001",
+ "country": "GT"
+ }
+ },
+ "exempt_phrase": null
+}
+
+[REQUEST] Guatemala > Endpoints > Envio de documentos > Envio de documentos por Whatsapp
+  METHOD: POST
+  URL: {{entorno}}/api/entity/{{empresa}}/invoices/await
+  DESC:  Para enviar el DTE por Whatsapp debemos agregar a nuestra petición: 
+ Para Whatsapp el tipo es 2 
+ "phones": [ 
+ { 
+ "type": 2, 
+ "phone": "+502"
+ }
+]
+
+ 
+ En el arreglo podemos asociar más de un numeró de teléfono, siempre tomando en cuenta que debemos contar con los tokens de Whatsapp necesarios para enviar el documento a cada uno de los numeros ingresados 
+ 
+  BODY:
+{
+ "type": "FACT",
+ "datetime_issue": {{YYYY-MM-DDThh:mm:ss}},
+ "items": [
+ {
+ "qty": 1,
+ "type": "B",
+ "price": 100,
+ "description": "Vasos plásticos",
+ "without_iva": 0,
+ "discount": 25,
+ "is_discount_percentage": 0,
+ "taxes": {
+ "qty": null,
+ "tax_code": null,
+ "full_name": null,
+ "short_name": null,
+ "tax_amount": null,
+ "taxable_amount": null
+ }
+ }
+ ],
+ "total": 75,
+ "total_tax": "4.70",
+ "emails": [
+ {
+ "email": "example@exammple.com"
+ }
+ ],
+ "emails_cc": [
+ {
+ "email": ""
+ }
+ ],
+ "phones": [ 
+ { 
+ "type": 1, 
+ "phone": "+502
+ }
+ ],
+ "to_cf": 0,
+ "to": {
+ "tax_code_type": "NIT",
+ "tax_code": "1607421",
+ "tax_name": "John Doe",
+ "address": {
+ "street": "1a Calle",
+ "city": "Mixco",
+ "state": "Guatemala",
+ "zip": "01001",
+ "country": "GT"
+ }
+ },
+ "exempt_phrase": null
+}
+
+[FOLDER] Guatemala > Endpoints > Anulacion de documentos
+La API de FELplex permite la anulacion de documentos, tomando en cuenta que la fecha de vencimiento del período del IVA al que corresponde el documento a anular, siendo este el tiempo restante del mes en el cual se emitió el documento y el siguiente.
+
+[REQUEST] Guatemala > Endpoints > Anulacion de documentos > Anular DTE
+  METHOD: DELETE
+  URL: {{entorno}}/api/entity/{{empresa}}/invoices/{{dte_uuid}}
+  DESC:  El UUID a ingresar debe ser el devuelto por parte de FELplex, no confundir con Autorizacion de SAT 
+
+  BODY:
+{
+
+"reason":"Devolución"
+
+}
+
+  RESPONSE undefined Anular DTE:
+{
+ "success": true, /*True, si la anulación fue exitosa, false si fallo*/
+ "uuid": "10FC365A-72D7-4B4D-AAB8-CF847B5DA4C8", /*Uuid del documento anulado*/
+ "certifier": { /*Datos del certificador*/
+ "name": "CARI LATINOAMERICA, S.A.",
+ "tax_code": "96941243"
+ },
+ "errors": [] /*En caso de haber fallado el proceso de anulacion se brindaran detalles del error*/
+}
+
+[FOLDER] Guatemala > Endpoints > Solicitud de datos
+La API de FELplex permite solicitar algunos datos como lo son: Solicitar datos de DTE: Permite consultar los datos de certificacion de un documento Texto de DTE: Permite consultar los detalles completos de un documento electrónico previamente certificado Listado de frases: Exento del ISR: Frases que deben incluirse cuando el emisor se encuentra exento del Impuesto Sobre la Renta (ISR). Exento de IVA: Existen facturas que por diferentes motivos deben llevar esta frase ya que: NO deben incluir el IVA. Deben incluir la base legal por la cual no incluyen el IVA (art. 29 literal “a” Ley del IVA y art. 11 Reglamento de la Ley del IVA). Son recibos y recibos por donación la correspondiente base legal de exención de IVA. Cantidad de DTE: Cantidad disponible de Documentos tributarios electrónicos de una empresa para su emisión
+
+[REQUEST] Guatemala > Endpoints > Solicitud de datos > Consultar datos de DTE
+  METHOD: GET
+  URL: {{entorno}}/api/entity/{{empresa}}/invoices/{{dte_uuid}}
+  DESC:  El UUID a ingresar debe ser el devuelto por parte de FELplex, no confundir con Autorizacion de SAT 
+
+  RESPONSE undefined Consultar datos de DTE:
+{
+ "valid": true,
+ "uuid": "10FC365A-72D7-4B4D-AAB8-CF847B5DA4C8",
+ "sat": {
+ "serie": "CD2E66E5",
+ "no": "126240118",
+ "authorization": "CD2E66E5-0786-4576-91F0-7BBDE25FD740",
+ "certification_date": "2024-06-21 08:10:32"
+ },
+ "certifier": {
+ "name": "CARI LATINOAMERICA, S.A.",
+ "tax_code": "96941243"
+ },
+ "errors": [],
+ "invoice_url": "https://felplex.stage.plex.lat/pdf/10FC365A-72D7-4B4D-AAB8-CF847B5DA4C8",
+ "invoice_xml": "https://felplex.stage.plex.lat/xml/10FC365A-72D7-4B4D-AAB8-CF847B5DA4C8"
+}
+
+[REQUEST] Guatemala > Endpoints > Solicitud de datos > Solicitar Texto de DTE
+  METHOD: GET
+  URL: {{entorno}}/api/entity/{{empresa}}/invoices/{{dte_uuid}}/text
+  DESC:  El UUID a ingresar debe ser el devuelto por parte de FELplex, no confundir con Autorizacion de SAT 
+
+  RESPONSE undefined Solicitar Texto de DTE:
+Generado por www.felplex.com
+
+Documento Tributario Electrónico
+Factura
+
+Fecha: 2023-04-18
+No.: 3547546516 Serie: E8796919
+---------------------------------
+
+CLA Regimen General
+NIT: 326070
+Ciudad Quetzaltenango, Quetzaltenango
+
+---------------------------------
+Nombre: John Doe
+NIT: 1607421
+Dirección: 1a Calle, Mixco, Guatemala
+
+UNI DESCRIPCION TOTAL
+--- ------------------ -------
+1 Vasos plasticos 100.00
+
+SUBTOTAL: 100.00
+DESCUENTO: 25.00
+TOTAL: 75.00
+
+Sujeto a pago directo ISR 1234567890 2020-10-14
+
+
+Número y Fecha de Autorización:
+E8796919-D373-4394-8D3D-17584999296F
+Certificador: CARI LATINOAMERICA, S.A.
+NIT: 96941243
+Fecha: 2023-04-18 07:36:47
+
+[REQUEST] Guatemala > Endpoints > Solicitud de datos > Listado de Frases de Exento
+  METHOD: GET
+  URL: {{entorno}}/api/entity/{{empresa}}/invoices/exempt-phrases
+  DESC:  En el documento donde enviaremos la frase a utilizar de exento de IVA enviaremos el codigo en el campo exempt_phrase 
+
+  RESPONSE 200 Frases de Exento:
+[
+ {
+ "name": "Servicios de intituciones fiscalizadas por la SIB y bolsas de valores autorizadas (art. 7 num. 4 Ley del IVA).",
+ "phrase": "Exenta del IVA (art. 7 num. 4 Ley del IVA)",
+ "type": 4,
+ "code": 2
+ },
+ {
+ "name": "Ventas de cooperativas (art. 7 num. 5 Ley del IVA).",
+ "phrase": "Exenta del IVA (art. 7 num. 5 Ley del IVA)",
+ "type": 4,
+ "code": 3
+ },
+ {
+ "name": "Donaciones (art. 7 num. 9 Ley del IVA).",
+ "phrase": "Exenta del IVA (art. 7 num. 9 Ley del IVA)",
+ "type": 4,
+ "code": 4
+ },
+ {
+ "name": "Servicios exentos (art. 7 núm. 13 Ley del IVA).",
+ "phrase": "Exenta del IVA (art. 7 núm. 13 Ley del IVA)",
+ "type": 4,
+ "code": 6
+ },
+ {
+ "name": "Venta de activos de Bancos o Sociedades Financieras (art. 7 num. 14 Ley del IVA).",
+ "phrase": "Exenta del IVA (art. 7 num. 14 Ley del IVA)",
+ "type": 4,
+ "code": 7
+ },
+ {
+ "name": "Medicamentos (art. 7 num. 15 Ley del IVA).",
+ "phrase": "Exenta del IVA (art. 7 num. 15 Ley del IVA)",
+ "type": 4,
+ "code": 9
+ },
+ {
+ "name": "Vehículos (art. 55 Ley del IVA).",
+ "phrase": "Esta factura no incluye IVA (art. 55 Ley del IVA)",
+ "type": 4,
+ "code": 10
+ },
+ {
+ "name": "Ventas de maquilas (Decreto 29-89 Ley de Maquila).",
+ "phrase": "No afecta al IVA (Decreto 29-89 Ley de Maquila)",
+ "type": 4,
+ "code": 11
+ },
+ {
+ "name": "Ventas a zonas francas (Decreto 65-89 Ley de Zonas Francas).",
+ "phrase": "No afecta al IVA (Decreto 65-89 Ley de Zonas Francas)",
+ "type": 4,
+ "code": 12
+ },
+ {
+ "name": "Venta de vivienda (art. 7 num. 12, Ley del IVA).",
+ "phrase": "Exenta del IVA (art. 7 num. 12, Ley del IVA)",
+ "type": 4,
+ "code": 13
+ },
+ {
+ "name": "Venta de títulos y acciones (art. 7 num. 6 Ley del IVA).",
+ "phrase": "Exenta del IVA (art. 7 num. 6 Ley del IVA)",
+ "type": 4,
+ "code": 14
+ },
+ {
+ "name": "Venta al menudeo en mercados. Exenta del IVA (art. 7 num. 11 Ley del IVA).",
+ "phrase": "Exenta del IVA (art. 7 num. 11 Ley del IVA)",
+ "type": 4,
+ "code": 15
+ },
+ {
+ "name": "Ventas y servicios universidades (art. 8 núm. 2 Ley del IVA).",
+ "phrase": "Exenta del IVA (art. 8 núm. 2 Ley del IVA)",
+ "type": 4,
+ "code": 16
+ },
+ {
+ "name": "Ventas Zolic (art. 32 literal c Ley Orgánica Zolic).",
+ "phrase": "Exenta del IVA (art. 32 literal c Ley Orgánica Zolic)",
+ "type": 4,
+ "code": 17
+ },
+ {
+ "name": "Ventas a exentos con resolución específica.",
+ "phrase": "Contribuyentes con resoluciones específicas de exención al IVA",
+ "type": 4,
+ "code": 18
+ }
+]
+
+[REQUEST] Guatemala > Endpoints > Solicitud de datos > Listado de Frases de Exento Copy
+  METHOD: GET
+  URL: {{entorno}}/api/entity/{{empresa}}/invoices/isr-exempt-phrases
+  DESC:  En el documento donde enviaremos la frase a utilizar de exento de IVA enviaremos el codigo en el campo isr_exempt_phrase 
+
+  RESPONSE 200 Frases de Exento:
+[
+ {
+ "name": "Exenciones generales universidades. Las universidades legalmente autorizadas para funcionar en el país.",
+ "phrase": "Exenta del ISR (art. 8 núm. 2 Ley de Actualización Tributaria)",
+ "code": 1
+ },
+ {
+ "name": "Exenciones generales centros educativos privados. Los centros educativos privados, como centros de cultura, exclusivamente en las rentas derivadas de: matrícula de inscripción, colegiaturas y derechos de examen, por los cursos que tengan autorizados por la autoridad competente.",
+ "phrase": "Exenta del ISR (art. 8 núm. 3 Ley de Actualización Tributaria)",
+ "code": 2
+ },
+ {
+ "name": "Exenciones generales iglesias. Exclusivamente por razón de culto.",
+ "phrase": "Exenta del ISR (art. 8 núm. 5 Ley de Actualización Tributaria)",
+ "code": 3
+ },
+ {
+ "name": "Exenciones Rentas de Actividades Lucrativas entes no lucrativos. Las rentas que obtengan los entes que destinen exclusivamente a los fines no lucrativos de su creación y en ningún caso distribuyan, directa o indirectamente, utilidades o bienes entre sus integrantes, tales como: los colegios profesionales; los partidos políticos; los comités cívicos; las asociaciones o fundaciones no lucrativas legalmente autorizadas e inscritas como exentas ante la Administración Tributaria, que tengan por objeto la beneficencia, asistencia o el servicio social, actividades culturales, científicas de educación e instrucción, artísticas, literarias, deportivas, políticas, sindicales, gremiales, religiosas, o el desarrollo de comunidades indígenas; únicamente por la parte que provenga de donaciones o cuotas ordinarias o extraordinarias.",
+ "phrase": "Exenta del ISR (art. 11 núm. 1 Ley de Actualización Tributaria)",
+ "code": 4
+ },
+ {
+ "name": "Exenciones Rentas de Actividades Lucrativas cooperativas. Las rentas de las cooperativas legalmente constituidas en el país, provenientes de las transacciones con sus asociados y con otras cooperativas, federaciones y confederaciones de cooperativas.",
+ "phrase": "Exenta del ISR (art. 11 núm. 2 Ley de Actualización Tributaria)",
+ "code": 5
+ },
+ {
+ "name": "Exenta ISR Zolic. Para el cumplimiento de sus fines, la institución gozará de la exención de impuestos, derechos y arbitrios fiscales o municipales, establecidos o que se establezcan.",
+ "phrase": "Exenta del ISR (art. 31 Ley Orgánica Zolic)",
+ "code": 6
+ },
+ {
+ "name": "Exenta ISR Usuarios Zolic. Los usuarios que se instalen y operen dentro de la Zona Libre gozarán de exención del ISR por 10 años a partir de la fecha en que la empresa inicie sus operaciones dentro de la Zona Libre.",
+ "phrase": "Exenta del ISR (art. 32 litar a, Ley Orgánica Zolic)",
+ "code": 7
+ },
+ {
+ "name": "Exenciones generales entidades del Estado. Los organismos del Estado y sus entidades descentralizadas, autónomas, las municipalidades y sus empresas.",
+ "phrase": "Exenta del ISR (art. 8 núm. 1 Ley de Actualización Tributaria)",
+ "code": 8
+ },
+ {
+ "name": "Exención por servicio de carga eléctrica a otros tipos de vehículos y transp
+
+[REQUEST] Guatemala > Endpoints > Solicitud de datos > Solicitar DTE's disponibles
+  METHOD: GET
+  URL: {{entorno}}/api/entity/{{empresa}}/credits
+  RESPONSE undefined Solicitar DTE's disponibles:
+99
+
+[FOLDER] Guatemala > Endpoints > Validacion de datos
+La API de FELplex nos permite validar los siguientes identificadores: NIT: Numero de identificación tributaria, El NIT es un número seguido de un dígito verificador de 0 a 9 o una letra K mayuscula CUI: Codigo unico de identificación, conformado por numeros de una longitud de 13 caracteres
+
+[REQUEST] Guatemala > Endpoints > Validacion de datos > Buscar CUI
+  METHOD: GET
+  URL: {{entorno}}/api/entity/{{empresa}}/find/CUI/{{CUI}}
+  RESPONSE undefined Buscar CUI:
+[
+ {
+ "id": 233,
+ "tax_code_type": "CUI",
+ "tax_code": "22340622*****",
+ "tax_name": "John , Doe",
+ "phones": [],
+ "emails": [],
+ "address": {
+ "zip": "01001",
+ "city": "Mixco",
+ "state": "Guatemala",
+ "street": "1a Calle",
+ "country": "GT"
+ },
+ "name": "John ••••"
+ }
+]
+
+[REQUEST] Guatemala > Endpoints > Validacion de datos > Buscar NIT
+  METHOD: GET
+  URL: {{entorno}}/api/entity/{{empresa}}/find/NIT/{{NIT}}
+  RESPONSE undefined Buscar NIT:
+[
+ {
+ "id": 327,
+ "tax_code_type": "NIT",
+ "tax_code": "10450661213",
+ "tax_name": "PRIMER_APELLIDO SEGUNDO_APELLIDO, PRIMER_NOMBRE SEGUNDO_NOMBRE",
+ "phones": [],
+ "emails": [
+ "marleiq22@gmail.com"
+ ],
+ "address": {
+ "street": "Direccion prueba",
+ "city": "Guatemala",
+ "state": "Guatemala",
+ "zip": "01001"
+ },
+ "name": "PRIMER_APELLIDO SEGUNDO_APELLIDO •••• ••••"
+ }
+]
+
+[REQUEST] Guatemala > Endpoints > Reporte de documentos emitidos > Reporte de emisión
+  METHOD: POST
+  URL: {{entorno}}/api/entity/{{empresa}}/invoices/reports
+  RESPONSE undefined Reporte de emisión:
+[
+ {
+ "uuid": "20536D80-931B-4F2F-BBC5-18729A8C1115",
+ "fecha_emisión": "2024-10-22",
+ "estado": "ENVIADO",
+ "tipo": "Factura",
+ "receptor": "CF",
+ "tipo_receptor": "NIT",
+ "emitido_por": null,
+ "moneda": "GTQ",
+ "total": "150.000000",
+ "fecha_certificación": "2024-10-22 13:54:25",
+ "no_autorización": "C8CA331B-AAC1-469D-B59E-A1727618BBFC",
+ "no_serie": null,
+ "no": "2864793245",
+ "id_externo": null,
+ "establecimiento": "2"
+ },
+ {
+ "uuid": "FC646F03-52FC-44B4-94EC-AF8393DF2701",
+ "fecha_emisión": "2024-10-22",
+ "estado": "ENVIADO",
+ "tipo": "Factura",
+ "receptor": "CF",
+ "tipo_receptor": "NIT",
+ "emitido_por": null,
+ "moneda": "GTQ",
+ "total": "10.000000",
+ "fecha_certificación": "2024-10-22 13:52:46",
+ "no_autorización": "23D40B60-B558-4573-A86C-59421701AE56",
+ "no_serie": null,
+ "no": "3042461043",
+ "id_externo": null,
+ "establecimiento": "2"
+ }
+]
+
+[FOLDER] Guatemala > ✨Variables generales
+Entornos Código Descripción Desarrollo https://felplex.stage.plex.lat/ Producción https://app.felplex.com/ Afiliaciones al IVA disponibles Código Descripción Gen Contribuyente General PEQ Pequeño Contribuyente PEE Pequeño Contribuyente Régimen Electrónico EXE Exento Tipos de documento disponibles Descripción de los tipos de documento disponibles para emisión de documentos FEL, siempre utilizar el campo " type " Código Descripción FACT Factura FCAM Factura Cambiaria FPEQ Factura Pequeño Contribuyente FCAP Factura Cambiaria Pequeño Contribuyente FESP Factura Especial NABN Nota de Abono RDON Recibo de Donación RECI Recibo NDEB Nota de Débito NCRE Nota de Crédito FAPE Factura Pequeño Contribuyente Régimen Electrónico FCPE Factura Cambiaria Pequeño Contribuyente Régimen Electrónico Tipos de Moneda Descripción de los tipos de documento disponibles para emisión de documentos FEL, siempre utilizar el campo " currency " Código Descripción GTQ Quetzal guatemalteco USD Dólar estadounidense Fecha de factura Descripción de fecha de envió de generación de documentos, siempre utilizar el campo " datetime_issue " Código Descripción datetime_issue Debe ser enviado en formato YYYY-MM-dd Ítems Array con los ítems a enviar en la factura utilizar el campo "ítems" Código Descripción Qty Cantidad de ítems, debe ser en formato numérico de tipo entero, Type Tipo de ítem Bien “B” o servicio “S” Unit Unidad de medida del ítem a enviar esto se envía como cadena de texto Price Precio del ítem por unidad,
+
+[REQUEST] Guatemala > Ejemplos Requests DTE > DTE FACT
+  METHOD: POST
+  URL: {{entorno}}/api/entity/{{empresa}}/invoices/await
+  DESC:  El DTE es enviado a certificar en el momento, esperando la respuesta de la misma y mostrando la información de autorización o el listado de errores producto de la verificación realizada por la SAT. 
+
+  BODY:
+{
+ "type": "FACT",
+ "datetime_issue": "2024-08-15T00:00:00",
+ "items": [
+ {
+ "qty": 1,
+ "type": "B",
+ "price": 100,
+ "description": "Vasos plásticos",
+ "without_iva": 0,
+ "discount": 25,
+ "is_discount_percentage": 0,
+ "taxes": {
+ "quantity": null,
+ "tax_code": null,
+ "full_name": null,
+ "short_name": null,
+ "tax_amount": null,
+ "taxable_amount": null
+ }
+ }
+ ],
+ "total": 75,
+ "total_tax": "4.70",
+ "emails": [
+ {
+ "email": "example@exammple.com"
+ }
+ ],
+ "emails_cc": [
+ {
+ "email": ""
+ }
+ ],
+ "to_cf": 0,
+ "to": {
+ "tax_code_type": "NIT",
+ "tax_code": "1607421",
+ "tax_name": "John Doe",
+ "address": {
+ "street": "1a Calle",
+ "city": "Mixco",
+ "state": "Guatemala",
+ "zip": "01001",
+ "country": "GT"
+ }
+ },
+ "exempt_phrase": null
+}
+  RESPONSE undefined Nuevo DTE Síncrono:
+{
+ "valid": true,
+ "uuid": "F2AC2C5E-7582-4BCE-AE44-627F01E72DA4",
+ "sat": {
+ "serie": "8924E06C",
+ "no": "3535423344",
+ "authorization": "8924E06C-D2BA-4770-9B94-AF783725CDEA"
+ },
+ "certifier": {
+ "name": "CONTAP, S.A.",
+ "tax_code": "98978802"
+ },
+ "errors": []
+}
+
+[REQUEST] Guatemala > Ejemplos Requests DTE > DTE FCAM
+  METHOD: POST
+  URL: {{entorno}}/api/entity/{{empresa}}/invoices/await
+  DESC:  El DTE es enviado a certificar en el momento, esperando la respuesta de la misma y mostrando la información de autorización o el listado de errores producto de la verificación realizada por la SAT. 
+ Fechas de pago 
+ De manera opcional puedes agregar las fechas en las cuales se han acordado los pagos con tu cliente. Esto es para tu control interno y los datos no son enviados a la SAT. 
+ "use_payments": Los pagos se incluirán en la creación del documento si el valor de este es verdadero (1) de l
+  BODY:
+{
+ "type": "FCAM",
+ "datetime_issue": "2021-06-20T23:10:00",
+ "items": [
+ {
+ "qty": 1,
+ "type": "B",
+ "price": 100,
+ "description": "Vasos plásticos",
+ "without_iva": 0,
+ "discount": 0,
+ "is_discount_percentage": 0,
+ "taxes": 
+ {
+ "qty": null,
+ "tax_code": null,
+ "full_name": null,
+ "short_name": null,
+ "tax_amount": null,
+ "taxable_amount": null
+ }
+ }
+ ],
+ "total": 100,
+ "total_tax": "4.70",
+ "emails": [
+ {
+ "email": "example@exammple.com"
+ }
+ ],
+ "emails_cc": [
+ {
+ "email": ""
+ }
+ ],
+ "to_cf": 0,
+ "to": {
+ "tax_code_type": "NIT",
+ "tax_code": "1607421",
+ "tax_name": "John Doe",
+ "address": {
+ "street": "1a Calle",
+ "city": "Mixco",
+ "state": "Guatemala",
+ "zip": "01001",
+ "country": "GT"
+ }
+ },
+ "exempt_phrase": null,
+ "use_payments": 1,
+ "payments":[
+ {
+ "date": "2021-06-25",
+ "amount": 100
+ }
+ ]
+}
+  RESPONSE undefined Nuevo DTE Síncrono:
+{
+ "valid": true,
+ "uuid": "F2AC2C5E-7582-4BCE-AE44-627F01E72DA4",
+ "sat": {
+ "serie": "8924E06C",
+ "no": "3535423344",
+ "authorization": "8924E06C-D2BA-4770-9B94-AF783725CDEA"
+ },
+ "certifier": {
+ "name": "CONTAP, S.A.",
+ "tax_code": "98978802"
+ },
+ "errors": []
+}
+
+[REQUEST] Guatemala > Ejemplos Requests DTE > DTE NCRE
+  METHOD: POST
+  URL: {{entorno}}/api/entity/{{empresa}}/invoices/await
+  DESC:  El DTE es enviado a certificar en el momento, esperando la respuesta de la misma y mostrando la información de autorización o el listado de errores producto de la verificación realizada por la SAT. 
+ El campo "parent_invoice_id" hace referencia al Identificador FELplex del documento sobre el que generaremos la Nota de Crédito. 
+
+  BODY:
+{
+ "type": "NCRE",
+ "datetime_issue": "2020-12-20T00:00:00",
+ "items": [
+ {
+ "qty": 1,
+ "type": "B",
+ "price": 100,
+ "description": "Vasos plásticos",
+ "without_iva": 0,
+ "discount": 25,
+ "is_discount_percentage": 0,
+ "taxes": {
+ "qty": null,
+ "tax_code": null,
+ "full_name": null,
+ "short_name": null,
+ "tax_amount": null,
+ "taxable_amount": null
+ }
+ }
+ ],
+ "total": 75,
+ "total_tax": "4.70",
+ "emails": [
+ {
+ "email": "example@exammple.com"
+ }
+ ],
+ "emails_cc": [
+ {
+ "email": ""
+ }
+ ],
+ "to_cf": 0,
+ "to": {
+ "tax_code_type": "NIT",
+ "tax_code": "1607421",
+ "tax_name": "John Doe",
+ "address": {
+ "street": "1a Calle",
+ "city": "Mixco",
+ "state": "Guatemala",
+ "zip": "01001",
+ "country": "GT"
+ }
+ },
+ "exempt_phrase": null,
+ "parent_invoice_id": "E4A0191A-9B3B-4AD2-A38F-AA593CF48B62",
+ "memo": "Motivo de emisión del documento"
+}
+  RESPONSE undefined Nuevo DTE Síncrono:
+{
+ "valid": true,
+ "uuid": "F2AC2C5E-7582-4BCE-AE44-627F01E72DA4",
+ "sat": {
+ "serie": "8924E06C",
+ "no": "3535423344",
+ "authorization": "8924E06C-D2BA-4770-9B94-AF783725CDEA"
+ },
+ "certifier": {
+ "name": "CONTAP, S.A.",
+ "tax_code": "98978802"
+ },
+ "errors": []
+}
+
+[REQUEST] Guatemala > Ejemplos Requests DTE > DTE NDEB
+  METHOD: POST
+  URL: {{entorno}}/api/entity/{{empresa}}/invoices/await
+  DESC:  El DTE es enviado a certificar en el momento, esperando la respuesta de la misma y mostrando la información de autorización o el listado de errores producto de la verificación realizada por la SAT. 
+ El campo "parent_invoice_id" hace referencia al Identificador FELplex del documento sobre el que generaremos la Nota de Débito. 
+
+  BODY:
+{
+ "type": "NDEB",
+ "datetime_issue": "2020-12-20T00:00:00",
+ "items": [
+ {
+ "qty": 1,
+ "type": "B",
+ "price": 100,
+ "description": "Vasos plásticos",
+ "without_iva": 0,
+ "discount": 25,
+ "is_discount_percentage": 0,
+ "taxes": {
+ "qty": null,
+ "tax_code": null,
+ "full_name": null,
+ "short_name": null,
+ "tax_amount": null,
+ "taxable_amount": null
+ }
+ }
+ ],
+ "total": 75,
+ "total_tax": "4.70",
+ "emails": [
+ {
+ "email": "example@exammple.com"
+ }
+ ],
+ "emails_cc": [
+ {
+ "email": ""
+ }
+ ],
+ "to_cf": 0,
+ "to": {
+ "tax_code_type": "NIT",
+ "tax_code": "1607421",
+ "tax_name": "John Doe",
+ "address": {
+ "street": "1a Calle",
+ "city": "Mixco",
+ "state": "Guatemala",
+ "zip": "01001",
+ "country": "GT"
+ }
+ },
+ "exempt_phrase": null,
+ "parent_invoice_id": "E4A0191A-9B3B-4AD2-A38F-AA593CF48B62",
+ "memo": "Motivo de emisión del documento"
+}
+  RESPONSE undefined Nuevo DTE Síncrono:
+{
+ "valid": true,
+ "uuid": "F2AC2C5E-7582-4BCE-AE44-627F01E72DA4",
+ "sat": {
+ "serie": "8924E06C",
+ "no": "3535423344",
+ "authorization": "8924E06C-D2BA-4770-9B94-AF783725CDEA"
+ },
+ "certifier": {
+ "name": "CONTAP, S.A.",
+ "tax_code": "98978802"
+ },
+ "errors": []
+}
+
+[FOLDER] Guatemala > REST API codigos de error
+A continuación se muestra la lista de todos los códigos de error de la API REST Código Descripción FEL_RCP000 "Se Devuelve un FaceId" FEL_AUT001 "Error variable token no viene en el header del mensaje" FEL_AUT002 "El Token ha expirado, favor de renovarlo" FEL_AUT003 "Error Usuario / Clave Invalidos" FEL_ASO099 "El Certificador no está acreditado por el Emisor del DTE." FEL_GEN100 "Error Genérico Comuníquese con el Administrador del sistema" FEL_GEN101 "No existe el nodo de certificación dentro del xsd para validaciones del xml" FEL_GEN102 "El XML enviado no cumple con el esquema del XSD" FEL_GEN103 "Validar que la firma del certificador este correcta" FEL_INF300 "La diferencia entre la fecha de emisión y de certificación excede los cinco días." FEL_RCP301 "La fecha de emisión es posterior al último día del mes de la fecha de certificación." FEL_RCP302 "El NIT no existe en la SAT." FEL_RCP303 "El NIT no está afiliado." FEL_RCP304 "El NIT no está activo en la SAT." FEL_RCP305 "El establecimiento no existe en la SAT." FEL_RCP306 "El establecimiento no está activo en la SAT (para la fecha de emision)." FEL_RCP307 "El CUI del Receptor no es numérico." FEL_RCP308 "El CUI del Receptor tiene un dígito verificador inválido." FEL_RCP309 "El CUI del Receptor tiene un dígito verificador inválido." FEL_RCP310 "El tipo especial CUI no debe estar presente para una exportación." FEL_RCP311 "El NIT del Receptor debe ser CF para una exportación." FEL_RCP312 "El Tipo de Documento no puede utili
+
+[REQUEST] Guatemala > REST API codigos de error > Ejemplo de request erronea
+  METHOD: POST
+  URL: {{entorno}}/api/entity/{{empresa}}/invoices/await
+  DESC:  Ejemplo de una factura con impuesto de bomberos, erroneo 
+ Los errores se visualizaran en la API como un array de datos: 
+ 
+ errors: Para visualizar los mensajes de error 
+ 
+ error_codes: Para visualizar un listado de codigos de errores 
+ 
+ 
+
+  BODY:
+{
+ "emails": [
+ {
+ "email": "test@cari.com"
+ }
+ ],
+ "emails_cc": [
+ {
+ "email": "test@cari.net"
+ }
+ ],
+ "xml": "PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxkdGU6R1REb2N1bWVudG8gVmVyc2lvbj0iMC4xIg0KICAgIHhtbG5zOmNleD0iaHR0cDovL3d3dy5zYXQuZ29iLmd0L2ZhY2UyL0NvbXBsZW1lbnRvRXhwb3J0YWNpb25lcy8wLjEuMCINCiAgICB4bWxuczpjZXhwcm92PSJodHRwOi8vd3d3LnNhdC5nb2IuZ3QvZmFjZTIvQ29tcGxlbWVudG9FeHBvcnRhY2lvblByb3Zpc2lvbmFsLzAuMS4wIg0KICAgIHhtbG5zOmNmYz0iaHR0cDovL3d3dy5zYXQuZ29iLmd0L2R0ZS9mZWwvQ29tcENhbWJpYXJpYS8wLjEuMCINCiAgICB4bWxuczpjZmU9Imh0dHA6Ly93d3cuc2F0LmdvYi5ndC9mYWNlMi9Db21wbGVtZW50b0ZhY3R1cmFFc3BlY2lhbC8wLjEuMCINCiAgICB4bWxuczpjbm89Imh0dHA6Ly93d3cuc2F0LmdvYi5ndC9mYWNlMi9Db21wbGVtZW50b1JlZmVyZW5jaWFOb3RhLzAuMS4wIg0KICAgIHhtbG5zOm5zMj0iaHR0cDovL3d3dy53My5vcmcvMjAwMC8wOS94bWxkc2lnIyINCiAgICB4bWxuczpkdGU9Imh0dHA6Ly93d3cuc2F0LmdvYi5ndC9kdGUvZmVsLzAuMi4wIg0KICAgIHhtbG5zOnhzaT0iaHR0cDovL3d3dy53My5vcmcvMjAwMS9YTUxTY2hlbWEtaW5zdGFuY2UiIHhzaTpzY2hlbWFMb2NhdGlvbj0iaHR0cDovL3d3dy5zYXQuZ29iLmd0L2R0ZS9mZWwvMC4yLjAgR1RfRG9jdW1lbnRvLTAuMi4wLnhzZCI+DQogICAgPGR0ZTpTQVQgQ2xhc2VEb2N1bWVudG89ImR0ZSI+DQogICAgICAgIDxkdGU6RFRFIElEPSJEYXRvc0NlcnRpZmljYWRvcyI+DQogICAgICAgICAgICA8ZHRlOkRhdG9zRW1pc2lvbiBJRD0iRGF0b3NFbWlzaW9uIj4NCiAgICAgICAgICAgICAgICA8ZHRlOkRhdG9zR2VuZXJhbGVzIENvZGlnb01vbmVkYT0iVVNEIiBGZWNoYUhvcmFFbWlzaW9uPSIyMDI1LTAyLTEwVDEzOjEyOjMwIiBOdW1lcm9BY2Nlc289IjE3NDE5NTA2MSIgVGlwbz0iRkFDVCI+PC9kdGU6RGF0b3NHZW5lcmFsZXM+DQogICAgICAgICAgICAgICAgPGR0ZTpFbWlzb3IgQWZpbGlhY2lvbklWQT0iR0VOIiBDb2RpZ29Fc3RhYmxlY2ltaWVudG89IjIiIENvcnJlb0VtaXNvcj0id2tyaXNAaG90bWFpbC5jb20iIE5JVEVtaXNvcj0iNTg4ODQ5MiIgTm9tYnJlQ29tZXJjaWFsPSJHZWVrb20iIE5vbWJyZUVtaXNvcj0iSVNNQVIgQkxBRElNSVIgUEVSRVogUEVSRVoiPg0KICAgICAgICAgICAgICAgICAgICA8ZHRlOkRpcmVjY2lvbkVtaXNvcj4NCiAgICAgICAgICAgICAgICAgICAgICAgIDxkdGU6RGlyZWNjaW9uPjYzNCBDcmlzdGlhbiBPdmFsIFJldmF0b24sIEtZIDQ4ODM3PC9kdGU6RGlyZWNjaW9uPg0KICAgICAgICAgICAgICAgICAgICAgICAgPGR0ZTpDb2RpZ29Qb3N0YWw+NDUzMTY8L2R0ZTpDb2RpZ29Qb3N0YWw+DQogICAgICAgICAgICAgICAgICAgICAgICA8ZHRlOk11bmljaXBpbz5NYW5uc3RhZDwvZHRlOk11bmljaXBpbz4NCiAgICAgICAgICAgICAgICAgICAgICAgIDxkdGU6RGVwYXJ0YW1lbnRvPkNvbG9yYWRvPC9kdGU6RGVwYXJ0YW1lbnRvPg0KICAgICAgICAgICAgICAgICAgICAgICAgPGR0ZTpQYWlzPkdUPC9kdGU6UGFpcz4NCiAgICAgICAgICAgICAgICAgICAgPC9kdGU6RGlyZWNjaW9uRW1pc29yPg0KICAgICAgICAgICAgICAgIDwvZHRlOkVtaXNvcj4NCiAgICAgICAgICAgICAgICA8ZHRlOlJlY2VwdG9yIElEUmVjZXB0b3I9IkNGIiBOb21icmVSZWNlcHRvcj0iQ0YiPg0KICAgICAgICAgICAgICAgICAgICA8ZHRlOkRpcmVjY2lvblJlY2VwdG9yPg0KICAgICAgICAgICAgICAgICAgICAgICAgPGR0ZTpEaXJlY2Npb24+Q0lVREFEPC9kdGU6RGlyZWNjaW9uPg0KICAgICAgICAgICAgICAgICAgICAgICAgPGR0ZTpDb2RpZ29Qb3N0YWw+MDwvZHRlOkNvZGlnb1Bvc3RhbD4NCiAgICAgICAgICAgICAgICAgICAgICAgIDxkdGU6TXVuaWNpcGlvPjwvZHRlOk11bmljaXBpbz4NCiAgICAgICAgICAgICAgICAgICAgICAgIDxkdGU6RGVwYXJ0YW1lbnRvPjwvZHRlOkRlcGFydGFtZW50bz4NCiAgICAgICAgICAgICAgICAgICAgICAgIDxkdGU6UGFpcz5HVDwvZHRlOlBhaXM+DQogICAgICAgICAgICAgICAgICAgIDwvZHRlOkRpcmVjY2lvblJlY2VwdG9yPg0KICAgICAgICAgICAgICAgIDwvZHRlOlJlY2VwdG9yPg0KICAgICAgICAgICAgICAgIDxkdGU6RnJhc2VzPg0KICAgICAgICAgICAgICAgICAgICA8ZHRlOkZyYXNlIENvZGlnb0VzY2VuYXJpbz0iMSIgVGlwb0ZyYXNlPSIxIiAvPg0KICAgICAgICAgICAgICAgIDwvZHRlOkZyYXNlcz4NCiAgICAgICAgICAgICAgICA8ZHRlOkl0ZW1zPg0KICAgICAgICAgICAgICAgICAgICA8ZHRlOkl0ZW0gQmllbk9TZXJ2aWNpbz0iUyIgTnVtZXJvTGluZWE9IjEiPg0KICAgICAgICAgICAgICAgICAgICAgICAgPGR0ZTpDYW50aWRhZD4xPC9kdGU6Q2FudGlkYWQ+DQogICAgICAgICAgICAgICAgICAgICAgICA8ZHRlOkRlc2NyaXBjaW9uPkxVWjwvZHRlOkRlc2NyaXBjaW9uPg0KICAgICAgICAgICAgICAgICAgICAgICAgPGR0ZTpQcmVjaW9Vbml0YXJpbz40MjkuMDA8L2R0ZTpQcmVjaW9Vbml0YXJpbz4NCiAgICAgICAgICAgICAgICAgICAgICAgIDxkdGU6UHJlY2lvPjQyOS4wMDwvZHRlOlByZWNpbz4NCiAgICAgICAgICAgICAgICAgICAgICAgIDxkdGU6RGVzY3VlbnRvPjAuMDA8L2R0ZTpEZXNjdWVudG8+DQogICAgICAgICAgICAgICAgICAgICAgICA8ZHRlOkltcHVlc3Rvcz4NCiAgICAgICAgICAgICAgICAgICAgICAgICAgICA8ZHRlOkltcHVlc3RvPg0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA8ZHRlOk5vbWJyZUNvcnRvPklWQTwvZHRlOk5vbWJyZUNvcnRvPg0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA8ZHRlOkNvZGlnb1VuaWRhZEdyYXZhYmxlPjE8L2R0ZTpDb2RpZ29VbmlkYWRHcmF2YWJsZT4NCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgPGR0ZTpNb250b0dyYXZhYmxlPjM4My4wMzU3MTQ8L2R0ZTpNb250b0dyYXZhYmxlPg0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA8ZHRlOk1vbnRvSW1wdWVzdG8+NDUuOTY0Mjg2PC9kdGU6TW9udG9JbXB1ZXN0bz4NCiAgICAgICAgICAgICAgICAgICAgICAgICAgICA8L2R0ZTpJbXB1ZXN0bz4NCiAgICAgICAgICAgICAgICAgICAgICAgICAgICA8ZHRlOkltcHVlc3RvPg0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA8ZHRlOk5vbWJyZUNvcnRvPkJPTUJFUk9TPC9kdGU6Tm9tYnJlQ29ydG8+DQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIDxkdGU6Q29kaWdvVW5pZGFkR3JhdmFibGU+MTwvZHRlOkNvZGlnb1VuaWRhZEdyYXZhYmxlPg0KICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA8ZHRlOk1vbnRvR3JhdmFibGU+MzgzLjAzNTcxNDwvZHRlOk1vbnRvR3JhdmFibGU+DQogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIDxkdGU6TW9udG9JbXB1ZXN0bz4xNy42NjA3MTQ8L2R0ZTpNb250b0ltcHVlc3RvPg0KICAgICAgICAgICAgICAgICAgICAgICAgICAgIDwvZHRlOkltcHVlc3RvPg0KICAgICAgICAgICAgICAgICAgICAgICAgPC9kdGU6SW1wdWVzdG9zPg0KICAgICAgICAgICAgICAgICAgICAgICAgPGR0ZTpUb3RhbD40NDYuNjYwNzE0PC9kdGU6VG90YWw+DQogICAgICAgICAgICAgICAgICAgIDwvZHRlOkl0ZW0+DQogICAgICAgICAgICAgICAgPC9kdGU6SXRlbXM+DQogICAgICAgICAgICAgICAgPGR0ZTpUb3RhbGVzPg0KICAgICAgICAgICAgICAgICAgICA8ZHRlOlRvdGFsSW1wdWVzdG9zPg0KICAgICAgICAgICAgICAgICAgICAgICAgPGR0ZTpUb3RhbEltcHVlc3RvIE5vbWJyZUNvcnRvPSJJVkEiIFRvdGFsTW9udG9JbXB1ZXN0bz0iNDUuOTY0Mjg2IiAvPg0KICAgICAgICAgICAgICAgICAgICAgICAgPGR0ZTpUb3RhbEltcHVlc3RvIE5vbWJyZUNvcnRvPSJCT01CRVJPUyIgVG90YWxNb250b0ltcHVlc3RvPSIxNy42NjA3MTQiIC8+DQogICAgICAgICAgICAgICAgICAgIDwvZHRlOlRvdGFsSW1wdWVzdG9zPg0KICAgICAgICAgICAgICAgICAgICA8ZHRlOkdyYW5Ub3RhbD40NDYuNjYwNzE0PC9kdGU6R3JhblRvdGFsPg0KICAgICAgICAgICAgICAgIDwvZHRlOlRvdGFsZXM+DQogICAgICAgICAgICAgICAgPGR0ZTpDb21wbGVtZW50b3M+DQogICAgICAgICAgICAgICAgICAgIDxkdGU6Q29tcGxlbWVudG8gSURDb21wbGVtZW50bz0iTk9UQVMiIE5vbWJyZUNvbXBsZW1lbnRvPSJSZWZlcmVuY2lhc05vdGEiIFVSSUNvbXBsZW1lbnRvPSJOT1RBUyI+DQogICAgICAgICAgICAgICAgICAgICAgICA8Y25vOlJlZmVyZW5jaWFzTm90YSBWZXJzaW9uPSI0IiBOdW1lcm9BdXRvcml6YWNpb25Eb2N1bWVudG9PcmlnZW49IjUzRUQxMDRGLTE5NjEtNDFFOS05MDUzLUUyMzU3NzQ1NjRENSIgRmVjaGFFb
+  RESPONSE undefined New Request:
+{
+ "valid": false,
+ "uuid": "03FD6A73-614C-4882-B8C6-68413FA99BA1",
+ "sat": {
+ "serie": null,
+ "no": "",
+ "authorization": null,
+ "certification_date": null
+ },
+ "certifier": {
+ "name": "CARI Latinoamerica, S.A.",
+ "tax_code": "96941243"
+ },
+ "errors": [
+ [
+ "Monto del Impuesto calculado incorrectamente para Bomberos."
+ ],
+ [
+ "El monto total en Q del documento excede el límite permitido para receptor CF."
+ ],
+ [
+ "El monto total en Q del documento excede el límite permitido para receptor CF."
+ ]
+ ],
+ "error_codes": [
+ "FEL_CARI_065",
+ "FEL_CARI_102",
+ "FEL_CARI_105"
+ ],
+ "invoice_url": null,
+ "invoice_xml": null
+}
+
+[REQUEST] El Salvador > Ejemplos Requests DTE > Factura
+  METHOD: POST
+  URL: https://felplexweb.stage.plex.lat/api/invoices/emit
+  DESC:  Factura Electrónica 
+ El DTE es enviado a certificar en el momento, esperando la respuesta de la misma y mostrando la información de firma o el listado de errores producto de la verificación realizada por la Hacienda El Salvador. 
+
+  BODY:
+{
+ "identificacion": {
+ "tipoDte": "11",
+ "tipoModelo": 1,
+ "fecEmi": "2024-11-07",
+ "horEmi": "18:46:16",
+ "tipoMoneda": "USD"
+ },
+ "receptor": {
+ "nombre": "Juan Salvador",
+ "tipoDocumento": "36",
+ "numDocumento": "06140912201021",
+ "nombreComercial": "Patitos Devs",
+ "codPais": "9300",
+ "nombrePais": "El Salvador",
+ "complemento": "4ta. Avenida, Zona 2",
+ "tipoPersona": 1,
+ "descActividad": "Descripci\u00f3n de ae",
+ "telefono": "12345678",
+ "correo": "test@test.net"
+ },
+ "otrosDocumentos": null,
+ "cuerpoDocumento": [
+ {
+ "numItem": 1,
+ "codigo": null,
+ "descripcion": "TEST",
+ "cantidad": 1,
+ "uniMedida": 99,
+ "precioUni": 250,
+ "montoDescu": 0,
+ "ventaGravada": 250,
+ "tributos": [
+ "C3"
+ ],
+ "noGravado": 0
+ },
+ {
+ "numItem": 2,
+ "codigo": null,
+ "descripcion": "dr pepper",
+ "cantidad": 1,
+ "uniMedida": 99,
+ "precioUni": 0,
+ "montoDescu": 0,
+ "ventaGravada": 0,
+ "tributos": null,
+ "noGravado": 50
+ }
+ ],
+ "resumen": {
+ "totalGravada": 250,
+ "totalNoGravado": 50,
+ "descuento": 0,
+ "porcentajeDescuento": 0,
+ "totalDescu": 0,
+ "seguro": 0,
+ "flete": 0,
+ "montoTotalOperacion": 250,
+ "totalPagar": 300,
+ "condicionOperacion": 1,
+ "numPagoElectronico": null,
+ "observacion": null,
+ "descIncoterms": null,
+ "codIncoterms": null,
+ "pagos": [
+ {
+ "codigo": "01",
+ "montoPago": 300,
+ "plazo": null,
+ "referencia": "",
+ "periodo": null
+ }
+ ]
+ },
+ "apendice": null,
+ "ventaTercero": null,
+ "external_id": 12
+}
+  RESPONSE undefined Nueva Factura Electrónica:
+{
+ "valid": true,
+ "uuid": "2929D59B-1A7D-4613-B3C9-97102CEC1401",
+ "invoice": {
+ "serie": "DTE-01-00000000-100000000001901",
+ "no": 100000000001901,
+ "authorization": "D090DE04-ED20-46FD-A915-317E4492D083"
+ },
+ "errors": [],
+ "invoice_url": "https://felplexweb.dev.plex.lat/pdf/2929D59B-1A7D-4613-B3C9-97102CEC1401"
+}
+
+[REQUEST] El Salvador > Ejemplos Requests DTE > Factura a CF
+  METHOD: POST
+  URL: {{entorno}}/api/invoices/emit
+  DESC:  Factura Electrónica 
+ El DTE es enviado a certificar en el momento, esperando la respuesta de la misma y mostrando la información de firma o el listado de errores producto de la verificación realizada por la Hacienda El Salvador. 
+ 
+ El total debe ser menor a $25,000.00 
+ 
+
+  BODY:
+{
+ "identificacion": {
+ "fecEmi": "2024-08-05",
+ "horEmi": "16:15:45",
+ "tipoDte": "01",
+ "tipoMoneda": "USD",
+ "tipoModelo": 1
+ },
+ "documentoRelacionado": null,
+ "receptor": {
+ "tipoDocumento": null,
+ "numDocumento": null,
+ "nrc": null,
+ "nombre": "Clientes varios",
+ "codActividad": null,
+ "descActividad": null,
+ "nombreComercial": null,
+ "direccion": null,
+ "telefono": null,
+ "correo": null
+ },
+ "otrosDocumentos": null,
+ "ventaTercero": "",
+ "cuerpoDocumento": [
+ {
+ "numItem": 1,
+ "tipoItem": 1,
+ "numeroDocumento": null,
+ "codigo": null,
+ "codTributo": null,
+ "descripcion": "Producto de Prueba 1",
+ "cantidad": 1,
+ "uniMedida": 99,
+ "precioUni": 24999.99,
+ "montoDescu": 0,
+ "ventaNoSuj": 0,
+ "ventaExenta": 0,
+ "ventaGravada": 24999.99,
+ "tributos": null,
+ "psv": 0,
+ "noGravado": 0,
+ "ivaItem": 2876.11
+ }
+ ],
+ "resumen": {
+ "montoTotalOperacion": 24999.99,
+ "totalPagar": 24999.99,
+ "pagos": [
+ {
+ "codigo": "01",
+ "montoPago": 24999.99,
+ "plazo": null,
+ "referencia": "",
+ "periodo": null
+ }
+ ],
+ "descuNoSuj": 0,
+ "descuExenta": 0,
+ "descuGravada": 0,
+ "condicionOperacion": 1,
+ "numPagoElectronico": null
+ },
+ "extension": {
+ "nombRecibe": "",
+ "docuRecibe": "",
+ "observaciones": "",
+ "placaVehiculo": null
+ },
+ "apendice": null
+}
+  RESPONSE undefined Nueva Factura Electrónica:
+{
+ "valid": true,
+ "uuid": "2929D59B-1A7D-4613-B3C9-97102CEC1401",
+ "invoice": {
+ "serie": "DTE-01-00000000-100000000001901",
+ "no": 100000000001901,
+ "authorization": "D090DE04-ED20-46FD-A915-317E4492D083"
+ },
+ "errors": [],
+ "invoice_url": "https://felplexweb.stage.plex.lat/pdf/2929D59B-1A7D-4613-B3C9-97102CEC1401"
+}
+
+[REQUEST] El Salvador > Ejemplos Requests DTE > Factura (Descuentos y Tributos)
+  METHOD: POST
+  URL: {{entorno}}/api/invoices/emit
+  DESC:  Factura Electrónica 
+ El DTE es enviado a certificar en el momento, esperando la respuesta de la misma y mostrando la información de firma o el listado de errores producto de la verificación realizada por la Hacienda El Salvador. 
+
+  BODY:
+{
+ "identificacion": {
+ "fecEmi": "2024-07-17",
+ "horEmi": "22:02:06",
+ "tipoDte": "01",
+ "tipoMoneda": "USD",
+ "tipoModelo": 1
+ },
+ "documentoRelacionado": null,
+ "receptor": {
+ "tipoDocumento": null,
+ "numDocumento": null,
+ "nrc": null,
+ "nombre": "CF",
+ "codActividad": null,
+ "descActividad": null,
+ "nombreComercial": null,
+ "direccion": null,
+ "telefono": null,
+ "correo": null
+ },
+ "otrosDocumentos": null,
+ "ventaTercero": "",
+ "cuerpoDocumento": [
+ {
+ "numItem": 1,
+ "tipoItem": 1,
+ "numeroDocumento": null,
+ "codigo": null,
+ "codTributo": null,
+ "descripcion": "Producto de Prueba",
+ "cantidad": 1,
+ "uniMedida": 99,
+ "precioUni": 250,
+ "montoDescu": 50,
+ "ventaNoSuj": 0,
+ "ventaExenta": 0,
+ "ventaGravada": 200,
+ "tributos": [
+ "19"
+ ],
+ "psv": 0,
+ "noGravado": 0,
+ "ivaItem": 23
+ },
+ {
+ "numItem": 2,
+ "tipoItem": 1,
+ "numeroDocumento": null,
+ "codigo": null,
+ "codTributo": null,
+ "descripcion": "Test 23",
+ "cantidad": 1,
+ "uniMedida": 99,
+ "precioUni": 100,
+ "montoDescu": 0,
+ "ventaNoSuj": 0,
+ "ventaExenta": 0,
+ "ventaGravada": 100,
+ "tributos": [
+ "A5"
+ ],
+ "psv": 0,
+ "noGravado": 0,
+ "ivaItem": 11.5
+ }
+ ],
+ "resumen": {
+ "montoTotalOperacion": 300.0,
+ "totalPagar": 300.0,
+ "pagos": [
+ {
+ "codigo": "01",
+ "montoPago": 300.0,
+ "plazo": null,
+ "referencia": "",
+ "periodo": null
+ }
+ ],
+ "descuNoSuj": 0,
+ "descuExenta": 0,
+ "descuGravada": 0,
+ "condicionOperacion": 1,
+ "numPagoElectronico": null
+ },
+ "extension": {
+ "nombRecibe": "",
+ "docuRecibe": "",
+ "observaciones": "",
+ "placaVehiculo": null
+ },
+ "apendice": null
+}
+  RESPONSE undefined Nueva Factura Electrónica:
+{
+ "valid": true,
+ "uuid": "2929D59B-1A7D-4613-B3C9-97102CEC1401",
+ "invoice": {
+ "serie": "DTE-01-00000000-100000000001901",
+ "no": 100000000001901,
+ "authorization": "D090DE04-ED20-46FD-A915-317E4492D083"
+ },
+ "errors": [],
+ "invoice_url": "https://felplexweb.stage.plex.lat/pdf/2929D59B-1A7D-4613-B3C9-97102CEC1401"
+}
+
+[REQUEST] El Salvador > Ejemplos Requests DTE > Factura Descuentos
+  METHOD: POST
+  URL: {{entorno}}/api/invoices/emit
+  DESC:  Factura Electrónica 
+ El DTE es enviado a certificar en el momento, esperando la respuesta de la misma y mostrando la información de firma o el listado de errores producto de la verificación realizada por la Hacienda El Salvador. 
+ Para los descuentos por ítem, se agrega el valor al campo montoDescu dentro del cuerpo del Documento. 
+
+  BODY:
+{
+ "identificacion": {
+ "fecEmi": "2024-02-29",
+ "horEmi": "02:56:57",
+ "tipoDte": "01",
+ "tipoMoneda": "USD",
+ "tipoModelo": 1
+ },
+ "documentoRelacionado": null,
+ "receptor": {
+ "tipoDocumento": null,
+ "numDocumento": null,
+ "nrc": null,
+ "nombre": "CF",
+ "codActividad": null,
+ "descActividad": null,
+ "nombreComercial": null,
+ "direccion": null,
+ "telefono": null,
+ "correo": null
+ },
+ "otrosDocumentos": null,
+ "ventaTercero": "",
+ "cuerpoDocumento": [
+ {
+ "numItem": 1,
+ "tipoItem": 1,
+ "numeroDocumento": null,
+ "codigo": null,
+ "codTributo": null,
+ "descripcion": "Producto de Prueba",
+ "cantidad": 1,
+ "uniMedida": 99,
+ "precioUni": 250,
+ "montoDescu": 50,
+ "ventaNoSuj": 0,
+ "ventaExenta": 0,
+ "ventaGravada": 200,
+ "tributos": null,
+ "psv": 0,
+ "noGravado": 0,
+ "ivaItem": 23
+ }
+ ],
+ "resumen": {
+ "tributos": [],
+ "montoTotalOperacion": 200,
+ "totalPagar": 200,
+ "pagos": [
+ {
+ "codigo": "01",
+ "montoPago": 200,
+ "plazo": null,
+ "referencia": "",
+ "periodo": null
+ }
+ ],
+ "descuNoSuj": 0,
+ "descuExenta": 0,
+ "descuGravada": 0,
+ "condicionOperacion": 1,
+ "numPagoElectronico": null
+ },
+ "extension": {
+ "nombRecibe": "",
+ "docuRecibe": "",
+ "observaciones": "",
+ "placaVehiculo": null
+ },
+ "apendice": null
+}
+  RESPONSE undefined Nueva Factura Electrónica:
+{
+ "valid": true,
+ "uuid": "2929D59B-1A7D-4613-B3C9-97102CEC1401",
+ "invoice": {
+ "serie": "DTE-01-00000000-100000000001901",
+ "no": 100000000001901,
+ "authorization": "D090DE04-ED20-46FD-A915-317E4492D083"
+ },
+ "errors": [],
+ "invoice_url": "https://felplexweb.stage.plex.lat/pdf/2929D59B-1A7D-4613-B3C9-97102CEC1401"
+}
+
+[REQUEST] El Salvador > Ejemplos Requests DTE > Factura Tributos
+  METHOD: POST
+  URL: {{entorno}}/api/invoices/emit
+  DESC:  Factura Electrónica 
+ El DTE es enviado a certificar en el momento, esperando la respuesta de la misma y mostrando la información de firma o el listado de errores producto de la verificación realizada por la Hacienda El Salvador. 
+
+  BODY:
+{
+ "identificacion": {
+ "tipoDte": "03",
+ "tipoModelo": 1,
+ "fecEmi": "2024-07-17",
+ "horEmi": "03:02:01",
+ "tipoMoneda": "USD"
+ },
+ "documentoRelacionado": null,
+ "receptor": {
+ "nit": "06140912201021",
+ "nrc": "2967696",
+ "nombre": "David Bautista",
+ "codActividad": "01111",
+ "descActividad": "Cultivo de cereales excepto arroz y para forrajes",
+ "nombreComercial": "Patitos Devs",
+ "direccion": {
+ "departamento": "06",
+ "municipio": "20",
+ "complemento": "3 Avenida, Zona 4"
+ },
+ "telefono": "22113355",
+ "correo": "felplex@info.com"
+ },
+ "otrosDocumentos": null,
+ "ventaTercero": "",
+ "cuerpoDocumento": [
+ {
+ "numItem": 1,
+ "tipoItem": 1,
+ "numeroDocumento": null,
+ "codigo": null,
+ "codTributo": null,
+ "descripcion": "Producto de Prueba",
+ "cantidad": 1,
+ "uniMedida": 99,
+ "precioUni": 100,
+ "montoDescu": 0,
+ "ventaNoSuj": 0,
+ "ventaExenta": 0,
+ "ventaGravada": 100,
+ "tributos": [
+ "19",
+ "20"
+ ],
+ "psv": 0,
+ "noGravado": 0
+ }
+ ],
+ "resumen": {
+ "descuNoSuj": 0,
+ "descuExenta": 0,
+ "descuGravada": 0,
+ "montoTotalOperacion": 113,
+ "totalPagar": 113,
+ "pagos": [
+ {
+ "codigo": "01",
+ "montoPago": 113,
+ "plazo": null,
+ "referencia": "",
+ "periodo": null
+ }
+ ],
+ "condicionOperacion": 1,
+ "numPagoElectronico": null
+ },
+ "extension": {
+ "nombRecibe": null,
+ "docuRecibe": null,
+ "observaciones": null,
+ "placaVehiculo": null
+ },
+ "apendice": null
+}
+  RESPONSE undefined Nueva Factura Electrónica:
+{
+ "valid": true,
+ "uuid": "2929D59B-1A7D-4613-B3C9-97102CEC1401",
+ "invoice": {
+ "serie": "DTE-01-00000000-100000000001901",
+ "no": 100000000001901,
+ "authorization": "D090DE04-ED20-46FD-A915-317E4492D083"
+ },
+ "errors": [],
+ "invoice_url": "https://felplexweb.stage.plex.lat/pdf/2929D59B-1A7D-4613-B3C9-97102CEC1401"
+}
+
+[REQUEST] El Salvador > Ejemplos Requests DTE > Factura DUI
+  METHOD: POST
+  URL: {{entorno}}/api/invoices/emit
+  DESC:  Factura Electrónica 
+ El DTE es enviado a certificar en el momento, esperando la respuesta de la misma y mostrando la información de firma o el listado de errores producto de la verificación realizada por la Hacienda El Salvador. 
+ Tipo de documento de identificación del Receptor ( receptor.tipoDocumento) 
+ 
+ 
+ 
+ Código 
+ Valores 
+ 
+ 
+ 
+ 
+ 36 
+ NIT 
+ 
+ 
+ 13 
+ DUI 
+ 
+ 
+ 37 
+ Otros 
+ 
+ 
+ 03 
+ Pasaporte 
+ 
+ 
+ 02 
+ Carnet de Residente 
+ 
+ 
+ 
+ 
+  BODY:
+{
+ "identificacion": {
+ "fecEmi": "2024-07-17",
+ "horEmi": "03:07:04",
+ "tipoDte": "01",
+ "tipoMoneda": "USD",
+ "tipoModelo": 1
+ },
+ "documentoRelacionado": null,
+ "receptor": {
+ "tipoDocumento": "13",
+ "numDocumento": "01965246-6",
+ "nrc": null,
+ "nombre": "David Bautista",
+ "codActividad": null,
+ "descActividad": null,
+ "nombreComercial": "",
+ "direccion": {
+ "departamento": "06",
+ "municipio": "20",
+ "complemento": "Guatemala"
+ },
+ "telefono": "12345678",
+ "correo": "dbautista@cari.net"
+ },
+ "otrosDocumentos": null,
+ "ventaTercero": "",
+ "cuerpoDocumento": [
+ {
+ "numItem": 1,
+ "tipoItem": 1,
+ "numeroDocumento": null,
+ "codigo": null,
+ "codTributo": null,
+ "descripcion": "Producto de Prueba",
+ "cantidad": 1,
+ "uniMedida": 99,
+ "precioUni": 175,
+ "montoDescu": 0,
+ "ventaNoSuj": 0,
+ "ventaExenta": 0,
+ "ventaGravada": 175,
+ "tributos": null,
+ "psv": 0,
+ "noGravado": 0,
+ "ivaItem": 20.1
+ }
+ ],
+ "resumen": {
+ "montoTotalOperacion": 175,
+ "totalPagar": 175,
+ "pagos": [
+ {
+ "codigo": "01",
+ "montoPago": 175,
+ "plazo": null,
+ "referencia": "",
+ "periodo": null
+ }
+ ],
+ "descuNoSuj": 0,
+ "descuExenta": 0,
+ "descuGravada": 0,
+ "condicionOperacion": 1
+ },
+ "extension": {
+ "nombRecibe": null,
+ "docuRecibe": null,
+ "observaciones": null,
+ "placaVehiculo": null
+ },
+ "apendice": null
+}
+  RESPONSE undefined Nueva Factura Electrónica:
+{
+ "valid": true,
+ "uuid": "2929D59B-1A7D-4613-B3C9-97102CEC1401",
+ "invoice": {
+ "serie": "DTE-01-00000000-100000000001901",
+ "no": 100000000001901,
+ "authorization": "D090DE04-ED20-46FD-A915-317E4492D083"
+ },
+ "errors": [],
+ "invoice_url": "https://felplexweb.stage.plex.lat/pdf/2929D59B-1A7D-4613-B3C9-97102CEC1401"
+}
+
+[REQUEST] El Salvador > Ejemplos Requests DTE > Comprobante de Crédito Fiscal
+  METHOD: POST
+  URL: {{entorno}}/api/invoices/emit
+  DESC:  Comprobante de Crédito Fiscal Electrónico 
+ El DTE es enviado a certificar en el momento, esperando la respuesta de la misma y mostrando la información de firma o el listado de errores producto de la verificación realizada por la Hacienda El Salvador. 
+
+  BODY:
+{
+ "identificacion": {
+ "tipoDte": "03",
+ "tipoModelo": 1,
+ "fecEmi": "2024-07-17",
+ "horEmi": "17:33:06",
+ "tipoMoneda": "USD"
+ },
+ "documentoRelacionado": null,
+ "receptor": {
+ "nit": "06140912201021",
+ "nrc": "2967696",
+ "nombre": "Juan Salvador",
+ "codActividad": "01111",
+ "descActividad": "Cultivo de cereales excepto arroz y para forrajes",
+ "nombreComercial": "Patitos Devs",
+ "direccion": {
+ "departamento": "06",
+ "municipio": "20",
+ "complemento": "Guatemala"
+ },
+ "telefono": "12345678",
+ "correo": "test@test.net"
+ },
+ "otrosDocumentos": "",
+ "ventaTercero": "",
+ "cuerpoDocumento": [
+ {
+ "numItem": 1,
+ "tipoItem": 1,
+ "numeroDocumento": null,
+ "codigo": null,
+ "codTributo": null,
+ "descripcion": "TEST",
+ "cantidad": 1,
+ "uniMedida": 99,
+ "precioUni": 250,
+ "montoDescu": 0,
+ "ventaNoSuj": 0,
+ "ventaExenta": 0,
+ "ventaGravada": 250,
+ "tributos": [
+ "20"
+ ],
+ "psv": 0,
+ "noGravado": 0
+ }
+ ],
+ "resumen": {
+ "descuNoSuj": 0,
+ "descuExenta": 0,
+ "descuGravada": 0,
+ "montoTotalOperacion": 282.5,
+ "totalPagar": 282.5,
+ "pagos": [
+ {
+ "codigo": "01",
+ "montoPago": 282.5,
+ "plazo": null,
+ "referencia": "",
+ "periodo": null
+ }
+ ],
+ "condicionOperacion": 1,
+ "numPagoElectronico": null
+ },
+ "extension": {
+ "nombRecibe": null,
+ "docuRecibe": null,
+ "observaciones": null,
+ "placaVehiculo": null
+ },
+ "apendice": null
+}
+  RESPONSE undefined Nuevo Certificado de Crédito Fiscal:
+{
+ "valid": true,
+ "uuid": "2929D59B-1A7D-4613-B3C9-97102CEC1401",
+ "invoice": {
+ "serie": "DTE-03-00000000-100000000001901",
+ "no": 100000000001901,
+ "authorization": "D090DE04-ED20-46FD-A915-317E4492D083"
+ },
+ "errors": [],
+ "invoice_url": "https://felplexweb.dev.plex.lat/pdf/2929D59B-1A7D-4613-B3C9-97102CEC1401"
+}
+
+[REQUEST] El Salvador > Ejemplos Requests DTE > Nota de Remisión
+  METHOD: POST
+  URL: {{entorno}}/api/invoices/emit
+  DESC:  Nota de Remisión 
+ El DTE es enviado a certificar en el momento, esperando la respuesta de la misma y mostrando la información de firma o el listado de errores producto de la verificación realizada por la Hacienda El Salvador. 
+
+  BODY:
+{
+ "identificacion": {
+ "tipoDte": "04",
+ "tipoModelo": 1,
+ "fecEmi": "2024-07-17",
+ "horEmi": "17:42:58",
+ "tipoMoneda": "USD"
+ },
+ "documentoRelacionado": null,
+ "receptor": {
+ "tipoDocumento": "36",
+ "numDocumento": "06142310071022",
+ "nrc": null,
+ "nombre": "REGUS EL SALVADOR, LTDA.",
+ "codActividad": null,
+ "descActividad": null,
+ "nombreComercial": "",
+ "direccion": {
+ "departamento": "06",
+ "municipio": "20",
+ "complemento": "CIUDAD"
+ },
+ "telefono": "12345678",
+ "correo": "test@test.net",
+ "bienTitulo": "01"
+ },
+ "ventaTercero": "",
+ "cuerpoDocumento": [
+ {
+ "numItem": 1,
+ "tipoItem": 2,
+ "numeroDocumento": null,
+ "cantidad": 1,
+ "codigo": null,
+ "codTributo": "",
+ "uniMedida": 99,
+ "descripcion": "test",
+ "precioUni": 250,
+ "montoDescu": 0,
+ "ventaNoSuj": 0,
+ "ventaExenta": 0,
+ "ventaGravada": 250,
+ "tributos": [
+ "20"
+ ]
+ }
+ ],
+ "resumen": {
+ "descuNoSuj": 0,
+ "descuExenta": 0,
+ "descuGravada": 0,
+ "subTotal": 250,
+ "montoTotalOperacion": 282.5
+ },
+ "extension": {
+ "nombRecibe": "Receptor",
+ "docuRecibe": "123123",
+ "observacion": null,
+ "placaVehiculo": null
+ },
+ "apendice": null
+}
+  RESPONSE undefined Nueva Nota de Remisión:
+{
+ "valid": true,
+ "uuid": "2929D59B-1A7D-4613-B3C9-97102CEC1401",
+ "invoice": {
+ "serie": "DTE-04-00000000-100000000001901",
+ "no": 100000000001901,
+ "authorization": "D090DE04-ED20-46FD-A915-317E4492D083"
+ },
+ "errors": [],
+ "invoice_url": "https://felplexweb.dev.plex.lat/pdf/2929D59B-1A7D-4613-B3C9-97102CEC1401"
+}
+
+[REQUEST] El Salvador > Ejemplos Requests DTE > Nota de Crédito
+  METHOD: POST
+  URL: {{entorno}}/api/invoices/emit
+  DESC:  Nota de Crédito 
+ El DTE es enviado a certificar en el momento, esperando la respuesta de la misma y mostrando la información de firma o el listado de errores producto de la verificación realizada por la Hacienda El Salvador. 
+ Documentos Relacionados 
+ 
+ 03 - Comprobante de Crédito Fiscal 
+ 
+ 07 - Comprobante de Retención 
+ 
+ 
+ Especificaciones: 
+ 
+ Solo se pueden crear dos Notas de Crédito por documento relacionado. 
+ 
+ Solo se pueden relacionar documentos que no tengan mas de 3 meses de crea
+  BODY:
+{
+ "identificacion": {
+ "tipoDte": "05",
+ "tipoModelo": 1,
+ "fecEmi": "2024-07-17",
+ "horEmi": "17:50:27",
+ "tipoMoneda": "USD"
+ },
+ "documentoRelacionado": [
+ {
+ "tipoDocumento": "03",
+ "tipoGeneracion": 2,
+ "numeroDocumento": "ABFEE19F-1EA6-4B3A-934F-AC323760D697",
+ "fechaEmision": "2024-02-19"
+ }
+ ],
+ "receptor": {
+ "nit": "06140912201021",
+ "nrc": "2967696",
+ "nombre": "Juan Salvador",
+ "codActividad": "01111",
+ "descActividad": "Cultivo de cereales excepto arroz y para forrajes",
+ "nombreComercial": "Patitos Devs",
+ "direccion": {
+ "departamento": "06",
+ "municipio": "20",
+ "complemento": "Guatemala"
+ },
+ "telefono": "12345678",
+ "correo": "test@test.net"
+ },
+ "ventaTercero": "",
+ "cuerpoDocumento": [
+ {
+ "numItem": 1,
+ "tipoItem": 1,
+ "numeroDocumento": "ABFEE19F-1EA6-4B3A-934F-AC323760D697",
+ "cantidad": 1,
+ "codigo": null,
+ "codTributo": "",
+ "uniMedida": 99,
+ "descripcion": "TEST",
+ "precioUni": 200,
+ "montoDescu": 0,
+ "ventaNoSuj": 0,
+ "ventaExenta": 0,
+ "ventaGravada": 200,
+ "tributos": [
+ "20"
+ ]
+ }
+ ],
+ "resumen": {
+ "descuNoSuj": 0,
+ "descuExenta": 0,
+ "descuGravada": 0,
+ "montoTotalOperacion": 226,
+ "condicionOperacion": 1
+ },
+ "extension": {
+ "nombRecibe": null,
+ "docuRecibe": null,
+ "observacion": null,
+ "placaVehiculo": null
+ },
+ "apendice": null
+}
+  RESPONSE undefined Nueva Nota de Crédito:
+{
+ "valid": true,
+ "uuid": "2929D59B-1A7D-4613-B3C9-97102CEC1401",
+ "invoice": {
+ "serie": "DTE-05-00000000-100000000001901",
+ "no": 100000000001901,
+ "authorization": "D090DE04-ED20-46FD-A915-317E4492D083"
+ },
+ "errors": [],
+ "invoice_url": "https://felplexweb.dev.plex.lat/pdf/2929D59B-1A7D-4613-B3C9-97102CEC1401"
+}
+
+[REQUEST] El Salvador > Ejemplos Requests DTE > Nota de Débito
+  METHOD: POST
+  URL: {{entorno}}/api/invoices/emit
+  DESC:  Nota de Débito 
+ El DTE es enviado a certificar en el momento, esperando la respuesta de la misma y mostrando la información de firma o el listado de errores producto de la verificación realizada por la Hacienda El Salvador. 
+ Documentos Relacionados 
+ 
+ 03 - Comprobante de Crédito Fiscal 
+ 
+ 07 - Comprobante de Retención 
+ 
+ 
+ Especificaciones: 
+ 
+ Solo se pueden relacionar documentos que no tengan mas de 3 meses de creados. 
+ 
+ 
+ 
+ 
+ Llave 
+ Dato 
+ 
+ 
+ 
+ 
+ numeroDocumento 
+ Código de Generaci
+  BODY:
+{
+ "identificacion": {
+ "tipoDte": "06",
+ "tipoModelo": 1,
+ "fecEmi": "2024-02-19",
+ "horEmi": "18:06:34",
+ "tipoMoneda": "USD"
+ },
+ "documentoRelacionado": [
+ {
+ "tipoDocumento": "03",
+ "tipoGeneracion": 2,
+ "numeroDocumento": "A27FBCE8-2B36-43E6-8F52-F8E020985B5A",
+ "fechaEmision": "2024-02-14"
+ }
+ ],
+ "receptor": {
+ "nit": "06140912201021",
+ "nrc": "2967696",
+ "nombre": "Juan Salvador",
+ "codActividad": "01111",
+ "descActividad": "Cultivo de cereales excepto arroz y para forrajes",
+ "nombreComercial": "Patitos Devs",
+ "direccion": {
+ "departamento": "06",
+ "municipio": "20",
+ "complemento": "Guatemala"
+ },
+ "telefono": "12345678",
+ "correo": "test@test.net"
+ },
+ "ventaTercero": "",
+ "cuerpoDocumento": [
+ {
+ "numItem": 1,
+ "tipoItem": 1,
+ "numeroDocumento": "A27FBCE8-2B36-43E6-8F52-F8E020985B5A",
+ "cantidad": 1,
+ "codigo": null,
+ "codTributo": "",
+ "uniMedida": 99,
+ "descripcion": "TEST",
+ "precioUni": 30,
+ "montoDescu": 0,
+ "ventaNoSuj": 0,
+ "ventaExenta": 0,
+ "ventaGravada": 30,
+ "tributos": [
+ "20"
+ ]
+ }
+ ],
+ "resumen": {
+ "descuNoSuj": 0,
+ "descuExenta": 0,
+ "descuGravada": 0,
+ "montoTotalOperacion": 33.9,
+ "condicionOperacion": 1
+ },
+ "extension": {
+ "nombRecibe": null,
+ "docuRecibe": null,
+ "observacion": null,
+ "placaVehiculo": null
+ },
+ "apendice": null
+}
+  RESPONSE undefined Nueva Nota de Débito:
+{
+ "valid": true,
+ "uuid": "2929D59B-1A7D-4613-B3C9-97102CEC1401",
+ "invoice": {
+ "serie": "DTE-06-00000000-100000000001901",
+ "no": 100000000001901,
+ "authorization": "D090DE04-ED20-46FD-A915-317E4492D083"
+ },
+ "errors": [],
+ "invoice_url": "https://felplexweb.dev.plex.lat/pdf/2929D59B-1A7D-4613-B3C9-97102CEC1401"
+}
+
+[REQUEST] El Salvador > Ejemplos Requests DTE > Comprobante de Retención
+  METHOD: POST
+  URL: {{entorno}}/api/invoices/emit
+  DESC:  Comprobande de Retención 
+ El DTE es enviado a certificar en el momento, esperando la respuesta de la misma y mostrando la información de firma o el listado de errores producto de la verificación realizada por la Hacienda El Salvador. 
+ Documentos Relacionados 
+ 
+ 01 - Factura 
+ 
+ 03 - Comprobante de Crédito Fiscal 
+ 
+ 14 - Factura de Sujeto Exluido 
+ 
+ 
+ Especificaciones: 
+ 
+ Este documento solo lo puede emitir entidades registrada como Agente de Retención en el Ministerio de Hacienda 
+ 
+ 
+ 
+ 
+  BODY:
+{
+ "identificacion": {
+ "tipoDte": "07",
+ "tipoModelo": 1,
+ "fecEmi": "2024-02-19",
+ "horEmi": "18:20:20",
+ "tipoMoneda": "USD"
+ },
+ "receptor": {
+ "tipoDocumento": "36",
+ "numDocumento": "06140912201021",
+ "nrc": "2967696",
+ "nombre": "Juan Salvador",
+ "codActividad": "01111",
+ "descActividad": "Cultivo de cereales excepto arroz y para forrajes",
+ "nombreComercial": "Patitos Devs",
+ "direccion": {
+ "departamento": "06",
+ "municipio": "20",
+ "complemento": "Guatemala"
+ },
+ "telefono": "12345678",
+ "correo": "test@test.net"
+ },
+ "cuerpoDocumento": [
+ {
+ "numItem": 1,
+ "tipoDte": "03",
+ "tipoDoc": 2,
+ "numDocumento": "BEC8CB55-88B2-4E66-8B76-3F8F7C84940D",
+ "fechaEmision": "2024-02-14",
+ "montoSujetoGrav": 25,
+ "codigoRetencionMH": "C4",
+ "ivaRetenido": 3.25,
+ "descripcion": "TEST"
+ }
+ ],
+ "resumen": {
+ "totalSujetoRetencion": 25,
+ "totalIVAretenido": 3.25
+ },
+ "extension": {
+ "nombRecibe": null,
+ "docuRecibe": null,
+ "observacion": null
+ },
+ "apendice": null
+}
+  RESPONSE undefined Nuevo Comprobante de Retención:
+{
+ "valid": true,
+ "uuid": "2929D59B-1A7D-4613-B3C9-97102CEC1401",
+ "invoice": {
+ "serie": "DTE-07-00000000-100000000001901",
+ "no": 100000000001901,
+ "authorization": "D090DE04-ED20-46FD-A915-317E4492D083"
+ },
+ "errors": [],
+ "invoice_url": "https://felplexweb.dev.plex.lat/pdf/2929D59B-1A7D-4613-B3C9-97102CEC1401"
+}
+
+[REQUEST] El Salvador > Ejemplos Requests DTE > Comprobante de Liquidación
+  METHOD: POST
+  URL: {{entorno}}/api/invoices/emit
+  DESC:  Comprobande de Liquidación 
+ El DTE es enviado a certificar en el momento, esperando la respuesta de la misma y mostrando la información de firma o el listado de errores producto de la verificación realizada por la Hacienda El Salvador. 
+ Documentos Relacionados 
+ 
+ 01 - Factura 
+ 
+ 03 - Comprobante de Crédito Fiscal 
+ 
+ 05 - Nota de Crédito 
+ 
+ 06 - Nota de Débito 
+ 
+ 11 - Factura de Exportación 
+ 
+ 
+ Especificaciones: 
+ 
+ 
+ 
+ Llave 
+ Dato 
+ 
+ 
+ 
+ 
+ numeroDocumento 
+ Código de Generación del d
+  BODY:
+{
+ "identificacion": {
+ "version": 1,
+ "ambiente": "00",
+ "tipoDte": "08",
+ "tipoModelo": 1,
+ "tipoOperacion": 1,
+ "fecEmi": "2024-07-17",
+ "horEmi": "20:49:30",
+ "tipoMoneda": "USD"
+ },
+ "receptor": {
+ "nit": "06142310071022",
+ "nrc": "1829000",
+ "nombre": "REGUS EL SALVADOR, LTDA.",
+ "codActividad": "68109",
+ "descActividad": "Actividades inmobiliarias realizadas con bienes propios o arrendados n.c.p.",
+ "direccion": {
+ "departamento": "06",
+ "municipio": "20",
+ "complemento": "AV. ALVARADO DIAG. CENTROAMERICA, # 4,"
+ },
+ "telefono": "12345678",
+ "correo": "test@testr.com",
+ "nombreComercial": "regus"
+ },
+ "cuerpoDocumento": [
+ {
+ "numItem": 1,
+ "tipoDte": "11",
+ "tipoGeneracion": 1,
+ "numeroDocumento": "EAA573AD-8BF4-WWF1-88F2-08A0A2A4520",
+ "fechaGeneracion": "2024-07-17",
+ "ventaNoSuj": 0,
+ "ventaExenta": 0,
+ "ventaGravada": 0,
+ "exportaciones": 452,
+ "tributos": [
+ "C3"
+ ],
+ "ivaItem": 0,
+ "obsItem": "uno"
+ }
+ ],
+ "resumen": {
+ "montoTotalOperacion": 452,
+ "totalLetras": "DOS MIL DOLARES CON CERO CENTAVOS",
+ "totalExportacion": 452,
+ "ivaPerci": 0,
+ "total": 452,
+ "condicionOperacion": 1
+ },
+ "extension": {
+ "nombRecibe": null,
+ "docuRecibe": null,
+ "observacion": null
+ },
+ "apendice": null
+}
+  RESPONSE undefined Nuevo Comprobante de Retención:
+{
+ "valid": true,
+ "uuid": "2929D59B-1A7D-4613-B3C9-97102CEC1401",
+ "invoice": {
+ "serie": "DTE-07-00000000-100000000001901",
+ "no": 100000000001901,
+ "authorization": "D090DE04-ED20-46FD-A915-317E4492D083"
+ },
+ "errors": [],
+ "invoice_url": "https://felplexweb.dev.plex.lat/pdf/2929D59B-1A7D-4613-B3C9-97102CEC1401"
+}
+
+[REQUEST] El Salvador > Ejemplos Requests DTE > Documento Contable de Liquidación
+  METHOD: POST
+  URL: {{entorno}}/api/invoices/emit
+  DESC:  Documento Contable de Liquidación 
+ El DTE es enviado a certificar en el momento, esperando la respuesta de la misma y mostrando la información de firma o el listado de errores producto de la verificación realizada por la Hacienda El Salvador. 
+
+  BODY:
+{
+ "identificacion": {
+ "tipoDte": "09",
+ "tipoModelo": 1,
+ "fecEmi": "2024-07-17",
+ "horEmi": "17:33:06",
+ "tipoMoneda": "USD"
+ },
+ "documentoRelacionado": null,
+ "receptor": {
+ "nombreComercial": "ale 2024 rs",
+ "tipoEstablecimiento": "01",
+ "codigoMH": null,
+ "puntoVentaMH": null,
+ "puntoVentaContri": null,
+ "codigo": null,
+ "nit": "06140912201021",
+ "nrc": "2967696",
+ "nombre": "Rubber Ducky",
+ "codActividad": "46900",
+ "descActividad": "Venta al por mayor de otros productos",
+ "direccion": {
+ "departamento": "06",
+ "municipio": "20",
+ "complemento": "AV. ALVARADO DIAG. CENTROAMERICA, # 4,"
+ },
+ "telefono": "12345678",
+ "correo": "te2sttT@test.com"
+ },
+ "cuerpoDocumento": {
+ "periodoLiquidacionFechaInicio": "2024-07-17",
+ "periodoLiquidacionFechaFin": "2024-07-18",
+ "valorOperaciones": 50,
+ "subTotal": 50,
+ "iva": 5.75,
+ "montoSujetoPercepcion": 44.25,
+ "ivaPercibido": 0.89,
+ "comision": 0.23,
+ "porcentComision": 0,
+ "codLiquidacion": "123456",
+ "cantidadDoc": 20,
+ "montoSinPercepcion": 0,
+ "descripSinPercepcion": null,
+ "ivaComision": 0.03,
+ "liquidoApagar": 48.85,
+ "observaciones": null
+ },
+ "extension": {
+ "codEmpleado": null
+ },
+ "apendice": null
+}
+  RESPONSE undefined Nuevo Comprobante de Retención:
+{
+ "valid": true,
+ "uuid": "2929D59B-1A7D-4613-B3C9-97102CEC1401",
+ "invoice": {
+ "serie": "DTE-07-00000000-100000000001901",
+ "no": 100000000001901,
+ "authorization": "D090DE04-ED20-46FD-A915-317E4492D083"
+ },
+ "errors": [],
+ "invoice_url": "https://felplexweb.dev.plex.lat/pdf/2929D59B-1A7D-4613-B3C9-97102CEC1401"
+}
+
+[REQUEST] El Salvador > Ejemplos Requests DTE > Factura de Exportación
+  METHOD: POST
+  URL: {{entorno}}/api/invoices/emit
+  DESC:  Factura de Exportación 
+ El DTE es enviado a certificar en el momento, esperando la respuesta de la misma y mostrando la información de firma o el listado de errores producto de la verificación realizada por la Hacienda El Salvador. 
+
+  BODY:
+{
+ "identificacion": {
+ "tipoDte": "11",
+ "tipoModelo": 1,
+ "fecEmi": "2024-02-19",
+ "horEmi": "18:46:16",
+ "tipoMoneda": "USD"
+ },
+ "receptor": {
+ "nombre": "Juan Salvador",
+ "tipoDocumento": "36",
+ "numDocumento": "06140912201021",
+ "nombreComercial": "Patitos Devs",
+ "codPais": "9300",
+ "nombrePais": "El Salvador",
+ "complemento": "4ta. Avenida, Zona 2",
+ "tipoPersona": 1,
+ "descActividad": "Descripci\u00f3n de ae",
+ "telefono": "12345678",
+ "correo": "test@test.net"
+ },
+ "otrosDocumentos": null,
+ "cuerpoDocumento": [
+ {
+ "numItem": 1,
+ "codigo": null,
+ "descripcion": "TEST",
+ "cantidad": 1,
+ "uniMedida": 99,
+ "precioUni": 250,
+ "montoDescu": 0,
+ "ventaGravada": 250,
+ "tributos": [
+ "C3"
+ ],
+ "noGravado": 0
+ }
+ ],
+ "resumen": {
+ "totalGravada": 250,
+ "totalNoGravado": 0,
+ "descuento": 0,
+ "porcentajeDescuento": 0,
+ "totalDescu": 0,
+ "seguro": 0,
+ "flete": 0,
+ "montoTotalOperacion": 250,
+ "totalPagar": 250,
+ "condicionOperacion": 1,
+ "numPagoElectronico": null,
+ "observacion": null,
+ "descIncoterms": "EXW-En fabrica",
+ "codIncoterms": "01",
+ "pagos": [
+ {
+ "codigo": "01",
+ "montoPago": 250,
+ "plazo": null,
+ "referencia": "",
+ "periodo": null
+ }
+ ]
+ },
+ "apendice": null,
+ "ventaTercero": null
+}
+  RESPONSE undefined Nueva Factura Electrónica:
+{
+ "valid": true,
+ "uuid": "2929D59B-1A7D-4613-B3C9-97102CEC1401",
+ "invoice": {
+ "serie": "DTE-11-00000000-100000000001901",
+ "no": 100000000001901,
+ "authorization": "D090DE04-ED20-46FD-A915-317E4492D083"
+ },
+ "errors": [],
+ "invoice_url": "https://felplexweb.dev.plex.lat/pdf/2929D59B-1A7D-4613-B3C9-97102CEC1401"
+}
+
+[REQUEST] El Salvador > Ejemplos Requests DTE > Factura de Sujeto Excluido
+  METHOD: POST
+  URL: {{entorno}}/api/invoices/emit
+  DESC:  Nota de Sujeto Excluido 
+ El DTE es enviado a certificar en el momento, esperando la respuesta de la misma y mostrando la información de firma o el listado de errores producto de la verificación realizada por la Hacienda El Salvador. 
+
+  BODY:
+{
+ "identificacion": {
+ "tipoDte": "14",
+ "tipoModelo": 1,
+ "fecEmi": "2024-02-19",
+ "horEmi": "18:52:59",
+ "tipoMoneda": "USD"
+ },
+ "sujetoExcluido": {
+ "tipoDocumento": "36",
+ "numDocumento": "06140912201021",
+ "nombre": "Juan Salvador",
+ "codActividad": "01111",
+ "descActividad": "Cultivo de cereales excepto arroz y para forrajes",
+ "direccion": {
+ "departamento": "06",
+ "municipio": "20",
+ "complemento": "4ta. Avenida, Zona 2"
+ },
+ "telefono": "12345678",
+ "correo": "test@test.net"
+ },
+ "cuerpoDocumento": [
+ {
+ "numItem": 1,
+ "tipoItem": 1,
+ "cantidad": 1,
+ "codigo": null,
+ "uniMedida": 99,
+ "descripcion": "TEST",
+ "precioUni": 250,
+ "montoDescu": 0,
+ "compra": 250
+ }
+ ],
+ "resumen": {
+ "totalPagar": 250,
+ "totalLetras": "",
+ "condicionOperacion": 1,
+ "pagos": [
+ {
+ "codigo": "01",
+ "montoPago": 250,
+ "plazo": null,
+ "referencia": "",
+ "periodo": null
+ }
+ ],
+ "observaciones": null
+ },
+ "apendice": null
+}
+  RESPONSE undefined Nueva Factura Sujeto Excluido:
+{
+ "valid": true,
+ "uuid": "2929D59B-1A7D-4613-B3C9-97102CEC1401",
+ "invoice": {
+ "serie": "DTE-14-00000000-100000000001901",
+ "no": 100000000001901,
+ "authorization": "D090DE04-ED20-46FD-A915-317E4492D083"
+ },
+ "errors": [],
+ "invoice_url": "https://felplexweb.dev.plex.lat/pdf/2929D59B-1A7D-4613-B3C9-97102CEC1401"
+}
+
+[REQUEST] El Salvador > Ejemplos Requests DTE > Comprobante de Donación
+  METHOD: POST
+  URL: {{entorno}}/api/invoices/emit
+  DESC:  Factura Electrónica 
+ El DTE es enviado a certificar en el momento, esperando la respuesta de la misma y mostrando la información de firma o el listado de errores producto de la verificación realizada por la Hacienda El Salvador. 
+
+  BODY:
+{
+ "identificacion": {
+ "tipoDte": "15",
+ "tipoModelo": 1,
+ "fecEmi": "2024-02-19",
+ "horEmi": "18:54:18",
+ "tipoMoneda": "USD"
+ },
+ "donante": {
+ "tipoDocumento": "36",
+ "numDocumento": "06140912201021",
+ "nrc": "2967696",
+ "nombre": "Juan Salvador",
+ "codActividad": "46900",
+ "descActividad": "Cultivo de cereales excepto arroz y para forrajes",
+ "direccion": {
+ "departamento": "06",
+ "municipio": "20",
+ "complemento": "4ta. Avenida, Zona 2"
+ },
+ "telefono": "12345678",
+ "correo": "test@test.net",
+ "codDomiciliado": 1,
+ "codPais": "9300"
+ },
+ "otrosDocumentos": [
+ {
+ "codDocAsociado": 2,
+ "descDocumento": "Test",
+ "detalleDocumento": "pruebas"
+ }
+ ],
+ "cuerpoDocumento": [
+ {
+ "numItem": 1,
+ "tipoDonacion": 1,
+ "cantidad": 1,
+ "codigo": null,
+ "uniMedida": 99,
+ "descripcion": "TEST",
+ "depreciacion": 0,
+ "valorUni": 250,
+ "valor": 250
+ }
+ ],
+ "resumen": {
+ "valorTotal": 250,
+ "pagos": [
+ {
+ "codigo": "01",
+ "montoPago": 250,
+ "referencia": ""
+ }
+ ]
+ },
+ "apendice": null
+}
+  RESPONSE undefined Nuevo Comprobante de Donación:
+{
+ "valid": true,
+ "uuid": "2929D59B-1A7D-4613-B3C9-97102CEC1401",
+ "invoice": {
+ "serie": "DTE-15-00000000-100000000001901",
+ "no": 100000000001901,
+ "authorization": "D090DE04-ED20-46FD-A915-317E4492D083"
+ },
+ "errors": [],
+ "invoice_url": "https://felplexweb.dev.plex.lat/pdf/2929D59B-1A7D-4613-B3C9-97102CEC1401"
+}
+
+[FOLDER] El Salvador > Modelo Diferido
+Cuando se susciten causas de fuerza mayor que dificulten la transmisión y recepción de los Documentos Tributarios Electrónicos (DTE), se entiende que existe contingencia. Se podrán emitir en contingencia los siguientes documentos electrónicos: Factura Electrónica. Comprobante de Crédito Fiscal Electrónico. Nota de Remisión Electrónica. Nota de Crédito Electrónica. Nota de Debito Electrónica. Factura de Exportación Electrónica. Factura de Sujeto Excluido Electrónica. Durante la contingencia deberá generar sus documentos electrónicos consignando en lo siguiente: En Campo “tipoModelo” la opción 2 - Modelo Facturación Diferido. En campo “tipoContingencia” cualquiera de las opciones del catálogo CAT-005 Tipo de contingencia. En campo “motivoContin” podrá ampliar el tipo de contingencia seleccionado (requerido si el tipoContingencia = 5). CAT-005 Tipo de contingencia Código Valores 1 No disponibilidad de sistema del MH 2 No disponibilidad de sistema del emisor 3 Falla en el suministro de servicio de Internet del Emisor 4 Falla en el suministro de servicio de energía eléctrica del emisor que impida la transmisión de los DTE 5 Otro (deberá digitar un máximo de 500 caracteres explicando el motivo)
+
+[REQUEST] El Salvador > Modelo Diferido > Factura en Contingencia 1
+  METHOD: POST
+  URL: {{entorno}}/api/invoices/emit
+  DESC:  Factura Electrónica 
+ El DTE es enviado a certificar en el momento, esperando la respuesta de la misma y mostrando la información de firma o el listado de errores producto de la verificación realizada por la Hacienda El Salvador. 
+
+  BODY:
+{
+ "identificacion": {
+ "fecEmi": "2024-03-22",
+ "horEmi": "07:54:11",
+ "tipoDte": "01",
+ "tipoMoneda": "USD",
+ "tipoModelo": 2,
+ "tipoContingencia": 1,
+ "motivoContin": null
+ },
+ "documentoRelacionado": null,
+ "receptor": {
+ "tipoDocumento": null,
+ "numDocumento": null,
+ "nrc": null,
+ "nombre": "CF",
+ "codActividad": null,
+ "descActividad": null,
+ "nombreComercial": null,
+ "direccion": null,
+ "telefono": null,
+ "correo": null
+ },
+ "otrosDocumentos": null,
+ "ventaTercero": "",
+ "cuerpoDocumento": [
+ {
+ "numItem": 1,
+ "tipoItem": 1,
+ "numeroDocumento": null,
+ "codigo": null,
+ "codTributo": null,
+ "descripcion": "Producto de Prueba",
+ "cantidad": 1,
+ "uniMedida": 99,
+ "precioUni": 450,
+ "montoDescu": 0,
+ "ventaNoSuj": 0,
+ "ventaExenta": 0,
+ "ventaGravada": 450,
+ "tributos": null,
+ "psv": 0,
+ "noGravado": 0,
+ "ivaItem": 51.8
+ }
+ ],
+ "resumen": {
+ "montoTotalOperacion": 450,
+ "totalPagar": 450,
+ "pagos": [
+ {
+ "codigo": "01",
+ "montoPago": 450,
+ "plazo": null,
+ "referencia": "",
+ "periodo": null
+ }
+ ],
+ "descuNoSuj": 0,
+ "descuExenta": 0,
+ "descuGravada": 0,
+ "condicionOperacion": 1,
+ "numPagoElectronico": null
+ },
+ "extension": {
+ "nombRecibe": "",
+ "docuRecibe": "",
+ "observaciones": "",
+ "placaVehiculo": null
+ },
+ "apendice": null
+}
+  RESPONSE undefined Nueva Factura en Contingencia 1:
+{
+ "valid": true,
+ "uuid": "169FEAB1-362E-4E25-B39B-79D5C800F30B",
+ "invoice": {
+ "number": 100000000008604,
+ "control_number": "DTE-01-00000000-100000000008604",
+ "generation_code": "215CBDEA-8E8A-45D0-9901-170826CC6A72"
+ },
+ "errors": [],
+ "invoice_url": "https://felplexweb.stage.plex.lat/pdf/169FEAB1-362E-4E25-B39B-79D5C800F30B",
+ "invoice_json": "https://felplexweb.stage.plex.lat/json/215CBDEA-8E8A-45D0-9901-170826CC6A72"
+}
+
+[REQUEST] El Salvador > Modelo Diferido > Factura en Contingencia 2
+  METHOD: POST
+  URL: {{entorno}}/api/invoices/emit
+  DESC:  Factura Electrónica 
+ El DTE es enviado a certificar en el momento, esperando la respuesta de la misma y mostrando la información de firma o el listado de errores producto de la verificación realizada por la Hacienda El Salvador. 
+
+  BODY:
+{
+ "identificacion": {
+ "fecEmi": "2024-03-22",
+ "horEmi": "07:54:11",
+ "tipoDte": "01",
+ "tipoMoneda": "USD",
+ "tipoModelo": 2,
+ "tipoContingencia": 5,
+ "motivoContin": "Error de conexión"
+ },
+ "documentoRelacionado": null,
+ "receptor": {
+ "tipoDocumento": "36",
+ "numDocumento": "06140912201021",
+ "nrc": null,
+ "nombre": "Daniel Maldonado",
+ "codActividad": null,
+ "descActividad": null,
+ "nombreComercial": "",
+ "direccion": {
+ "departamento": "03",
+ "municipio": "02",
+ "complemento": "3 Avenida, Zona 4"
+ },
+ "telefono": "12345678",
+ "correo": "test@test.com"
+ },
+ "otrosDocumentos": null,
+ "ventaTercero": "",
+ "phones": null,
+ "cuerpoDocumento": [
+ {
+ "numItem": 1,
+ "tipoItem": 1,
+ "numeroDocumento": null,
+ "codigo": null,
+ "codTributo": null,
+ "descripcion": "Producto de Prueba",
+ "cantidad": 1,
+ "uniMedida": 99,
+ "precioUni": 450,
+ "montoDescu": 0,
+ "ventaNoSuj": 0,
+ "ventaExenta": 0,
+ "ventaGravada": 450,
+ "tributos": null,
+ "psv": 0,
+ "noGravado": 0,
+ "ivaItem": 51.8
+ }
+ ],
+ "resumen": {
+ "montoTotalOperacion": 450,
+ "totalPagar": 450,
+ "pagos": [
+ {
+ "codigo": "01",
+ "montoPago": 450,
+ "plazo": null,
+ "referencia": "",
+ "periodo": null
+ }
+ ],
+ "descuNoSuj": 0,
+ "descuExenta": 0,
+ "descuGravada": 0,
+ "condicionOperacion": 1,
+ "numPagoElectronico": null
+ },
+ "extension": {
+ "nombRecibe": "",
+ "docuRecibe": "",
+ "observaciones": "",
+ "placaVehiculo": null
+ },
+ "apendice": null
+}
+  RESPONSE undefined Nueva Factura en Contingencia 2:
+{
+ "valid": true,
+ "uuid": "ED29C8BA-1626-449F-BCBA-F5F81A514EF5",
+ "invoice": {
+ "number": 100000000008605,
+ "control_number": "DTE-01-00000000-100000000008605",
+ "generation_code": "76065DEB-D90E-4498-8967-07765FB079A2"
+ },
+ "errors": [],
+ "invoice_url": "https://felplexweb.stage.plex.lat/pdf/ED29C8BA-1626-449F-BCBA-F5F81A514EF5",
+ "invoice_json": "https://felplexweb.stage.plex.lat/json/76065DEB-D90E-4498-8967-07765FB079A2"
+}
+
+[REQUEST] El Salvador > Reportes > Report
+  METHOD: POST
+  URL: {{entorno}}/api/invoices/reports
+
+[REQUEST] El Salvador > Crear DTE
+  METHOD: POST
+  URL: {{entorno}}/api/invoices/emit
+  DESC:  El DTE es enviado a certificar en el momento, esperando la respuesta de la misma y mostrando la información de firma o el listado de errores producto de la verificación realizada por Hacienda El Salvador. 
+
+  BODY:
+{
+ "identificacion": {
+ "fecEmi": "2024-02-20",
+ "horEmi": "17:23:13",
+ "tipoDte": "01",
+ "tipoMoneda": "USD",
+ "tipoModelo": 1
+ },
+ "documentoRelacionado": null,
+ "receptor": {
+ "tipoDocumento": "36",
+ "numDocumento": "06140912201021",
+ "nrc": null,
+ "nombre": "Juan Salvador",
+ "codActividad": null,
+ "descActividad": null,
+ "nombreComercial": "",
+ "direccion": {
+ "departamento": "02",
+ "municipio": "01",
+ "complemento": "4ta. Avenida, Zona 2"
+ },
+ "telefono": "12345678",
+ "correo": "test@test.net"
+ },
+ "otrosDocumentos": "",
+ "ventaTercero": "",
+ "cuerpoDocumento": [
+ {
+ "numItem": 1,
+ "tipoItem": 1,
+ "numeroDocumento": null,
+ "codigo": null,
+ "codTributo": null,
+ "descripcion": "TEST",
+ "cantidad": 1,
+ "uniMedida": 99,
+ "precioUni": 250,
+ "montoDescu": 0,
+ "ventaNoSuj": 0,
+ "ventaExenta": 0,
+ "ventaGravada": 250,
+ "tributos": null,
+ "psv": 0,
+ "noGravado": 0,
+ "ivaItem": 28.8
+ }
+ ],
+ "resumen": {
+ "montoTotalOperacion": 250,
+ "totalPagar": 250,
+ "pagos": [
+ {
+ "codigo": "01",
+ "montoPago": 250,
+ "plazo": null,
+ "referencia": "",
+ "periodo": null
+ }
+ ],
+ "descuNoSuj": 0,
+ "descuExenta": 0,
+ "descuGravada": 0,
+ "condicionOperacion": 1,
+ "numPagoElectronico": null
+ },
+ "extension": {
+ "nombRecibe": null,
+ "docuRecibe": null,
+ "observaciones": null,
+ "placaVehiculo": null
+ },
+ "apendice": null
+}
+  RESPONSE undefined Nuevo DTE:
+{
+ "valid": true,
+ "uuid": "2929D59B-1A7D-4613-B3C9-97102CEC1401",
+ "invoice": {
+ "serie": "DTE-03-00000000-100000000001901",
+ "no": 100000000001901,
+ "authorization": "D090DE04-ED20-46FD-A915-317E4492D083"
+ },
+ "errors": [],
+ "invoice_url": "https://felplexweb.dev.plex.lat/pdf/2929D59B-1A7D-4613-B3C9-97102CEC1401"
+}
+
+[REQUEST] El Salvador > Invalidar DTE
+  METHOD: DELETE
+  URL: {{entorno}}/api/invoices/{{dte_uuid}}
+  BODY:
+{
+ "nombreResponsable": "Sergio Mendez",
+ "tipDocResponsable": "36",
+ "numDocResponsable": "06140912201021",
+ "nombreSolicita": "Oscar Suarez",
+ "tipDocSolicita": "36",
+ "numDocSolicita": "06142310071022"
+}
+  RESPONSE undefined Anular DTE:
+{
+ "success": true,
+ "uuid": "3F5FEB44-F648-4228-B797-CB8FB2FA72F3",
+ "errors": []
+}

@@ -45,6 +45,7 @@ import { TEST_FLOW_FILTER } from "../utils/testFlowMode"
 import InventoryItemYieldPanel from "../components/yield/InventoryItemYieldPanel"
 import { compressInventoryImageFile, revokeCompressedImagePreview } from "../utils/imageCompression"
 import { logPerformanceEvent } from "../utils/performanceLogger"
+import { useErpPerfModule } from "../hooks/useErpPerfModule"
 import {
   isInventoryItemVisibleInCatalog,
   logInventorySaveDebug,
@@ -151,6 +152,7 @@ function findRecipeWeightConversion(conversions, baseUnit) {
 }
 
 function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
+  useErpPerfModule(`inventario-${section}`)
   const { user } = useAuth()
   const canManage = canManageInventory(user)
   const canEditCatalog = canManage && section !== "movimientosInventario"

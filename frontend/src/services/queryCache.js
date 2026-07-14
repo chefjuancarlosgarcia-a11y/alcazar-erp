@@ -1,5 +1,6 @@
 import { CACHE_TTL } from "./cacheConfig"
 import { cacheKeyPrefix, logPerformanceEvent } from "../utils/performanceLogger"
+import { isErpPerfDebugEnabled, logErpPerfCacheEvent } from "../utils/erpPerf"
 
 const entries = new Map()
 
@@ -28,14 +29,17 @@ export function cachedQuery(key, loader, ttlMs = CACHE_TTL.CATALOG) {
   const current = entries.get(key)
   if (current?.value !== undefined && current.expiresAt > Date.now()) {
     logCacheEvent("cache_hit", key, ttlMs)
+    if (isErpPerfDebugEnabled()) logErpPerfCacheEvent({ key, eventType: "cache_hit", ttlMs })
     return Promise.resolve(current.value)
   }
   if (current?.promise) {
     logCacheEvent("cache_inflight", key, ttlMs)
+    if (isErpPerfDebugEnabled()) logErpPerfCacheEvent({ key, eventType: "cache_inflight", ttlMs })
     return current.promise
   }
 
   logCacheEvent("cache_miss", key, ttlMs)
+  if (isErpPerfDebugEnabled()) logErpPerfCacheEvent({ key, eventType: "cache_miss", ttlMs })
   const promise = Promise.resolve()
     .then(() => loader())
     .then((value) => {

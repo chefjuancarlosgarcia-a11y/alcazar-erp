@@ -6,6 +6,7 @@ import {
   logSupabaseConfigWarnings,
   resolveSupabaseClientConfig
 } from "../services/supabaseConnectivity"
+import { createErpPerfFetchLogger } from "../utils/erpPerf"
 
 const resolved = resolveSupabaseClientConfig()
 const config = getSupabaseConfigStatus()
@@ -16,8 +17,11 @@ if (import.meta.env.DEV && !config.configured) {
   console.error("[Supabase] Faltan VITE_SUPABASE_URL o VITE_SUPABASE_ANON_KEY en frontend/.env")
 }
 
+let underlyingFetch = fetch
 const devFetch = createDevRestFetchLogger()
-const clientOptions = devFetch ? { global: { fetch: devFetch } } : undefined
+if (devFetch) underlyingFetch = (input, init) => devFetch(input, init)
+const perfFetch = createErpPerfFetchLogger(underlyingFetch)
+const clientOptions = perfFetch ? { global: { fetch: perfFetch } } : devFetch ? { global: { fetch: devFetch } } : undefined
 
 export const supabase = createClient(resolved.url, resolved.anonKey, clientOptions)
 

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, startTransition } fr
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
 import useSupabaseRealtime from "../hooks/useSupabaseRealtime"
+import { useErpPerfModule } from "../hooks/useErpPerfModule"
 import { useActionGuard } from "../hooks/useActionGuard"
 import { getActiveAreas } from "../services/areasService"
 import { getProfilesTaskUnavailability, getTaskAssignableProfiles } from "../services/tasksService"
@@ -697,10 +698,12 @@ function Tasks() {
   }, [workActive, location.pathname, params, navigate])
 
   useEffect(() => {
+    if (workActive) return
     refreshChecklistModuleAccess?.()
-  }, [refreshChecklistModuleAccess, user?.id])
+  }, [refreshChecklistModuleAccess, user?.id, workActive])
 
   useEffect(() => {
+    if (workActive) return undefined
     let mounted = true
     getActiveAreas().then(({ data }) => {
       if (mounted) setAreas((data || []).map((area) => ({ id: area.id, name: area.name })))
@@ -708,10 +711,10 @@ function Tasks() {
     return () => {
       mounted = false
     }
-  }, [])
+  }, [workActive])
 
   useEffect(() => {
-    if (!isManager) return undefined
+    if (workActive || !isManager) return undefined
     let mounted = true
 
     async function loadEmployees() {
@@ -734,7 +737,7 @@ function Tasks() {
     return () => {
       mounted = false
     }
-  }, [isManager, user?.id, user?.role])
+  }, [isManager, user?.id, user?.role, workActive])
 
   useEffect(() => {
     const currentTasks = assignedTasks.map(withComputedTaskStatus)
@@ -1633,6 +1636,7 @@ function MyTasks({ initialTaskId = "", tasks, user, allTasks, persistAllTasks })
 }
 
 function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }) {
+  useErpPerfModule("checklists")
   const userRole = normalizeRole(user?.role)
   const checklistPerms = resolveChecklistLibraryPermissions(userRole)
   const {

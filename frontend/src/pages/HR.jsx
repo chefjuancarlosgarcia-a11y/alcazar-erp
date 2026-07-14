@@ -18,6 +18,7 @@ import ExpedientesDashboard from "../modules/hr-expedientes/ExpedientesDashboard
 import RecruitmentDashboard from "../modules/hr-recruitment/RecruitmentDashboard"
 import { Navigate, useLocation } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
+import { useErpPerfModule } from "../hooks/useErpPerfModule"
 
 const LegacyInventoryApp = lazy(() => import("../modules/LegacyInventoryApp"))
 
@@ -36,6 +37,8 @@ function HR() {
   const editProfile = params.get("mode") === "edit"
   const defaultSection = ["admin", "gerente", "gerente_general", "recursos_humanos", "rrhh"].includes(user?.role) ? "usuarios" : "asistencia"
   const selectedSection = section || defaultSection
+
+  useErpPerfModule(`rrhh-${selectedSection}`)
 
   if (selectedSection === "usuarios") {
     return <ProfileManagement requestedProfileId={profileId} editRequested={editProfile} />

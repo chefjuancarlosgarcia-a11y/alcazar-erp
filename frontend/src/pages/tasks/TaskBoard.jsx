@@ -28,6 +28,8 @@ import { createTaskWorkPlanHandler } from "../../hooks/useTaskWorkPlanActions"
 
 import { useOperationalTaskDetailSync } from "../../hooks/useOperationalTaskDetailSync"
 
+import { useErpPerfModule } from "../../hooks/useErpPerfModule"
+
 import { useTaskFocusRefresh } from "../../hooks/useOperationalTasksSync"
 
 import {
@@ -59,6 +61,15 @@ import TaskArchivedPanel from "./TaskArchivedPanel"
 import TaskLabelsPicker from "./TaskLabelsPicker"
 
 import { getTaskLabelsCatalog, createTaskLabel, updateTaskLabel, deleteTaskLabel, archiveOperationalTask, restoreOperationalTask, getArchivedOperationalTasks, updateOperationalTaskLabels } from "../../services/taskLabelsService"
+
+import TaskBoardSkeleton from "./TaskBoardSkeleton"
+
+import {
+  resolveTaskBoardViewState,
+  shouldShowTaskBoardContent,
+  shouldShowTaskBoardEmpty,
+  useDelayedSkeleton
+} from "./taskBoardViewState"
 
 import "./operationalTasks.css"
 
@@ -122,7 +133,11 @@ export default function TaskBoard({ onMessage }) {
 
     setTasks,
 
-    lastSyncedAt
+    lastSyncedAt,
+
+    requestCompleted,
+
+    hasCachedData
 
   } = useOperationalTasksBoard({
 
@@ -138,7 +153,9 @@ export default function TaskBoard({ onMessage }) {
 
   })
 
-
+  useErpPerfModule("trabajo-tablero", {
+    ready: requestCompleted && !loading
+  })
 
   const { profiles: assignableProfiles } = useAssignableProfiles()
 
@@ -228,18 +245,6 @@ export default function TaskBoard({ onMessage }) {
     await loadDetail(selectedId, { background: true })
 
   }, [checkServerConflict, hasUnsavedEditsRef, loadDetail, refresh, selectedId])
-
-
-
-  useTaskFocusRefresh({
-
-    enabled: true,
-
-    hasUnsavedEdits: () => hasUnsavedEditsRef.current,
-
-    onRefresh: () => syncView({ background: true, includeDetail: true })
-
-  })
 
 
 
@@ -910,6 +915,35 @@ export default function TaskBoard({ onMessage }) {
 
   const listRefreshing = refreshing || detailRefreshing
 
+  const viewState = resolveTaskBoardViewState({
+    loading,
+    refreshing,
+    error,
+    requestCompleted,
+    tasks,
+    hasCachedData
+  })
+
+  const showSkeleton = useDelayedSkeleton(viewState === "initial-loading")
+
+  const showBoardContent = shouldShowTaskBoardContent(viewState)
+
+  const showBoardEmpty = shouldShowTaskBoardEmpty(viewState)
+
+  useTaskFocusRefresh({
+
+    enabled: true,
+
+    hasUnsavedEdits: () => hasUnsavedEditsRef.current,
+
+    isRefreshing: listRefreshing,
+
+    lastSyncedAt,
+
+    onRefresh: () => syncView({ background: true, includeDetail: true })
+
+  })
+
 
 
   return (
@@ -1092,12 +1126,34 @@ export default function TaskBoard({ onMessage }) {
 
 
 
-      {error ? <p className="ot-feedback ot-feedback--error">{error}</p> : null}
+      {error && viewState === "error-with-cache" ? (
+        <p className="ot-feedback ot-feedback--error ot-feedback--inline">
+          No se pudo actualizar. Mostrando la última versión guardada.
+        </p>
+      ) : null}
 
-      {loading ? <p className="ot-muted">Cargando tablero...</p> : null}
+      {viewState === "error-without-cache" ? (
+        <div className="ot-board-empty erp-card">
+          <p className="ot-feedback ot-feedback--error">{error || "No se pudo cargar el tablero."}</p>
+          <button
+            type="button"
+            className="ot-btn ot-btn--ghost"
+            onClick={() => syncView({ background: false, includeDetail: false })}
+          >
+            Reintentar
+          </button>
+        </div>
+      ) : null}
 
+      {showSkeleton ? <TaskBoardSkeleton /> : null}
 
+      {showBoardEmpty ? (
+        <div className="ot-board-empty erp-card">
+          <p className="ot-muted">No hay tareas en el tablero con los filtros actuales.</p>
+        </div>
+      ) : null}
 
+      {showBoardContent ? (
       <div className="ot-kanban ot-kanban--phase-b">
 
         {OPERATIONAL_TASK_BOARD_COLUMNS.map((column) => (
@@ -1205,10 +1261,11 @@ export default function TaskBoard({ onMessage }) {
         ))}
 
       </div>
+      ) : null}
 
 
 
-      {cancelledTasks.length ? (
+      {showBoardContent && cancelledTasks.length ? (
 
         <section className="ot-cancelled-section erp-card">
 

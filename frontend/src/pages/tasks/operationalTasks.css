@@ -404,6 +404,95 @@
   font-size: 12px;
 }
 
+.ot-board-empty {
+  display: grid;
+  gap: var(--erp-space-16);
+  padding: var(--erp-space-24);
+  text-align: center;
+}
+
+.ot-feedback--inline {
+  margin: 0;
+}
+
+.ot-kanban--skeleton,
+.ot-list--skeleton {
+  pointer-events: none;
+}
+
+.ot-kanban-column--skeleton {
+  min-height: 320px;
+}
+
+.ot-task-card-skeleton {
+  display: grid;
+  gap: var(--erp-space-8);
+  padding: var(--erp-space-16);
+  border: 1px solid #1f3046;
+  background: #0b1524;
+}
+
+.ot-skeleton {
+  border-radius: 8px;
+  background: linear-gradient(
+    90deg,
+    #152238 0%,
+    #1e3350 50%,
+    #152238 100%
+  );
+  background-size: 200% 100%;
+  animation: ot-skeleton-shimmer 1.2s ease-in-out infinite;
+}
+
+.ot-skeleton--title {
+  height: 16px;
+  width: 72%;
+}
+
+.ot-skeleton--count {
+  height: 16px;
+  width: 32px;
+}
+
+.ot-skeleton--line {
+  height: 12px;
+  width: 88%;
+}
+
+.ot-skeleton--wide {
+  width: 96%;
+}
+
+.ot-skeleton--short {
+  width: 48%;
+}
+
+.ot-skeleton--badge {
+  height: 24px;
+  width: 64px;
+}
+
+.ot-skeleton--avatar {
+  height: 24px;
+  width: 24px;
+  border-radius: 50%;
+}
+
+.ot-skeleton-row {
+  display: flex;
+  gap: var(--erp-space-8);
+  align-items: center;
+}
+
+@keyframes ot-skeleton-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
 .ot-conflict-banner {
   display: grid;
   gap: var(--erp-space-8);

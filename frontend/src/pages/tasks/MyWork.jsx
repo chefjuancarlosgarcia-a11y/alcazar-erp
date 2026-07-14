@@ -22,6 +22,8 @@ import {
 
 import { useOperationalTaskDetailSync } from "../../hooks/useOperationalTaskDetailSync"
 
+import { useErpPerfModule } from "../../hooks/useErpPerfModule"
+
 import { createTaskWorkPlanHandler } from "../../hooks/useTaskWorkPlanActions"
 
 import { useTaskFocusRefresh } from "../../hooks/useOperationalTasksSync"
@@ -57,6 +59,15 @@ import {
   updateOperationalTaskLabels
 
 } from "../../services/taskLabelsService"
+
+import TaskListSkeleton from "./TaskListSkeleton"
+
+import {
+  resolveTaskBoardViewState,
+  shouldShowTaskBoardContent,
+  shouldShowTaskBoardEmpty,
+  useDelayedSkeleton
+} from "./taskBoardViewState"
 
 import "./operationalTasks.css"
 
@@ -106,11 +117,17 @@ export default function MyWork({ onMessage }) {
 
     setTasks,
 
-    lastSyncedAt
+    lastSyncedAt,
+
+    requestCompleted,
+
+    hasCachedData
 
   } = useMyOperationalTasks()
 
-
+  useErpPerfModule("trabajo-mi-trabajo", {
+    ready: requestCompleted && !loading
+  })
 
   const { profiles: assignableProfiles } = useAssignableProfiles()
 
@@ -190,18 +207,6 @@ export default function MyWork({ onMessage }) {
     await loadDetail(selectedId, { background: true })
 
   }, [checkServerConflict, hasUnsavedEditsRef, loadDetail, refresh, selectedId])
-
-
-
-  useTaskFocusRefresh({
-
-    enabled: true,
-
-    hasUnsavedEdits: () => hasUnsavedEditsRef.current,
-
-    onRefresh: () => syncView({ background: true, includeDetail: true })
-
-  })
 
 
 
@@ -644,6 +649,35 @@ export default function MyWork({ onMessage }) {
 
   const listRefreshing = refreshing || detailRefreshing
 
+  const viewState = resolveTaskBoardViewState({
+    loading,
+    refreshing,
+    error,
+    requestCompleted,
+    itemCount: openTasks.length,
+    hasCachedData
+  })
+
+  const showSkeleton = useDelayedSkeleton(viewState === "initial-loading")
+
+  const showListContent = shouldShowTaskBoardContent(viewState)
+
+  const showListEmpty = shouldShowTaskBoardEmpty(viewState)
+
+  useTaskFocusRefresh({
+
+    enabled: true,
+
+    hasUnsavedEdits: () => hasUnsavedEditsRef.current,
+
+    isRefreshing: listRefreshing,
+
+    lastSyncedAt,
+
+    onRefresh: () => syncView({ background: true, includeDetail: true })
+
+  })
+
 
 
   return (
@@ -726,12 +760,34 @@ export default function MyWork({ onMessage }) {
 
 
 
-      {error ? <p className="ot-feedback ot-feedback--error">{error}</p> : null}
+      {error && viewState === "error-with-cache" ? (
+        <p className="ot-feedback ot-feedback--error ot-feedback--inline">
+          No se pudo actualizar. Mostrando la última versión guardada.
+        </p>
+      ) : null}
 
-      {loading ? <p className="ot-muted">Cargando tareas...</p> : null}
+      {viewState === "error-without-cache" ? (
+        <div className="ot-board-empty erp-card">
+          <p className="ot-feedback ot-feedback--error">{error || "No se pudieron cargar tus tareas."}</p>
+          <button
+            type="button"
+            className="ot-btn ot-btn--ghost"
+            onClick={() => syncView({ background: false, includeDetail: false })}
+          >
+            Reintentar
+          </button>
+        </div>
+      ) : null}
 
+      {showSkeleton ? <TaskListSkeleton /> : null}
 
+      {showListEmpty ? (
+        <div className="ot-board-empty erp-card">
+          <p className="ot-muted">No tienes tareas abiertas. Crea una arriba con Enter.</p>
+        </div>
+      ) : null}
 
+      {showListContent ? (
       <div className="ot-list ot-list--cards">
 
         {openTasks.map((task) => (
@@ -768,13 +824,8 @@ export default function MyWork({ onMessage }) {
 
         ))}
 
-        {!loading && !openTasks.length ? (
-
-          <p className="ot-muted">No tienes tareas abiertas. Crea una arriba con Enter.</p>
-
-        ) : null}
-
       </div>
+      ) : null}
 
 
 

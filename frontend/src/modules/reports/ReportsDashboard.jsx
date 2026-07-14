@@ -1,6 +1,7 @@
 import { Component, useEffect, useMemo, useState } from "react"
 import { useActionGuard } from "../../hooks/useActionGuard"
 import { logPerformanceEvent } from "../../utils/performanceLogger"
+import { useErpPerfModule } from "../../hooks/useErpPerfModule"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
@@ -61,6 +62,7 @@ function canAccessReportTab(key, role) {
 }
 
 function ReportsDashboard() {
+  useErpPerfModule("reportes")
   const { user } = useAuth()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()

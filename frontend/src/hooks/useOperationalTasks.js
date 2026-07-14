@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 import {
 
@@ -38,27 +38,71 @@ function useOperationalListQuery(fetcher, deps = []) {
 
   const [lastSyncedAt, setLastSyncedAt] = useState(null)
 
+  const [requestCompleted, setRequestCompleted] = useState(false)
+
+  const [hasCachedData, setHasCachedData] = useState(false)
+
+  const hasCachedDataRef = useRef(false)
+
 
 
   const refresh = useCallback(async (options = {}) => {
 
     const background = Boolean(options.background)
 
-    if (background) setRefreshing(true)
+    const hasCache = hasCachedDataRef.current
 
-    else setLoading(true)
+
+
+    if (background) {
+
+      setRefreshing(true)
+
+    } else if (!hasCache) {
+
+      setLoading(true)
+
+    }
 
 
 
     const result = await fetcher()
 
-    setTasks(result.data)
-
-    setError(result.error || "")
-
-    if (!result.error) setLastSyncedAt(new Date())
 
 
+    if (result.error) {
+
+      if (hasCache) {
+
+        setError(result.error || "")
+
+      } else {
+
+        setTasks(result.data || [])
+
+        setError(result.error || "")
+
+      }
+
+    } else {
+
+      const nextTasks = result.data || []
+
+      setTasks(nextTasks)
+
+      setError("")
+
+      setHasCachedData(true)
+
+      hasCachedDataRef.current = true
+
+      setLastSyncedAt(new Date())
+
+    }
+
+
+
+    setRequestCompleted(true)
 
     if (background) setRefreshing(false)
 
@@ -78,7 +122,27 @@ function useOperationalListQuery(fetcher, deps = []) {
 
 
 
-  return { tasks, loading, refreshing, error, refresh, setTasks, lastSyncedAt }
+  return {
+
+    tasks,
+
+    loading,
+
+    refreshing,
+
+    error,
+
+    refresh,
+
+    setTasks,
+
+    lastSyncedAt,
+
+    requestCompleted,
+
+    hasCachedData
+
+  }
 
 }
 
@@ -107,8 +171,6 @@ export function useOperationalTasksBoard(filters = {}) {
     [
 
       filters.areaId,
-
-      filters.assigneeId,
 
       filters.search,
 
@@ -245,10 +307,15 @@ export async function patchOperationalTask(taskId, payload) {
 
 
 export async function assignOperationalTaskMembers(taskId, payload) {
+
   if (Array.isArray(payload)) {
+
     return updateOperationalTaskAssignees(taskId, payload)
+
   }
+
   return updateOperationalTaskMembers(taskId, payload)
+
 }
 
 
@@ -292,5 +359,4 @@ export function useAssignableProfiles() {
   return { profiles, loading, error, refresh }
 
 }
-
 

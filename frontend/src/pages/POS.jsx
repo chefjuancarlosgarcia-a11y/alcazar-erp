@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useLocation } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
 import useSupabaseRealtime from "../hooks/useSupabaseRealtime"
+import { useErpPerfModule } from "../hooks/useErpPerfModule"
 import { useActionGuard } from "../hooks/useActionGuard"
 import { useToast } from "../hooks/useToast"
 import { ToastContainer } from "../components/ToastContainer"
@@ -755,6 +756,8 @@ function POS() {
   const { user, loading: authLoading } = useAuth()
   const params = new URLSearchParams(location.search)
   const section = params.get("section") || "pos"
+
+  useErpPerfModule(`pos-${section}`)
   const { toasts, showToast, dismissToast } = useToast()
   const { deductionMode, enabled: migrationModeEnabled } = useInventoryDeductionMode()
 
