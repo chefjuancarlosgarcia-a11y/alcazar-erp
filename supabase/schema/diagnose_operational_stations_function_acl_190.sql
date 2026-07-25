@@ -9,7 +9,9 @@ with os1_functions as (
     pg_get_function_identity_arguments(p.oid) as function_signature,
     p.prosecdef as security_definer,
     coalesce(array_to_string(p.proconfig, ', '), '') as function_config,
+    p.proacl as proacl_raw,
     p.proacl::text as proacl,
+    p.proowner as owner_oid,
     r.rolname as owner
   from pg_proc p
   join pg_namespace n on n.oid = p.pronamespace
@@ -43,7 +45,12 @@ acl_flags as (
     f.*,
     exists (
       select 1
-      from aclexplode(coalesce(f.proacl, acldefault('f', (select proowner from pg_proc where oid = f.oid)))) a
+      from aclexplode(
+        coalesce(
+          f.proacl_raw,
+          acldefault('f', f.owner_oid)
+        )
+      ) a
       where a.grantee = 0
         and a.privilege_type = 'EXECUTE'
     ) as public_execute,
