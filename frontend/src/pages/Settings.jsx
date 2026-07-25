@@ -73,6 +73,11 @@ function Settings() {
             Impresoras
           </button>
         )}
+        {canManagePrinters && (
+          <Link className="settings-tab" to="/settings/operational-stations">
+            Estaciones operativas
+          </Link>
+        )}
         {canManageLoginSecurity && (
           <button className={`settings-tab ${activeTab === "login-security" ? "active" : ""}`} onClick={() => setActiveTab("login-security")}>
             Seguridad login
