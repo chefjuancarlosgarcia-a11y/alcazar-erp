@@ -45,6 +45,8 @@ function mapOrder(row) {
     areaId: row.area_id,
     area: row.area_name,
     usuarioNombre: row.waiter_name || "POS",
+    ownerProfileId: row.owner_profile_id || row.waiter_id || null,
+    waiterId: row.waiter_id || null,
     estado: row.status === "sent" ? "en preparacion" : row.status,
     mesaKey: `${row.area_id || ""}:${row.table_id || ""}`,
     total: Number(row.total || 0),
@@ -61,9 +63,83 @@ async function queryOrder(query, label) {
   }
 }
 
+const POS_TABLE_SERVICE_ACTIVE_STATUSES = ["open", "sent", "awaiting_bill", "sent_to_cashier", "partially_paid"]
+
+export function createPosRpcIdempotencyKey() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID()
+  }
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+export function mapPosTableServiceError(error) {
+  const raw = formatSupabaseError(error)
+  const text = String(raw || error?.message || "")
+  if (/POS_TABLE_PENDING_RELEASE/i.test(text)) {
+    return {
+      code: "POS_TABLE_PENDING_RELEASE",
+      message: "Esta mesa tiene un servicio pendiente de cierre. Un supervisor o el titular debe liberarla antes de abrir uno nuevo.",
+      userMessage: "Mesa pendiente de cierre. Solicita liberación antes de continuar."
+    }
+  }
+  if (/POS_TABLE_IN_BILLING/i.test(text)) {
+    return {
+      code: "POS_TABLE_IN_BILLING",
+      message: "La mesa tiene una orden en flujo de cobro.",
+      userMessage: "La mesa está en cobro. Completa o revierte el flujo de caja antes de abrir otro servicio."
+    }
+  }
+  if (/POS_IDEMPOTENCY_FINGERPRINT_MISMATCH/i.test(text)) {
+    return {
+      code: "POS_IDEMPOTENCY_FINGERPRINT_MISMATCH",
+      message: "La clave de idempotencia ya se usó con otros parámetros.",
+      userMessage: "Conflicto de reintento. Vuelve a intentar la acción desde el inicio."
+    }
+  }
+  if (/POS_RELEASE_NOT_OWNER/i.test(text)) {
+    return {
+      code: "POS_RELEASE_NOT_OWNER",
+      message: "Solo el titular del servicio puede liberar esta mesa en este escenario.",
+      userMessage: "No eres el titular del servicio. Pide al mesero responsable o a un supervisor."
+    }
+  }
+  if (/POS_RELEASE_REQUIRES_SUPERVISOR/i.test(text)) {
+    return {
+      code: "POS_RELEASE_REQUIRES_SUPERVISOR",
+      message: "Esta liberación requiere supervisor, gerente general o administrador autenticado.",
+      userMessage: "Se requiere un usuario con rol supervisor o superior para liberar este servicio."
+    }
+  }
+  if (/POS_RELEASE_BLOCKED_PAYMENTS/i.test(text)) {
+    return {
+      code: "POS_RELEASE_BLOCKED_PAYMENTS",
+      message: "Órdenes con pagos registrados no se liberan por este flujo.",
+      userMessage: "Hay pagos registrados. Usa el flujo de caja; esta mesa no se puede liberar aquí."
+    }
+  }
+  if (/POS_RELEASE_REASON_REQUIRED/i.test(text)) {
+    return {
+      code: "POS_RELEASE_REASON_REQUIRED",
+      message: "Indica un motivo de al menos 10 caracteres.",
+      userMessage: "Escribe un motivo de liberación (mínimo 10 caracteres)."
+    }
+  }
+  if (/POS_IDEMPOTENCY_KEY_REQUIRED/i.test(text)) {
+    return {
+      code: "POS_IDEMPOTENCY_KEY_REQUIRED",
+      message: "Falta clave de idempotencia.",
+      userMessage: "Error interno de idempotencia. Recarga e intenta de nuevo."
+    }
+  }
+  if (/No tienes permiso/i.test(text)) {
+    return { code: "POS_FORBIDDEN", message: text, userMessage: text }
+  }
+  return { code: "POS_RPC_ERROR", message: text, userMessage: text }
+}
+
 export async function getOpenOrderByTable(tableId) {
   return queryOrder(
-    supabase.from("pos_orders").select(orderSelect).eq("table_id", String(tableId)).in("status", ["open", "awaiting_bill", "sent_to_cashier", "partially_paid"]).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+    supabase.from("pos_orders").select(orderSelect).eq("table_id", String(tableId)).in("status", POS_TABLE_SERVICE_ACTIVE_STATUSES).order("created_at", { ascending: false }).limit(1).maybeSingle(),
     "cargar orden abierta POS"
   )
 }
@@ -72,7 +148,7 @@ export async function getActiveOrdersForTables(tableIds = []) {
   const ids = [...new Set((tableIds || []).map((id) => String(id)).filter(Boolean))]
   if (!ids.length) return { data: [], error: null, message: "" }
   const { data, error } = await withTimeout(
-    supabase.from("pos_orders").select(orderSelect).in("table_id", ids).in("status", ["open", "awaiting_bill", "sent_to_cashier", "partially_paid"]).order("created_at", { ascending: false }),
+    supabase.from("pos_orders").select(orderSelect).in("table_id", ids).in("status", POS_TABLE_SERVICE_ACTIVE_STATUSES).order("created_at", { ascending: false }),
     15000,
     "cargar ordenes activas por mesa"
   )
@@ -142,6 +218,69 @@ export async function recordOrderEvent(orderId, eventType, description) {
   return { error }
 }
 
+export async function openPosTableService(tableData, { idempotencyKey } = {}) {
+  const key = idempotencyKey || createPosRpcIdempotencyKey()
+  const tableId = String(tableData.tableId || tableData.mesaId || "")
+  const { data, error } = await withTimeout(
+    supabase.rpc("open_pos_table_service", {
+      p_table_id: tableId,
+      p_table_name: tableData.tableName || `Mesa ${tableData.mesaNumero || ""}`,
+      p_area_id: tableData.areaId || null,
+      p_area_name: tableData.areaName || tableData.areaNombre || null,
+      p_sales_channel: tableData.salesChannel || "dine_in",
+      p_customer_id: tableData.customerId || null,
+      p_customer_address_id: tableData.customerAddressId || null,
+      p_delivery_notes: tableData.deliveryNotes || null,
+      p_external_source: tableData.externalSource || null,
+      p_external_order_id: tableData.externalOrderId || null,
+      p_idempotency_key: key
+    }),
+    15000,
+    "abrir servicio de mesa POS"
+  )
+  if (error) {
+    const mapped = mapPosTableServiceError(error)
+    return { data: null, error, message: mapped.userMessage, ...mapped, idempotencyKey: key }
+  }
+  const orderId = data?.order_id
+  if (!orderId) {
+    return {
+      data: null,
+      error: new Error("Supabase no devolvió order_id al abrir servicio."),
+      message: "No se pudo abrir el servicio de mesa.",
+      idempotencyKey: key
+    }
+  }
+  const orderResult = await getOrderWithItems(orderId)
+  return {
+    ...orderResult,
+    openMeta: data,
+    idempotencyKey: key,
+    created: data?.created === true,
+    reused: data?.reused === true
+  }
+}
+
+export async function releasePosTableService(orderId, reason, { idempotencyKey } = {}) {
+  const key = idempotencyKey || createPosRpcIdempotencyKey()
+  const { data, error } = await withTimeout(
+    supabase.rpc("release_pos_table_service", {
+      p_order_id: orderId,
+      p_reason: reason,
+      p_idempotency_key: key,
+      p_force_supervisor: false
+    }),
+    15000,
+    "liberar servicio de mesa POS"
+  )
+  if (error) {
+    const mapped = mapPosTableServiceError(error)
+    return { data: null, error, message: mapped.userMessage, ...mapped, idempotencyKey: key }
+  }
+  return { data, error: null, message: "", idempotencyKey: key }
+}
+
+/** Legacy SELECT+INSERT — conservado para canales no mesa y módulos externos. POS dine-in usa openPosTableService. */
 export async function createOrGetOpenOrder(tableData, currentUser) {
   const existing = await getOpenOrderByTable(tableData.tableId || tableData.mesaId)
   if (existing.error || existing.data) return existing
@@ -160,6 +299,7 @@ export async function createOrGetOpenOrder(tableData, currentUser) {
       external_order_id: tableData.externalOrderId || null,
       waiter_id: currentUser.id,
       waiter_name: currentUser.name || currentUser.username || "POS",
+      owner_profile_id: currentUser.id,
       status: "open"
     }).select(orderSelect).single(),
     "crear orden POS"

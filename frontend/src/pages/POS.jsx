@@ -78,12 +78,15 @@ import {
   clearDraftItems,
   clearLegacyPOSOrders,
   createOrGetOpenOrder,
+  createPosRpcIdempotencyKey,
   getActiveOrdersForTables,
   getOpenOrderByTable,
   getTableOrderEvents,
   getOrderWithItems,
   getTableOrderHistory,
   markOrderItemServed,
+  openPosTableService,
+  releasePosTableService,
   removeOrderItem,
   recordOrderEvent,
   requestOrderBill,
@@ -300,6 +303,7 @@ function tableStatusLabel(status) {
     problema: "Problema",
     en_produccion: "En cocina",
     lista_para_servir: "Lista",
+    pendiente_cierre: "Pendiente cierre",
     reservada: "Reservada",
     limpieza: "Limpieza",
     inactiva: "Inactiva"
@@ -308,6 +312,7 @@ function tableStatusLabel(status) {
 
 function tableTrafficState(status, activeMinutes = 0) {
   if (["inactiva", "limpieza", "cerrada", "fuera_servicio"].includes(status)) return "disabled"
+  if (status === "pendiente_cierre") return "pending_release"
   if (["esperando_cuenta", "pago_en_proceso"].includes(status)) return "payment"
   if (status === "disponible" || status === "pagada") return "free"
   if (Number(activeMinutes || 0) >= TABLE_TIME_THRESHOLDS.normalMinutes) return "late"
@@ -319,10 +324,27 @@ function tableTrafficLabel(traffic, status) {
     free: "Disponible",
     active: "En servicio",
     payment: "Esperando pago",
+    pending_release: "Pendiente de cierre",
     late: "Tiempo excedido",
     disabled: tableStatusLabel(status)
   }[traffic] || tableStatusLabel(status)
 }
+
+function posOrderHasActiveItems(order) {
+  return (order?.items || []).some((item) => item.status !== "cancelled")
+}
+
+function posOrderIsZombieOpen(order) {
+  if (!order) return false
+  if (["paid", "cancelled"].includes(order.status)) return false
+  return !posOrderHasActiveItems(order)
+}
+
+function posOrderEverSentToKds(order) {
+  return (order?.items || []).some((item) => !["draft", "cancelled"].includes(item.status))
+}
+
+const POS_ELEVATED_SUPERVISOR_ROLES = ["admin", "gerente_general", "supervisor"]
 
 function formatTableDuration(minutes) {
   const totalMinutes = Math.max(0, Math.floor(Number(minutes || 0)))
@@ -843,6 +865,7 @@ function POS() {
   const [savingCustomer, setSavingCustomer] = useState(false)
   const [showDeliveryModal, setShowDeliveryModal] = useState(false)
   const [creatingDeliveryOrder, setCreatingDeliveryOrder] = useState(false)
+  const [releasingTable, setReleasingTable] = useState(false)
   const [ordenError, setOrdenError] = useState("")
   const [ordenMessage, setOrdenMessage] = useState("")
   const [realtimeNotice, setRealtimeNotice] = useState("")
@@ -869,6 +892,7 @@ function POS() {
   const ordenMesaRef = useRef(null)
   const draftItemsRef = useRef([])
   const sendingToKitchenRef = useRef(false)
+  const tableOpenIdempotencyRef = useRef(null)
 
   const activeCategories = useMemo(() => posCategories.filter((category) => category.active !== false).sort((a, b) => Number(a.sortOrder) - Number(b.sortOrder)), [posCategories])
   const classicCategories = useMemo(
@@ -1032,6 +1056,8 @@ function POS() {
   const activeSalesChannel = SALES_CHANNELS.find((channel) => channel.id === salesChannel) || SALES_CHANNELS[0]
   const deliveryDataReady = salesChannel !== "delivery"
     || Boolean(deliveryForm.cliente.trim() && (deliveryForm.telefono.trim() || deliveryForm.whatsapp.trim()) && deliveryForm.direccion1.trim() && deliveryForm.formaPago)
+  const releaseTableAccess = resolveReleaseTableAccess(currentOrder)
+  const canReleaseTable = Boolean(releaseTableAccess.allowed && ordenMesa && !ordenMesa.isSalesChannel && currentOrder)
   const canRequestCashier = Boolean(currentOrder && sentItems.length > 0 && draftItems.length === 0 && ordenMesa && deliveryDataReady)
   const cashierBlockedByDrafts = Boolean(currentOrder && sentItems.length > 0 && draftItems.length > 0 && ordenMesa && deliveryDataReady)
   const activeMinutes = currentOrder ? minutosTranscurridos(currentOrder.created_at) : null
@@ -1040,7 +1066,9 @@ function POS() {
   const serviceEvents = orderEvents.filter((event) => serviceEventTypes.includes(event.event_type)).slice(0, 8)
   const nextServiceAction = !currentOrder
     ? "Agrega productos para iniciar el servicio."
-    : readyItemsCount > 0
+    : posOrderIsZombieOpen(currentOrder)
+      ? "Servicio pendiente de cierre. Libera la mesa o contacta a un supervisor."
+      : readyItemsCount > 0
       ? "Hay productos listos: entrégalos y marca servido."
       : draftItems.length > 0
         ? "Envía los productos nuevos a cocina."
@@ -1078,6 +1106,7 @@ function POS() {
   }
 
   function salirOrdenActual() {
+    // 187: solo navegación — no libera mesa ni modifica BD.
     setOrdenMesa(null)
     setCurrentOrder(null)
     setActiveOrderId("")
@@ -1876,9 +1905,90 @@ function POS() {
     setLayoutMessage("Plano recargado desde la nube.")
   }
 
+  function resetTableOpenIdempotency() {
+    tableOpenIdempotencyRef.current = createPosRpcIdempotencyKey()
+  }
+
+  function resolveReleaseTableAccess(order) {
+    if (!order || ordenMesa?.isSalesChannel) {
+      return { allowed: false, hint: "" }
+    }
+    if (["paid", "cancelled"].includes(order.status)) {
+      return { allowed: false, hint: "El servicio ya está cerrado." }
+    }
+    if (order.status === "partially_paid") {
+      return { allowed: false, hint: "Hay pagos parciales. Usa el flujo de caja para cerrar este servicio." }
+    }
+    const ownerId = order.ownerProfileId || order.owner_profile_id || order.waiterId || order.waiter_id
+    const isOwner = Boolean(ownerId && user?.id && String(ownerId) === String(user.id))
+    const isElevated = POS_ELEVATED_SUPERVISOR_ROLES.includes(user?.role)
+    const inBilling = ["awaiting_bill", "sent_to_cashier"].includes(order.status)
+    const hasKdsHistory = posOrderEverSentToKds(order)
+    if (inBilling || hasKdsHistory) {
+      return {
+        allowed: isElevated,
+        hint: isElevated
+          ? "Liberación excepcional auditada (historial KDS o cobro)."
+          : "Se requiere supervisor, gerente general o administrador autenticado."
+      }
+    }
+    if (isOwner || isElevated) {
+      return { allowed: true, hint: isOwner ? "Liberación por titular del servicio." : "Liberación por supervisor." }
+    }
+    return {
+      allowed: false,
+      hint: "Solo el titular del servicio o un supervisor puede liberar esta mesa."
+    }
+  }
+
+  async function handleReleaseTableService() {
+    if (!currentOrder?.id || !ordenMesa || ordenMesa.isSalesChannel || releasingTable) return
+    const access = resolveReleaseTableAccess(currentOrder)
+    if (!access.allowed) {
+      setOrdenError(access.hint || "No tienes permiso para liberar este servicio.")
+      return
+    }
+    const reason = window.prompt(
+      "Motivo de liberación (mínimo 10 caracteres). Esta acción cancela el servicio y queda auditada:",
+      ""
+    )
+    if (reason == null) return
+    if (String(reason).trim().length < 10) {
+      setOrdenError("Indica un motivo de al menos 10 caracteres para liberar la mesa.")
+      return
+    }
+    if (!window.confirm("¿Confirmas la liberación excepcional de esta mesa? No se puede deshacer desde POS.")) return
+    setReleasingTable(true)
+    setOrdenError("")
+    setOrdenMessage("")
+    try {
+      const result = await releasePosTableService(currentOrder.id, reason.trim(), {
+        idempotencyKey: createPosRpcIdempotencyKey()
+      })
+      if (result.error) throw new Error(result.message || result.error.message)
+      if (result.data?.released === false && result.data?.reason === "already_paid") {
+        setOrdenMessage("La orden ya está pagada. La mesa se liberará cuando el servicio quede terminal.")
+        return
+      }
+      setOrdenMessage("Mesa liberada correctamente.")
+      await cargarMesaDesdeSupabase(ordenMesa, "", { includeHistory: true })
+      setActiveOrderId("")
+      setCurrentOrder(null)
+      setOrden([])
+      setPosStep(3)
+    } catch (error) {
+      setOrdenError(error.message || "No se pudo liberar la mesa.")
+    } finally {
+      setReleasingTable(false)
+    }
+  }
+
   function estadoMesaPorOrden(order) {
-    if (!order || !order.items?.some((item) => item.status !== "cancelled")) return "disponible"
-    if (order.status === "paid") return "pagada"
+    if (!order || ["paid", "cancelled"].includes(order.status)) {
+      if (order?.status === "paid") return "pagada"
+      return "disponible"
+    }
+    if (posOrderIsZombieOpen(order)) return "pendiente_cierre"
     if (order.status === "partially_paid") return "pago_en_proceso"
     if (order.status === "sent_to_cashier") return "pago_en_proceso"
     if (order.status === "awaiting_bill") return "esperando_cuenta"
@@ -1911,6 +2021,7 @@ function POS() {
 
   function inferPasoDesdeMesaPlano(mesa) {
     const estado = mesa?.estado || mesa?.status || "disponible"
+    if (estado === "pendiente_cierre") return 3
     if (estado === "disponible" || estado === "pagada") return 3
     if (["esperando_cuenta", "pago_en_proceso"].includes(estado)) return 4
     if (mesa?.orderCreatedAt || !["disponible", "pagada"].includes(estado)) return 3
@@ -1965,6 +2076,7 @@ function POS() {
       esperando_cuenta: "Esperando cuenta",
       pago_en_proceso: "Pago en proceso",
       pagada: "Pagada",
+      pendiente_cierre: "Pendiente de cierre",
       problema: "Problema",
       en_produccion: "En producción",
       lista_para_servir: "Lista para servir"
@@ -2038,13 +2150,17 @@ function POS() {
     setSeatNames(["Persona 1"])
     setSelectedAssignment("Mesa completa")
     setPosStep(inferPasoDesdeMesaPlano(mesa))
+    resetTableOpenIdempotency()
     setMesaCargando(true)
     if (!esPedidoDomicilioParaLlevar(areaActiva.nombre) && !esPedidoDomicilioParaLlevar(mesa.numero)) {
       setDeliveryErrors({})
     }
     try {
       const order = await cargarMesaDesdeSupabase(selectedTable)
-      if (order && ordenActivaEnMesa(order)) {
+      if (order && posOrderIsZombieOpen(order)) {
+        setPosStep(3)
+        setOrdenMessage("Mesa pendiente de cierre. Libera el servicio anterior o pide ayuda a un supervisor.")
+      } else if (order && ordenActivaEnMesa(order)) {
         restaurarComensalesDesdeOrden(order)
         setPosStep(resolverPasoPos(order))
         setOrdenMessage("")
@@ -3127,6 +3243,10 @@ function POS() {
       setOrdenError("Esta mesa está en proceso de cobro. Devuelve la precuenta antes de agregar productos.")
       return false
     }
+    if (posOrderIsZombieOpen(currentOrder)) {
+      setOrdenError("Mesa pendiente de cierre. Libera el servicio anterior antes de agregar productos.")
+      return false
+    }
     if (productNeedsQuickConfiguration(product)) {
       agregarAOrden(product)
       return true
@@ -3153,6 +3273,10 @@ function POS() {
       setOrdenError("Esta mesa está en proceso de cobro. Devuelve la precuenta antes de agregar productos.")
       return
     }
+    if (posOrderIsZombieOpen(currentOrder)) {
+      setOrdenError("Mesa pendiente de cierre. Libera el servicio anterior antes de agregar productos.")
+      return
+    }
     posDebug("producto seleccionado", {
       producto: item,
       recipeId: productRecipeId(item),
@@ -3169,6 +3293,10 @@ function POS() {
     const safeQuantity = Math.max(1, Number(quantity) || 1)
     if (!ordenMesa) {
       setOrdenError("Selecciona una mesa o tipo de orden antes de agregar productos.")
+      return false
+    }
+    if (posOrderIsZombieOpen(currentOrder)) {
+      setOrdenError("Mesa pendiente de cierre. Libera el servicio anterior antes de agregar productos.")
       return false
     }
 
@@ -3227,17 +3355,32 @@ function POS() {
       let orderId = activeOrderId
       const customerData = await ensureCustomerForSalesChannel()
       if (!orderId) {
-        const created = await createOrGetOpenOrder({
-          tableId: ordenMesa.mesaId,
-          tableName: ordenMesa.isSalesChannel ? ordenMesa.mesaNumero : `Mesa ${ordenMesa.mesaNumero}`,
-          areaId: ordenMesa.areaId,
-          areaName: ordenMesa.areaNombre,
-          salesChannel,
-          customerId: customerData.customer?.id,
-          customerAddressId: customerData.address?.id,
-          deliveryNotes: salesChannel === "delivery" ? buildDeliveryInfoText() : null,
-          externalSource: salesChannel === "online" ? "wix" : null
-        }, user)
+        const openAttemptKey = tableOpenIdempotencyRef.current || createPosRpcIdempotencyKey()
+        tableOpenIdempotencyRef.current = openAttemptKey
+        const openTable = salesChannel === "dine_in" && !ordenMesa.isSalesChannel
+          ? await openPosTableService({
+            tableId: ordenMesa.mesaId,
+            tableName: `Mesa ${ordenMesa.mesaNumero}`,
+            areaId: ordenMesa.areaId,
+            areaName: ordenMesa.areaNombre,
+            salesChannel,
+            customerId: customerData.customer?.id,
+            customerAddressId: customerData.address?.id,
+            deliveryNotes: salesChannel === "delivery" ? buildDeliveryInfoText() : null,
+            externalSource: salesChannel === "online" ? "wix" : null
+          }, { idempotencyKey: openAttemptKey })
+          : await createOrGetOpenOrder({
+            tableId: ordenMesa.mesaId,
+            tableName: ordenMesa.isSalesChannel ? ordenMesa.mesaNumero : `Mesa ${ordenMesa.mesaNumero}`,
+            areaId: ordenMesa.areaId,
+            areaName: ordenMesa.areaNombre,
+            salesChannel,
+            customerId: customerData.customer?.id,
+            customerAddressId: customerData.address?.id,
+            deliveryNotes: salesChannel === "delivery" ? buildDeliveryInfoText() : null,
+            externalSource: salesChannel === "online" ? "wix" : null
+          }, user)
+        const created = openTable
         if (created.error) throw new Error(created.message || created.error.message)
         if (!created.data?.id) throw new Error("Supabase no devolvió la orden creada. Verifica la migración 010_pos_orders.sql.")
         orderId = created.data.id
@@ -3507,10 +3650,6 @@ function POS() {
 
   async function handleClearDraftItems() {
     if (!activeOrderId || draftItems.length === 0) return
-    if (sentItems.length > 0) {
-      setOrdenError("Esta orden ya tiene productos enviados. Para cancelar debes solicitar autorizacion.")
-      return
-    }
     try {
       const result = await clearDraftItems(activeOrderId)
       if (result.error) throw result.error
@@ -4933,6 +5072,10 @@ function POS() {
             enviarCuentaACaja={enviarCuentaACaja}
             dividirCuentaIgual={dividirCuentaIgual}
             salirOrdenActual={salirOrdenActual}
+            handleReleaseTableService={handleReleaseTableService}
+            canReleaseTable={canReleaseTable}
+            releaseTableHint={releaseTableAccess.hint}
+            releasingTable={releasingTable}
             collapsedOrderSections={collapsedOrderSections}
             setCollapsedOrderSections={setCollapsedOrderSections}
             readyItemsCount={readyItemsCount}
@@ -5367,6 +5510,7 @@ const tableStatusStyles = {
   problema: { background: "var(--erp-danger)", borderColor: "#f87171" },
   en_produccion: { background: "#9a3412", borderColor: "#fb923c" },
   lista_para_servir: { background: "#0f766e", borderColor: "#2dd4bf", boxShadow: "0 0 16px rgba(45,212,191,.45)" },
+  pendiente_cierre: { background: "#854d0e", borderColor: "#facc15" },
   reservada: { background: "#78350f", borderColor: "#fbbf24" },
   limpieza: { background: "#1e3a8a", borderColor: "#60a5fa" },
   inactiva: { background: "#374151", borderColor: "#94a3b8" }
