@@ -2614,6 +2614,7 @@
 
 .pos-floor-legend .legend-free { background: #22c55e; }
 .pos-floor-legend .legend-active { background: #f59e0b; }
+.pos-floor-legend .legend-pending-release { background: #eab308; }
 .pos-floor-legend .legend-payment { background: #38bdf8; }
 .pos-floor-legend .legend-late { background: #ef4444; }
 

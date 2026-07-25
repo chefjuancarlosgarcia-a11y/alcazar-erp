@@ -44,6 +44,10 @@ export function PosTicketPanel({
   onSendCashier,
   onSplitBill,
   onExit,
+  onReleaseTable,
+  canReleaseTable = false,
+  releaseTableHint = "",
+  releasingTable = false,
   onToggleActivity,
   showActivity,
   readyItemsCount,
@@ -312,11 +316,20 @@ export function PosTicketPanel({
           </button>
           <button
             type="button"
+            className="pos-action-btn danger"
+            onClick={onReleaseTable}
+            disabled={!canReleaseTable || releasingTable || !ordenMesa || ordenMesa.isSalesChannel}
+            title={releaseTableHint || "Libera el servicio de mesa de forma auditada"}
+          >
+            {releasingTable ? "Liberando..." : "Liberar mesa"}
+          </button>
+          <button
+            type="button"
             className="pos-action-btn exit"
             onClick={onExit}
-            title="Cierra la vista de esta mesa sin cobrar (la comanda sigue en el sistema)"
+            title="Cierra la vista de esta mesa sin liberar el servicio (solo navegación)"
           >
-            Salir de mesa
+            Salir de vista
           </button>
         </div>
       </div>

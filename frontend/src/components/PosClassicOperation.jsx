@@ -92,6 +92,10 @@ export default function PosClassicOperation({
   enviarCuentaACaja,
   dividirCuentaIgual,
   salirOrdenActual,
+  handleReleaseTableService,
+  canReleaseTable = false,
+  releaseTableHint = "",
+  releasingTable = false,
   collapsedOrderSections,
   setCollapsedOrderSections,
   readyItemsCount,
@@ -168,6 +172,7 @@ export default function PosClassicOperation({
                   <div className="pos-floor-legend" aria-hidden="true">
                     <span><i className="legend-free" /> Disponible</span>
                     <span><i className="legend-active" /> En servicio</span>
+                    <span><i className="legend-pending-release" /> Pendiente de cierre</span>
                     <span><i className="legend-payment" /> Cuenta / cobro</span>
                     <span><i className="legend-late" /> Tiempo extendido</span>
                   </div>
@@ -272,6 +277,10 @@ export default function PosClassicOperation({
               onSendCashier={() => enviarCuentaACaja(currentOrder)}
               onSplitBill={dividirCuentaIgual}
               onExit={salirOrdenActual}
+              onReleaseTable={handleReleaseTableService}
+              canReleaseTable={canReleaseTable}
+              releaseTableHint={releaseTableHint}
+              releasingTable={releasingTable}
               onToggleActivity={() => setCollapsedOrderSections((current) => ({ ...current, activity: !current.activity }))}
               showActivity={!collapsedOrderSections.activity}
               readyItemsCount={readyItemsCount}
