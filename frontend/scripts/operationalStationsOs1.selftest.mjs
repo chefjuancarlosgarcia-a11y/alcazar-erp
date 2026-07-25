@@ -370,6 +370,57 @@ const tests = [
       const returnTokenPos = completeBlock.indexOf("access_token")
       if (returnTokenPos < finalizePos) throw new Error("tokens must not be returned before finalize")
     }
+  },
+  {
+    name: "CS23 unknown action rejected at end of edge handler",
+    run() {
+      if (!/return genericInvalid\(origin\)\s*\n\}\)/.test(edge.slice(-400))) {
+        throw new Error("handler must fall through to genericInvalid")
+      }
+    }
+  },
+  {
+    name: "CS24 authorize always getUser and is_operational_stations_admin",
+    run() {
+      const authorizeBlock = edge.slice(edge.indexOf('action === "authorize"'), edge.indexOf('action === "complete"'))
+      if (!/auth\.getUser\(\)/.test(authorizeBlock)) throw new Error("authorize needs getUser")
+      if (!/is_operational_stations_admin/.test(authorizeBlock)) {
+        throw new Error("authorize needs admin RPC")
+      }
+    }
+  },
+  {
+    name: "CS25 edge does not dynamic RPC name from payload",
+    run() {
+      if (/payload\.(rpc|function)/i.test(edge)) throw new Error("dynamic RPC selection forbidden")
+      if (/\.rpc\(\s*String\(payload/.test(edge)) throw new Error("dynamic RPC forbidden")
+    }
+  },
+  {
+    name: "CS26 status and complete require claim secret",
+    run() {
+      const statusBlock = edge.slice(edge.indexOf('action === "status"'), edge.indexOf('action === "authorize"'))
+      const completeBlock = edge.slice(edge.indexOf('action === "complete"'))
+      if (!/device_claim_secret/.test(statusBlock)) throw new Error("status needs claim secret")
+      if (!/device_claim_secret/.test(completeBlock)) throw new Error("complete needs claim secret")
+    }
+  },
+  {
+    name: "CS27 complete uses service adminClient rpc not client-selected RPC",
+    run() {
+      const completeBlock = edge.slice(edge.indexOf('action === "complete"'))
+      if (!/adminClient\.rpc\(\s*["']finalize_station_device_enrollment["']/.test(completeBlock)) {
+        throw new Error("finalize must be fixed name on adminClient")
+      }
+    }
+  },
+  {
+    name: "CS28 runbook documents verify_jwt false and no-verify-jwt deploy",
+    run() {
+      const runbook = read("docs/os1-preproduction-application-runbook.md")
+      if (!/verify_jwt = false/i.test(runbook)) throw new Error("runbook must document verify_jwt false")
+      if (!/--no-verify-jwt/.test(runbook)) throw new Error("runbook must document --no-verify-jwt")
+    }
   }
 ]
 
