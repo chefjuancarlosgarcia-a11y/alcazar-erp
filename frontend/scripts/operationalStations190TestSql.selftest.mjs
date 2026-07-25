@@ -18,8 +18,9 @@ function countMatches(source, pattern) {
 }
 
 const scenarioMatches = [
-  ...testSql.matchAll(/return query\s+select\s+'([a-z0-9_]+)'::text/gi)
+  ...testSql.matchAll(/'([a-z0-9_]+)'::text,/g)
 ]
+const uniqueScenarios = new Set(scenarioMatches.map((m) => m[1]))
 
 const tests = [
   {
@@ -101,21 +102,33 @@ const tests = [
     }
   },
   {
+    name: "190 test SQL includes ACL matrix scenario",
+    run() {
+      if (!/acl_matrix_all_os1_functions[\s\S]*count\(\*\)\s*=\s*20/.test(testSql)) {
+        throw new Error("acl_matrix must require inventory count = 20")
+      }
+      if (!/bool_and\(checks\.ok\)/.test(testSql)) {
+        throw new Error("acl_matrix must use bool_and on ACL rows")
+      }
+      if (!/aclexplode/.test(testSql)) throw new Error("missing aclexplode PUBLIC check")
+    }
+  },
+  {
+    name: "190 test SQL scenario count uses unique scenario names",
+    run() {
+      if (uniqueScenarios.size < 40) {
+        throw new Error(`expected >= 40 unique scenarios, found ${uniqueScenarios.size}`)
+      }
+    }
+  },
+  {
     name: "190 test SQL documents edge/auth skips",
     run() {
       if (!testSql.includes("runtime_skipped_requires_edge_auth_complete")) {
         throw new Error("missing edge skip scenario")
       }
-      const skips = scenarioMatches.filter((m) => m[1].startsWith("runtime_skipped"))
+      const skips = [...uniqueScenarios].filter((s) => s.startsWith("runtime_skipped"))
       if (skips.length < 3) throw new Error("expected multiple runtime_skipped scenarios")
-    }
-  },
-  {
-    name: "190 test SQL scenario count minimum",
-    run() {
-      if (scenarioMatches.length < 40) {
-        throw new Error(`expected >= 40 scenarios, found ${scenarioMatches.length}`)
-      }
     }
   }
 ]
@@ -131,4 +144,6 @@ for (const test of tests) {
     process.exitCode = 1
   }
 }
-console.log(`\n${passed}/${tests.length} passed (${scenarioMatches.length} scenarios detected)`)
+console.log(
+  `\n${passed}/${tests.length} passed (${uniqueScenarios.size} unique scenarios; ${scenarioMatches.length} scenario literals in source)`
+)

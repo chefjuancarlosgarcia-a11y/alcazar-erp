@@ -121,11 +121,34 @@ Detenerse en cualquier gate si el **resultado esperado** no coincide. Guardar **
 
 **Evidencia:** captura “Success” + hora.
 
-**Detenerse si:** cualquier error SQL.
+**Detenerse si:** algún error SQL.
 
 **Rollback aplicable:** no automático; ver rollback forward-only y Gate J.
 
 **NO hacer:** activar flag, crear estaciones, ni correr tests de negocio todavía.
+
+---
+
+## Gate B2 — ACL correctivo 191 (solo si 190 ya está aplicada y Gate C falló permisos)
+
+**Cuándo:** Supabase compartido ya tiene migración **190** pero el test de permisos (`failed_total` en escenarios `perm_*` / `acl_matrix_*`) sigue distinto de cero.
+
+**Dónde:** SQL Editor → New query.
+
+**Preflight ACL (solo lectura):** pegar
+`supabase/schema/diagnose_operational_stations_function_acl_190.sql`
+→ guardar captura; filas con `acl_matches_expected = false` indican qué función corregir.
+
+**Qué pegar para corregir:** archivo completo
+`supabase/schema/191_operational_stations_function_permissions.sql`
+
+**Postflight ACL:** volver a ejecutar el diagnóstico ACL; esperar **todas** las filas `acl_matches_expected = true`.
+
+**Evidencia:** capturas pre/post ACL.
+
+**Detenerse si:** 191 falla o el diagnóstico sigue con mismatches.
+
+**NO hacer:** reejecutar 190 completa; no `REVOKE ON ALL FUNCTIONS IN SCHEMA public`.
 
 ---
 
