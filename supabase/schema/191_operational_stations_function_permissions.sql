@@ -89,4 +89,9 @@ grant execute on function public.list_operational_station_devices_admin(uuid, te
 grant execute on function public.get_operational_station_device_context() to authenticated;
 grant execute on function public.touch_operational_station_device_seen(text) to authenticated;
 
+revoke execute on function public.get_operational_station_device_context()
+  from service_role;
+revoke execute on function public.touch_operational_station_device_seen(text)
+  from service_role;
+
 commit;

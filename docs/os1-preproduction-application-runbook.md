@@ -152,6 +152,19 @@ Detenerse en cualquier gate si el **resultado esperado** no coincide. Guardar **
 
 ---
 
+## Gate B3 — ACL dispositivo 192 (solo si diagnóstico ACL deja 2 filas `authenticated_device` en false)
+
+**Cuándo:** Tras **191**, el diagnóstico ACL muestra `acl_matches_expected = false` únicamente en
+`get_operational_station_device_context` y `touch_operational_station_device_seen` con `service_role_execute = true`.
+
+**Qué pegar:** `supabase/schema/192_operational_station_device_function_permissions.sql`
+
+**Test:** `supabase/schema/192_test_operational_station_device_function_permissions.sql` → `failed_total = 0`.
+
+**Evidencia:** diagnóstico ACL con **20/20** `acl_matches_expected = true`.
+
+---
+
 ## Gate C — Test SQL 190
 
 **Dónde:** SQL Editor → **nueva** query.

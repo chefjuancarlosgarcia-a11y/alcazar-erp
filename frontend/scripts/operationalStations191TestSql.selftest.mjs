@@ -39,6 +39,18 @@ const tests = [
     }
   },
   {
+    name: "191 migration revokes service_role on device RPCs",
+    run() {
+      const mig191 = readFileSync(
+        resolve(root, "supabase/schema/191_operational_stations_function_permissions.sql"),
+        "utf8"
+      )
+      if (!/revoke execute on function public\.get_operational_station_device_context\(\)\s*\n\s*from service_role/i.test(mig191)) {
+        throw new Error("191 canonical must revoke device context from service_role")
+      }
+    }
+  },
+  {
     name: "191 test uses aclexplode for PUBLIC",
     run() {
       if (!/aclexplode/.test(testSql)) throw new Error("missing aclexplode")
