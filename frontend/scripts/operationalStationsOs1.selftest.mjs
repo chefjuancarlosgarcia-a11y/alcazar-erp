@@ -16,6 +16,21 @@ function grepOs1(rel, pattern) {
 
 const sql190 = read("supabase/schema/190_operational_stations_foundation.sql")
 const edge = read("supabase/functions/operational-station-enroll/index.ts")
+const edgeCors = read("supabase/functions/operational-station-enroll/cors.ts")
+
+/** Mirror of cors.ts evaluateCors for local policy tests (keep in sync). */
+function parseEnrollOrigins(envValue) {
+  return (envValue || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+}
+function evaluateCors(origin, allowlist) {
+  if (allowlist.length === 0) return { ok: false, reason: "empty_allowlist" }
+  if (!origin) return { ok: false, reason: "missing_origin" }
+  if (!allowlist.includes(origin)) return { ok: false, reason: "origin_not_allowed" }
+  return { ok: true, origin }
+}
 const svc = read("frontend/src/services/operationalStationsService.js")
 const enrollPage = read("frontend/src/pages/StationEnroll.jsx")
 const settingsPage = read("frontend/src/pages/OperationalStationsSettings.jsx")
@@ -290,7 +305,86 @@ const tests = [
   {
     name: "CS11 CORS Vary Origin",
     run() {
-      if (!/Vary:\s*"Origin"|Vary: "Origin"/.test(edge)) throw new Error("missing Vary Origin")
+      const corsBundle = edge + edgeCors
+      if (!/Vary:\s*"Origin"|Vary: "Origin"/.test(corsBundle)) throw new Error("missing Vary Origin")
+    }
+  },
+  {
+    name: "CS11b CORS no allowlist first-origin fallback",
+    run() {
+      const bundle = edge + edgeCors
+      if (/allowlist\[0\]/.test(bundle)) throw new Error("must not use allowlist[0] as fallback")
+      if (/allowlist\.includes\(origin\)\s*\?\s*origin\s*:\s*allowlist/.test(bundle)) {
+        throw new Error("must not ternary fallback to allowlist entry")
+      }
+    }
+  },
+  {
+    name: "CS11c CORS invalid origin policy 403 without ACAO",
+    run() {
+      if (!/corsForbiddenResponse/.test(edge)) throw new Error("handler must use corsForbiddenResponse")
+      if (!/status:\s*403/.test(edgeCors)) throw new Error("corsForbiddenResponse must be 403")
+      const forbiddenBlock = edgeCors.slice(
+        edgeCors.indexOf("export function corsForbiddenResponse"),
+        edgeCors.indexOf("export function corsOptionsResponse")
+      )
+      if (/Access-Control-Allow-Origin/.test(forbiddenBlock)) {
+        throw new Error("403 must not set Access-Control-Allow-Origin")
+      }
+    }
+  },
+  {
+    name: "CS11d CORS allowed origin reflected exactly",
+    run() {
+      if (!/"Access-Control-Allow-Origin":\s*origin/.test(edgeCors)) {
+        throw new Error("ACAO must reflect allowed origin parameter only")
+      }
+      if (/Access-Control-Allow-Origin":\s*"\*"/.test(edgeCors + edge)) {
+        throw new Error("wildcard ACAO forbidden")
+      }
+    }
+  },
+  {
+    name: "CS11e CORS OPTIONS POST methods",
+    run() {
+      if (!/corsOptionsResponse/.test(edge)) throw new Error("OPTIONS must use corsOptionsResponse")
+      if (!/POST, OPTIONS/.test(edgeCors)) throw new Error("missing POST, OPTIONS methods")
+      if (!/status:\s*204/.test(edgeCors)) throw new Error("OPTIONS should return 204")
+    }
+  },
+  {
+    name: "CS11f CORS gate before body action RPC Auth rate limit",
+    run() {
+      const serveStart = edge.indexOf("Deno.serve")
+      const corsGateEnd = edge.indexOf("if (req.method === \"OPTIONS\")")
+      const arrayBufferPos = edge.indexOf("req.arrayBuffer()")
+      const rateLimitPos = edge.indexOf("function rateLimit")
+      const claimRpcPos = edge.indexOf('action === "claim"')
+      if (corsGateEnd < serveStart || arrayBufferPos < corsGateEnd) {
+        throw new Error("CORS gate must run before reading body")
+      }
+      if (claimRpcPos < arrayBufferPos) throw new Error("actions must follow body read")
+      if (!/if \(!corsDecision\.ok\)/.test(edge.slice(serveStart, arrayBufferPos))) {
+        throw new Error("missing corsDecision.ok gate before side effects")
+      }
+      if (rateLimitPos > serveStart) {
+        /* rateLimit defined above handler; invocations only after gate */
+      }
+      if (/createUser/.test(edge.slice(serveStart, arrayBufferPos))) {
+        throw new Error("Auth must not run before CORS gate")
+      }
+    }
+  },
+  {
+    name: "CS11g CORS evaluateCors unit policy",
+    run() {
+      const list = parseEnrollOrigins("http://localhost:5174, https://alcazar-erp.vercel.app")
+      const ok = evaluateCors("http://localhost:5174", list)
+      if (!ok.ok || ok.origin !== "http://localhost:5174") throw new Error("allowed origin must pass")
+      const bad = evaluateCors("https://sitio-no-autorizado.example", list)
+      if (bad.ok) throw new Error("disallowed origin must fail")
+      const missing = evaluateCors(null, list)
+      if (missing.ok) throw new Error("missing Origin must fail (browser-only OS1 v1)")
     }
   },
   {
@@ -374,7 +468,7 @@ const tests = [
   {
     name: "CS23 unknown action rejected at end of edge handler",
     run() {
-      if (!/return genericInvalid\(origin\)\s*\n\}\)/.test(edge.slice(-400))) {
+      if (!/return genericInvalid\(allowedOrigin\)\s*\n\}\)/.test(edge.slice(-400))) {
         throw new Error("handler must fall through to genericInvalid")
       }
     }

@@ -1,53 +1,43 @@
 import { createClient } from "@supabase/supabase-js"
+import {
+  corsForbiddenResponse,
+  corsHeadersForAllowedOrigin,
+  corsOptionsResponse,
+  evaluateCors,
+  parseEnrollOrigins
+} from "./cors.ts"
 
 const MAX_BODY_BYTES = 32_768
 const RATE_WINDOW_MS = 60_000
 const RATE_MAX = 30
 const rateBuckets = new Map<string, { count: number; resetAt: number }>()
 
-function corsHeaders(origin: string | null): Record<string, string> {
-  const allowlist = (Deno.env.get("OPERATIONAL_STATION_ENROLL_ORIGINS") || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean)
-  const allowOrigin =
-    origin && allowlist.includes(origin) ? origin : allowlist[0] || ""
-  const headers: Record<string, string> = {
-    "Access-Control-Allow-Headers":
-      "authorization, x-client-info, apikey, content-type, x-idempotency-key",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    Vary: "Origin"
-  }
-  if (allowOrigin) headers["Access-Control-Allow-Origin"] = allowOrigin
-  return headers
-}
-
 function json(
   body: Record<string, unknown>,
   status = 200,
-  origin: string | null = null,
+  allowedOrigin: string,
   extraHeaders: Record<string, string> = {}
 ) {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
-      ...corsHeaders(origin),
+      ...corsHeadersForAllowedOrigin(allowedOrigin),
       "Content-Type": "application/json",
       ...extraHeaders
     }
   })
 }
 
-function genericInvalid(origin: string | null) {
-  return json({ error: "Solicitud invalida." }, 400, origin)
+function genericInvalid(allowedOrigin: string) {
+  return json({ error: "Solicitud invalida." }, 400, allowedOrigin)
 }
 
-function requireIdempotencyKey(key: string, origin: string | null) {
-  if (!key || key.length > 128) return genericInvalid(origin)
+function requireIdempotencyKey(key: string, allowedOrigin: string) {
+  if (!key || key.length > 128) return genericInvalid(allowedOrigin)
   return null
 }
 
-function rateLimit(clientKey: string, origin: string | null) {
+function rateLimit(clientKey: string, allowedOrigin: string) {
   const now = Date.now()
   const bucket = rateBuckets.get(clientKey)
   if (!bucket || now > bucket.resetAt) {
@@ -55,7 +45,7 @@ function rateLimit(clientKey: string, origin: string | null) {
     return null
   }
   bucket.count += 1
-  if (bucket.count > RATE_MAX) return json({ error: "Solicitud invalida." }, 429, origin)
+  if (bucket.count > RATE_MAX) return json({ error: "Solicitud invalida." }, 429, allowedOrigin)
   return null
 }
 
@@ -88,34 +78,41 @@ function strongPassword() {
 }
 
 Deno.serve(async (req) => {
-  const origin = req.headers.get("Origin")
+  const requestOrigin = req.headers.get("Origin")
+  const allowlist = parseEnrollOrigins(Deno.env.get("OPERATIONAL_STATION_ENROLL_ORIGINS"))
+  const corsDecision = evaluateCors(requestOrigin, allowlist)
+  if (!corsDecision.ok) {
+    return corsForbiddenResponse()
+  }
+  const allowedOrigin = corsDecision.origin
+
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders(origin) })
+    return corsOptionsResponse(allowedOrigin)
   }
   if (req.method !== "POST") {
-    return json({ error: "Metodo no permitido." }, 405, origin)
+    return json({ error: "Metodo no permitido." }, 405, allowedOrigin)
   }
 
   const contentType = req.headers.get("content-type") || ""
   if (!contentType.toLowerCase().includes("application/json")) {
-    return genericInvalid(origin)
+    return genericInvalid(allowedOrigin)
   }
 
   const raw = await req.arrayBuffer()
-  if (raw.byteLength > MAX_BODY_BYTES) return genericInvalid(origin)
+  if (raw.byteLength > MAX_BODY_BYTES) return genericInvalid(allowedOrigin)
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY")
   if (!supabaseUrl || !serviceKey || !anonKey) {
-    return json({ error: "Configuracion incompleta." }, 500, origin)
+    return json({ error: "Configuracion incompleta." }, 500, allowedOrigin)
   }
 
   let payload: Record<string, unknown>
   try {
     payload = JSON.parse(new TextDecoder().decode(raw))
   } catch {
-    return genericInvalid(origin)
+    return genericInvalid(allowedOrigin)
   }
 
   const action = String(payload.action || "")
@@ -128,12 +125,12 @@ Deno.serve(async (req) => {
   })
 
   if (action === "claim") {
-    const invalidKey = requireIdempotencyKey(idempotencyKey, origin)
+    const invalidKey = requireIdempotencyKey(idempotencyKey, allowedOrigin)
     if (invalidKey) return invalidKey
     const token = String(payload.token || "")
     const fingerprint = String(payload.client_fingerprint || "")
     const userAgent = String(payload.user_agent || "")
-    const limited = rateLimit(clientRateKey(req, fingerprint || "claim"), origin)
+    const limited = rateLimit(clientRateKey(req, fingerprint || "claim"), allowedOrigin)
     if (limited) return limited
 
     let claimSecret = newClaimSecret()
@@ -146,7 +143,7 @@ Deno.serve(async (req) => {
       p_user_agent: userAgent,
       p_idempotency_key: idempotencyKey
     })
-    if (error) return genericInvalid(origin)
+    if (error) return genericInvalid(allowedOrigin)
     const row = data as Record<string, unknown>
     const response: Record<string, unknown> = {
       ok: true,
@@ -158,15 +155,15 @@ Deno.serve(async (req) => {
     if (row.claim_secret_issued === true && claimSecret) {
       response.device_claim_secret = claimSecret
     }
-    return json(response, 200, origin)
+    return json(response, 200, allowedOrigin)
   }
 
   if (action === "status") {
     const deviceId = String(payload.device_id || "")
     const enrollmentId = String(payload.enrollment_id || "")
     const claimSecret = String(payload.device_claim_secret || "")
-    if (!claimSecret) return genericInvalid(origin)
-    const limited = rateLimit(clientRateKey(req, `${enrollmentId}:status`), origin)
+    if (!claimSecret) return genericInvalid(allowedOrigin)
+    const limited = rateLimit(clientRateKey(req, `${enrollmentId}:status`), allowedOrigin)
     if (limited) return limited
     const claimSecretHash = await sha256Hex(claimSecret)
     const { data, error } = await adminClient.rpc("get_device_enrollment_status", {
@@ -174,18 +171,18 @@ Deno.serve(async (req) => {
       p_enrollment_id: enrollmentId,
       p_claim_secret_hash: claimSecretHash
     })
-    if (error) return genericInvalid(origin)
+    if (error) return genericInvalid(allowedOrigin)
     const status = String((data as Record<string, unknown>)?.status || "invalid")
-    if (status === "invalid") return genericInvalid(origin)
-    return json({ ok: true, status }, 200, origin)
+    if (status === "invalid") return genericInvalid(allowedOrigin)
+    return json({ ok: true, status }, 200, allowedOrigin)
   }
 
   if (action === "authorize") {
-    const invalidKey = requireIdempotencyKey(idempotencyKey, origin)
+    const invalidKey = requireIdempotencyKey(idempotencyKey, allowedOrigin)
     if (invalidKey) return invalidKey
     const authHeader = req.headers.get("Authorization")
     if (!authHeader?.startsWith("Bearer ")) {
-      return json({ error: "No autorizado." }, 401, origin)
+      return json({ error: "No autorizado." }, 401, allowedOrigin)
     }
     const userClient = createClient(supabaseUrl, anonKey, {
       global: { headers: { Authorization: authHeader } },
@@ -193,12 +190,12 @@ Deno.serve(async (req) => {
     })
     const { data: userData, error: userError } = await userClient.auth.getUser()
     if (userError || !userData.user) {
-      return json({ error: "No autorizado." }, 401, origin)
+      return json({ error: "No autorizado." }, 401, allowedOrigin)
     }
     const { data: isAdmin, error: adminError } = await userClient.rpc(
       "is_operational_stations_admin"
     )
-    if (adminError || !isAdmin) return json({ error: "No autorizado." }, 403, origin)
+    if (adminError || !isAdmin) return json({ error: "No autorizado." }, 403, allowedOrigin)
 
     const deviceId = String(payload.device_id || "")
     const confirmationCode = String(payload.confirmation_code || "")
@@ -212,19 +209,19 @@ Deno.serve(async (req) => {
       p_reason: reason || null
     })
     if (authRpcError) {
-      return json({ error: "No se pudo autorizar el dispositivo." }, 400, origin)
+      return json({ error: "No se pudo autorizar el dispositivo." }, 400, allowedOrigin)
     }
-    return json({ ok: true, status: "authorized" }, 200, origin)
+    return json({ ok: true, status: "authorized" }, 200, allowedOrigin)
   }
 
   if (action === "complete") {
-    const invalidKey = requireIdempotencyKey(idempotencyKey, origin)
+    const invalidKey = requireIdempotencyKey(idempotencyKey, allowedOrigin)
     if (invalidKey) return invalidKey
     const enrollmentId = String(payload.enrollment_id || "")
     const deviceId = String(payload.device_id || "")
     let claimSecret = String(payload.device_claim_secret || "")
-    if (!claimSecret) return genericInvalid(origin)
-    const limited = rateLimit(clientRateKey(req, `${enrollmentId}:complete`), origin)
+    if (!claimSecret) return genericInvalid(allowedOrigin)
+    const limited = rateLimit(clientRateKey(req, `${enrollmentId}:complete`), allowedOrigin)
     if (limited) return limited
 
     const claimSecretHash = await sha256Hex(claimSecret)
@@ -236,7 +233,7 @@ Deno.serve(async (req) => {
         p_claim_secret_hash: claimSecretHash
       }
     )
-    if (gateError || gate?.status !== "authorized") return genericInvalid(origin)
+    if (gateError || gate?.status !== "authorized") return genericInvalid(allowedOrigin)
 
     const email = `station-device-${deviceId.replace(/-/g, "")}@stations.internal`
     let password = strongPassword()
@@ -255,7 +252,7 @@ Deno.serve(async (req) => {
           p_enrollment_id: enrollmentId,
           p_reason: "auth_create_failed"
         })
-        return genericInvalid(origin)
+        return genericInvalid(allowedOrigin)
       }
       authUserId = created.user.id
 
@@ -275,7 +272,7 @@ Deno.serve(async (req) => {
           p_enrollment_id: enrollmentId,
           p_reason: "sign_in_failed"
         })
-        return genericInvalid(origin)
+        return genericInvalid(allowedOrigin)
       }
 
       const { error: finalizeError } = await adminClient.rpc(
@@ -296,7 +293,7 @@ Deno.serve(async (req) => {
           p_enrollment_id: enrollmentId,
           p_reason: "finalize_failed"
         })
-        return genericInvalid(origin)
+        return genericInvalid(allowedOrigin)
       }
 
       claimSecret = ""
@@ -310,7 +307,7 @@ Deno.serve(async (req) => {
           token_type: signInData.session.token_type
         },
         200,
-        origin,
+        allowedOrigin,
         {
           "Cache-Control": "no-store",
           Pragma: "no-cache"
@@ -322,5 +319,5 @@ Deno.serve(async (req) => {
     }
   }
 
-  return genericInvalid(origin)
+  return genericInvalid(allowedOrigin)
 })
