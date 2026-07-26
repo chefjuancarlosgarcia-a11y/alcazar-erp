@@ -31,52 +31,67 @@ begin
   return query
   select 'acl_service_role_edge_bundle'::text,
     (
-      select bool_and(has_function_privilege('service_role', sig, 'EXECUTE'))
-      from unnest(array[
-        'public.claim_station_enrollment(text,text,text,text,text)'::regprocedure,
-        'public.get_device_enrollment_status(uuid,uuid,text)'::regprocedure,
-        'public.finalize_station_device_enrollment(uuid,uuid,uuid,text,text)'::regprocedure
-      ]) as sig
+      select bool_and(has_function_privilege('service_role', p.oid, 'EXECUTE'))
+      from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public'
+        and p.proname in (
+          'claim_station_enrollment',
+          'get_device_enrollment_status',
+          'finalize_station_device_enrollment'
+        )
     )
     and (
-      select bool_and(not has_function_privilege('authenticated', sig, 'EXECUTE'))
-      from unnest(array[
-        'public.claim_station_enrollment(text,text,text,text,text)'::regprocedure,
-        'public.finalize_station_device_enrollment(uuid,uuid,uuid,text,text)'::regprocedure
-      ]) as sig
+      select bool_and(not has_function_privilege('authenticated', p.oid, 'EXECUTE'))
+      from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public'
+        and p.proname in ('claim_station_enrollment', 'finalize_station_device_enrollment')
     ),
     'Edge RPC service_role only'::text;
 
   return query
   select 'acl_anon_no_direct_os1_rpc'::text,
     (
-      select bool_and(not has_function_privilege('anon', sig, 'EXECUTE'))
-      from unnest(array[
-        'public.claim_station_enrollment(text,text,text,text,text)'::regprocedure,
-        'public.provision_operational_station(text,text,text,text,uuid,text)'::regprocedure,
-        'public.create_station_enrollment_token(uuid,text)'::regprocedure
-      ]) as sig
+      select bool_and(not has_function_privilege('anon', p.oid, 'EXECUTE'))
+      from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public'
+        and p.proname in (
+          'claim_station_enrollment',
+          'provision_operational_station',
+          'create_station_enrollment_token'
+        )
     ),
     'anon denied direct OS1 RPC'::text;
 
   return query
   select 'acl_authenticated_admin_bundle'::text,
     (
-      select bool_and(has_function_privilege('authenticated', sig, 'EXECUTE'))
-      from unnest(array[
-        'public.provision_operational_station(text,text,text,text,uuid,text)'::regprocedure,
-        'public.authorize_station_device_enrollment(uuid,text,text,text)'::regprocedure,
-        'public.is_operational_stations_admin()'::regprocedure
-      ]) as sig
+      select bool_and(has_function_privilege('authenticated', p.oid, 'EXECUTE'))
+      from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public'
+        and p.proname in (
+          'provision_operational_station',
+          'authorize_station_device_enrollment',
+          'is_operational_stations_admin'
+        )
     ),
     'admin RPC authenticated'::text;
 
   return query
   select 'acl_log_not_world_executable'::text,
-    not has_function_privilege('anon', 'public.log_operational_station_event(uuid,uuid,text,uuid,jsonb,text)', 'EXECUTE')
+    not has_function_privilege(
+      'anon',
+      (select p.oid from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+       where n.nspname = 'public' and p.proname = 'log_operational_station_event'),
+      'EXECUTE'
+    )
     and not has_function_privilege(
       'authenticated',
-      'public.log_operational_station_event(uuid,uuid,text,uuid,jsonb,text)',
+      (select p.oid from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+       where n.nspname = 'public' and p.proname = 'log_operational_station_event'),
       'EXECUTE'
     ),
     'log_operational_station_event internal'::text;
@@ -143,21 +158,9 @@ begin
               select 1 from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
               where a.grantee = 0 and a.privilege_type = 'EXECUTE'
             ) as public_execute,
-            has_function_privilege(
-              'anon',
-              format('public.%I(%s)', p.proname, pg_get_function_identity_arguments(p.oid))::regprocedure,
-              'EXECUTE'
-            ) as anon_execute,
-            has_function_privilege(
-              'authenticated',
-              format('public.%I(%s)', p.proname, pg_get_function_identity_arguments(p.oid))::regprocedure,
-              'EXECUTE'
-            ) as authenticated_execute,
-            has_function_privilege(
-              'service_role',
-              format('public.%I(%s)', p.proname, pg_get_function_identity_arguments(p.oid))::regprocedure,
-              'EXECUTE'
-            ) as service_role_execute
+            has_function_privilege('anon', p.oid, 'EXECUTE') as anon_execute,
+            has_function_privilege('authenticated', p.oid, 'EXECUTE') as authenticated_execute,
+            has_function_privilege('service_role', p.oid, 'EXECUTE') as service_role_execute
           from pg_proc p
           join pg_namespace n on n.oid = p.pronamespace
           where n.nspname = 'public'

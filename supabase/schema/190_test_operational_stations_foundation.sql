@@ -188,38 +188,56 @@ begin
 
   return query
   select 'perm_anon_no_claim_execute'::text,
-    not has_function_privilege('anon', 'public.claim_station_enrollment(text,text,text,text,text)', 'EXECUTE'),
+    not has_function_privilege(
+      'anon',
+      (select p.oid from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+       where n.nspname = 'public' and p.proname = 'claim_station_enrollment'),
+      'EXECUTE'
+    ),
     'anon claim denied'::text;
 
   return query
   select 'perm_anon_no_finalize_execute'::text,
     not has_function_privilege(
       'anon',
-      'public.finalize_station_device_enrollment(uuid,uuid,uuid,text,text)',
+      (select p.oid from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+       where n.nspname = 'public' and p.proname = 'finalize_station_device_enrollment'),
       'EXECUTE'
     ),
     'anon finalize denied'::text;
 
   return query
   select 'perm_authenticated_no_claim_execute'::text,
-    not has_function_privilege('authenticated', 'public.claim_station_enrollment(text,text,text,text,text)', 'EXECUTE'),
+    not has_function_privilege(
+      'authenticated',
+      (select p.oid from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+       where n.nspname = 'public' and p.proname = 'claim_station_enrollment'),
+      'EXECUTE'
+    ),
     'authenticated claim denied'::text;
 
   return query
   select 'perm_service_role_has_claim_execute'::text,
-    has_function_privilege('service_role', 'public.claim_station_enrollment(text,text,text,text,text)', 'EXECUTE'),
+    has_function_privilege(
+      'service_role',
+      (select p.oid from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+       where n.nspname = 'public' and p.proname = 'claim_station_enrollment'),
+      'EXECUTE'
+    ),
     'service_role claim allowed'::text;
 
   return query
   select 'perm_finalize_service_role_only'::text,
     has_function_privilege(
       'service_role',
-      'public.finalize_station_device_enrollment(uuid,uuid,uuid,text,text)',
+      (select p.oid from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+       where n.nspname = 'public' and p.proname = 'finalize_station_device_enrollment'),
       'EXECUTE'
     )
     and not has_function_privilege(
       'authenticated',
-      'public.finalize_station_device_enrollment(uuid,uuid,uuid,text,text)',
+      (select p.oid from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+       where n.nspname = 'public' and p.proname = 'finalize_station_device_enrollment'),
       'EXECUTE'
     ),
     'finalize limited to service_role'::text;
@@ -285,21 +303,9 @@ begin
               from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
               where a.grantee = 0 and a.privilege_type = 'EXECUTE'
             ) as public_execute,
-            has_function_privilege(
-              'anon',
-              format('public.%I(%s)', p.proname, pg_get_function_identity_arguments(p.oid))::regprocedure,
-              'EXECUTE'
-            ) as anon_execute,
-            has_function_privilege(
-              'authenticated',
-              format('public.%I(%s)', p.proname, pg_get_function_identity_arguments(p.oid))::regprocedure,
-              'EXECUTE'
-            ) as authenticated_execute,
-            has_function_privilege(
-              'service_role',
-              format('public.%I(%s)', p.proname, pg_get_function_identity_arguments(p.oid))::regprocedure,
-              'EXECUTE'
-            ) as service_role_execute
+            has_function_privilege('anon', p.oid, 'EXECUTE') as anon_execute,
+            has_function_privilege('authenticated', p.oid, 'EXECUTE') as authenticated_execute,
+            has_function_privilege('service_role', p.oid, 'EXECUTE') as service_role_execute
           from pg_proc p
           join pg_namespace n on n.oid = p.pronamespace
           where n.nspname = 'public'

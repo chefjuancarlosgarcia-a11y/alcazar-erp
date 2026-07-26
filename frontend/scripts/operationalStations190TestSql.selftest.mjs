@@ -102,6 +102,26 @@ const tests = [
     }
   },
   {
+    name: "190 test ACL checks use pg_proc oid not regprocedure",
+    run() {
+      if (/format\('public\.%I\(%s\)',\s*p\.proname,\s*pg_get_function_identity_arguments/.test(testSql)) {
+        throw new Error("must not build regprocedure from identity arguments for privileges")
+      }
+      if (/has_function_privilege\([^)]*'public\./.test(testSql)) {
+        throw new Error("has_function_privilege must not use string function signatures")
+      }
+      if (/to_regprocedure/i.test(testSql)) {
+        throw new Error("must not use to_regprocedure in 190 test")
+      }
+      if (!/has_function_privilege\('anon',\s*p\.oid,\s*'EXECUTE'\)/.test(testSql)) {
+        throw new Error("acl_matrix must use has_function_privilege with p.oid")
+      }
+      if (!/has_function_privilege\(\s*'anon',\s*\(\s*select p\.oid/.test(testSql)) {
+        throw new Error("spot perm checks must resolve oid from pg_proc")
+      }
+    }
+  },
+  {
     name: "190 test SQL includes ACL matrix scenario",
     run() {
       if (!/acl_matrix_all_os1_functions[\s\S]*count\(\*\)\s*=\s*20/.test(testSql)) {

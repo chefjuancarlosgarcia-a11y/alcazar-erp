@@ -51,6 +51,23 @@ const tests = [
     }
   },
   {
+    name: "191 test ACL checks use pg_proc oid not regprocedure",
+    run() {
+      if (/format\('public\.%I\(%s\)',\s*p\.proname,\s*pg_get_function_identity_arguments/.test(testSql)) {
+        throw new Error("must not build regprocedure from identity arguments")
+      }
+      if (/::regprocedure/.test(testSql)) {
+        throw new Error("191 test must not use regprocedure for ACL checks")
+      }
+      if (/has_function_privilege\([^)]*'public\./.test(testSql)) {
+        throw new Error("has_function_privilege must not use string signatures")
+      }
+      if (!/has_function_privilege\('anon',\s*p\.oid,\s*'EXECUTE'\)/.test(testSql)) {
+        throw new Error("matrix must use has_function_privilege with p.oid")
+      }
+    }
+  },
+  {
     name: "191 test uses aclexplode for PUBLIC",
     run() {
       if (!/aclexplode/.test(testSql)) throw new Error("missing aclexplode")
