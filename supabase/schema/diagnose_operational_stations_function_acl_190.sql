@@ -54,21 +54,9 @@ acl_flags as (
       where a.grantee = 0
         and a.privilege_type = 'EXECUTE'
     ) as public_execute,
-    has_function_privilege(
-      'anon',
-      format('%I.%I(%s)', f.schema_name, f.function_name, f.function_signature)::regprocedure,
-      'EXECUTE'
-    ) as anon_execute,
-    has_function_privilege(
-      'authenticated',
-      format('%I.%I(%s)', f.schema_name, f.function_name, f.function_signature)::regprocedure,
-      'EXECUTE'
-    ) as authenticated_execute,
-    has_function_privilege(
-      'service_role',
-      format('%I.%I(%s)', f.schema_name, f.function_name, f.function_signature)::regprocedure,
-      'EXECUTE'
-    ) as service_role_execute,
+    has_function_privilege('anon', f.oid, 'EXECUTE') as anon_execute,
+    has_function_privilege('authenticated', f.oid, 'EXECUTE') as authenticated_execute,
+    has_function_privilege('service_role', f.oid, 'EXECUTE') as service_role_execute,
     case f.function_name
       when 'claim_station_enrollment' then 'service_role_only'
       when 'verify_operational_device_claim_secret' then 'service_role_only'
