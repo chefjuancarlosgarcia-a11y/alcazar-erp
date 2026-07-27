@@ -1,0 +1,69 @@
+.station-cash-entry {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: var(--erp-space-24);
+}
+
+.station-cash-entry--active {
+  max-width: none;
+  margin: 0;
+}
+
+.station-cash-entry-header {
+  margin-bottom: var(--erp-space-24);
+}
+
+.station-cash-entry-eyebrow {
+  color: var(--erp-text-muted, #94a3b8);
+  margin: 0 0 var(--erp-space-8);
+}
+
+.station-cash-entry-operator {
+  font-size: 1.125rem;
+  margin: var(--erp-space-8) 0 0;
+}
+
+.station-cash-entry-idle,
+.station-cash-entry-muted {
+  color: var(--erp-text-muted, #94a3b8);
+}
+
+.station-cash-entry-error {
+  color: #f87171;
+  margin-bottom: var(--erp-space-16);
+}
+
+.station-cash-pin-display {
+  font-size: 2rem;
+  letter-spacing: 0.5em;
+  text-align: center;
+  margin-bottom: var(--erp-space-24);
+  min-height: 48px;
+}
+
+.station-cash-pin-pad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--erp-space-16);
+}
+
+.station-cash-pin-key {
+  min-height: var(--erp-btn-height, 48px);
+  font-size: 1.25rem;
+  border-radius: var(--erp-radius-card, 12px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(15, 23, 42, 0.8);
+  color: #e2e8f0;
+  cursor: pointer;
+}
+
+.station-cash-entry-lock {
+  min-height: var(--erp-btn-height, 48px);
+  padding: 0 var(--erp-space-16);
+  border-radius: var(--erp-radius-card, 12px);
+  border: 0;
+  background: #0ea5a4;
+  color: #022c2c;
+  font-weight: 700;
+  cursor: pointer;
+}

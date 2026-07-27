@@ -8,6 +8,7 @@ import ForgotUser from "../pages/ForgotUser"
 import UpdatePassword from "../pages/UpdatePassword"
 import Kiosk from "../pages/Kiosk"
 import ProtectedRoute from "./ProtectedRoute"
+import StationDeviceRoute from "./StationDeviceRoute"
 import { logPerformanceEvent } from "../utils/performanceLogger"
 
 function lazyWithPerformanceLogging(moduleName, factory) {
@@ -66,6 +67,7 @@ const OperationsCenter = lazyWithPerformanceLogging("operations_center", () => i
 const BakeryProductionHub = lazyWithPerformanceLogging("bakery", () => import("../modules/bakery/BakeryProductionHub"))
 const OperationalStationsSettings = lazyWithPerformanceLogging("operational_stations", () => import("../pages/OperationalStationsSettings"))
 const StationEnroll = lazyWithPerformanceLogging("station_enroll", () => import("../pages/StationEnroll"))
+const StationCashEntry = lazyWithPerformanceLogging("station_cash", () => import("../pages/StationCashEntry"))
 
 function PageLoadingFallback() {
   return <p>Cargando módulo...</p>
@@ -88,6 +90,14 @@ function AppRoutes() {
           <Route path="/update-password" element={<UpdatePassword />} />
           <Route path="/kiosk" element={<Kiosk />} />
           <Route path="/station-enroll" element={<StationEnroll />} />
+          <Route
+            path="/station/cash"
+            element={
+              <StationDeviceRoute>
+                <StationCashEntry />
+              </StationDeviceRoute>
+            }
+          />
           <Route element={<MainLayout />}>
             <Route index element={<DefaultRedirect />} />
             <Route path="/dashboard" element={<ProtectedRoute module="dashboard"><Dashboard /></ProtectedRoute>} />
