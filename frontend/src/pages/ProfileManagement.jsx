@@ -9,6 +9,7 @@ import {
   setAttendancePin,
   validateAttendancePinAvailable
 } from "../services/attendanceService"
+import OperationalAccessSection from "../components/OperationalAccessSection"
 import {
   deleteEmployeeCustomSchedule,
   getEmployeeCustomSchedules,
@@ -1268,6 +1269,13 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
                 <p className="profiles-note">Puedes guardar la informacion del usuario sin generar PIN. El PIN solo se asigna o cambia si este campo tiene 4 digitos al presionar Guardar.</p>
                 {pinActionMessage && <p className="profiles-pin-feedback" role="status">{pinActionMessage}</p>}
               </FormSection>
+
+              {editingProfile?.id && (
+                <OperationalAccessSection
+                  profileId={editingProfile.id}
+                  canManage={["admin", "gerente_general", "rrhh", "recursos_humanos"].includes(user?.role)}
+                />
+              )}
             </div>
 
             <footer className="profiles-modal-actions">

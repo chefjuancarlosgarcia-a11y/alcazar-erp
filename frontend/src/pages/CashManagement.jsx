@@ -3,16 +3,8 @@ import { useSearchParams } from "react-router-dom"
 import FinanceIntegrationPanel from "../components/FinanceIntegrationPanel"
 import { useAuth } from "../context/AuthContext"
 import { useActionGuard } from "../hooks/useActionGuard"
-import {
-  cashSummary,
-  closeCashSession,
-  createCashMovement,
-  getCashMovements,
-  getCashRegisters,
-  getCashSessions,
-  getOpenCashSession,
-  openCashSession
-} from "../services/cashService"
+import { cashSummary } from "../services/cashService"
+import { createHumanCashPort } from "../services/cashManagementPort"
 import { listFinanceBankAccounts } from "../services/financeService"
 import "./CashManagement.css"
 
@@ -37,12 +29,18 @@ const MOVEMENT_LABELS = {
   shift_close: "Cierre"
 }
 
-function CashManagement() {
+function CashManagement({ cashPort: cashPortProp, uiConfig = {} }) {
   const { user } = useAuth()
+  const cashPort = cashPortProp || createHumanCashPort()
+  const isStationMode = cashPort.mode === "station"
   const [searchParams] = useSearchParams()
   const highlightedSessionId = searchParams.get("session") || ""
-  const canAccessCash = CASH_ROLES.includes(user?.role)
-  const canSuperviseCash = SUPERVISOR_ROLES.includes(user?.role)
+  const canAccessCash = isStationMode || CASH_ROLES.includes(user?.role)
+  const [canSuperviseCash, setCanSuperviseCash] = useState(
+    isStationMode ? false : SUPERVISOR_ROLES.includes(user?.role)
+  )
+  const [canCloseSession, setCanCloseSession] = useState(true)
+  const [stationBanner, setStationBanner] = useState(uiConfig.operatorBanner || "")
   const [registers, setRegisters] = useState([])
   const [selectedRegisterId, setSelectedRegisterId] = useState("")
   const selectedRegisterIdRef = useRef("")
@@ -56,42 +54,61 @@ function CashManagement() {
   const [openingForm, setOpeningForm] = useState({ amount: "500", notes: "" })
   const [movementForm, setMovementForm] = useState(null)
   const [closeForm, setCloseForm] = useState({ counted: "", notes: "" })
-  const summary = useMemo(() => cashSummary(session, movements), [movements, session])
+  const summary = useMemo(
+    () => (cashPort.cashSummary || cashSummary)(session, movements),
+    [cashPort, movements, session]
+  )
   const countedValue = Number(closeForm.counted || 0)
   const previewDifference = countedValue - summary.expected
   const { busy: loadBusy, run: runLoad } = useActionGuard()
   const { busy: cashBusy, run: runCashAction } = useActionGuard()
+
+  const notifyHumanActivity = useCallback(() => {
+    if (isStationMode) uiConfig.onHumanActivity?.()
+  }, [isStationMode, uiConfig])
+
+  const notifyFunctionalCashAction = useCallback(() => {
+    if (isStationMode) uiConfig.onFunctionalCashAction?.()
+  }, [isStationMode, uiConfig])
 
   const loadData = useCallback(async () => {
     if (!canAccessCash) return
     const result = await runLoad(async () => {
       setLoading(true)
       setError("")
-      const registerResult = await getCashRegisters()
-      if (registerResult.error) {
-        setError("No se pudieron cargar las cajas. Verifica la migracion 045.")
+      const loaded = await cashPort.load(selectedRegisterIdRef.current)
+      if (loaded.error) {
+        setError(loaded.error.message || "No se pudo cargar caja.")
         setLoading(false)
         return
       }
-      const nextRegisters = registerResult.data || []
-      const registerId = selectedRegisterIdRef.current || nextRegisters[0]?.id || ""
-      setRegisters(nextRegisters)
-      if (registerId && !selectedRegisterIdRef.current) {
+      const payload = loaded.data
+      if (isStationMode) {
+        setRegisters(payload.register ? [payload.register] : [])
+        const registerId = payload.registerId || payload.register?.id || ""
         selectedRegisterIdRef.current = registerId
         setSelectedRegisterId(registerId)
+        setSession(payload.session || null)
+        setSessions(payload.sessions || [])
+        setMovements(payload.movements || [])
+        setCanSuperviseCash(Boolean(payload.canSupervise))
+        setCanCloseSession(Boolean(payload.canCloseSession))
+        setStationBanner(
+          payload.operatorName
+            ? `Operando como ${payload.operatorName}`
+            : uiConfig.operatorBanner || ""
+        )
+      } else {
+        setRegisters(payload.registers || [])
+        const registerId = payload.registerId || selectedRegisterIdRef.current || ""
+        if (registerId && !selectedRegisterIdRef.current) {
+          selectedRegisterIdRef.current = registerId
+          setSelectedRegisterId(registerId)
+        }
+        setSession(payload.session || null)
+        setSessions(payload.sessions || [])
+        setMovements(payload.movements || [])
       }
-
-      const [sessionResult, sessionsResult] = await Promise.all([
-        getOpenCashSession(registerId),
-        getCashSessions(20)
-      ])
-      if (sessionResult.error) setError(sessionResult.error.message || "No se pudo cargar la sesion abierta.")
-      const openSession = sessionResult.data || null
-      setSession(openSession)
-      setSessions(sessionsResult.data || [])
-
-      const movementResult = await getCashMovements(openSession?.id)
-      setMovements(movementResult.data || [])
 
       const bankResult = await listFinanceBankAccounts()
       if (!bankResult.error) setBankAccounts(bankResult.data || [])
@@ -99,7 +116,7 @@ function CashManagement() {
       setLoading(false)
     })
     if (result?.skipped) return
-  }, [canAccessCash, runLoad])
+  }, [canAccessCash, cashPort, isStationMode, runLoad, uiConfig.operatorBanner])
 
   useEffect(() => {
     loadData()
@@ -111,10 +128,13 @@ function CashManagement() {
 
   async function handleOpenCash(event) {
     event.preventDefault()
+    notifyFunctionalCashAction()
     await runCashAction(async () => {
-      const result = await openCashSession(selectedRegisterId, openingForm.amount, openingForm.notes)
+      const result = await cashPort.openCashSession(selectedRegisterId, openingForm.amount, openingForm.notes)
       if (result.error) {
-        setError(result.error.message || "No se pudo abrir caja.")
+        setError(
+          result.idempotencyUnknown ? result.error.message : result.error.message || "No se pudo abrir caja."
+        )
         return
       }
       setMessage("Caja abierta correctamente.")
@@ -135,8 +155,9 @@ function CashManagement() {
       setError("El motivo es obligatorio.")
       return
     }
+    notifyFunctionalCashAction()
     await runCashAction(async () => {
-      const result = await createCashMovement({
+      const result = await cashPort.createCashMovement({
         sessionId: session.id,
         movementType: movementForm.type,
         amount: config?.amount ? movementForm.amount : 0,
@@ -144,7 +165,20 @@ function CashManagement() {
         reference: movementForm.reference
       })
       if (result.error) {
-        setError(result.error.message || "No se pudo registrar el movimiento.")
+        setError(
+          result.idempotencyUnknown
+            ? result.error.message
+            : result.error.message || "No se pudo registrar el movimiento."
+        )
+        return
+      }
+      if (isStationMode && result.operatorLocked) {
+        uiConfig.onOperatorLocked?.()
+        return
+      }
+      if (isStationMode && movementForm.type === "sale_cash") {
+        setMessage("Venta registrada. Estación bloqueada.")
+        uiConfig.onOperatorLocked?.()
         return
       }
       setMovementForm(null)
@@ -157,10 +191,18 @@ function CashManagement() {
     event.preventDefault()
     if (!session) return
     if (!window.confirm("Confirmar cierre de caja? Esta accion deja la sesion cerrada.")) return
+    notifyFunctionalCashAction()
     await runCashAction(async () => {
-      const result = await closeCashSession(session.id, closeForm.counted, closeForm.notes)
+      const result = await cashPort.closeCashSession(session.id, closeForm.counted, closeForm.notes)
       if (result.error) {
-        setError(result.error.message || "No se pudo cerrar caja.")
+        setError(
+          result.idempotencyUnknown ? result.error.message : result.error.message || "No se pudo cerrar caja."
+        )
+        return
+      }
+      if (isStationMode && result.operatorLocked) {
+        setMessage("Caja cerrada. Estación bloqueada.")
+        uiConfig.onOperatorLocked?.()
         return
       }
       setMessage("Caja cerrada correctamente.")
@@ -176,9 +218,14 @@ function CashManagement() {
     <section className="cash-page">
       <header className="cash-header">
         <div>
-          <p className="cash-eyebrow">Control financiero</p>
-          <h1>Caja</h1>
-          <p className="cash-muted">Apertura, movimientos, retiros, cierre y auditoria basica.</p>
+          <p className="cash-eyebrow">{uiConfig.eyebrow || (isStationMode ? "Estación operativa" : "Control financiero")}</p>
+          <h1>{uiConfig.title || (isStationMode ? stationBanner || "Caja" : "Caja")}</h1>
+          <p className="cash-muted">
+            {isStationMode
+              ? "Turno de caja vinculado a la estación. No comparte sesión con login humano."
+              : "Apertura, movimientos, retiros, cierre y auditoria basica."}
+          </p>
+          {isStationMode && stationBanner && <p className="cash-muted">{stationBanner}</p>}
         </div>
         <div className={`cash-state ${session ? "open" : "closed"}`}>{session ? "Abierta" : "Cerrada"}</div>
       </header>
@@ -186,6 +233,7 @@ function CashManagement() {
       {message && <div className="cash-success">{message}</div>}
       {error && <div className="cash-error">{error}</div>}
 
+      {!isStationMode && (
       <div className="cash-toolbar">
         <label>Caja<select value={selectedRegisterId} onChange={(event) => {
           selectedRegisterIdRef.current = event.target.value
@@ -196,6 +244,15 @@ function CashManagement() {
           {loadBusy ? "Actualizando..." : "Actualizar"}
         </button>
       </div>
+      )}
+      {isStationMode && (
+      <div className="cash-toolbar">
+        <span className="cash-muted">{register?.name || "Caja Principal"}</span>
+        <button type="button" className="cash-secondary" onClick={loadData} disabled={loadBusy || cashBusy}>
+          {loadBusy ? "Actualizando..." : "Actualizar"}
+        </button>
+      </div>
+      )}
 
       <section className="cash-status-grid">
         <Metric label="Caja" value={register?.name || "Caja Principal"} />
@@ -208,8 +265,8 @@ function CashManagement() {
       {loading ? <div className="cash-panel">Cargando caja...</div> : !session ? (
         <form className="cash-panel cash-open-form" onSubmit={handleOpenCash}>
           <div><h2>Abrir caja</h2><p className="cash-muted">No hay caja abierta para este registro.</p></div>
-          <label>Fondo inicial<input type="number" min="0" step="0.01" value={openingForm.amount} onChange={(event) => setOpeningForm({ ...openingForm, amount: event.target.value })} required /></label>
-          <label>Notas<textarea value={openingForm.notes} onChange={(event) => setOpeningForm({ ...openingForm, notes: event.target.value })} /></label>
+          <label>Fondo inicial<input type="number" min="0" step="0.01" value={openingForm.amount} onChange={(event) => { notifyHumanActivity(); setOpeningForm({ ...openingForm, amount: event.target.value }) }} required /></label>
+          <label>Notas<textarea value={openingForm.notes} onChange={(event) => { notifyHumanActivity(); setOpeningForm({ ...openingForm, notes: event.target.value }) }} /></label>
           <button className="cash-primary" disabled={cashBusy || loadBusy}>
             {cashBusy ? "Abriendo..." : "Abrir caja"}
           </button>
@@ -225,7 +282,10 @@ function CashManagement() {
                   type="button"
                   className={item.supervisorOnly && !canSuperviseCash ? "disabled" : ""}
                   disabled={item.supervisorOnly && !canSuperviseCash}
-                  onClick={() => setMovementForm({ type: item.type, amount: "", reason: "", reference: "" })}
+                  onClick={() => {
+                    notifyHumanActivity()
+                    setMovementForm({ type: item.type, amount: "", reason: "", reference: "" })
+                  }}
                 >
                   {item.label}
                 </button>
@@ -234,9 +294,9 @@ function CashManagement() {
             {movementForm && (
               <form className="cash-movement-form" onSubmit={handleMovement}>
                 <h3>{MOVEMENT_LABELS[movementForm.type]}</h3>
-                {MOVEMENT_TYPES.find((item) => item.type === movementForm.type)?.amount && <label>Monto<input type="number" min="0.01" step="0.01" value={movementForm.amount} onChange={(event) => setMovementForm({ ...movementForm, amount: event.target.value })} required /></label>}
-                <label>Motivo<textarea value={movementForm.reason} onChange={(event) => setMovementForm({ ...movementForm, reason: event.target.value })} required={MOVEMENT_TYPES.find((item) => item.type === movementForm.type)?.reason} /></label>
-                <label>Referencia<input value={movementForm.reference} onChange={(event) => setMovementForm({ ...movementForm, reference: event.target.value })} /></label>
+                {MOVEMENT_TYPES.find((item) => item.type === movementForm.type)?.amount && <label>Monto<input type="number" min="0.01" step="0.01" value={movementForm.amount} onChange={(event) => { notifyHumanActivity(); setMovementForm({ ...movementForm, amount: event.target.value }) }} required /></label>}
+                <label>Motivo<textarea value={movementForm.reason} onChange={(event) => { notifyHumanActivity(); setMovementForm({ ...movementForm, reason: event.target.value }) }} required={MOVEMENT_TYPES.find((item) => item.type === movementForm.type)?.reason} /></label>
+                <label>Referencia<input value={movementForm.reference} onChange={(event) => { notifyHumanActivity(); setMovementForm({ ...movementForm, reference: event.target.value }) }} /></label>
                 <div className="cash-form-actions"><button type="button" className="cash-secondary" onClick={() => setMovementForm(null)} disabled={cashBusy}>Cancelar</button><button className="cash-primary" disabled={cashBusy}>{cashBusy ? "Guardando..." : "Guardar movimiento"}</button></div>
               </form>
             )}
@@ -253,10 +313,13 @@ function CashManagement() {
               <Row label="Efectivo esperado" value={money(summary.expected)} strong />
             </div>
             <form className="cash-close-form" onSubmit={handleCloseCash}>
-              <label>Efectivo contado<input type="number" min="0" step="0.01" value={closeForm.counted} onChange={(event) => setCloseForm({ ...closeForm, counted: event.target.value })} required /></label>
-              <label>Notas<textarea value={closeForm.notes} onChange={(event) => setCloseForm({ ...closeForm, notes: event.target.value })} /></label>
+              {!canCloseSession && (
+                <p className="cash-muted">Este turno fue abierto por otro cajero. Solo ese cajero o un supervisor puede cerrarlo.</p>
+              )}
+              <label>Efectivo contado<input type="number" min="0" step="0.01" value={closeForm.counted} onChange={(event) => { notifyHumanActivity(); setCloseForm({ ...closeForm, counted: event.target.value }) }} required disabled={!canCloseSession} /></label>
+              <label>Notas<textarea value={closeForm.notes} onChange={(event) => { notifyHumanActivity(); setCloseForm({ ...closeForm, notes: event.target.value }) }} disabled={!canCloseSession} /></label>
               <div className={`cash-difference ${differenceClass(previewDifference)}`}>{differenceLabel(previewDifference)} · {money(Math.abs(previewDifference))}</div>
-              <button className="cash-danger" disabled={cashBusy}>{cashBusy ? "Cerrando..." : "Cerrar caja"}</button>
+              <button className="cash-danger" disabled={cashBusy || !canCloseSession}>{cashBusy ? "Cerrando..." : "Cerrar caja"}</button>
             </form>
           </section>
         </div>

@@ -195,6 +195,7 @@ export function AuthProvider({ children }) {
   const [session, setSession] = useState(null)
   const [profile, setProfile] = useState(null)
   const [user, setUser] = useState(null)
+  const [stationDeviceContext, setStationDeviceContext] = useState(null)
   const [checklistModuleAccess, setChecklistModuleAccess] = useState(false)
   const [loading, setLoading] = useState(isSupabaseConfigured)
   const [profileError, setProfileError] = useState(isSupabaseConfigured ? "" : "Supabase no está configurado. Revisa las variables de entorno.")
@@ -270,6 +271,26 @@ export function AuthProvider({ children }) {
       return { ok: false, message: "No se pudo cargar tu perfil. Contacta administración." }
     }
     if (!data) {
+      const isStationDevice = Boolean(activeSession?.user?.user_metadata?.operational_station_device)
+      if (isStationDevice) {
+        const { data: deviceCtx, error: deviceCtxError } = await supabase.rpc(
+          "get_operational_station_device_context"
+        )
+        if (!deviceCtxError && deviceCtx?.active) {
+          logProfileLoadOutcome({
+            sourceFunction: "AuthContext.loadProfileForSession",
+            authUserId: sessionUserId,
+            authEmail: sessionEmail,
+            outcome: "station_device_context"
+          })
+          setProfile(null)
+          setUser(null)
+          setStationDeviceContext(deviceCtx)
+          setProfileError("")
+          syncLegacyUser(null)
+          return { ok: true, stationDevice: true, deviceContext: deviceCtx }
+        }
+      }
       logProfileLoadOutcome({
         sourceFunction: "AuthContext.loadProfileForSession",
         authUserId: sessionUserId,
@@ -312,6 +333,7 @@ export function AuthProvider({ children }) {
     })
     setProfile(data)
     setUser(currentUser)
+    setStationDeviceContext(null)
     setChecklistModuleAccess(hasChecklistAccess)
     setProfileError("")
     syncLegacyUser(currentUser)
@@ -405,6 +427,7 @@ export function AuthProvider({ children }) {
     setSession(null)
     setProfile(null)
     setUser(null)
+    setStationDeviceContext(null)
     setProfileError("")
     syncLegacyUser(null)
   }, [])
@@ -467,6 +490,8 @@ export function AuthProvider({ children }) {
       profile,
       loading,
       profileError,
+      stationDeviceContext,
+      isStationDevice: Boolean(stationDeviceContext?.active),
       isAuthenticated: Boolean(session && user),
       checklistModuleAccess,
       login,
@@ -480,7 +505,7 @@ export function AuthProvider({ children }) {
       getDefaultPath,
       modules: MODULES
     }
-  }, [changeOwnPassword, changePassword, checklistModuleAccess, loading, login, logout, profile, profileError, refreshChecklistModuleAccess, refreshProfile, session, updateOwnProfile, user])
+  }, [changeOwnPassword, changePassword, checklistModuleAccess, loading, login, logout, profile, profileError, refreshChecklistModuleAccess, refreshProfile, session, stationDeviceContext, updateOwnProfile, user])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

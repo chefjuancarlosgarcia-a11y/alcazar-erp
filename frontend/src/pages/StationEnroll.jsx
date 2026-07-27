@@ -145,7 +145,7 @@ export default function StationEnroll() {
       })
       setPhase("done")
       setStationLabel("Dispositivo autorizado")
-      setMessage("Sesión técnica establecida. No abra POS/KDS/Caja hasta fases posteriores.")
+      setMessage("Sesión técnica establecida. Abra /station/cash en este dispositivo.")
       window.clearInterval(timer)
     }, 4000)
     return () => window.clearInterval(timer)
