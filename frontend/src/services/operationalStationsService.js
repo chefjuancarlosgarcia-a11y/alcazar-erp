@@ -1,4 +1,15 @@
 import { supabase } from "../lib/supabase"
+import {
+  buildProvisionOperationalStationPayload,
+  mapOperationalStationProvisionError
+} from "./operationalStationsProvisionHelpers.js"
+
+export {
+  applyStationTypeToProvisionForm,
+  buildProvisionOperationalStationPayload,
+  mapOperationalStationProvisionError,
+  validateProvisionOperationalStationForm
+} from "./operationalStationsProvisionHelpers.js"
 
 const ENROLL_FUNCTION = "operational-station-enroll"
 export const CLAIM_SECRET_STORAGE_PREFIX = "os1-device-claim-secret:"
@@ -44,14 +55,25 @@ export async function listOperationalStationDevices(stationId, status) {
 }
 
 export async function provisionOperationalStation(payload) {
-  return supabase.rpc("provision_operational_station", {
-    p_station_code: payload.stationCode,
-    p_name: payload.name,
-    p_station_type: payload.stationType,
-    p_area_id: payload.areaId || null,
-    p_cash_register_id: payload.cashRegisterId || null,
-    p_pos_floor_zone: payload.posFloorZone || null
+  const built = buildProvisionOperationalStationPayload(payload)
+  const result = await supabase.rpc("provision_operational_station", {
+    p_station_code: built.stationCode,
+    p_name: built.name,
+    p_station_type: built.stationType,
+    p_area_id: built.areaId || null,
+    p_cash_register_id: built.cashRegisterId || null,
+    p_pos_floor_zone: built.posFloorZone || null
   })
+  if (result.error?.message) {
+    return {
+      ...result,
+      error: {
+        ...result.error,
+        message: mapOperationalStationProvisionError(result.error.message)
+      }
+    }
+  }
+  return result
 }
 
 export async function updateOperationalStation(stationId, payload) {

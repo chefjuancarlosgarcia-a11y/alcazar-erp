@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
+import { getActiveAreas } from "../services/areasService"
+import { getCashRegisters } from "../services/cashService"
 import {
+  applyStationTypeToProvisionForm,
   authorizeStationDevice,
   buildEnrollmentUrl,
   createStationEnrollmentToken,
@@ -11,7 +14,8 @@ import {
   rejectAndBlockStationDevice,
   replaceStationDevice,
   revokeStationDevice,
-  updateOperationalStation
+  updateOperationalStation,
+  validateProvisionOperationalStationForm
 } from "../services/operationalStationsService"
 import "./OperationalStationsSettings.css"
 
@@ -27,6 +31,7 @@ const EMPTY_FORM = {
   name: "",
   stationType: "kds",
   areaId: "",
+  cashRegisterId: "",
   posFloorZone: ""
 }
 
@@ -35,6 +40,8 @@ function OperationalStationsSettings() {
   const canManage = ["admin", "gerente_general"].includes(user?.role)
   const [stations, setStations] = useState([])
   const [devices, setDevices] = useState([])
+  const [areas, setAreas] = useState([])
+  const [cashRegisters, setCashRegisters] = useState([])
   const [form, setForm] = useState(EMPTY_FORM)
   const [filterStatus, setFilterStatus] = useState("pending")
   const [loading, setLoading] = useState(true)
@@ -78,15 +85,37 @@ function OperationalStationsSettings() {
     }
   }, [canManage, fetchOperationalData])
 
+  useEffect(() => {
+    if (!canManage) return undefined
+    let cancelled = false
+    ;(async () => {
+      const [areasRes, registersRes] = await Promise.all([getActiveAreas(), getCashRegisters()])
+      if (cancelled) return
+      if (areasRes.error) setError(areasRes.error.message)
+      else setAreas(areasRes.data || [])
+      if (registersRes.error) setError(registersRes.error.message)
+      else setCashRegisters(registersRes.data || [])
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [canManage])
+
   const pendingDevices = useMemo(
     () => devices.filter((d) => d.status === "pending"),
     [devices]
   )
 
+  const showAreaSelector =
+    form.stationType === "kds" || form.stationType === "production"
+  const showCashRegisterSelector = form.stationType === "cash"
+
   async function handleCreateStation(event) {
     event.preventDefault()
     if (!canManage) return
     setError("")
+    const validationError = validateProvisionOperationalStationForm(form)
+    if (validationError) return setError(validationError)
     const { data, error: rpcError } = await provisionOperationalStation(form)
     if (rpcError) return setError(rpcError.message)
     setMessage(`Estación ${data?.name || form.name} creada (borrador).`)
@@ -187,11 +216,43 @@ function OperationalStationsSettings() {
           <label>Código<input required value={form.stationCode} onChange={(e) => setForm({ ...form, stationCode: e.target.value })} /></label>
           <label>Nombre<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
           <label>Tipo
-            <select value={form.stationType} onChange={(e) => setForm({ ...form, stationType: e.target.value })}>
+            <select
+              value={form.stationType}
+              onChange={(e) => setForm((prev) => applyStationTypeToProvisionForm(prev, e.target.value))}
+            >
               {STATION_TYPES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
             </select>
           </label>
-          <label>Área (KDS/Producción)<input value={form.areaId} onChange={(e) => setForm({ ...form, areaId: e.target.value })} placeholder="cocina" /></label>
+          {showCashRegisterSelector && (
+            <label>Caja asociada
+              <select
+                required
+                value={form.cashRegisterId}
+                onChange={(e) => setForm({ ...form, cashRegisterId: e.target.value })}
+              >
+                <option value="">Selecciona una caja activa</option>
+                {cashRegisters.map((register) => (
+                  <option key={register.id} value={register.id}>
+                    {register.name}{register.location ? ` · ${register.location}` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {showAreaSelector && (
+            <label>Área operativa
+              <select
+                required
+                value={form.areaId}
+                onChange={(e) => setForm({ ...form, areaId: e.target.value })}
+              >
+                <option value="">Selecciona un área</option>
+                {areas.map((area) => (
+                  <option key={area.id} value={area.id}>{area.name}</option>
+                ))}
+              </select>
+            </label>
+          )}
         </div>
         <button type="submit" className="operational-stations-primary">Crear borrador</button>
       </form>

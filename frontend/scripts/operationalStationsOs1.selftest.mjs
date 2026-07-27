@@ -1,6 +1,12 @@
 import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
+import {
+  applyStationTypeToProvisionForm,
+  buildProvisionOperationalStationPayload,
+  mapOperationalStationProvisionError,
+  validateProvisionOperationalStationForm
+} from "../src/services/operationalStationsProvisionHelpers.js"
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 
@@ -514,6 +520,80 @@ const tests = [
       const runbook = read("docs/os1-preproduction-application-runbook.md")
       if (!/verify_jwt = false/i.test(runbook)) throw new Error("runbook must document verify_jwt false")
       if (!/--no-verify-jwt/.test(runbook)) throw new Error("runbook must document --no-verify-jwt")
+    }
+  },
+  {
+    name: "CS29 Caja provision requires cash_register_id",
+    run() {
+      const err = validateProvisionOperationalStationForm({
+        stationType: "cash",
+        cashRegisterId: "",
+        areaId: ""
+      })
+      if (!err) throw new Error("cash must require register")
+      const built = buildProvisionOperationalStationPayload({
+        stationType: "cash",
+        stationCode: "x",
+        name: "n",
+        cashRegisterId: "550e8400-e29b-41d4-a716-446655440000",
+        areaId: "entrada"
+      })
+      if (built.cashRegisterId !== "550e8400-e29b-41d4-a716-446655440000") throw new Error("cash register uuid")
+      if (built.areaId !== null) throw new Error("cash must send area_id null")
+    }
+  },
+  {
+    name: "CS30 settings loads active cash registers catalog",
+    run() {
+      if (!/getCashRegisters/.test(settingsPage)) throw new Error("must load cash registers")
+      if (!/Caja asociada/.test(settingsPage)) throw new Error("cash selector label")
+      if (!/cashRegisterId/.test(settingsPage)) throw new Error("cashRegisterId field")
+    }
+  },
+  {
+    name: "CS31 KDS production area_id and null cash register",
+    run() {
+      const built = buildProvisionOperationalStationPayload({
+        stationType: "kds",
+        stationCode: "k",
+        name: "n",
+        areaId: "cocina",
+        cashRegisterId: "550e8400-e29b-41d4-a716-446655440000"
+      })
+      if (built.areaId !== "cocina") throw new Error("kds needs area")
+      if (built.cashRegisterId !== null) throw new Error("kds clears cash register")
+    }
+  },
+  {
+    name: "CS32 POS clears area and cash register",
+    run() {
+      const built = buildProvisionOperationalStationPayload({
+        stationType: "pos",
+        stationCode: "p",
+        name: "n",
+        areaId: "x",
+        cashRegisterId: "550e8400-e29b-41d4-a716-446655440000"
+      })
+      if (built.areaId !== null || built.cashRegisterId !== null) {
+        throw new Error("pos must null both")
+      }
+      const next = applyStationTypeToProvisionForm(
+        { areaId: "a", cashRegisterId: "r", stationType: "cash" },
+        "pos"
+      )
+      if (next.areaId || next.cashRegisterId) throw new Error("type change to pos clears fields")
+    }
+  },
+  {
+    name: "CS33 constraint errors mapped for humans",
+    run() {
+      const msg = mapOperationalStationProvisionError(
+        'new row violates check constraint "operational_stations_cash_register_chk"'
+      )
+      if (/operational_stations_cash_register_chk/.test(msg)) throw new Error("must not expose constraint name")
+      if (!/caja del catálogo/i.test(msg)) throw new Error("human cash message")
+      if (!/buildProvisionOperationalStationPayload/.test(svc)) throw new Error("service must build payload")
+      if (!/mapOperationalStationProvisionError/.test(svc)) throw new Error("service must map errors")
     }
   }
 ]
