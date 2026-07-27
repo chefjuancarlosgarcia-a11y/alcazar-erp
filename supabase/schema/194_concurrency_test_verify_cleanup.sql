@@ -1,10 +1,15 @@
--- CC194 concurrency — VERIFY + conflict probe + CLEANUP (tras Worker A y B).
--- Capturar/exportar el result set de verificación ANTES de que el bloque cleanup borre datos.
--- Si el lab no existe: fila cc194_lab_missing_use_cleanup_only (sin 42P01); cleanup sigue al final.
+-- CC194 concurrency — VERIFY + cleanup (tras Worker A y B).
+-- Un solo result set visible en Supabase SQL Editor (escenarios + totals + cleanup_status).
 
 begin;
 
-create or replace function public.cc194_concurrency_verify()
+create temp table cc194_verify_capture (
+  scenario text not null,
+  passed boolean not null,
+  detail text not null
+) on commit drop;
+
+create or replace function pg_temp.cc194_concurrency_verify()
 returns table(
   scenario text,
   passed boolean,
@@ -88,38 +93,21 @@ begin
 end;
 $$;
 
-with results as materialized (
-  select * from public.cc194_concurrency_verify()
-),
-summary as (
-  select
-    count(*)::int as total,
-    count(*) filter (where passed)::int as passed_total,
-    count(*) filter (where not passed)::int as failed_total,
-    (count(*) filter (where not passed) > 0) as cleanup_required
-  from results
-)
-select
-  r.scenario,
-  r.passed,
-  r.detail,
-  s.total,
-  s.passed_total,
-  s.failed_total,
-  s.cleanup_required
-from results r
-cross join summary s
-order by r.passed asc, r.scenario;
+insert into cc194_verify_capture (scenario, passed, detail)
+select scenario, passed, detail from pg_temp.cc194_concurrency_verify();
 
-drop function if exists public.cc194_concurrency_verify();
+create temp table cc194_verify_meta (
+  cleanup_status text not null,
+  fixtures_removed boolean not null
+) on commit drop;
 
--- Cleanup fixture (misma lógica que 194_concurrency_test_cleanup_only.sql)
 do $$
 declare
   v_register uuid := '19400000-0000-4000-8000-000000000001'::uuid;
   v_station uuid := '19400000-0000-4000-8000-000000000002'::uuid;
   v_device uuid := '19400000-0000-4000-8000-000000000003'::uuid;
   v_session uuid := '19400000-0000-4000-8000-000000000004'::uuid;
+  v_fixtures_removed boolean;
 begin
   if exists (select 1 from public.cash_registers where id = v_register)
      and not exists (
@@ -180,9 +168,43 @@ begin
 
   drop table if exists public.cc194_concurrency_heartbeat;
   drop table if exists public.cc194_concurrency_lab;
+
+  v_fixtures_removed :=
+    to_regclass('public.cc194_concurrency_lab') is null
+    and to_regclass('public.cc194_concurrency_heartbeat') is null
+    and not exists (
+      select 1 from public.operational_stations where station_code = 'cc194-conc-lab'
+    );
+
+  insert into cc194_verify_meta (cleanup_status, fixtures_removed)
+  values (
+    case when v_fixtures_removed then 'cc194_cleanup_done' else 'cc194_cleanup_incomplete' end,
+    v_fixtures_removed
+  );
 end;
 $$;
 
-commit;
+drop function if exists public.cc194_concurrency_verify();
 
-select 'cc194_cleanup_done'::text as status, false as cleanup_required;
+with summary as (
+  select
+    count(*)::int as total,
+    count(*) filter (where passed)::int as passed_total,
+    count(*) filter (where not passed)::int as failed_total
+  from cc194_verify_capture
+)
+select
+  r.scenario,
+  r.passed,
+  r.detail,
+  s.total,
+  s.passed_total,
+  s.failed_total,
+  m.cleanup_status,
+  (s.failed_total > 0 or not m.fixtures_removed) as cleanup_required
+from cc194_verify_capture r
+cross join summary s
+cross join cc194_verify_meta m
+order by r.passed asc, r.scenario;
+
+commit;

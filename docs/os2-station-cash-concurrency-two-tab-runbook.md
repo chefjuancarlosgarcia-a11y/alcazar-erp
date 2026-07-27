@@ -1,6 +1,6 @@
-﻿# CC194 — Concurrencia idempotencia 194 (dos pestañas SQL Editor)
+﻿# CC194 — Concurrencia idempotencia 194 (dos sesiones SQL Editor)
 
-Prueba **real** de `station_cash_idempotency_begin` / `complete` con dos conexiones Supabase.
+Prueba **real** de `station_cash_idempotency_begin` / `complete` con dos conexiones Supabase independientes.
 **No** usa estación cash productiva, dispositivo enrollado real ni wrappers con `auth.uid()`.
 
 ## Qué queda probado vs pendiente
@@ -19,8 +19,10 @@ El SQL Editor corre como **postgres**: puede invocar helpers internos revocados 
 
 - 193 / 194 / 195 aplicadas; tests estructurales OK.
 - Al menos un `profiles.status = 'active'` **sin** `cash_sessions.status = 'open'` (solo FK de sesión operador lab; no se abre caja humana).
-- Tres pestañas del SQL Editor (0 = control, 1 = A, 2 = B).
-- UUID fijos del lab (válidos RFC): register `19400000-…-0001`, station `…-0002`, device `…-0003`, operator session `…-0004`.
+- **Dos navegadores** con sesión SQL Editor independiente (no solo pestañas del mismo navegador):
+  - **Google Chrome** — Control + Worker A
+  - **Microsoft Edge** — Worker B
+- UUID fijos del lab: register `19400000-…-0001`, station `…-0002`, device `…-0003`, operator session `…-0004`.
 
 ## Archivos
 
@@ -28,67 +30,65 @@ El SQL Editor corre como **postgres**: puede invocar helpers internos revocados 
 |--------|--------|
 | `194_concurrency_test_cleanup_only.sql` | Reset / fallo de setup / duda de estado (sin lab) |
 | `194_concurrency_test_setup.sql` | Inicio de corrida |
-| `194_concurrency_test_worker_a.sql` | Pestaña 1 |
-| `194_concurrency_test_worker_b.sql` | Pestaña 2 |
-| `194_concurrency_test_verify_cleanup.sql` | Final de corrida exitosa (verificar + limpiar) |
+| `194_concurrency_test_worker_a.sql` | Chrome — Worker A |
+| `194_concurrency_test_worker_b.sql` | Edge — Worker B |
+| `194_concurrency_test_verify_cleanup.sql` | Final (verificar + limpiar, **un solo grid**) |
 
 ## Recuperación (setup falló o estado desconocido)
 
-El **setup** usa `BEGIN` … `COMMIT`. Si hay error, no hay commit de fixtures (salvo ejecutar cleanup explícito).
+El **setup** usa `BEGIN` … `COMMIT`. Si hay error, no hay commit de fixtures.
 
-1. Ejecutar **`194_concurrency_test_cleanup_only.sql`** (idempotente; no requiere tablas `cc194_*`).
-2. Confirmar `status = cc194_cleanup_done`, `cleanup_required = false`.
-3. Ejecutar **setup** de nuevo.
-4. Solo entonces **Worker A** y **Worker B**.
-
-**No** usar `verify_cleanup` como primer paso si el lab nunca existió: devolverá `cc194_lab_missing_use_cleanup_only` (sin error 42P01) pero el propósito es **`cleanup_only`**.
+1. **`194_concurrency_test_cleanup_only.sql`**
+2. Confirmar `status = cc194_cleanup_done`, `cleanup_required = false`
+3. **Setup** de nuevo
+4. Worker A (Chrome) y Worker B (Edge)
 
 ## Prueba completa (orden feliz)
 
-### Pestaña 0 — Control
+### Chrome — Control
 
-1. (Opcional) `cleanup_only` si hubo intento previo.
-2. Ejecutar **setup** → `cc194_setup_ok`, `station_code = cc194-conc-lab`.
-3. Consulta heartbeat:
+1. (Opcional) `cleanup_only`
+2. **Setup** → `cc194_setup_ok`
+3. Abrir pestaña SQL con **worker_a** precargado (no ejecutar aún)
+4. Heartbeat (opcional):
    ```sql
    select worker, phase, updated_at from public.cc194_concurrency_heartbeat order by worker;
    ```
 
-### Pestaña 1 — Worker A (primero)
+### Edge — Worker B (precarga)
 
-4. Ejecutar **worker_a** (~8 s en transacción).
-5. Heartbeat: `starting` → `holding_lock` → `committed`.
+5. Abrir pestaña SQL con **worker_b** precargado (no ejecutar aún).
 
-### Pestaña 2 — Worker B (durante `holding_lock`)
+### Concurrencia (ventana ~8 s)
 
-6. Con A en `holding_lock`, ejecutar **worker_b**.
-7. B termina con `phase = replay_ok`.
+6. **Chrome:** Run **worker_a** (transacción ~8 s).
+7. Cuando heartbeat muestre `holding_lock`, **Edge:** Run **worker_b** (una sola vez).
+8. **No** volver a ejecutar worker_a.
 
-### Pestaña 0 — Verificar y limpiar
+### Chrome — verify_cleanup
 
-8. Ejecutar **verify_cleanup**.
-   - **Exportar/capturar** el grid de escenarios (`passed_total`, `failed_total`) antes de cerrar el resultado; el script borra fixtures al continuar.
-   - Esperado con lab completo: `passed_total = 7`, `failed_total = 0`.
-   - Cierre: `cc194_cleanup_done`.
+9. Ejecutar **verify_cleanup**.
+   - Supabase muestra **una tabla** con columnas: `scenario`, `passed`, `detail`, `total`, `passed_total`, `failed_total`, `cleanup_status`, `cleanup_required`.
+   - Esperado corrida OK: `passed_total = 7`, `failed_total = 0`, `cleanup_status = cc194_cleanup_done`, `cleanup_required = false`.
 
 ## Fallo de Worker A o B (lab ya existente)
 
-- **A falló antes de commit:** `cleanup_only` o `verify_cleanup` (ambos limpian al final).
-- **A commit OK, B no corrido:** ejecutar B una vez; luego `verify_cleanup`.
-- **Verify con fallos:** revisar escenarios; luego `cleanup_only` para reset.
+- **A falló:** `cleanup_only` o `verify_cleanup` (limpia aunque `passed=false` en escenarios).
+- **A OK, B no corrido:** ejecutar B en Edge; luego `verify_cleanup`.
+- **Verify con fallos:** revisar `failed_total`; `cleanup_only` para reset.
 
 ## Resultado esperado (corrida OK)
 
 - **1** fila idempotency con key `cc194-conc-key-001`.
-- `mutation_count = 1` en lab (antes del cleanup).
+- `mutation_count = 1` en lab (capturado antes del cleanup en verify).
 - A y B: mismo JSON `completed`.
 - Conflicto fingerprint alterno en verify.
 
-## STOP — no continuar a Edge si…
+## STOP — no continuar a Edge productivo si…
 
 - Setup falla por falta de profile.
 - Worker B obtiene NULL en begin.
-- Verify (con lab presente) muestra `failed_total > 0` en escenarios de concurrencia.
+- `failed_total > 0` en verify_cleanup (escenarios de concurrencia).
 
 ## Riesgos
 
@@ -98,6 +98,6 @@ El **setup** usa `BEGIN` … `COMMIT`. Si hay error, no hay commit de fixtures (
 
 ## Recomendación
 
-Ejecutar en remoto con flag false, **antes** de Edge, tras `cleanup_only` + setup OK.
+Ejecutar en remoto con flag false, **antes** de Edge JWT, tras `cleanup_only` + setup OK.
 
 Ver también: `docs/os2-station-cash-replay-terminal-runbook.md`.

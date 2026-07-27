@@ -105,7 +105,7 @@ const tests = [
   {
     name: "CC194-6 verify has counts passed failed cleanup",
     run() {
-      for (const col of ["passed_total", "failed_total", "cleanup_required"]) {
+      for (const col of ["passed_total", "failed_total", "cleanup_required", "cleanup_status"]) {
         if (!files.verify.includes(col)) throw new Error(`missing ${col}`)
       }
       if (!files.verify.includes("conflict_fingerprint_raises")) throw new Error("conflict scenario")
@@ -196,6 +196,10 @@ const tests = [
       const runbook = read("docs/os2-station-cash-concurrency-two-tab-runbook.md")
       if (!/Edge|JWT|auth\.uid/i.test(runbook)) throw new Error("runbook must document Edge/JWT limit")
       if (!/cleanup_only/i.test(runbook)) throw new Error("runbook must document cleanup_only recovery")
+      if (!/Chrome/i.test(runbook) || !/Edge/i.test(runbook)) {
+        throw new Error("runbook must require independent Chrome/Edge SQL sessions")
+      }
+      if (!/Microsoft Edge/i.test(runbook)) throw new Error("runbook must name Edge for worker B")
     }
   },
   {
@@ -276,7 +280,36 @@ const tests = [
       if (!files.verify.includes("cc194_lab_missing_use_cleanup_only")) {
         throw new Error("missing lab message scenario")
       }
-      if (!files.verify.includes("Capturar/exportar")) throw new Error("document capture before cleanup")
+    }
+  },
+  {
+    name: "CC194-16 verify_cleanup single visible result set",
+    run() {
+      const v = files.verify.replace(/--[^\n]*/g, "")
+      if (/\bcommit;\s*\n\s*select/i.test(v)) {
+        throw new Error("no SELECT after COMMIT (Supabase hides prior grids)")
+      }
+      if (!/create temp table cc194_verify_capture/i.test(v)) {
+        throw new Error("materialize verify in temp table")
+      }
+      if (!/insert into cc194_verify_capture/i.test(v)) {
+        throw new Error("capture verify before cleanup")
+      }
+      const capturePos = v.search(/insert into cc194_verify_capture/i)
+      const cleanupPos = v.search(/delete from public\.operational_station_cash_idempotency/i)
+      const finalPos = v.search(/with summary as/i)
+      if (capturePos < 0 || cleanupPos < capturePos || finalPos < cleanupPos) {
+        throw new Error("order must be capture -> cleanup -> final SELECT")
+      }
+      if ((v.match(/\bwith summary as\b/gi) || []).length !== 1) {
+        throw new Error("exactly one final summary SELECT")
+      }
+      if (!/select\s+\n?\s*r\.scenario[\s\S]*cleanup_status[\s\S]*cleanup_required/is.test(v)) {
+        throw new Error("final SELECT must expose scenario and cleanup columns together")
+      }
+      if (/select\s+'cc194_cleanup_done'[\s\S]*as status/i.test(v)) {
+        throw new Error("no separate cleanup status result set")
+      }
     }
   }
 ]
