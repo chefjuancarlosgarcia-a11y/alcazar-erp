@@ -48,6 +48,15 @@ const tests = [
     name: "SEC-4 lookup uses hmac",
     run() {
       if (!sql193.includes("extensions.hmac")) throw new Error("pin_lookup must use extensions.hmac")
+      if (/public\.hmac/.test(sql193)) throw new Error("no public.hmac")
+    }
+  },
+  {
+    name: "SEC-4b canonical 193 no public pgcrypto",
+    run() {
+      if (/public\.(digest|crypt|gen_salt)\s*\(/i.test(sql193)) {
+        throw new Error("193 must use extensions.* for digest/crypt/gen_salt")
+      }
     }
   },
   {

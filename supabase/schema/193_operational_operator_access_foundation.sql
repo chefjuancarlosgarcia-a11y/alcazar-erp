@@ -30,7 +30,7 @@ grant select, insert, update, delete on table public.operational_security_secret
 insert into public.operational_security_secrets (secret_name, secret_value, version)
 values (
   'operational_pin_lookup_pepper',
-  encode(gen_random_bytes(32), 'hex'),
+  encode(extensions.gen_random_bytes(32), 'hex'),
   1
 )
 on conflict (secret_name) do nothing;
@@ -298,7 +298,7 @@ begin
   )
   values (
     p_profile_id,
-    crypt(v_pin, gen_salt('bf')),
+    extensions.crypt(v_pin, extensions.gen_salt('bf')),
     v_lookup,
     'active',
     0,
@@ -440,7 +440,7 @@ begin
   limit 1;
 
   if v_cred.profile_id is null
-    or crypt(p_pin, v_cred.pin_hash) <> v_cred.pin_hash then
+    or extensions.crypt(p_pin, v_cred.pin_hash) <> v_cred.pin_hash then
     raise exception '%', v_generic;
   end if;
 
@@ -481,8 +481,8 @@ begin
   set revoked_at = now(), revoke_reason = 'superseded'
   where operational_station_device_id = v_device.id and revoked_at is null;
 
-  v_token := encode(gen_random_bytes(32), 'hex');
-  v_token_hash := encode(public.digest(v_token, 'sha256'), 'hex');
+  v_token := encode(extensions.gen_random_bytes(32), 'hex');
+  v_token_hash := encode(extensions.digest(v_token, 'sha256'), 'hex');
 
   insert into public.operational_operator_sessions (
     operational_station_device_id,
@@ -533,7 +533,7 @@ set search_path = ''
 as $$
 declare
   v_device public.operational_station_devices;
-  v_hash text := encode(public.digest(trim(p_session_token), 'sha256'), 'hex');
+  v_hash text := encode(extensions.digest(trim(p_session_token), 'sha256'), 'hex');
   v_session public.operational_operator_sessions;
   v_idle_seconds int := 90;
 begin
@@ -586,7 +586,7 @@ set search_path = ''
 as $$
 declare
   v_device public.operational_station_devices;
-  v_hash text := encode(public.digest(trim(p_session_token), 'sha256'), 'hex');
+  v_hash text := encode(extensions.digest(trim(p_session_token), 'sha256'), 'hex');
   v_session public.operational_operator_sessions;
 begin
   v_device := public.resolve_operational_device_for_auth_user();

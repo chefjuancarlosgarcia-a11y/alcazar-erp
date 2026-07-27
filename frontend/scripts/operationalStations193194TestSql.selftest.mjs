@@ -11,7 +11,8 @@ function read(rel) {
 const testFiles = [
   "supabase/schema/193_test_operational_operator_access.sql",
   "supabase/schema/194_test_station_cash_operator_wrappers.sql",
-  "supabase/schema/194_test_station_cash_replay_terminal.sql"
+  "supabase/schema/194_test_station_cash_replay_terminal.sql",
+  "supabase/schema/195_test_operational_operator_pgcrypto_schema.sql"
 ]
 
 const os2SqlAudit = [
@@ -24,9 +25,24 @@ const os2SqlAudit = [
   "supabase/schema/diagnose_operational_operator_access_postflight_193.sql",
   "supabase/schema/diagnose_station_cash_preflight_194.sql",
   "supabase/schema/diagnose_station_cash_postflight_194.sql",
+  "supabase/schema/195_fix_operational_operator_pgcrypto_schema.sql",
+  "supabase/schema/195_test_operational_operator_pgcrypto_schema.sql",
+  "supabase/schema/diagnose_operational_operator_pgcrypto_preflight_195.sql",
+  "supabase/schema/diagnose_operational_operator_pgcrypto_postflight_195.sql",
   "supabase/rollback/193_operational_operator_access_foundation.rollback.sql",
-  "supabase/rollback/194_station_cash_operator_wrappers.rollback.sql"
+  "supabase/rollback/194_station_cash_operator_wrappers.rollback.sql",
+  "supabase/rollback/195_fix_operational_operator_pgcrypto_schema.rollback.sql"
 ]
+
+const os2Sql195 = [
+  "supabase/schema/195_fix_operational_operator_pgcrypto_schema.sql",
+  "supabase/schema/195_test_operational_operator_pgcrypto_schema.sql",
+  "supabase/schema/diagnose_operational_operator_pgcrypto_preflight_195.sql",
+  "supabase/schema/diagnose_operational_operator_pgcrypto_postflight_195.sql",
+  "supabase/rollback/195_fix_operational_operator_pgcrypto_schema.rollback.sql"
+]
+
+const os2Sql193Canonical = ["supabase/schema/193_operational_operator_access_foundation.sql"]
 
 const os2Sql194 = [
   "supabase/schema/194_station_cash_operator_wrappers.sql",
@@ -99,6 +115,23 @@ const tests = [
     name: `pgcrypto-194 ${path.basename(rel)}`,
     run: () => assert194Pgcrypto(rel, read(rel))
   })),
+  ...os2Sql193Canonical.map((rel) => ({
+    name: `pgcrypto-193-canonical ${path.basename(rel)}`,
+    run: () => assert194Pgcrypto(rel, read(rel))
+  })),
+  ...os2Sql195.map((rel) => ({
+    name: `pgcrypto-195 ${path.basename(rel)}`,
+    run: () => assert194Pgcrypto(rel, read(rel))
+  })),
+  {
+    name: "195 migration single begin commit",
+    run: () => {
+      const sql = read("supabase/schema/195_fix_operational_operator_pgcrypto_schema.sql")
+      if (!/^begin;/im.test(sql)) throw new Error("195 must begin with begin")
+      if ((sql.match(/\bcommit;/g) || []).length !== 1) throw new Error("195 must have single commit")
+      if (/create table/i.test(sql)) throw new Error("195 must not create tables")
+    }
+  },
   {
     name: "194 migration single begin commit",
     run: () => {

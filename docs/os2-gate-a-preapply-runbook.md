@@ -4,7 +4,9 @@ Worktree: `C:\Users\chefj\alcazar-inventario-os1`
 Branch: `feat/operational-stations-os2-cash`
 Draft PR: [#9](https://github.com/chefjuancarlosgarcia-a11y/alcazar-erp/pull/9)
 
-**Estado remoto al preparar Gate A:** 190/191/192 aplicadas; 193/194 no; Edge `operational-station-access` no desplegada; `operational_stations_enabled = false`; Caja Principal + un dispositivo active; sin PIN operativo real.
+**Estado remoto (actualizado):** 190/191/192 + **193 aplicadas**; **194 falló y fue revertida** (transacción); **195 pendiente**; Edge no desplegada; `operational_stations_enabled = false`; sin PIN operativo real. **193 remoto** puede seguir con `public.digest` / `crypt` sin calificar hasta aplicar **195** (canónica 193 ya usa `extensions.*` solo para instalaciones nuevas).
+
+**Orden apply recomendado:** preflight 194 (rollback limpio) → 194 corregida → postflight 194 → **195 forward-fix pgcrypto** → test/postflight 195 → **tests runtime 194** (replay/concurrencia) → Edge/PIN.
 
 **Regla:** No avanzar de gate si hay fila con `is_blocker = true` en el diagnóstico correspondiente (salvo gate informativo explícito).
 
@@ -140,9 +142,36 @@ Draft PR: [#9](https://github.com/chefjuancarlosgarcia-a11y/alcazar-erp/pull/9)
 
 - Fallo replay-first order, impl ejecutable por cliente, idempotency counts anómalos post-fixture.
 
+**Nota (pgcrypto 193 remoto):** Los tests **estructurales** de 194 (wrappers, ACL, replay terminal sin crypto 193) pueden correr tras Gate E. Escenarios **runtime** que ejecuten `verify_operational_pin_for_device` / hashing 193 deben correr **después de Gate F2 (195)**.
+
 **Evidencia**
 
 - Exports tests + postflight + notas runbook concurrencia.
+
+---
+
+## Gate F2 — Forward-fix 195 (pgcrypto en RPC 193)
+
+| Paso | Acción |
+|------|--------|
+| Preflight | `supabase/schema/diagnose_operational_operator_pgcrypto_preflight_195.sql` |
+| Migración | `supabase/schema/195_fix_operational_operator_pgcrypto_schema.sql` |
+| Test | `supabase/schema/195_test_operational_operator_pgcrypto_schema.sql` |
+| Postflight | `supabase/schema/diagnose_operational_operator_pgcrypto_postflight_195.sql` |
+| Rollback | `supabase/rollback/195_fix_operational_operator_pgcrypto_schema.rollback.sql` (no-op intencional; no downgrade seguro) |
+
+**Resultado esperado**
+
+- Preflight: 194 presente; legacy `public.digest` o `crypt` sin `extensions.` en cuerpos 193; `ready_to_apply_195` sin blocker.
+- 195: `CREATE OR REPLACE` de cuatro RPC; cero filas/PIN/pepper/flag tocados.
+- Test: cero `public.digest` en `pg_get_functiondef`; runtime smoke `extensions.digest/crypt/hmac` en `BEGIN`/`ROLLBACK`.
+- Postflight: sin legacy pgcrypto en funciones afectadas.
+
+**STOP**
+
+- Aplicar 195 antes de 194; o legacy aún presente post-195; o test runtime smoke falla.
+
+**No reaplicar** `193_operational_operator_access_foundation.sql` en remoto solo por este fix.
 
 ---
 
