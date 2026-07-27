@@ -39,6 +39,15 @@ const tests = [
     }
   },
   {
+    name: "OS2-2b pepper in server-only secrets table",
+    run() {
+      if (/insert into public\.app_settings[\s\S]*operational_pin_pepper/.test(sql193)) {
+        throw new Error("pepper must not use app_settings")
+      }
+      if (!/operational_security_secrets/.test(sql193)) throw new Error("operational_security_secrets required")
+    }
+  },
+  {
     name: "OS2-3 verify derives device auth.uid not client station",
     run() {
       if (!/resolve_operational_device_for_auth_user/.test(sql193)) throw new Error("device resolver")

@@ -6,17 +6,34 @@ begin;
 
 create extension if not exists pgcrypto;
 
--- Pepper for PIN lookup (rotate via app_settings update in controlled window).
-insert into public.app_settings (key, value)
+-- Server-only pepper (never in app_settings — authenticated has SELECT on that table).
+create table if not exists public.operational_security_secrets (
+  secret_name text primary key,
+  secret_value text not null,
+  version int not null default 1,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint operational_security_secrets_name_check
+    check (secret_name in ('operational_pin_lookup_pepper')),
+  constraint operational_security_secrets_value_format
+    check (secret_value ~ '^[0-9a-f]{64}$')
+);
+
+comment on table public.operational_security_secrets is
+  'Secretos OS2 solo servidor. Rotación: UPDATE controlado vía service_role; recalcular pin_lookup tras rotar.';
+
+alter table public.operational_security_secrets enable row level security;
+
+revoke all on table public.operational_security_secrets from public, anon, authenticated;
+grant select, insert, update, delete on table public.operational_security_secrets to service_role;
+
+insert into public.operational_security_secrets (secret_name, secret_value, version)
 values (
-  'operational_pin_pepper',
-  jsonb_build_object(
-    'version', 1,
-    'pepper', encode(gen_random_bytes(32), 'hex'),
-    'updated_at', now()
-  )
+  'operational_pin_lookup_pepper',
+  encode(gen_random_bytes(32), 'hex'),
+  1
 )
-on conflict (key) do nothing;
+on conflict (secret_name) do nothing;
 
 -- ---------------------------------------------------------------------------
 -- Tables
@@ -132,9 +149,9 @@ stable
 security definer
 set search_path = ''
 as $$
-  select nullif(value ->> 'pepper', '')
-  from public.app_settings
-  where key = 'operational_pin_pepper';
+  select secret_value
+  from public.operational_security_secrets
+  where secret_name = 'operational_pin_lookup_pepper';
 $$;
 
 create or replace function public.operational_pin_lookup(p_pin text)
@@ -145,8 +162,9 @@ security definer
 set search_path = ''
 as $$
   select encode(
-    public.digest(
-      coalesce(public.operational_pin_pepper_value(), '') || ':' || trim(p_pin),
+    extensions.hmac(
+      trim(p_pin),
+      coalesce(public.operational_pin_pepper_value(), ''),
       'sha256'
     ),
     'hex'
@@ -301,7 +319,7 @@ begin
     jsonb_build_object('profile_id', p_profile_id), null
   );
 
-  return jsonb_build_object('ok', true, 'pin', v_pin);
+  return jsonb_build_object('ok', true);
 end;
 $$;
 

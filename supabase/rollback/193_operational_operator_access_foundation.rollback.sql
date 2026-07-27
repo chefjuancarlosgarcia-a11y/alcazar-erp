@@ -20,6 +20,8 @@ drop table if exists public.operational_operator_sessions;
 drop table if exists public.operational_station_assignments;
 drop table if exists public.operational_credentials;
 
+drop table if exists public.operational_security_secrets;
+
 delete from public.app_settings where key = 'operational_pin_pepper';
 
 -- Restore get_operational_station_device_context without cash_register_id (190 shape)
