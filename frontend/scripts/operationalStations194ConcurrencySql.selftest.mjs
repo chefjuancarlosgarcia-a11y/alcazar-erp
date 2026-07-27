@@ -12,7 +12,8 @@ const files = {
   setup: read("supabase/schema/194_concurrency_test_setup.sql"),
   workerA: read("supabase/schema/194_concurrency_test_worker_a.sql"),
   workerB: read("supabase/schema/194_concurrency_test_worker_b.sql"),
-  verify: read("supabase/schema/194_concurrency_test_verify_cleanup.sql")
+  verify: read("supabase/schema/194_concurrency_test_verify_cleanup.sql"),
+  cleanupOnly: read("supabase/schema/194_concurrency_test_cleanup_only.sql")
 }
 
 const forbidden = [/caja-principal-01/i, /\bCaja Principal\b/]
@@ -170,6 +171,7 @@ const tests = [
       }
       const runbook = read("docs/os2-station-cash-concurrency-two-tab-runbook.md")
       if (!/Edge|JWT|auth\.uid/i.test(runbook)) throw new Error("runbook must document Edge/JWT limit")
+      if (!/cleanup_only/i.test(runbook)) throw new Error("runbook must document cleanup_only recovery")
     }
   },
   {
@@ -192,6 +194,9 @@ const tests = [
       }
       for (const id of FIXTURE_UUIDS.slice(0, 3)) {
         if (!byFile.verify.includes(id)) throw new Error(`verify cleanup missing uuid ${id}`)
+        if (!extractUuidLiterals(files.cleanupOnly).includes(id)) {
+          throw new Error(`cleanup_only missing uuid ${id}`)
+        }
       }
       const workerUuids = new Set([...byFile.workerA, ...byFile.workerB])
       if (workerUuids.size > 0) {
@@ -206,6 +211,48 @@ const tests = [
       if (!/\bcommit;\s*\n\s*select\s+'cc194_setup_ok'/is.test(files.setup)) {
         throw new Error("setup must commit before success select")
       }
+    }
+  },
+  {
+    name: "CC194-14 cleanup_only idempotent recovery script",
+    run() {
+      const sql = files.cleanupOnly
+      if (/[^if exists\s]public\.cc194_concurrency_verify\s*\(\s*\)/i.test(
+        sql.replace(/drop function if exists public\.cc194_concurrency_verify\s*\(\s*\)\s*;/gi, "")
+      )) {
+        throw new Error("cleanup_only must not call verify")
+      }
+      if (/from\s+public\.cc194_concurrency_lab/i.test(sql)) {
+        throw new Error("cleanup_only must not select from lab table")
+      }
+      if (!/^begin;/im.test(sql) || (sql.match(/\bcommit;/g) || []).length !== 1) {
+        throw new Error("cleanup_only single begin/commit")
+      }
+      for (const id of FIXTURE_UUIDS) {
+        if (!sql.includes(id)) throw new Error(`cleanup_only missing ${id}`)
+      }
+      if (!sql.includes("CC194 cleanup abortado")) throw new Error("name/code guards")
+      if (!sql.includes("drop table if exists public.cc194_concurrency_lab")) {
+        throw new Error("drop lab if exists")
+      }
+      if (!/cc194_cleanup_done/.test(sql) || !/cleanup_required/.test(sql)) {
+        throw new Error("final status row")
+      }
+      if (!sql.includes("drop function if exists public.cc194_concurrency_verify()")) {
+        throw new Error("drop stray verify function")
+      }
+    }
+  },
+  {
+    name: "CC194-15 verify_cleanup handles missing lab",
+    run() {
+      if (!files.verify.includes("to_regclass('public.cc194_concurrency_lab')")) {
+        throw new Error("guard before querying lab")
+      }
+      if (!files.verify.includes("cc194_lab_missing_use_cleanup_only")) {
+        throw new Error("missing lab message scenario")
+      }
+      if (!files.verify.includes("Capturar/exportar")) throw new Error("document capture before cleanup")
     }
   }
 ]
