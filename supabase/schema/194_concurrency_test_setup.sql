@@ -11,7 +11,7 @@ begin
     select 1 from public.operational_stations where station_code = 'cc194-conc-lab'
   ) then
     raise exception
-      'CC194 setup: fixture cc194-conc-lab ya existe. Ejecute 194_concurrency_test_verify_cleanup.sql y reintente.';
+      'CC194 setup: fixture cc194-conc-lab ya existe. Ejecute 194_concurrency_test_cleanup_only.sql y reintente.';
   end if;
 
   if exists (
@@ -19,13 +19,17 @@ begin
     where id = '19400000-0000-4000-8000-000000000003'::uuid
   ) then
     raise exception
-      'CC194 setup: dispositivo lab cc194 ya existe. Ejecute verify_cleanup antes de setup.';
+      'CC194 setup: dispositivo lab cc194 ya existe. Ejecute 194_concurrency_test_cleanup_only.sql y reintente.';
   end if;
 
-  if to_regclass('public.cc194_concurrency_lab') is not null
-     and exists (select 1 from public.cc194_concurrency_lab) then
+  if to_regclass('public.cc194_concurrency_lab') is not null then
     raise exception
-      'CC194 setup: cc194_concurrency_lab tiene filas. Ejecute verify_cleanup antes de setup.';
+      'CC194_SETUP_ALREADY_EXISTS: cc194_concurrency_lab. Ejecute 194_concurrency_test_cleanup_only.sql.';
+  end if;
+
+  if to_regclass('public.cc194_concurrency_heartbeat') is not null then
+    raise exception
+      'CC194_SETUP_ALREADY_EXISTS: cc194_concurrency_heartbeat. Ejecute 194_concurrency_test_cleanup_only.sql.';
   end if;
 
   if exists (
@@ -33,7 +37,7 @@ begin
     where idempotency_key like 'cc194-conc-%'
   ) then
     raise exception
-      'CC194 setup: filas idempotency cc194 pendientes. Ejecute verify_cleanup antes de setup.';
+      'CC194 setup: filas idempotency cc194 pendientes. Ejecute 194_concurrency_test_cleanup_only.sql antes de setup.';
   end if;
 end;
 $$;

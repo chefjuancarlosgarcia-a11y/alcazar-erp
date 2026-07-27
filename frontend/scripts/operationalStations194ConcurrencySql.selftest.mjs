@@ -43,6 +43,9 @@ function isValidUuidFormat(u) {
   })
 }
 
+const BAD_REGCLASS_EXISTS =
+  /to_regclass\s*\(\s*'public\.cc194_concurrency_(?:lab|heartbeat)'\s*\)\s*is\s*not\s*null[\s\S]{0,120}\bexists\s*\(\s*select\s+1\s+from\s+public\.cc194_concurrency_/i
+
 const tests = [
   {
     name: "CC194-1 setup uses cc194 fixture prefix",
@@ -138,6 +141,27 @@ const tests = [
     run() {
       if (!files.setup.includes("fixture cc194-conc-lab ya existe")) {
         throw new Error("abort if station exists")
+      }
+      if (!files.setup.includes("CC194_SETUP_ALREADY_EXISTS")) {
+        throw new Error("abort if lab/heartbeat objects exist")
+      }
+      if (!/to_regclass\s*\(\s*'public\.cc194_concurrency_lab'\s*\)\s*is\s*not\s*null\s*then/i.test(
+        files.setup
+      )) {
+        throw new Error("direct lab to_regclass guard")
+      }
+      if (!/to_regclass\s*\(\s*'public\.cc194_concurrency_heartbeat'\s*\)\s*is\s*not\s*null\s*then/i.test(
+        files.setup
+      )) {
+        throw new Error("direct heartbeat to_regclass guard")
+      }
+      const guardEnd = files.setup.search(/create table if not exists public\.cc194_concurrency_lab/i)
+      const firstGuard = files.setup.search(/do \$\$/i)
+      if (guardEnd < 0 || firstGuard < 0 || guardEnd < firstGuard) {
+        throw new Error("guards must precede CREATE TABLE lab")
+      }
+      if (BAD_REGCLASS_EXISTS.test(Object.values(files).join("\n"))) {
+        throw new Error("no to_regclass AND EXISTS on optional lab tables")
       }
       if (!files.setup.includes("no hay profile activo")) throw new Error("abort if no safe profile")
       if (/delete from public\.operational_stations/i.test(files.setup)) {
