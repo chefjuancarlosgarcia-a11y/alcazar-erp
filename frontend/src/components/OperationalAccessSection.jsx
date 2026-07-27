@@ -42,27 +42,53 @@ export default function OperationalAccessSection({ profileId, canManage }) {
     setBusy(true)
     setError("")
     setMessage("")
-    const pin = randomOperationalPin()
-    const { data, error: rpcError } = await adminSetOperationalPin(profileId, pin)
-    setBusy(false)
-    if (rpcError) return setError(rpcError.message)
-    const delivered = data?.pin || pin
-    setGeneratedPin(delivered)
-    setMessage("PIN operativo generado. Entregar una sola vez al colaborador.")
-    const sumRes = await adminGetOperationalAccessSummary(profileId)
-    if (!sumRes.error) setSummary(sumRes.data)
+    setGeneratedPin("")
+    try {
+      const pin = randomOperationalPin()
+      const { data, error: rpcError } = await adminSetOperationalPin(profileId, pin)
+      if (rpcError) {
+        setError(rpcError.message || "No se pudo guardar el PIN operativo.")
+        return
+      }
+      if (data?.ok !== true) {
+        setError("No se pudo guardar el PIN operativo.")
+        return
+      }
+      setGeneratedPin(pin)
+      setMessage("PIN operativo generado. Entregar una sola vez al colaborador.")
+      const sumRes = await adminGetOperationalAccessSummary(profileId)
+      if (sumRes.error) setError(sumRes.error.message)
+      else if (sumRes.data) setSummary(sumRes.data)
+    } catch (err) {
+      setError(err?.message || "Error inesperado al generar PIN operativo.")
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function handleAssign() {
-    if (!stationId) return setError("Seleccione una estación Caja.")
+    if (!stationId) {
+      setError("Seleccione una estación Caja.")
+      return
+    }
     setBusy(true)
     setError("")
-    const { error: rpcError } = await adminAssignOperationalStation(profileId, stationId, true)
-    setBusy(false)
-    if (rpcError) return setError(rpcError.message)
-    setMessage("Asignación a estación guardada.")
-    const sumRes = await adminGetOperationalAccessSummary(profileId)
-    if (!sumRes.error) setSummary(sumRes.data)
+    setMessage("")
+    try {
+      const { error: rpcError } = await adminAssignOperationalStation(profileId, stationId, true)
+      if (rpcError) {
+        setError(rpcError.message || "No se pudo guardar la asignación.")
+        return
+      }
+      setMessage("Asignación a estación guardada.")
+      const sumRes = await adminGetOperationalAccessSummary(profileId)
+      if (sumRes.error) setError(sumRes.error.message)
+      else if (sumRes.data) setSummary(sumRes.data)
+    } catch (err) {
+      setError(err?.message || "Error inesperado al asignar estación.")
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (

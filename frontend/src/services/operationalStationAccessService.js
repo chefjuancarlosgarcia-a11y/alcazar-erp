@@ -1,3 +1,5 @@
+import { isSupabaseClientConfigured, supabase } from "../lib/supabase"
+
 export const OPERATOR_SESSION_STORAGE_KEY = "os2-operator-session-token"
 export const OPERATOR_SESSION_META_KEY = "os2-operator-session-meta"
 
@@ -5,6 +7,17 @@ const ACCESS_FUNCTION = "operational-station-access"
 
 function makeIdempotencyKey(prefix) {
   return `${prefix}-${crypto.randomUUID()}`
+}
+
+function rpcUnavailable(message = "Cliente Supabase no configurado.") {
+  return { data: null, error: { message } }
+}
+
+function ensureRpcClient() {
+  if (!isSupabaseClientConfigured || !supabase?.rpc) {
+    return rpcUnavailable()
+  }
+  return null
 }
 
 export function loadOperatorSessionToken() {
@@ -34,7 +47,9 @@ export function loadOperatorSessionMeta() {
 }
 
 async function invokeAccess(body, idempotencyKeyHeader) {
-  const { supabase } = await import("../lib/supabase")
+  if (!isSupabaseClientConfigured || !supabase?.functions?.invoke) {
+    return { data: null, error: new Error("Cliente Supabase no configurado.") }
+  }
   return supabase.functions.invoke(ACCESS_FUNCTION, {
     body,
     headers: idempotencyKeyHeader ? { "x-idempotency-key": idempotencyKeyHeader } : undefined
@@ -84,20 +99,44 @@ export async function lockOperatorSession(reason = "locked") {
 }
 
 export async function adminSetOperationalPin(profileId, pin) {
-  const { supabase } = await import("../lib/supabase")
-  return supabase.rpc("admin_set_operational_pin", { p_profile_id: profileId, p_pin: pin })
+  const blocked = ensureRpcClient()
+  if (blocked) return blocked
+  if (!profileId) return rpcUnavailable("Seleccione un colaborador.")
+  if (!pin) return rpcUnavailable("PIN operativo inválido.")
+  try {
+    return await supabase.rpc("admin_set_operational_pin", {
+      p_profile_id: profileId,
+      p_pin: pin
+    })
+  } catch (err) {
+    return { data: null, error: { message: err?.message || "Error al guardar PIN operativo." } }
+  }
 }
 
 export async function adminAssignOperationalStation(profileId, stationId, active = true) {
-  const { supabase } = await import("../lib/supabase")
-  return supabase.rpc("admin_assign_operational_station", {
-    p_profile_id: profileId,
-    p_station_id: stationId,
-    p_active: active
-  })
+  const blocked = ensureRpcClient()
+  if (blocked) return blocked
+  if (!profileId || !stationId) return rpcUnavailable("Colaborador y estación requeridos.")
+  try {
+    return await supabase.rpc("admin_assign_operational_station", {
+      p_profile_id: profileId,
+      p_station_id: stationId,
+      p_active: active
+    })
+  } catch (err) {
+    return { data: null, error: { message: err?.message || "Error al asignar estación." } }
+  }
 }
 
 export async function adminGetOperationalAccessSummary(profileId) {
-  const { supabase } = await import("../lib/supabase")
-  return supabase.rpc("admin_get_operational_access_summary", { p_profile_id: profileId })
+  const blocked = ensureRpcClient()
+  if (blocked) return blocked
+  if (!profileId) return rpcUnavailable("Seleccione un colaborador.")
+  try {
+    return await supabase.rpc("admin_get_operational_access_summary", {
+      p_profile_id: profileId
+    })
+  } catch (err) {
+    return { data: null, error: { message: err?.message || "Error al cargar acceso operativo." } }
+  }
 }
