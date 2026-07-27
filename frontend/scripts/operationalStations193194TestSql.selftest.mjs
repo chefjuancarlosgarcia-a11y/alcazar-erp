@@ -8,11 +8,28 @@ function read(rel) {
   return fs.readFileSync(path.join(repoRoot, rel), "utf8")
 }
 
-const files = [
+const testFiles = [
   "supabase/schema/193_test_operational_operator_access.sql",
   "supabase/schema/194_test_station_cash_operator_wrappers.sql",
   "supabase/schema/194_test_station_cash_replay_terminal.sql"
 ]
+
+const os2SqlAudit = [
+  "supabase/schema/193_operational_operator_access_foundation.sql",
+  "supabase/schema/193_test_operational_operator_access.sql",
+  "supabase/schema/194_station_cash_operator_wrappers.sql",
+  "supabase/schema/194_test_station_cash_operator_wrappers.sql",
+  "supabase/schema/194_test_station_cash_replay_terminal.sql",
+  "supabase/schema/diagnose_operational_operator_access_preflight_193.sql",
+  "supabase/schema/diagnose_operational_operator_access_postflight_193.sql",
+  "supabase/schema/diagnose_station_cash_preflight_194.sql",
+  "supabase/schema/diagnose_station_cash_postflight_194.sql",
+  "supabase/rollback/193_operational_operator_access_foundation.rollback.sql",
+  "supabase/rollback/194_station_cash_operator_wrappers.rollback.sql"
+]
+
+const mysqlLimit = /limit\s+\d+\s*,\s*\d+/i
+const brokenLimitComma = /\blimit\s+\d+\s*,\s*'/i
 
 function assertTestStructure(name, sql) {
   if (!/^begin;/im.test(sql)) throw new Error(`${name}: missing begin`)
@@ -28,10 +45,33 @@ function assertTestStructure(name, sql) {
   if (!/order by r\.passed asc/.test(sql)) throw new Error(`${name}: failed first ordering`)
 }
 
-const tests = files.map((rel) => ({
-  name: path.basename(rel),
-  run: () => assertTestStructure(rel, read(rel))
-}))
+function assertNoMysqlLimit(rel, sql) {
+  if (mysqlLimit.test(sql)) {
+    throw new Error(`${rel}: MySQL LIMIT offset,count not supported in PostgreSQL`)
+  }
+  if (brokenLimitComma.test(sql)) {
+    throw new Error(`${rel}: LIMIT must not use comma before next SELECT item`)
+  }
+}
+
+const tests = [
+  ...testFiles.map((rel) => ({
+    name: `structure ${path.basename(rel)}`,
+    run: () => assertTestStructure(rel, read(rel))
+  })),
+  ...os2SqlAudit.map((rel) => ({
+    name: `limit-syntax ${path.basename(rel)}`,
+    run: () => assertNoMysqlLimit(rel, read(rel))
+  })),
+  {
+    name: "193 test eleven scenarios",
+    run: () => {
+      const sql = read("supabase/schema/193_test_operational_operator_access.sql")
+      const n = (sql.match(/return query/g) || []).length
+      if (n !== 11) throw new Error(`expected 11 return query blocks, got ${n}`)
+    }
+  }
+]
 
 let passed = 0
 for (const t of tests) {

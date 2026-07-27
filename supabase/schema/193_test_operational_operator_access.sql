@@ -93,12 +93,14 @@ begin
     ),
     'verify_operational_pin_for_device'::text;
 
-  return query select 'device_context_includes_cash_register_id'::text,
-    position('cash_register_id' in pg_get_functiondef(p.oid)) > 0
-    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-    where n.nspname = 'public' and p.proname = 'get_operational_station_device_context'
-    limit 1,
-    'cash_register_id in context'::text;
+  return query
+  select 'device_context_includes_cash_register_id'::text,
+    position('cash_register_id' in pg_get_functiondef(p.oid)) > 0,
+    'cash_register_id in context'::text
+  from pg_proc p
+  join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public' and p.proname = 'get_operational_station_device_context'
+  limit 1;
 end;
 $$;
 
