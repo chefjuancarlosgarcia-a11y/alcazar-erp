@@ -37,6 +37,9 @@ const os2Sql194 = [
   "supabase/rollback/194_station_cash_operator_wrappers.rollback.sql"
 ]
 
+const mysqlLimit = /limit\s+\d+\s*,\s*\d+/i
+const brokenLimitComma = /\blimit\s+\d+\s*,\s*'/i
+
 const badPgcryptoPublic = /public\.(digest|hmac|crypt|gen_salt)\s*\(/i
 const unqualifiedPgcrypto = /(?<!extensions\.)(?<![.\w])(digest|hmac|crypt|gen_salt)\s*\(/i
 
