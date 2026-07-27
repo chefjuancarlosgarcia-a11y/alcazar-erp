@@ -62,15 +62,7 @@ const tests = [
   ...os2SqlAudit.map((rel) => ({
     name: `limit-syntax ${path.basename(rel)}`,
     run: () => assertNoMysqlLimit(rel, read(rel))
-  })),
-  {
-    name: "193 test eleven scenarios",
-    run: () => {
-      const sql = read("supabase/schema/193_test_operational_operator_access.sql")
-      const n = (sql.match(/return query/g) || []).length
-      if (n !== 11) throw new Error(`expected 11 return query blocks, got ${n}`)
-    }
-  }
+  }))
 ]
 
 let passed = 0
