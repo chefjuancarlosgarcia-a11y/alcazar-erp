@@ -20,6 +20,16 @@ El SQL Editor corre como **postgres**: puede invocar helpers internos revocados 
 - 193 / 194 / 195 aplicadas; tests estructurales OK.
 - Al menos un `profiles.status = 'active'` **sin** `cash_sessions.status = 'open'` (solo FK de sesión operador lab; no se abre caja humana).
 - Tres pestañas del SQL Editor (0 = control, 1 = A, 2 = B).
+- UUID fijos del lab (válidos RFC): register `19400000-…-0001`, station `…-0002`, device `…-0003`, operator session `…-0004`.
+
+## Recuperación tras error de setup (p. ej. UUID inválido)
+
+El **setup** corre en `BEGIN` … `COMMIT`. Si el editor muestra error, la transacción **no** hace commit (no queda estación lab persistida).
+
+1. Ejecutar **`194_concurrency_test_verify_cleanup.sql`** (seguro aunque no existan fixtures).
+2. Confirmar salida `cc194_cleanup_done` y ausencia de `cc194-conc-lab` / tablas `cc194_*`.
+3. Ejecutar **setup** de nuevo.
+4. Solo entonces **Worker A** y **Worker B**.
 
 ## Archivos
 

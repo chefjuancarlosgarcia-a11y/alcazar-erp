@@ -103,9 +103,9 @@ drop function if exists public.cc194_concurrency_verify();
 -- Cleanup fixture (siempre ejecutar tras revisar resultados; seguro re-ejecutar)
 do $$
 declare
-  v_station uuid := 'cc1940000-0000-4000-8000-000000000002'::uuid;
-  v_device uuid := 'cc1940000-0000-4000-8000-000000000003'::uuid;
-  v_register uuid := 'cc1940000-0000-4000-8000-000000000001'::uuid;
+  v_station uuid := '19400000-0000-4000-8000-000000000002'::uuid;
+  v_device uuid := '19400000-0000-4000-8000-000000000003'::uuid;
+  v_register uuid := '19400000-0000-4000-8000-000000000001'::uuid;
 begin
   delete from public.operational_station_cash_idempotency
   where device_id = v_device and idempotency_key like 'cc194-conc-%';

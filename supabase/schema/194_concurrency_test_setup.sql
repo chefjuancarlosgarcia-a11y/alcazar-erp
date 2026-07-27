@@ -16,7 +16,7 @@ begin
 
   if exists (
     select 1 from public.operational_station_devices
-    where id = 'cc1940000-0000-4000-8000-000000000003'::uuid
+    where id = '19400000-0000-4000-8000-000000000003'::uuid
   ) then
     raise exception
       'CC194 setup: dispositivo lab cc194 ya existe. Ejecute verify_cleanup antes de setup.';
@@ -64,10 +64,10 @@ truncate public.cc194_concurrency_heartbeat;
 
 do $$
 declare
-  v_register_id uuid := 'cc1940000-0000-4000-8000-000000000001'::uuid;
-  v_station_id uuid := 'cc1940000-0000-4000-8000-000000000002'::uuid;
-  v_device_id uuid := 'cc1940000-0000-4000-8000-000000000003'::uuid;
-  v_session_id uuid := 'cc1940000-0000-4000-8000-000000000004'::uuid;
+  v_register_id uuid := '19400000-0000-4000-8000-000000000001'::uuid;
+  v_station_id uuid := '19400000-0000-4000-8000-000000000002'::uuid;
+  v_device_id uuid := '19400000-0000-4000-8000-000000000003'::uuid;
+  v_session_id uuid := '19400000-0000-4000-8000-000000000004'::uuid;
   v_profile_id uuid;
   v_key text := 'cc194-conc-key-001';
   v_op text := 'conc_lab';

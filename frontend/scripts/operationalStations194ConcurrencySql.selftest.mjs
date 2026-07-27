@@ -18,6 +18,30 @@ const files = {
 const forbidden = [/caja-principal-01/i, /\bCaja Principal\b/]
 const sharedKey = "cc194-conc-key-001"
 
+const FIXTURE_UUIDS = [
+  "19400000-0000-4000-8000-000000000001",
+  "19400000-0000-4000-8000-000000000002",
+  "19400000-0000-4000-8000-000000000003",
+  "19400000-0000-4000-8000-000000000004"
+]
+
+const UUID_LIT = /'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})'::uuid/gi
+const FORBIDDEN_UUID_PREFIX = /cc1940000-/i
+
+function extractUuidLiterals(sql) {
+  return [...sql.matchAll(UUID_LIT)].map((m) => m[1].toLowerCase())
+}
+
+function isValidUuidFormat(u) {
+  const parts = u.split("-")
+  if (parts.length !== 5) return false
+  if (parts[0].length !== 8) return false
+  return parts.every((p, i) => {
+    const len = i === 0 ? 8 : i === 4 ? 12 : 4
+    return p.length === len && /^[0-9a-f]+$/.test(p)
+  })
+}
+
 const tests = [
   {
     name: "CC194-1 setup uses cc194 fixture prefix",
@@ -146,6 +170,42 @@ const tests = [
       }
       const runbook = read("docs/os2-station-cash-concurrency-two-tab-runbook.md")
       if (!/Edge|JWT|auth\.uid/i.test(runbook)) throw new Error("runbook must document Edge/JWT limit")
+    }
+  },
+  {
+    name: "CC194-12 fixture UUID literals valid and consistent",
+    run() {
+      if (FORBIDDEN_UUID_PREFIX.test(Object.values(files).join("\n"))) {
+        throw new Error("forbidden cc1940000- uuid prefix")
+      }
+      const byFile = {}
+      for (const [name, sql] of Object.entries(files)) {
+        byFile[name] = extractUuidLiterals(sql)
+        for (const u of byFile[name]) {
+          if (!isValidUuidFormat(u)) throw new Error(`${name}: invalid uuid ${u}`)
+          if (u.split("-")[0].length !== 8) throw new Error(`${name}: first block must be 8 hex chars`)
+        }
+      }
+      const setupSet = new Set(byFile.setup)
+      for (const id of FIXTURE_UUIDS) {
+        if (!setupSet.has(id)) throw new Error(`setup missing fixture uuid ${id}`)
+      }
+      for (const id of FIXTURE_UUIDS.slice(0, 3)) {
+        if (!byFile.verify.includes(id)) throw new Error(`verify cleanup missing uuid ${id}`)
+      }
+      const workerUuids = new Set([...byFile.workerA, ...byFile.workerB])
+      if (workerUuids.size > 0) {
+        throw new Error("workers must not hardcode uuid literals; use cc194_concurrency_lab")
+      }
+    }
+  },
+  {
+    name: "CC194-13 setup wrapped in begin commit",
+    run() {
+      if (!/^begin;/im.test(files.setup)) throw new Error("setup must begin transaction")
+      if (!/\bcommit;\s*\n\s*select\s+'cc194_setup_ok'/is.test(files.setup)) {
+        throw new Error("setup must commit before success select")
+      }
     }
   }
 ]
