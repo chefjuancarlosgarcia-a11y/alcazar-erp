@@ -152,6 +152,15 @@ const tests = [
     run() {
       if (!/Se requiere clave de idempotencia/.test(sql194)) throw new Error("server requires key")
     }
+  },
+  {
+    name: "IDEM-13 fingerprint uses extensions.digest",
+    run() {
+      const fp = sql194.match(/function public\.station_cash_request_fingerprint[\s\S]*?\$\$;/)
+      if (!fp?.[0]?.includes("extensions.digest(")) throw new Error("extensions.digest required")
+      if (/public\.digest/.test(fp[0])) throw new Error("no public.digest in fingerprint")
+      if (!/set search_path = ''/.test(fp[0])) throw new Error("empty search_path on fingerprint fn")
+    }
   }
 ]
 

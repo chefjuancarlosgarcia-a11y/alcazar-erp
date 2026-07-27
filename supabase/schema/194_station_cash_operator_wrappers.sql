@@ -82,7 +82,7 @@ immutable
 security invoker
 set search_path = ''
 as $$
-  select encode(public.digest(convert_to(coalesce(p_payload, '{}'::jsonb)::text, 'UTF8'), 'sha256'), 'hex');
+  select encode(extensions.digest(convert_to(coalesce(p_payload, '{}'::jsonb)::text, 'UTF8'), 'sha256'), 'hex');
 $$;
 
 revoke all on function public.station_cash_request_fingerprint(text, jsonb) from public, anon, authenticated, service_role;
@@ -227,7 +227,7 @@ begin
     raise exception '%', v_generic;
   end if;
 
-  v_hash := encode(public.digest(trim(p_operator_session_token), 'sha256'), 'hex');
+  v_hash := encode(extensions.digest(trim(p_operator_session_token), 'sha256'), 'hex');
   select * into v_op
   from public.operational_operator_sessions
   where session_token_hash = v_hash
@@ -359,7 +359,7 @@ begin
     raise exception '%', v_generic;
   end if;
 
-  v_hash := encode(public.digest(trim(p_operator_session_token), 'sha256'), 'hex');
+  v_hash := encode(extensions.digest(trim(p_operator_session_token), 'sha256'), 'hex');
   select * into v_op_session
   from public.operational_operator_sessions
   where session_token_hash = v_hash
