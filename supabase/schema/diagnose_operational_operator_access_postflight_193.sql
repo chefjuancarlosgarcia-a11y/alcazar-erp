@@ -1,6 +1,17 @@
 -- Postflight read-only AFTER applying 193 (before 194). No DDL/DML. No secrets/PII rows.
 
-with gates as (
+with fn as (
+  select
+    to_regprocedure('public.verify_operational_pin_for_device(text, text, text)') as verify_pin_oid,
+    to_regprocedure('public.touch_operational_operator_session(text)') as touch_oid,
+    to_regprocedure('public.lock_operational_operator_session(text, text, text)') as lock_oid,
+    to_regprocedure('public.operational_pin_pepper_value()') as pepper_oid,
+    to_regprocedure('public.operational_pin_lookup(text)') as lookup_oid
+),
+secrets_rel as (
+  select to_regclass('public.operational_security_secrets') as relid
+),
+gates as (
   select 'os2_four_tables_exist' as gate_code,
     not (
       exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'operational_credentials')
@@ -74,45 +85,63 @@ with gates as (
 
   union all
   select 'core_rpc_grants_authenticated',
-    not (
-      has_function_privilege('authenticated', 'public.verify_operational_pin_for_device(text, text, text)', 'EXECUTE')
-      and has_function_privilege('authenticated', 'public.touch_operational_operator_session(text)', 'EXECUTE')
-      and has_function_privilege('authenticated', 'public.lock_operational_operator_session(text, text, text)', 'EXECUTE')
+    (
+      select fn.verify_pin_oid is null or fn.touch_oid is null or fn.lock_oid is null
+        or not (
+          coalesce(has_function_privilege('authenticated', fn.verify_pin_oid, 'EXECUTE'), false)
+          and coalesce(has_function_privilege('authenticated', fn.touch_oid, 'EXECUTE'), false)
+          and coalesce(has_function_privilege('authenticated', fn.lock_oid, 'EXECUTE'), false)
+        )
+      from fn
     ),
-    jsonb_build_object(
-      'verify_pin', has_function_privilege('authenticated', 'public.verify_operational_pin_for_device(text, text, text)', 'EXECUTE'),
-      'touch', has_function_privilege('authenticated', 'public.touch_operational_operator_session(text)', 'EXECUTE')
+    (
+      select jsonb_build_object(
+        'verify_pin', case when fn.verify_pin_oid is null then null
+          else has_function_privilege('authenticated', fn.verify_pin_oid, 'EXECUTE') end,
+        'touch', case when fn.touch_oid is null then null
+          else has_function_privilege('authenticated', fn.touch_oid, 'EXECUTE') end
+      )
+      from fn
     )
 
   union all
   select 'secret_storage_table_exists',
-    not exists (
-      select 1 from information_schema.tables
-      where table_schema = 'public' and table_name = 'operational_security_secrets'
-    ),
-    jsonb_build_object('present', true)
+    to_regclass('public.operational_security_secrets') is null,
+    jsonb_build_object('present', to_regclass('public.operational_security_secrets') is not null)
 
   union all
   select 'secret_storage_rls_enabled',
-    not coalesce((
+    to_regclass('public.operational_security_secrets') is null
+    or not coalesce((
       select c.relrowsecurity from pg_class c
-      join pg_namespace n on n.oid = c.relnamespace
-      where n.nspname = 'public' and c.relname = 'operational_security_secrets'
+      where c.oid = to_regclass('public.operational_security_secrets')
     ), false),
     jsonb_build_object('rls', true)
 
   union all
   select 'secret_storage_clients_denied',
-    has_table_privilege('authenticated', 'public.operational_security_secrets', 'SELECT')
-    or has_table_privilege('anon', 'public.operational_security_secrets', 'SELECT'),
-    jsonb_build_object(
-      'authenticated_select', has_table_privilege('authenticated', 'public.operational_security_secrets', 'SELECT'),
-      'anon_select', has_table_privilege('anon', 'public.operational_security_secrets', 'SELECT')
+    (
+      select secrets_rel.relid is not null
+        and (
+          coalesce(has_table_privilege('authenticated', secrets_rel.relid, 'SELECT'), false)
+          or coalesce(has_table_privilege('anon', secrets_rel.relid, 'SELECT'), false)
+        )
+      from secrets_rel
+    ),
+    (
+      select jsonb_build_object(
+        'authenticated_select', case when secrets_rel.relid is null then null
+          else has_table_privilege('authenticated', secrets_rel.relid, 'SELECT') end,
+        'anon_select', case when secrets_rel.relid is null then null
+          else has_table_privilege('anon', secrets_rel.relid, 'SELECT') end
+      )
+      from secrets_rel
     )
 
   union all
   select 'pepper_row_exists_not_exposed',
-    not exists (
+    to_regclass('public.operational_security_secrets') is null
+    or not exists (
       select 1 from public.operational_security_secrets
       where secret_name = 'operational_pin_lookup_pepper'
     ),
@@ -125,20 +154,25 @@ with gates as (
 
   union all
   select 'internal_helpers_not_client',
-    has_function_privilege('authenticated', 'public.operational_pin_pepper_value()', 'EXECUTE')
-    or has_function_privilege('authenticated', 'public.operational_pin_lookup(text)', 'EXECUTE'),
-    jsonb_build_object(
-      'pepper_value_denied', not has_function_privilege('authenticated', 'public.operational_pin_pepper_value()', 'EXECUTE'),
-      'pin_lookup_denied', not has_function_privilege('authenticated', 'public.operational_pin_lookup(text)', 'EXECUTE')
+    (
+      select (fn.pepper_oid is not null and coalesce(has_function_privilege('authenticated', fn.pepper_oid, 'EXECUTE'), false))
+        or (fn.lookup_oid is not null and coalesce(has_function_privilege('authenticated', fn.lookup_oid, 'EXECUTE'), false))
+      from fn
+    ),
+    (
+      select jsonb_build_object(
+        'pepper_value_denied', case when fn.pepper_oid is null then null
+          else not has_function_privilege('authenticated', fn.pepper_oid, 'EXECUTE') end,
+        'pin_lookup_denied', case when fn.lookup_oid is null then null
+          else not has_function_privilege('authenticated', fn.lookup_oid, 'EXECUTE') end
+      )
+      from fn
     )
 
   union all
   select 'device_context_includes_cash_register_id',
-    not exists (
-      select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-      where n.nspname = 'public' and p.proname = 'get_operational_station_device_context'
-    ),
-    jsonb_build_object('function_present', true)
+    to_regprocedure('public.get_operational_station_device_context()') is null,
+    jsonb_build_object('function_present', to_regprocedure('public.get_operational_station_device_context()') is not null)
 
   union all
   select 'flag_still_disabled',

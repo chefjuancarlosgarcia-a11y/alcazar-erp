@@ -13,6 +13,36 @@ active_devices as (
   join cash_station cs on cs.id = d.station_id
   where d.status = 'active'
 ),
+inventory_193 as (
+  select
+    (
+      select count(*)
+      from information_schema.tables
+      where table_schema = 'public'
+        and table_name in (
+          'operational_credentials',
+          'operational_station_assignments',
+          'operational_operator_sessions',
+          'operational_pin_attempt_buckets',
+          'operational_security_secrets'
+        )
+    )::int as tables_present,
+    (
+      select count(distinct p.proname)
+      from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public'
+        and p.proname in (
+          'verify_operational_pin_for_device',
+          'admin_set_operational_pin',
+          'touch_operational_operator_session',
+          'lock_operational_operator_session',
+          'resolve_operational_device_for_auth_user',
+          'operational_pin_pepper_value',
+          'operational_pin_lookup'
+        )
+    )::int as functions_present
+),
 gates as (
   select 'os1_four_tables_present' as gate_code,
     not (
@@ -76,12 +106,61 @@ gates as (
   select 'os1_core_functions_present',
     not (
       exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'get_operational_station_device_context')
-      and exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'resolve_operational_device_for_auth_user')
       and exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'claim_station_enrollment')
     ),
     jsonb_build_object(
       'get_operational_station_device_context', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'get_operational_station_device_context'),
-      'finalize_station_device_enrollment', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'finalize_station_device_enrollment')
+      'claim_station_enrollment', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'claim_station_enrollment')
+    )
+
+  union all
+  select 'functions_193_missing',
+    false,
+    (
+      select jsonb_build_object(
+        'functions_193_missing', i.functions_present = 0,
+        'functions_present', i.functions_present,
+        'functions_expected', 7
+      )
+      from inventory_193 i
+    )
+
+  union all
+  select 'objects_193_partial',
+    (
+      select (i.tables_present > 0 and i.tables_present < 5)
+        or (i.functions_present > 0 and i.functions_present < 7)
+      from inventory_193 i
+    ),
+    (
+      select jsonb_build_object(
+        'objects_193_partial', (i.tables_present > 0 and i.tables_present < 5)
+          or (i.functions_present > 0 and i.functions_present < 7),
+        'tables_present', i.tables_present,
+        'functions_present', i.functions_present
+      )
+      from inventory_193 i
+    )
+
+  union all
+  select 'ready_to_apply_193',
+    (
+      select (i.tables_present > 0 and i.tables_present < 5)
+        or (i.functions_present > 0 and i.functions_present < 7)
+        or exists (select 1 from public.app_settings where key = 'operational_pin_pepper')
+      from inventory_193 i
+    ),
+    (
+      select jsonb_build_object(
+        'ready_to_apply_193',
+          i.tables_present = 0
+          and i.functions_present = 0
+          and not exists (select 1 from public.app_settings where key = 'operational_pin_pepper'),
+        'functions_193_missing', i.functions_present = 0,
+        'objects_193_partial', (i.tables_present > 0 and i.tables_present < 5)
+          or (i.functions_present > 0 and i.functions_present < 7)
+      )
+      from inventory_193 i
     )
 
   union all
@@ -225,16 +304,32 @@ gates as (
 
   union all
   select 'os1_192_device_context_authenticated',
-    not has_function_privilege('authenticated', 'public.get_operational_station_device_context()', 'EXECUTE'),
+    to_regprocedure('public.get_operational_station_device_context()') is null
+    or not coalesce(
+      has_function_privilege(
+        'authenticated',
+        to_regprocedure('public.get_operational_station_device_context()'),
+        'EXECUTE'
+      ),
+      false
+    ),
     jsonb_build_object(
-      'device_context_execute', has_function_privilege('authenticated', 'public.get_operational_station_device_context()', 'EXECUTE')
+      'device_context_execute', case
+        when to_regprocedure('public.get_operational_station_device_context()') is null then null
+        else has_function_privilege(
+          'authenticated',
+          to_regprocedure('public.get_operational_station_device_context()'),
+          'EXECUTE'
+        )
+      end
     )
 
   union all
-  select 'os1_resolve_device_internal',
-    has_function_privilege('authenticated', 'public.resolve_operational_device_for_auth_user()', 'EXECUTE'),
+  select 'os2_193_resolve_device_must_be_absent',
+    to_regprocedure('public.resolve_operational_device_for_auth_user()') is not null,
     jsonb_build_object(
-      'resolve_denied', not has_function_privilege('authenticated', 'public.resolve_operational_device_for_auth_user()', 'EXECUTE')
+      'resolve_exists_pre_193', to_regprocedure('public.resolve_operational_device_for_auth_user()') is not null,
+      'functions_193_missing', to_regprocedure('public.resolve_operational_device_for_auth_user()') is null
     )
 
   union all
