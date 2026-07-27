@@ -1,7 +1,7 @@
 -- Gate D preflight — read-only BEFORE applying 194_station_cash_operator_wrappers.sql
 -- Requires 193 fully applied. Single SELECT; gate_code, is_blocker, detail. No secrets.
 
-with gates as (
+with gates (gate_code, is_blocker, detail) as (
   select 'os2_193_foundation_present' as gate_code,
     not (
       exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'operational_operator_sessions')

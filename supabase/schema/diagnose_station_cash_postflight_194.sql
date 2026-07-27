@@ -17,13 +17,15 @@ with fn as (
 idempotency_rel as (
   select to_regclass('public.operational_station_cash_idempotency') as relid
 ),
-gates as (
+gates (gate_code, is_blocker, detail) as (
   select 'idempotency_table_rls' as gate_code,
-    (select idempotency_rel.relid is null from idempotency_rel)
-    or not coalesce((
-      select c.relrowsecurity from pg_class c
-      where c.oid = (select idempotency_rel.relid from idempotency_rel)
-    ), false),
+    (
+      (select idempotency_rel.relid is null from idempotency_rel)
+      or not coalesce((
+        select c.relrowsecurity from pg_class c
+        where c.oid = (select idempotency_rel.relid from idempotency_rel)
+      ), false)
+    ) as is_blocker,
     jsonb_build_object(
       'table_present', (select idempotency_rel.relid is not null from idempotency_rel)
     ) as detail

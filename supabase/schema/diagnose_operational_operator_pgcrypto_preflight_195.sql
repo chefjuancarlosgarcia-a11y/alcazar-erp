@@ -17,7 +17,7 @@ defs as (
   join pg_proc p on p.proname = a.proname
   join pg_namespace n on n.oid = p.pronamespace and n.nspname = 'public'
 ),
-gates as (
+gates (gate_code, is_blocker, detail) as (
   select 'station_cash_wrappers_present'::text as gate_code,
     not exists (
       select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace

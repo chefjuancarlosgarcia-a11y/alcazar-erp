@@ -11,7 +11,7 @@ with fn as (
 secrets_rel as (
   select to_regclass('public.operational_security_secrets') as relid
 ),
-gates as (
+gates (gate_code, is_blocker, detail) as (
   select 'os2_four_tables_exist' as gate_code,
     not (
       exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'operational_credentials')

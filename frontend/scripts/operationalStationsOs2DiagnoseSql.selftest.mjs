@@ -8,13 +8,50 @@ function read(rel) {
   return fs.readFileSync(path.join(repoRoot, rel), "utf8")
 }
 
-const preflight193 = read("supabase/schema/diagnose_operational_operator_access_preflight_193.sql")
-const postflight193 = read("supabase/schema/diagnose_operational_operator_access_postflight_193.sql")
-const preflight194 = read("supabase/schema/diagnose_station_cash_preflight_194.sql")
-const postflight194 = read("supabase/schema/diagnose_station_cash_postflight_194.sql")
+const diagnoseFiles = [
+  ["preflight193", "supabase/schema/diagnose_operational_operator_access_preflight_193.sql"],
+  ["postflight193", "supabase/schema/diagnose_operational_operator_access_postflight_193.sql"],
+  ["preflight194", "supabase/schema/diagnose_station_cash_preflight_194.sql"],
+  ["postflight194", "supabase/schema/diagnose_station_cash_postflight_194.sql"],
+  ["preflight195", "supabase/schema/diagnose_operational_operator_pgcrypto_preflight_195.sql"],
+  ["postflight195", "supabase/schema/diagnose_operational_operator_pgcrypto_postflight_195.sql"]
+]
+
+const sqlByName = Object.fromEntries(diagnoseFiles.map(([name, rel]) => [name, read(rel)]))
+
+const preflight193 = sqlByName.preflight193
+const postflight193 = sqlByName.postflight193
+const preflight194 = sqlByName.preflight194
+const postflight194 = sqlByName.postflight194
 
 const os2FnPattern =
   /has_function_privilege\s*\(\s*'[^']+'\s*,\s*'public\.(?:resolve_operational|verify_operational|operational_pin|get_station_cash|station_cash|lock_operational|touch_operational)/
+
+const gatesColumnList = /gates\s*\(\s*gate_code\s*,\s*is_blocker\s*,\s*detail\s*\)\s*as\s*\(/i
+const finalExport = /select\s+gate_code,\s*is_blocker,\s*detail/im
+const secretLeak =
+  /\b(service_role_key|sb_secret)\b|\bselect\b[\s\S]{0,120}\bsecret_value\b/i
+
+function assertDiagnoseShape(name, sql) {
+  if (!gatesColumnList.test(sql)) {
+    throw new Error(`${name}: gates(gate_code, is_blocker, detail) required on UNION CTE`)
+  }
+  if (!finalExport.test(sql)) {
+    throw new Error(`${name}: expected select gate_code, is_blocker, detail`)
+  }
+  const noComments = sql.replace(/--[^\n]*/g, "")
+  const withoutStrings = noComments.replace(/'[^']*'/g, "''")
+  const semicolonCount = (withoutStrings.match(/;/g) || []).length
+  if (semicolonCount !== 1 || !/;\s*$/.test(noComments.trim())) {
+    throw new Error(`${name}: must be a single statement`)
+  }
+  if (/^\s*(insert|update|delete|create|drop|alter)\s/im.test(withoutStrings)) {
+    throw new Error(`${name}: must be read-only`)
+  }
+  if (secretLeak.test(sql)) {
+    throw new Error(`${name}: must not embed secrets or PIN material`)
+  }
+}
 
 const tests = [
   {
@@ -86,23 +123,20 @@ const tests = [
     }
   },
   {
-    name: "DIAG all single SELECT export",
+    name: "DIAG-POST194 first union branch names is_blocker",
     run() {
-      for (const [name, sql] of [
-        ["preflight193", preflight193],
-        ["postflight193", postflight193],
-        ["preflight194", preflight194],
-        ["postflight194", postflight194]
-      ]) {
-        if (!/select\s+gate_code,\s*is_blocker,\s*detail/im.test(sql)) {
-          throw new Error(`${name}: expected gate_code/is_blocker/detail result set`)
-        }
-        if (/^\s*(insert|update|delete|create|drop|alter)\s/im.test(sql.replace(/--[^\n]*/g, ""))) {
-          throw new Error(`${name}: must be read-only`)
-        }
+      const m = postflight194.match(
+        /gates\s*\(\s*gate_code\s*,\s*is_blocker\s*,\s*detail\s*\)[\s\S]*?idempotency_table_rls[\s\S]*?\)\s*as\s*is_blocker/i
+      )
+      if (!m) {
+        throw new Error("postflight 194 idempotency_table_rls must expose is_blocker (42703 fix)")
       }
     }
-  }
+  },
+  ...diagnoseFiles.map(([name]) => ({
+    name: `DIAG shape ${name}`,
+    run: () => assertDiagnoseShape(name, sqlByName[name])
+  }))
 ]
 
 let passed = 0

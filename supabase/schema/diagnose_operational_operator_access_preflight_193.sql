@@ -43,7 +43,7 @@ inventory_193 as (
         )
     )::int as functions_present
 ),
-gates as (
+gates (gate_code, is_blocker, detail) as (
   select 'os1_four_tables_present' as gate_code,
     not (
       exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'operational_stations')
