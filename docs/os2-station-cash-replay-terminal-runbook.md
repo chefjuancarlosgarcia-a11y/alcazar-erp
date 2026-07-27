@@ -30,6 +30,8 @@ La razón de revocación **no basta**; debe existir la fila completed + coincide
 5. **Concurrencia misma K** (requiere **dos conexiones** SQL o dos clientes)
    - Conexión A: inicia mutación, detiene antes de commit (o usa `pg_sleep` en prueba controlada).
    - Conexión B: misma K → bloqueo `FOR UPDATE` en idempotency hasta commit de A; luego B recibe completed sin segunda mutación.
+   - **Guía paso a paso (SQL Editor):** `docs/os2-station-cash-concurrency-two-tab-runbook.md`
+     Scripts: `194_concurrency_test_setup.sql`, `worker_a.sql`, `worker_b.sql`, `verify_cleanup.sql`.
 
 ## ACL
 
