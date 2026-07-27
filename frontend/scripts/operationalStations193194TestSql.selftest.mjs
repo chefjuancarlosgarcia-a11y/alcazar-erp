@@ -62,7 +62,6 @@ function assertFingerprintDigest(sql194) {
     throw new Error("fingerprint must not use public.digest")
   }
 }
-const brokenLimitComma = /\blimit\s+\d+\s*,\s*'/i
 
 function assertTestStructure(name, sql) {
   if (!/^begin;/im.test(sql)) throw new Error(`${name}: missing begin`)
