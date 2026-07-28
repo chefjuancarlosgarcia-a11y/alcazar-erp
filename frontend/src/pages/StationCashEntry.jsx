@@ -18,7 +18,12 @@ import {
 import { useAuth } from "../context/AuthContext"
 import "./StationCashEntry.css"
 
-const PIN_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "clear", "0", "enter"]
+const PIN_LENGTH = 4
+const GENERIC_PIN_ERROR = "PIN o acceso no válido."
+
+function normalizePinDigits(value) {
+  return String(value || "").replace(/\D/g, "").slice(0, PIN_LENGTH)
+}
 
 export default function StationCashEntry() {
   const { stationDeviceContext } = useAuth()
@@ -30,9 +35,16 @@ export default function StationCashEntry() {
   const activityPendingRef = useRef(false)
   const lastTouchSentAtRef = useRef(0)
   const touchInFlightRef = useRef(false)
+  const pinInputRef = useRef(null)
 
   const stationName = stationDeviceContext?.station_name || "Caja Principal"
   const isCashStation = stationDeviceContext?.station_type === "cash"
+  const pinDigitCount = pin.length
+  const canSubmitPin = pinDigitCount === PIN_LENGTH && !busy
+
+  const focusPinInput = useCallback(() => {
+    pinInputRef.current?.focus()
+  }, [])
 
   const handleOperatorLocked = useCallback((message) => {
     clearOperatorSession()
@@ -98,6 +110,26 @@ export default function StationCashEntry() {
     void flushOperatorTouch()
   }, [flushOperatorTouch])
 
+  const submitPin = useCallback(async (nextPin) => {
+    if (nextPin.length !== PIN_LENGTH || busy) return
+    setBusy(true)
+    setError("")
+    const { data, error: verifyError } = await verifyOperationalPin({ pin: nextPin, module: "cash" })
+    setBusy(false)
+    if (verifyError || !data?.ok) {
+      setPin("")
+      setError(GENERIC_PIN_ERROR)
+      requestAnimationFrame(() => focusPinInput())
+      return
+    }
+    const token = loadOperatorSessionToken()
+    setSessionToken(token)
+    setOperatorMeta(loadOperatorSessionMeta())
+    activityPendingRef.current = false
+    lastTouchSentAtRef.current = 0
+    setPin("")
+  }, [busy, focusPinInput])
+
   /* eslint-disable react-hooks/refs -- port callbacks invoked only from async RPC/UI handlers */
   const cashPort = useMemo(() => {
     if (!sessionToken) return null
@@ -136,53 +168,47 @@ export default function StationCashEntry() {
     }
   }, [sessionToken, markHumanActivity])
 
+  useEffect(() => {
+    if (sessionToken || !isCashStation) return undefined
+    focusPinInput()
+    return undefined
+  }, [sessionToken, isCashStation, focusPinInput])
+
+  function handlePinChange(event) {
+    if (busy) return
+    setPin(normalizePinDigits(event.target.value))
+    if (error) setError("")
+  }
+
+  function handlePinPaste(event) {
+    event.preventDefault()
+    if (busy) return
+    setPin(normalizePinDigits(event.clipboardData.getData("text")))
+    if (error) setError("")
+  }
+
+  function handlePinKeyDown(event) {
+    if (event.key !== "Enter") return
+    event.preventDefault()
+    if (canSubmitPin) void submitPin(pin)
+  }
+
+  function handlePinFormSubmit(event) {
+    event.preventDefault()
+    if (canSubmitPin) void submitPin(pin)
+  }
+
+  async function handleLock() {
+    await lockOperatorSession("manual_lock")
+    handleOperatorLocked()
+  }
+
   if (!isCashStation) {
     return (
       <section className="erp-page-shell station-cash-entry">
         <p>Esta terminal no es una estación tipo Caja.</p>
       </section>
     )
-  }
-
-  async function submitPin(nextPin) {
-    if (nextPin.length !== 4) return
-    setBusy(true)
-    setError("")
-    const { data, error: verifyError } = await verifyOperationalPin({ pin: nextPin, module: "cash" })
-    setBusy(false)
-    if (verifyError || !data?.ok) {
-      setPin("")
-      setError("PIN o acceso no válido.")
-      return
-    }
-    const token = loadOperatorSessionToken()
-    setSessionToken(token)
-    setOperatorMeta(loadOperatorSessionMeta())
-    activityPendingRef.current = false
-    lastTouchSentAtRef.current = 0
-    setPin("")
-  }
-
-  function onKey(key) {
-    if (busy) return
-    if (key === "clear") {
-      setPin("")
-      setError("")
-      return
-    }
-    if (key === "enter") {
-      submitPin(pin)
-      return
-    }
-    if (pin.length >= 4) return
-    const next = pin + key
-    setPin(next)
-    if (next.length === 4) submitPin(next)
-  }
-
-  async function handleLock() {
-    await lockOperatorSession("manual_lock")
-    handleOperatorLocked()
   }
 
   if (sessionToken && operatorMeta?.operatorName && cashPort) {
@@ -219,23 +245,66 @@ export default function StationCashEntry() {
         <h1>{stationName} — Ingrese su PIN</h1>
         <p className="station-cash-entry-muted">Acceso operativo individual (4 dígitos)</p>
       </header>
-      {error && <p className="station-cash-entry-error">{error}</p>}
-      <div className="station-cash-pin-display" aria-live="polite">
-        {pin.padEnd(4, "•").slice(0, 4).replace(/\d/g, "•")}
-      </div>
-      <div className="station-cash-pin-pad">
-        {PIN_KEYS.map((key) => (
-          <button
-            key={key}
-            type="button"
-            className={`station-cash-pin-key station-cash-pin-key--${key}`}
+      {error && (
+        <p className="station-cash-entry-error" role="alert">
+          {error}
+        </p>
+      )}
+      <form className="station-cash-pin-form" onSubmit={handlePinFormSubmit} noValidate>
+        <div
+          className="station-cash-pin-field"
+          onPointerDown={(event) => {
+            if (event.target === event.currentTarget || event.target.closest(".station-cash-pin-cell")) {
+              focusPinInput()
+            }
+          }}
+        >
+          <div className="station-cash-pin-cells">
+            {Array.from({ length: PIN_LENGTH }, (_, index) => (
+              <span
+                key={index}
+                className={
+                  pin[index]
+                    ? "station-cash-pin-cell station-cash-pin-cell--filled"
+                    : "station-cash-pin-cell"
+                }
+                aria-hidden="true"
+              >
+                {pin[index] ? "●" : ""}
+              </span>
+            ))}
+          </div>
+          <input
+            ref={pinInputRef}
+            id="station-operational-pin"
+            name="station-operational-pin"
+            className="station-cash-pin-input"
+            type="password"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            maxLength={PIN_LENGTH}
+            autoComplete="off"
+            enterKeyHint="go"
+            aria-label="PIN operativo de 4 dígitos"
+            aria-describedby="station-cash-pin-progress"
+            value={pin}
+            onChange={handlePinChange}
+            onPaste={handlePinPaste}
+            onKeyDown={handlePinKeyDown}
             disabled={busy}
-            onClick={() => onKey(key === "enter" ? "enter" : key === "clear" ? "clear" : key)}
-          >
-            {key === "enter" ? "OK" : key === "clear" ? "⌫" : key}
-          </button>
-        ))}
-      </div>
+          />
+        </div>
+        <p id="station-cash-pin-progress" className="station-cash-pin-progress" aria-live="polite">
+          {busy ? "Validando…" : `${pinDigitCount} de 4 dígitos ingresados`}
+        </p>
+        <button
+          type="submit"
+          className="station-cash-pin-submit"
+          disabled={!canSubmitPin}
+        >
+          Entrar
+        </button>
+      </form>
     </section>
   )
 }
