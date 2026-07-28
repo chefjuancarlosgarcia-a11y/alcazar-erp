@@ -73,8 +73,9 @@ const tests = [
   {
     name: "PINUX-7 busy validating state",
     run() {
-      if (!/Validando…/.test(pinFormBlock)) throw new Error("Validando copy")
+      if (!/Validando…/.test(pinFormBlock)) throw new Error("Validando on submit button")
       if (!/disabled=\{busy\}/.test(pinFormBlock)) throw new Error("input disabled while busy")
+      if (!/aria-busy=\{busy\}/.test(pinFormBlock)) throw new Error("submit aria-busy")
     }
   },
   {
@@ -88,10 +89,46 @@ const tests = [
     }
   },
   {
-    name: "PINUX-9 progress aria live",
+    name: "PINUX-9 discreet progress aria live",
     run() {
-      if (!/de 4 dígitos ingresados/.test(pinFormBlock)) throw new Error("progress text")
-      if (!/aria-live="polite"/.test(pinFormBlock)) throw new Error("aria-live")
+      if (!/station-cash-pin-sr-progress/.test(pinFormBlock)) throw new Error("sr-only progress")
+      if (!/de 4 dígitos ingresados/.test(pinFormBlock)) throw new Error("progress text for AT")
+      if (/className="station-cash-pin-progress"/.test(pinFormBlock)) {
+        throw new Error("visible 0 de 4 progress removed")
+      }
+    }
+  },
+  {
+    name: "PINUX-12 tactile keypad shares pin state",
+    run() {
+      if (!/station-cash-pin-keypad/.test(pinFormBlock)) throw new Error("keypad present")
+      if (!/applyPinUpdate/.test(stationEntry)) throw new Error("shared pin updater")
+      if (!/appendPinDigit/.test(stationEntry) || !/removeLastPinDigit/.test(stationEntry)) {
+        throw new Error("keypad handlers")
+      }
+      if (!/aria-label=\{`Dígito \$\{key\}`\}/.test(pinFormBlock)) throw new Error("digit aria-label")
+      if (!/Limpiar PIN/.test(pinFormBlock)) throw new Error("clear aria-label")
+    }
+  },
+  {
+    name: "PINUX-13 access card layout",
+    run() {
+      const pinGate = stationEntry.match(/station-cash-entry--pin-gate[\s\S]*$/)?.[0] || ""
+      if (!/station-cash-access-card/.test(pinGate)) throw new Error("access card")
+      if (!/Acceso a \{stationName\}/.test(pinGate)) throw new Error("dynamic title")
+      if (/\{stationName\} — Ingrese/.test(pinGate)) throw new Error("no combined title line")
+    }
+  },
+  {
+    name: "PINUX-14 disabled submit styling",
+    run() {
+      const css = fs.readFileSync(
+        path.join(repoRoot, "frontend/src/pages/StationCashEntry.css"),
+        "utf8"
+      )
+      if (!/\.station-cash-pin-submit:disabled[\s\S]*#334155/.test(css)) {
+        throw new Error("disabled submit dark gray")
+      }
     }
   },
   {
