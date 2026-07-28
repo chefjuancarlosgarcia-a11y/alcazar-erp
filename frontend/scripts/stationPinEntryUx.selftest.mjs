@@ -41,7 +41,7 @@ const tests = [
     name: "PINUX-3 filled shows bullet not digit in DOM",
     run() {
       if (!/\{pin\[index\] \? "●" : ""\}/.test(pinFormBlock)) throw new Error("bullet mask")
-      if (/pin\[index\]\}/.test(pinBlock.replace(/\{pin\[index\] \? "●" : ""\}/g, ""))) {
+      if (/pin\[index\]\}/.test(pinFormBlock.replace(/\{pin\[index\] \? "●" : ""\}/g, ""))) {
         throw new Error("must not render raw digit in cells")
       }
     }
