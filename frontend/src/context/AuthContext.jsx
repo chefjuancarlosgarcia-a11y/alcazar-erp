@@ -116,6 +116,13 @@ function resolveAuthRole(role) {
   return ROLE_PERMISSIONS[normalized] ? normalized : "colaborador"
 }
 
+export function isOperationalStationDeviceSessionCandidate(sessionUser) {
+  if (!sessionUser) return false
+  if (sessionUser.app_metadata?.operational_station_device === true) return true
+  if (sessionUser.user_metadata?.operational_station_device === true) return true
+  return false
+}
+
 export function normalizeProfileToCurrentUser(profile, sessionUser) {
   if (!profile || !sessionUser) return null
   const role = resolveAuthRole(profile.role)
@@ -217,10 +224,54 @@ export function AuthProvider({ children }) {
     if (!sessionUserId) {
       setProfile(null)
       setUser(null)
+      setStationDeviceContext(null)
       setChecklistModuleAccess(false)
       setProfileError("")
       syncLegacyUser(null)
       return { ok: true, user: null, profile: null }
+    }
+
+    setStationDeviceContext(null)
+
+    if (isOperationalStationDeviceSessionCandidate(activeSession.user)) {
+      const { data: deviceCtx, error: deviceCtxError } = await supabase.rpc(
+        "get_operational_station_device_context"
+      )
+      if (!deviceCtxError && deviceCtx?.active) {
+        logProfileLoadOutcome({
+          sourceFunction: "AuthContext.loadProfileForSession",
+          authUserId: sessionUserId,
+          authEmail: sessionEmail,
+          outcome: "station_device_context"
+        })
+        setProfile(null)
+        setUser(null)
+        setStationDeviceContext(deviceCtx)
+        setChecklistModuleAccess(false)
+        setProfileError("")
+        syncLegacyUser(null)
+        return { ok: true, stationDevice: true, deviceContext: deviceCtx }
+      }
+      logProfileLoadOutcome({
+        sourceFunction: "AuthContext.loadProfileForSession",
+        authUserId: sessionUserId,
+        authEmail: sessionEmail,
+        outcome: deviceCtxError ? "station_device_rpc_error" : "station_device_inactive",
+        error: deviceCtxError || undefined
+      })
+      setProfile(null)
+      setUser(null)
+      setStationDeviceContext(null)
+      setChecklistModuleAccess(false)
+      setProfileError("Terminal no autorizada o sin estación activa.")
+      syncLegacyUser(null)
+      window.dispatchEvent(new CustomEvent("auth:session-interrupted", {
+        detail: {
+          reason: "station_device_denied",
+          message: deviceCtxError?.message || "station_device_inactive"
+        }
+      }))
+      return { ok: false, message: "Terminal no autorizada o sin estación activa." }
     }
 
     const profileQuery = 'from("profiles").select("*").eq("id", sessionUserId).maybeSingle()'
@@ -271,26 +322,6 @@ export function AuthProvider({ children }) {
       return { ok: false, message: "No se pudo cargar tu perfil. Contacta administración." }
     }
     if (!data) {
-      const isStationDevice = Boolean(activeSession?.user?.user_metadata?.operational_station_device)
-      if (isStationDevice) {
-        const { data: deviceCtx, error: deviceCtxError } = await supabase.rpc(
-          "get_operational_station_device_context"
-        )
-        if (!deviceCtxError && deviceCtx?.active) {
-          logProfileLoadOutcome({
-            sourceFunction: "AuthContext.loadProfileForSession",
-            authUserId: sessionUserId,
-            authEmail: sessionEmail,
-            outcome: "station_device_context"
-          })
-          setProfile(null)
-          setUser(null)
-          setStationDeviceContext(deviceCtx)
-          setProfileError("")
-          syncLegacyUser(null)
-          return { ok: true, stationDevice: true, deviceContext: deviceCtx }
-        }
-      }
       logProfileLoadOutcome({
         sourceFunction: "AuthContext.loadProfileForSession",
         authUserId: sessionUserId,
