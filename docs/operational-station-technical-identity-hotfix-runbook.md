@@ -42,7 +42,7 @@ Preflight raises `196_preflight_blocked` if any device-linked profile has those 
 node frontend/scripts/operationalStationTechnicalIdentity.selftest.mjs
 cd frontend && npm run build
 cd frontend && npm run lint
-cd supabase/functions/operational-station-enroll && deno check index.ts
+cd supabase/functions/operational-station-enroll && npx --yes deno@2.3.1 check index.ts
 cd supabase/functions/operational-station-access && deno check index.ts
 git diff --check
 ```
