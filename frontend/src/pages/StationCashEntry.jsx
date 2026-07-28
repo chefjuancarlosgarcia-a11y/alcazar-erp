@@ -16,6 +16,7 @@ import {
   shouldSendOperatorTouch
 } from "../services/operationalOperatorIdle"
 import { useAuth } from "../context/AuthContext"
+import { BRANDING } from "../branding"
 import "./StationCashEntry.css"
 
 const PIN_LENGTH = 4
@@ -24,6 +25,13 @@ const GENERIC_PIN_ERROR = "PIN o acceso no válido."
 function normalizePinDigits(value) {
   return String(value || "").replace(/\D/g, "").slice(0, PIN_LENGTH)
 }
+
+const PIN_KEYPAD_ROWS = [
+  ["1", "2", "3"],
+  ["4", "5", "6"],
+  ["7", "8", "9"],
+  ["backspace", "0", "clear"]
+]
 
 export default function StationCashEntry() {
   const { stationDeviceContext } = useAuth()
@@ -174,17 +182,35 @@ export default function StationCashEntry() {
     return undefined
   }, [sessionToken, isCashStation, focusPinInput])
 
-  function handlePinChange(event) {
+  const applyPinUpdate = useCallback((nextValue) => {
     if (busy) return
-    setPin(normalizePinDigits(event.target.value))
+    setPin(normalizePinDigits(nextValue))
     if (error) setError("")
+  }, [busy, error])
+
+  function appendPinDigit(digit) {
+    if (busy || pin.length >= PIN_LENGTH) return
+    applyPinUpdate(`${pin}${digit}`)
+  }
+
+  function removeLastPinDigit() {
+    if (busy || !pin.length) return
+    applyPinUpdate(pin.slice(0, -1))
+  }
+
+  function clearPinDigits() {
+    if (busy) return
+    applyPinUpdate("")
+  }
+
+  function handlePinChange(event) {
+    applyPinUpdate(event.target.value)
   }
 
   function handlePinPaste(event) {
     event.preventDefault()
     if (busy) return
-    setPin(normalizePinDigits(event.clipboardData.getData("text")))
-    if (error) setError("")
+    applyPinUpdate(event.clipboardData.getData("text"))
   }
 
   function handlePinKeyDown(event) {
@@ -240,71 +266,137 @@ export default function StationCashEntry() {
   }
 
   return (
-    <section className="erp-page-shell station-cash-entry">
-      <header className="station-cash-entry-header">
-        <h1>{stationName} — Ingrese su PIN</h1>
-        <p className="station-cash-entry-muted">Acceso operativo individual (4 dígitos)</p>
-      </header>
-      {error && (
-        <p className="station-cash-entry-error" role="alert">
-          {error}
-        </p>
-      )}
-      <form className="station-cash-pin-form" onSubmit={handlePinFormSubmit} noValidate>
-        <div
-          className="station-cash-pin-field"
-          onPointerDown={(event) => {
-            if (event.target === event.currentTarget || event.target.closest(".station-cash-pin-cell")) {
-              focusPinInput()
-            }
-          }}
-        >
-          <div className="station-cash-pin-cells">
-            {Array.from({ length: PIN_LENGTH }, (_, index) => (
-              <span
-                key={index}
-                className={
-                  pin[index]
-                    ? "station-cash-pin-cell station-cash-pin-cell--filled"
-                    : "station-cash-pin-cell"
-                }
-                aria-hidden="true"
-              >
-                {pin[index] ? "●" : ""}
-              </span>
-            ))}
+    <section className="erp-page-shell station-cash-entry station-cash-entry--pin-gate">
+      <div className="station-cash-access-card">
+        <header className="station-cash-access-header">
+          {BRANDING.logoUrl ? (
+            <img
+              className="station-cash-access-logo"
+              src={BRANDING.logoUrl}
+              alt=""
+            />
+          ) : (
+            <span className="station-cash-access-mark" aria-hidden="true">
+              {BRANDING.monogram}
+            </span>
+          )}
+          <h1 className="station-cash-access-title">Acceso a {stationName}</h1>
+          <p className="station-cash-access-subtitle">Ingresa tu PIN operativo de 4 dígitos</p>
+        </header>
+
+        <form className="station-cash-pin-form" onSubmit={handlePinFormSubmit} noValidate>
+          <div
+            className="station-cash-pin-field"
+            role="presentation"
+            onPointerDown={() => focusPinInput()}
+          >
+            <div className="station-cash-pin-cells">
+              {Array.from({ length: PIN_LENGTH }, (_, index) => (
+                <span
+                  key={index}
+                  className={
+                    pin[index]
+                      ? "station-cash-pin-cell station-cash-pin-cell--filled"
+                      : "station-cash-pin-cell"
+                  }
+                  aria-hidden="true"
+                >
+                  {pin[index] ? "●" : ""}
+                </span>
+              ))}
+            </div>
+            <input
+              ref={pinInputRef}
+              id="station-operational-pin"
+              name="station-operational-pin"
+              className="station-cash-pin-input"
+              type="password"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={PIN_LENGTH}
+              autoComplete="off"
+              enterKeyHint="go"
+              aria-label="PIN operativo de 4 dígitos"
+              aria-describedby="station-cash-pin-progress station-cash-pin-message"
+              value={pin}
+              onChange={handlePinChange}
+              onPaste={handlePinPaste}
+              onKeyDown={handlePinKeyDown}
+              disabled={busy}
+            />
           </div>
-          <input
-            ref={pinInputRef}
-            id="station-operational-pin"
-            name="station-operational-pin"
-            className="station-cash-pin-input"
-            type="password"
-            inputMode="numeric"
-            pattern="[0-9]*"
-            maxLength={PIN_LENGTH}
-            autoComplete="off"
-            enterKeyHint="go"
-            aria-label="PIN operativo de 4 dígitos"
-            aria-describedby="station-cash-pin-progress"
-            value={pin}
-            onChange={handlePinChange}
-            onPaste={handlePinPaste}
-            onKeyDown={handlePinKeyDown}
-            disabled={busy}
-          />
-        </div>
-        <p id="station-cash-pin-progress" className="station-cash-pin-progress" aria-live="polite">
-          {busy ? "Validando…" : `${pinDigitCount} de 4 dígitos ingresados`}
-        </p>
-        <button
-          type="submit"
-          className="station-cash-pin-submit"
-          disabled={!canSubmitPin}
-        >
-          Entrar
-        </button>
-      </form>
+
+          <div id="station-cash-pin-message" className="station-cash-pin-message">
+            {error ? (
+              <p className="station-cash-entry-error" role="alert">
+                {error}
+              </p>
+            ) : (
+              <span className="station-cash-pin-message-placeholder" aria-hidden="true">
+                {" "}
+              </span>
+            )}
+          </div>
+
+          <p id="station-cash-pin-progress" className="station-cash-pin-sr-progress" aria-live="polite">
+            {busy ? "Validando PIN operativo" : `${pinDigitCount} de 4 dígitos ingresados`}
+          </p>
+
+          <div className="station-cash-pin-keypad">
+            {PIN_KEYPAD_ROWS.flatMap((row) => row).map((key) => {
+              if (key === "backspace") {
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    className="station-cash-pin-key station-cash-pin-key--action"
+                    aria-label="Borrar último dígito"
+                    disabled={busy || pin.length === 0}
+                    onClick={removeLastPinDigit}
+                  >
+                    Borrar
+                  </button>
+                )
+              }
+              if (key === "clear") {
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    className="station-cash-pin-key station-cash-pin-key--action"
+                    aria-label="Limpiar PIN"
+                    disabled={busy || pin.length === 0}
+                    onClick={clearPinDigits}
+                  >
+                    Limpiar
+                  </button>
+                )
+              }
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  className="station-cash-pin-key"
+                  aria-label={`Dígito ${key}`}
+                  disabled={busy || pin.length >= PIN_LENGTH}
+                  onClick={() => appendPinDigit(key)}
+                >
+                  {key}
+                </button>
+              )
+            })}
+          </div>
+
+          <button
+            type="submit"
+            className="station-cash-pin-submit"
+            disabled={!canSubmitPin}
+            aria-busy={busy}
+          >
+            {busy ? "Validando…" : "Entrar"}
+          </button>
+        </form>
+      </div>
     </section>
   )
 }

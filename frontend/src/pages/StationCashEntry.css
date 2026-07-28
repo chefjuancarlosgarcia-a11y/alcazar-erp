@@ -1,12 +1,78 @@
 .station-cash-entry {
-  max-width: 640px;
-  margin: 0 auto;
-  padding: var(--erp-space-24);
+  box-sizing: border-box;
 }
 
 .station-cash-entry--active {
   max-width: none;
   margin: 0;
+  padding: var(--erp-space-24);
+}
+
+.station-cash-entry--pin-gate {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: min(100dvh, 100vh);
+  padding: var(--erp-space-16);
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.station-cash-access-card {
+  width: min(100%, 480px);
+  margin: 0 auto;
+  padding: var(--erp-space-24);
+  border-radius: var(--erp-radius-card, 12px);
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: rgba(15, 23, 42, 0.94);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.32);
+  box-sizing: border-box;
+}
+
+.station-cash-access-header {
+  display: grid;
+  gap: var(--erp-space-8);
+  justify-items: center;
+  text-align: center;
+  margin-bottom: var(--erp-space-24);
+}
+
+.station-cash-access-logo {
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+}
+
+.station-cash-access-mark {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--erp-radius-card, 12px);
+  background: rgba(20, 184, 166, 0.16);
+  border: 1px solid rgba(20, 184, 166, 0.48);
+  color: #5eead4;
+  font-weight: 800;
+  font-size: 1rem;
+  letter-spacing: 0.04em;
+}
+
+.station-cash-access-title {
+  margin: 0;
+  font-size: clamp(1.25rem, 2.8vw, 1.5rem);
+  line-height: 1.25;
+  font-weight: 700;
+  color: #f8fafc;
+  text-wrap: balance;
+  max-width: 100%;
+}
+
+.station-cash-access-subtitle {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.4;
+  color: var(--erp-text-muted, #94a3b8);
+  max-width: 36ch;
 }
 
 .station-cash-entry-header {
@@ -29,29 +95,31 @@
 }
 
 .station-cash-entry-error {
+  margin: 0;
   color: #f87171;
-  margin-bottom: var(--erp-space-16);
   font-weight: 600;
+  font-size: 0.9375rem;
+  line-height: 1.4;
+  text-align: center;
 }
 
 .station-cash-pin-form {
   display: grid;
   gap: var(--erp-space-16);
-  justify-items: center;
+  width: 100%;
 }
 
 .station-cash-pin-field {
   position: relative;
-  width: min(100%, 360px);
+  width: 100%;
   min-height: 64px;
   cursor: text;
 }
 
 .station-cash-pin-cells {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--erp-space-16);
-  pointer-events: none;
 }
 
 .station-cash-pin-cell {
@@ -64,7 +132,7 @@
   font-size: 1.75rem;
   line-height: 1;
   color: #f8fafc;
-  background: rgba(15, 23, 42, 0.88);
+  background: rgba(7, 16, 35, 0.88);
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.24);
 }
 
@@ -106,16 +174,58 @@
   border-color: #0ea5a4;
 }
 
-.station-cash-pin-progress {
-  margin: 0;
-  font-size: 1.125rem;
+.station-cash-pin-message {
+  min-height: 24px;
+  display: grid;
+  align-items: center;
+}
+
+.station-cash-pin-message-placeholder {
+  visibility: hidden;
+}
+
+.station-cash-pin-sr-progress {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.station-cash-pin-keypad {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--erp-space-8);
+  width: 100%;
+}
+
+.station-cash-pin-key {
+  min-height: 56px;
+  border-radius: var(--erp-radius-card, 12px);
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  background: rgba(30, 41, 59, 0.92);
+  color: #f1f5f9;
+  font-size: 1.25rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.station-cash-pin-key--action {
+  font-size: 0.9375rem;
   font-weight: 600;
-  color: #e2e8f0;
-  text-align: center;
+}
+
+.station-cash-pin-key:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .station-cash-pin-submit {
-  width: min(100%, 360px);
+  width: 100%;
   min-height: var(--erp-btn-height, 48px);
   padding: 0 var(--erp-space-24);
   border-radius: var(--erp-radius-card, 12px);
@@ -128,8 +238,11 @@
 }
 
 .station-cash-pin-submit:disabled {
-  opacity: 0.45;
+  background: #334155;
+  color: #64748b;
+  opacity: 1;
   cursor: not-allowed;
+  border: 1px solid rgba(148, 163, 184, 0.24);
 }
 
 .station-cash-entry-lock {
@@ -144,7 +257,12 @@
 }
 
 @media (max-width: 767px) {
-  .station-cash-pin-cell {
+  .station-cash-access-card {
+    padding: var(--erp-space-16);
+  }
+
+  .station-cash-pin-cell,
+  .station-cash-pin-key {
     min-height: 52px;
   }
 
@@ -154,7 +272,16 @@
 }
 
 @media (min-width: 768px) and (max-width: 1024px) {
-  .station-cash-pin-cell {
+  .station-cash-pin-cell,
+  .station-cash-pin-key {
     min-height: 48px;
+  }
+}
+
+@media (max-height: 768px) {
+  .station-cash-entry--pin-gate {
+    align-items: flex-start;
+    padding-top: var(--erp-space-16);
+    padding-bottom: var(--erp-space-24);
   }
 }
