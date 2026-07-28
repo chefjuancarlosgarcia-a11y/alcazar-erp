@@ -1,11 +1,27 @@
 import { Navigate } from "react-router-dom"
-import { useAuth } from "../context/AuthContext"
+import { isOperationalStationDeviceSessionCandidate, useAuth } from "../context/AuthContext"
 
 function ProtectedRoute({ module, children }) {
-  const { user, session, loading, profileError, logout, canAccess, getDefaultPath } = useAuth()
+  const {
+    user,
+    session,
+    loading,
+    profileError,
+    logout,
+    canAccess,
+    getDefaultPath,
+    isStationDevice
+  } = useAuth()
 
   if (loading) {
     return <div style={statusStyle}>Cargando sesión...</div>
+  }
+
+  if (
+    session
+    && (isStationDevice || isOperationalStationDeviceSessionCandidate(session.user))
+  ) {
+    return <Navigate to="/station/cash" replace />
   }
 
   if (session && !user && profileError) {

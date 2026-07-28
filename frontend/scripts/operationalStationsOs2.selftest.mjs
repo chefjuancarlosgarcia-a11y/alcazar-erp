@@ -80,7 +80,15 @@ const tests = [
     name: "OS2-7 AuthContext station device context",
     run() {
       if (!/stationDeviceContext/.test(authCtx)) throw new Error("stationDeviceContext state")
-      if (!/get_operational_station_device_context/.test(authCtx)) throw new Error("RPC on missing profile")
+      if (!/get_operational_station_device_context/.test(authCtx)) throw new Error("RPC required")
+      const profilesIdx = authCtx.indexOf('from("profiles")')
+      const rpcIdx = authCtx.indexOf("get_operational_station_device_context")
+      if (rpcIdx < 0 || profilesIdx < 0 || rpcIdx > profilesIdx) {
+        throw new Error("device RPC must run before profiles query for technical sessions")
+      }
+      if (!/isOperationalStationDeviceSessionCandidate/.test(authCtx)) {
+        throw new Error("technical session candidate helper")
+      }
     }
   },
   {
