@@ -96,6 +96,7 @@ import {
   updateOrderItemNotes,
   updateOrderItemQuantity
 } from "../services/posOrdersFacade"
+import { usePosOrdersPort } from "../services/posOrdersPortContext"
 import {
   deletePosFloorTable,
   deletePosFloorZone,
@@ -776,6 +777,7 @@ function TableWithChairs({ table, selected = false, editing = false, zoom = 1, o
 function POS({ stationMode = false, stationPosPort = null, onStationTerminalAction = null }) {
   const location = useLocation()
   const { user, loading: authLoading } = useAuth()
+  const ordersPort = usePosOrdersPort()
   const params = new URLSearchParams(location.search)
   const section = params.get("section") || "pos"
 
@@ -845,6 +847,7 @@ function POS({ stationMode = false, stationPosPort = null, onStationTerminalActi
   const [mesaError, setMesaError] = useState("")
   const [layoutMessage, setLayoutMessage] = useState("")
   const [layoutError, setLayoutError] = useState("")
+  const [floorPlanLoadFailed, setFloorPlanLoadFailed] = useState(false)
   const [draggingTableId, setDraggingTableId] = useState(null)
   const floorPlanRef = useRef(null)
   const [ordenMesa, setOrdenMesa] = useState(null)
@@ -1403,59 +1406,91 @@ function POS({ stationMode = false, stationPosPort = null, onStationTerminalActi
 
   const reloadFloorFromCloud = useCallback(async (fromRemote = false) => {
     if (floorLayoutSkipRemoteRef.current) return
-    if (stationMode && stationPosPort) {
-      const result = await stationPosPort.fetchFloorLayout()
-      if (result.error || !result.data?.areas?.length) {
-        if (fromRemote) return
-        setLayoutError(result.message || "No se pudo recargar el plano de estación.")
+    if (stationMode && !ordersPort?.fetchFloorLayout) {
+      if (!fromRemote) {
+        setLayoutError("Puerto POS estación incompleto (fetchFloorLayout).")
         setFloorSyncStatus("error")
-        return
+        setFloorPlanLoadFailed(true)
       }
-      applyHydratedLayout(
-        { areas: result.data.areas, tables: result.data.tables, settings: result.data.settings },
-        "supabase"
-      )
       return
     }
-    const result = await getPosFloorLayout()
-    if (result.error || !result.data?.areas?.length) {
+    const result = stationMode
+      ? await ordersPort.fetchFloorLayout()
+      : await getPosFloorLayout()
+    if (result.error) {
       if (fromRemote) return
-      setLayoutError(result.message || "No se pudo recargar el plano desde la nube.")
+      setLayoutError(result.message || "No se pudo cargar el plano de mesas.")
       setFloorSyncStatus("error")
+      setFloorPlanLoadFailed(true)
       return
     }
-    if (fromRemote && floorSyncStatus === "dirty") {
+    setFloorPlanLoadFailed(false)
+    if (!result.data?.areas?.length) {
+      if (fromRemote) return
+      setAreasRestaurante([])
+      setLayoutSettings(result.data?.settings || DEFAULT_LAYOUT_SETTINGS)
+      setFloorLayoutSource("empty")
+      setFloorSyncStatus("synced")
+      setLayoutError("")
+      return
+    }
+    if (!stationMode && fromRemote && floorSyncStatus === "dirty") {
       showToast("Plano actualizado en otro dispositivo. Tienes cambios sin guardar en este equipo.", "warning", 4000)
       return
     }
     const hydrated = hydrateLayoutFromPayload(result.data)
     const withOrders = await hydrateMesasFromOrders(hydrated.areas)
     applyHydratedLayout({ ...hydrated, areas: withOrders }, "supabase")
-    if (fromRemote) {
+    setLayoutError("")
+    if (!stationMode && fromRemote) {
       showToast("Plano actualizado desde otro dispositivo.", "info", 3000)
     }
-  }, [applyHydratedLayout, floorSyncStatus, showToast, stationMode, stationPosPort])
+  }, [applyHydratedLayout, floorSyncStatus, ordersPort, showToast, stationMode])
 
   useEffect(() => {
+    if (stationMode && !ordersPort?.fetchFloorLayout) {
+      return undefined
+    }
     let cancelled = false
     async function bootstrapFloorLayout() {
       setFloorLayoutLoading(true)
+      setLayoutError("")
+      setFloorPlanLoadFailed(false)
       const localSnapshot = loadPosLayout()
-      const hasLocal = localSnapshot.areas.length > 0
+      const hasLocal = !stationMode && localSnapshot.areas.length > 0
       if (!cancelled) setLocalLayoutAvailable(hasLocal)
 
-      const remote = await getPosFloorLayout()
+      const remote = stationMode
+        ? await ordersPort.fetchFloorLayout()
+        : await getPosFloorLayout()
       if (cancelled) return
 
-      if (!remote.error && remote.data?.areas?.length) {
+      if (remote.error) {
+        setLayoutError(remote.message || "No se pudo cargar el plano de mesas.")
+        setFloorSyncStatus("error")
+        setFloorPlanLoadFailed(true)
+        if (hasLocal) {
+          applyHydratedLayout(localSnapshot, "local")
+        } else {
+          setAreasRestaurante([])
+          setLayoutSettings(DEFAULT_LAYOUT_SETTINGS)
+          setFloorLayoutSource(stationMode ? "error" : "empty")
+        }
+        setFloorLayoutLoading(false)
+        return
+      }
+
+      if (remote.data?.areas?.length) {
         const hydrated = hydrateLayoutFromPayload(remote.data)
         const withOrders = await hydrateMesasFromOrders(hydrated.areas)
+        if (cancelled) return
         applyHydratedLayout({ ...hydrated, areas: withOrders }, "supabase")
+        setLayoutError("")
       } else if (hasLocal) {
         applyHydratedLayout(localSnapshot, "local")
       } else {
         setAreasRestaurante([])
-        setLayoutSettings(DEFAULT_LAYOUT_SETTINGS)
+        setLayoutSettings(remote.data?.settings || DEFAULT_LAYOUT_SETTINGS)
         setFloorLayoutSource("empty")
         setFloorSyncStatus("synced")
       }
@@ -1463,16 +1498,16 @@ function POS({ stationMode = false, stationPosPort = null, onStationTerminalActi
     }
     bootstrapFloorLayout()
     return () => { cancelled = true }
-  }, [applyHydratedLayout])
+  }, [applyHydratedLayout, ordersPort, stationMode])
 
   useSupabaseRealtime({
     table: "pos_floor_zones",
-    enabled: floorLayoutSource === "supabase" && section === "croquis",
+    enabled: !stationMode && floorLayoutSource === "supabase" && section === "croquis",
     onChange: () => { reloadFloorFromCloud(true) }
   })
   useSupabaseRealtime({
     table: "pos_floor_tables",
-    enabled: floorLayoutSource === "supabase" && section === "croquis",
+    enabled: !stationMode && floorLayoutSource === "supabase" && section === "croquis",
     onChange: () => { reloadFloorFromCloud(true) }
   })
 
@@ -5029,6 +5064,9 @@ function POS({ stationMode = false, stationPosPort = null, onStationTerminalActi
         <>
           <PosClassicOperation
             stationMode={stationMode}
+            floorLayoutLoading={floorLayoutLoading}
+            floorPlanLoadFailed={floorPlanLoadFailed}
+            onRetryFloorLoad={() => reloadFloorFromCloud(false)}
             POS_DEBUG={POS_DEBUG}
             puedeVerAuditoria={puedeVerAuditoria}
             successInlineStyle={successInlineStyle}

@@ -521,7 +521,11 @@ export function createStationPosPort(operatorSessionToken, { onOperatorLocked, o
 
 /** Adapter shape for posOrdersFacade — maps human posOrdersService names to station port. */
 export function createStationPosOrdersFacadeAdapter(port) {
+  if (typeof port.fetchFloorLayout !== "function") {
+    throw new Error("Station POS port must expose fetchFloorLayout")
+  }
   return {
+    fetchFloorLayout: () => port.fetchFloorLayout(),
     openPosTableService: (params) => port.openPosTableService(params),
     getOpenOrderByTable: (tableId) => port.getOpenOrderByTable(tableId),
     getActiveOrdersForTables: (ids) => port.getActiveOrdersForTables(ids),

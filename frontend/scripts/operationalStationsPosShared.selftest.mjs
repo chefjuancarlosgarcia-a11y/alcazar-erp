@@ -12,9 +12,11 @@ const routes = read("frontend/src/routes/AppRoutes.jsx")
 const posEntry = read("frontend/src/pages/StationPosEntry.jsx")
 const facade = read("frontend/src/services/posOrdersFacade.js")
 const portCtx = read("frontend/src/services/posOrdersPortContext.jsx")
+const posFloorPlan = read("frontend/src/services/posFloorPlanService.js")
 const stationPos = read("frontend/src/services/stationPosService.js")
 const posPage = read("frontend/src/pages/POS.jsx")
 const posTicket = read("frontend/src/components/PosTicketPanel.jsx")
+const posClassic = read("frontend/src/components/PosClassicOperation.jsx")
 const access = read("frontend/src/components/OperationalAccessSection.jsx")
 
 const tests = [
@@ -115,6 +117,7 @@ const tests = [
     run() {
       if (!/PosOrdersPortProvider/.test(posEntry)) throw new Error("provider")
       if (!/setStationPosOrdersDelegate/.test(portCtx)) throw new Error("provider sets delegate")
+      if (!/fetchFloorLayout/.test(facade)) throw new Error("facade exposes fetchFloorLayout")
     }
   },
   {
@@ -254,6 +257,94 @@ const tests = [
       if (/localStorage.*stationMode|getItem\([^)]*stationMode/.test(posPage)) {
         throw new Error("stationMode must not be read from storage")
       }
+    }
+  },
+  {
+    name: "POS-27 station floor uses port RPC not human get_pos_floor_layout",
+    run() {
+      if (!/stationMode\s*\?\s*await ordersPort\.fetchFloorLayout\(\)/.test(posPage)) {
+        throw new Error("bootstrap/reload must call ordersPort.fetchFloorLayout in stationMode")
+      }
+      if (!/:\s*await getPosFloorLayout\(\)/.test(posPage)) {
+        throw new Error("human path must keep getPosFloorLayout")
+      }
+      if (!/get_station_pos_floor_layout/.test(stationPos)) throw new Error("station RPC wrapper")
+      if (!/get_pos_floor_layout/.test(posFloorPlan)) throw new Error("human floor service")
+    }
+  },
+  {
+    name: "POS-28 RPC floor errors are not treated as empty layout",
+    run() {
+      if (!/setFloorPlanLoadFailed\(true\)/.test(posPage)) {
+        throw new Error("must flag floor load failure on RPC error")
+      }
+      if (!/remote\.error/.test(posPage) || !/floorPlanLoadFailed/.test(posClassic)) {
+        throw new Error("surface load failure in classic operation UI")
+      }
+    }
+  },
+  {
+    name: "POS-29 station facade adapter requires fetchFloorLayout",
+    run() {
+      if (!/typeof port\.fetchFloorLayout !== "function"/.test(stationPos)) {
+        throw new Error("adapter must require fetchFloorLayout")
+      }
+      if (!/fetchFloorLayout:\s*\(\)\s*=>\s*port\.fetchFloorLayout\(\)/.test(stationPos)) {
+        throw new Error("adapter must wire fetchFloorLayout")
+      }
+    }
+  },
+  {
+    name: "POS-30 mapStationPosFloorResponse preserves zones tables coords",
+    run() {
+      if (!/export function mapStationPosFloorResponse/.test(stationPos)) {
+        throw new Error("mapper export")
+      }
+      const fixture = {
+        areas: [
+          { id: "z1", name: "PRIMER NIVEL", sort_order: 1, width: 900, height: 520 },
+          { id: "z2", name: "SEGUNDO NIVEL ENTRADA", sort_order: 2, width: 800, height: 480 },
+          { id: "z3", name: "SEGUNDO NIVEL TERRAZA PRINCIPAL", sort_order: 3, width: 820, height: 500 }
+        ],
+        tables: [
+          { id: "t1", zone_id: "z1", name: "M1", capacity: 4, x: 12, y: 18, manual_status: "disponible" },
+          { id: "t2", zone_id: "z1", name: "M2", capacity: 2, x: 44, y: 22, manual_status: "disponible" }
+        ],
+        settings: { snap_to_grid: true, grid_size: 24, zoom: 1 },
+        active_orders: []
+      }
+      const areas = (fixture.areas || []).map((z) => ({
+        id: z.id,
+        name: z.name,
+        sortOrder: z.sort_order ?? 0,
+        width: z.width ?? 800,
+        height: z.height ?? 600
+      }))
+      const tables = (fixture.tables || []).map((t) => ({
+        id: t.id,
+        areaId: t.zone_id,
+        name: t.name,
+        x: t.x,
+        y: t.y,
+        capacity: t.capacity
+      }))
+      if (areas.length !== 3 || tables.length !== 2) throw new Error("fixture")
+      const m1 = tables.find((t) => t.name === "M1")
+      if (!m1 || m1.areaId !== "z1" || m1.x !== 12 || m1.capacity !== 4) throw new Error("M1 mapping")
+      if (!/t\.areaId \|\| t\.zone_id/.test(stationPos)) throw new Error("mapper uses zone_id")
+      if (!/x: t\.x/.test(stationPos) || !/capacity: t\.capacity/.test(stationPos)) {
+        throw new Error("mapper preserves coords/capacity")
+      }
+    }
+  },
+  {
+    name: "POS-31 station catalog uses get_station_pos_catalog not getPOSProducts",
+    run() {
+      if (!/get_station_pos_catalog/.test(stationPos)) throw new Error("station catalog RPC")
+      if (!/stationMode && stationPosPort[\s\S]*stationPosPort\.fetchCatalog/.test(posPage)) {
+        throw new Error("station catalog via port when stationMode")
+      }
+      if (!/getPOSProducts\(\)/.test(posPage)) throw new Error("human catalog path")
     }
   }
 ]
