@@ -213,6 +213,48 @@ const tests = [
         throw new Error("do not store operator secrets in idempotency intents")
       }
     }
+  },
+  {
+    name: "POS-23 stationMode bypasses human POS role guard",
+    run() {
+      if (!/const canAccessPos = stationMode \|\| POS_ROLES\.includes\(user\?\.role\)/.test(posPage)) {
+        throw new Error("stationMode must bypass human POS_ROLES guard")
+      }
+      if (!/if \(!canAccessPos\)/.test(posPage)) throw new Error("guard must use canAccessPos")
+    }
+  },
+  {
+    name: "POS-24 human /pos still requires POS_ROLES when stationMode absent",
+    run() {
+      if (!/module="pos"/.test(routes) || !/<POS \/>/.test(routes)) {
+        throw new Error("human /pos route without stationMode prop")
+      }
+      if (!/POS_ROLES\.includes\(user\?\.role\)/.test(posPage)) {
+        throw new Error("human role check must remain in POS")
+      }
+      if (!/stationMode = false/.test(posPage)) throw new Error("stationMode defaults false")
+    }
+  },
+  {
+    name: "POS-25 query params cannot enable stationMode",
+    run() {
+      if (/params\.get\(["']stationMode/.test(posPage)) {
+        throw new Error("stationMode must not come from URL params")
+      }
+      if (/params\.get\(["']station/.test(posPage) && /stationMode/.test(posPage)) {
+        throw new Error("no station query param for stationMode")
+      }
+      if (!/params\.get\("section"\)/.test(posPage)) throw new Error("URL params limited to section")
+    }
+  },
+  {
+    name: "POS-26 stationMode only from StationPosEntry prop",
+    run() {
+      if (!/<POS stationMode/.test(posEntry)) throw new Error("StationPosEntry must pass stationMode prop")
+      if (/localStorage.*stationMode|getItem\([^)]*stationMode/.test(posPage)) {
+        throw new Error("stationMode must not be read from storage")
+      }
+    }
   }
 ]
 
