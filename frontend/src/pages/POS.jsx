@@ -107,6 +107,7 @@ import {
 } from "../services/posFloorPlanService"
 import PosClassicOperation from "../components/PosClassicOperation"
 import PosDishCatalog from "../components/PosDishCatalog"
+import { buildStationCategoriesFromCatalogProducts } from "../utils/stationPosCatalogMapper"
 import "./POS.css"
 
 const POS_CATEGORIES_KEY = "posCategories"
@@ -848,6 +849,8 @@ function POS({ stationMode = false, stationPosPort = null, onStationTerminalActi
   const [layoutMessage, setLayoutMessage] = useState("")
   const [layoutError, setLayoutError] = useState("")
   const [floorPlanLoadFailed, setFloorPlanLoadFailed] = useState(false)
+  const [stationCatalogLoadFailed, setStationCatalogLoadFailed] = useState(false)
+  const [stationCatalogEmpty, setStationCatalogEmpty] = useState(false)
   const [draggingTableId, setDraggingTableId] = useState(null)
   const floorPlanRef = useRef(null)
   const [ordenMesa, setOrdenMesa] = useState(null)
@@ -927,6 +930,10 @@ function POS({ stationMode = false, stationPosPort = null, onStationTerminalActi
       console.log("POS after category", byCategory.length, { categoriaActiva })
     }
 
+    if (stationMode) {
+      return byCategory.filter((item) => item.active !== false)
+    }
+
     const visible = byCategory.filter((item) => {
       const productionState = getProductProductionState(item, finalRecipes, productionAreas, activeCategories)
       const saleState = getProductSaleState(item, productionState, deductionMode)
@@ -955,7 +962,7 @@ function POS({ stationMode = false, stationPosPort = null, onStationTerminalActi
     }
 
     return visible
-  }, [items, categoriaActiva, finalRecipes, productionAreas, activeCategories, deductionMode])
+  }, [items, categoriaActiva, finalRecipes, productionAreas, activeCategories, deductionMode, stationMode])
   const getSearchRecipe = useCallback((product) => {
     const recipeId = productRecipeId(product)
     return finalRecipes.find((recipe) => String(recipe.id) === String(recipeId)) || product.recipe || null
@@ -1176,7 +1183,7 @@ function POS({ stationMode = false, stationPosPort = null, onStationTerminalActi
 
     let mounted = true
 
-    if (!user) {
+    if (!user && !stationMode) {
       setItems([])
       setItemsLoading(false)
       setCatalogItems([])
@@ -1189,22 +1196,53 @@ function POS({ stationMode = false, stationPosPort = null, onStationTerminalActi
       return undefined
     }
 
-    setItemsLoading(true)
-    invalidatePOSProductsCache()
+    if (stationMode) {
+      if (!stationPosPort?.fetchCatalog) {
+        setOrdenError("Puerto POS estación incompleto (fetchCatalog).")
+        setStationCatalogLoadFailed(true)
+        setStationCatalogEmpty(false)
+        setItems([])
+        setPosCategories([])
+        setItemsLoading(false)
+        return undefined
+      }
 
-    if (stationMode && stationPosPort) {
-      stationPosPort.fetchCatalog().then(({ data, error }) => {
+      setItemsLoading(true)
+      setStationCatalogLoadFailed(false)
+      setStationCatalogEmpty(false)
+      setOrdenError("")
+      setItems([])
+      setPosCategories([])
+      invalidatePOSProductsCache()
+
+      stationPosPort.fetchCatalog().then(({ data, error, message }) => {
         if (!mounted) return
         if (error) {
-          setOrdenError(`No se pudo cargar el catálogo POS estación: ${error.message || error}`)
+          setOrdenError(message || `No se pudo cargar el catálogo POS estación: ${error.message || error}`)
+          setStationCatalogLoadFailed(true)
           setItems([])
+          setPosCategories([])
+        } else if (!data?.length) {
+          setStationCatalogEmpty(true)
+          setItems([])
+          setPosCategories([])
         } else {
           setItems(data || [])
-          setPosCategories(loadPosCategories(data || []))
+          setPosCategories(buildStationCategoriesFromCatalogProducts(data || []))
         }
         setItemsLoading(false)
       })
-    } else {
+
+      return () => {
+        mounted = false
+      }
+    }
+
+    if (!user) return undefined
+
+    setItemsLoading(true)
+    invalidatePOSProductsCache()
+
     getProductionAreas().then(({ data, error }) => {
       if (!mounted) return
       if (error) {
@@ -1235,7 +1273,6 @@ function POS({ stationMode = false, stationPosPort = null, onStationTerminalActi
       }
       setItemsLoading(false)
     })
-    }
 
     return () => {
       mounted = false
@@ -1243,7 +1280,7 @@ function POS({ stationMode = false, stationPosPort = null, onStationTerminalActi
   }, [authLoading, user?.id, stationMode, stationPosPort])
 
   useEffect(() => {
-    if (authLoading || !user || section !== "agregar-item") return undefined
+    if (stationMode || authLoading || !user || section !== "agregar-item") return undefined
 
     let mounted = true
     const active = catalogStatusFilter === "active"
@@ -1316,7 +1353,7 @@ function POS({ stationMode = false, stationPosPort = null, onStationTerminalActi
   }, [])
 
   useEffect(() => {
-    if (section !== "agregar-item") return undefined
+    if (section !== "agregar-item" || stationMode) return undefined
 
     window.runPOSCatalogPerfAudit = async (options = {}) => runCatalogPerfAudit({
       pages: options.pages || [1, 2, 3],
@@ -1339,10 +1376,41 @@ function POS({ stationMode = false, stationPosPort = null, onStationTerminalActi
       delete window.runPOSCatalogPerfAudit
       delete window.exportPOSCatalogPerfLog
     }
-  }, [section, catalogSearch, catalogCategoryFilter, catalogStatusFilter])
+  }, [section, catalogSearch, catalogCategoryFilter, catalogStatusFilter, stationMode])
+
+  const reloadStationSaleCatalog = useCallback(async () => {
+    if (!stationMode || !stationPosPort?.fetchCatalog) {
+      setOrdenError("Puerto POS estación incompleto (fetchCatalog).")
+      setStationCatalogLoadFailed(true)
+      return
+    }
+    setItemsLoading(true)
+    setStationCatalogLoadFailed(false)
+    setStationCatalogEmpty(false)
+    setOrdenError("")
+    const { data, error, message } = await stationPosPort.fetchCatalog()
+    if (error) {
+      setOrdenError(message || `No se pudo cargar el catálogo POS estación: ${error.message || error}`)
+      setStationCatalogLoadFailed(true)
+      setItems([])
+      setPosCategories([])
+    } else if (!data?.length) {
+      setStationCatalogEmpty(true)
+      setItems([])
+      setPosCategories([])
+    } else {
+      setItems(data || [])
+      setPosCategories(buildStationCategoriesFromCatalogProducts(data || []))
+    }
+    setItemsLoading(false)
+  }, [stationMode, stationPosPort])
 
   useEffect(() => {
     async function refreshProducts() {
+      if (stationMode) {
+        await reloadStationSaleCatalog()
+        return
+      }
       invalidatePOSProductsCache()
       const { data, error } = await getPOSProducts()
       if (error) {
@@ -1381,16 +1449,18 @@ function POS({ stationMode = false, stationPosPort = null, onStationTerminalActi
     }
     window.addEventListener("pos-products-updated", refreshProducts)
     return () => window.removeEventListener("pos-products-updated", refreshProducts)
-  }, [section, catalogPage, catalogSearch, catalogCategoryFilter, catalogStatusFilter])
+  }, [section, catalogPage, catalogSearch, catalogCategoryFilter, catalogStatusFilter, stationMode, reloadStationSaleCatalog])
 
   useEffect(() => {
-    localStorage.setItem(POS_CATEGORIES_KEY, JSON.stringify(posCategories))
+    if (!stationMode) {
+      localStorage.setItem(POS_CATEGORIES_KEY, JSON.stringify(posCategories))
+    }
     if (!activeCategories.some((category) => category.id === categoriaActiva)) {
       const timeout = window.setTimeout(() => setCategoriaActiva(activeCategories[0]?.id || ""), 0)
       return () => window.clearTimeout(timeout)
     }
     return undefined
-  }, [posCategories, activeCategories, categoriaActiva])
+  }, [stationMode, posCategories, activeCategories, categoriaActiva])
 
   const applyHydratedLayout = useCallback((hydrated, source) => {
     setAreasRestaurante(hydrated.areas)
@@ -5067,6 +5137,9 @@ function POS({ stationMode = false, stationPosPort = null, onStationTerminalActi
             floorLayoutLoading={floorLayoutLoading}
             floorPlanLoadFailed={floorPlanLoadFailed}
             onRetryFloorLoad={() => reloadFloorFromCloud(false)}
+            stationCatalogLoadFailed={stationCatalogLoadFailed}
+            stationCatalogEmpty={stationCatalogEmpty}
+            onRetryStationCatalog={reloadStationSaleCatalog}
             POS_DEBUG={POS_DEBUG}
             puedeVerAuditoria={puedeVerAuditoria}
             successInlineStyle={successInlineStyle}

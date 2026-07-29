@@ -6,6 +6,9 @@ export default function PosClassicOperation({
   floorLayoutLoading = false,
   floorPlanLoadFailed = false,
   onRetryFloorLoad = null,
+  stationCatalogLoadFailed = false,
+  stationCatalogEmpty = false,
+  onRetryStationCatalog = null,
   POS_DEBUG,
   puedeVerAuditoria,
   successInlineStyle,
@@ -127,7 +130,20 @@ export default function PosClassicOperation({
           <>
             {POS_DEBUG && puedeVerAuditoria && <div style={successInlineStyle}>Catálogo oficial conectado y consumo por receta activo.</div>}
             {realtimeNotice && <div style={liveNoticeStyle}>{realtimeNotice}</div>}
-            {itemsLoading && <div className="pos-classic-notice">Cargando productos POS desde Supabase...</div>}
+            {itemsLoading && <div className="pos-classic-notice">Cargando productos POS…</div>}
+            {stationMode && stationCatalogLoadFailed && (
+              <div className="pos-friendly-empty">
+                <strong>No se pudo cargar el catálogo POS.</strong>
+                {typeof onRetryStationCatalog === "function" && (
+                  <button type="button" className="pos-back-to-floor" onClick={onRetryStationCatalog}>
+                    Reintentar
+                  </button>
+                )}
+              </div>
+            )}
+            {stationMode && !stationCatalogLoadFailed && stationCatalogEmpty && !itemsLoading && (
+              <div className="pos-friendly-empty">No hay productos activos en el catálogo de estación.</div>
+            )}
             {floorLayoutLoading && salesChannel === "dine_in" && (
               <div className="pos-classic-notice">Cargando plano de mesas...</div>
             )}

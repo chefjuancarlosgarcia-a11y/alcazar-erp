@@ -2,6 +2,12 @@ import { supabase } from "../lib/supabase"
 import { formatSupabaseError, withTimeout } from "./productionTicketsService"
 import { runStationPosIdempotentRpc } from "./stationPosIdempotency"
 import { mapPosTableServiceError } from "./posOrdersService"
+import {
+  buildStationCategoriesFromCatalogProducts,
+  mapStationPosCatalogResponse
+} from "../utils/stationPosCatalogMapper"
+
+export { buildStationCategoriesFromCatalogProducts, mapStationPosCatalogResponse }
 
 const STATION_POS_DISABLED = "POS en estación no está habilitado en esta fase."
 
@@ -61,42 +67,6 @@ function mapOrder(row, items = []) {
     total: Number(row.total || 0),
     items: mergedItems.map(mapOrderItem)
   }
-}
-
-function mapStationCatalogProduct(p) {
-  return {
-    id: p.id,
-    productId: p.id,
-    name: p.name,
-    nombre: p.name,
-    price: Number(p.price || 0),
-    precio: Number(p.price || 0),
-    category_id: p.category_id,
-    categoryId: p.category_id,
-    category_name: p.category_name,
-    recipeId: p.recipe_id,
-    recipe_id: p.recipe_id,
-    productionAreaId: p.production_area_id,
-    production_area_id: p.production_area_id,
-    productionReady: p.production_ready === true,
-    production_ready: p.production_ready === true,
-    product_type: p.product_type,
-    isTestItem: p.is_test_item === true,
-    is_test_item: p.is_test_item === true,
-    allow_kitchen_notes: p.allow_kitchen_notes,
-    sort_order: p.sort_order,
-    variants: p.variants || [],
-    modifier_options: p.modifiers || [],
-    optionGroups: p.option_groups || [],
-    option_groups: p.option_groups || [],
-    optionGroupsHydrated: true,
-    active: true
-  }
-}
-
-export function mapStationPosCatalogResponse(data) {
-  const products = (data?.products || []).map(mapStationCatalogProduct)
-  return products
 }
 
 export function mapStationPosFloorResponse(data) {

@@ -1,6 +1,11 @@
 import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
+import {
+  buildStationCategoriesFromCatalogProducts,
+  mapStationPosCatalogResponse,
+  productCategoryIdForPos
+} from "../src/utils/stationPosCatalogMapper.js"
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const read = (rel) => fs.readFileSync(path.join(root, rel), "utf8")
@@ -341,10 +346,100 @@ const tests = [
     name: "POS-31 station catalog uses get_station_pos_catalog not getPOSProducts",
     run() {
       if (!/get_station_pos_catalog/.test(stationPos)) throw new Error("station catalog RPC")
-      if (!/stationMode && stationPosPort[\s\S]*stationPosPort\.fetchCatalog/.test(posPage)) {
+      if (!/if \(stationMode\)[\s\S]*stationPosPort\.fetchCatalog/.test(posPage)) {
         throw new Error("station catalog via port when stationMode")
       }
-      if (!/getPOSProducts\(\)/.test(posPage)) throw new Error("human catalog path")
+      if (!/getPOSProducts\(\)/.test(posPage)) throw new Error("human catalog path retained for /pos")
+    }
+  },
+  {
+    name: "POS-32 station catalog loads when user is null",
+    run() {
+      if (!/!user && !stationMode/.test(posPage)) throw new Error("human-only guard")
+      if (!/if \(stationMode\)[\s\S]*stationPosPort\.fetchCatalog/.test(posPage)) {
+        throw new Error("stationMode must fetch catalog without human user")
+      }
+    }
+  },
+  {
+    name: "POS-33 stationMode never calls getPOSProducts in sale catalog effect",
+    run() {
+      const stationBlock = posPage.match(/if \(stationMode\) \{[\s\S]*?return \(\) => \{\s*mounted = false\s*\}/)
+      if (!stationBlock) throw new Error("station catalog block")
+      if (/getPOSProducts|getProductionAreas|getActiveRecipes|getPOSCatalogPage/.test(stationBlock[0])) {
+        throw new Error("station catalog block must not call human catalog APIs")
+      }
+    }
+  },
+  {
+    name: "POS-34 pos-products-updated refresh uses station port",
+    run() {
+      if (!/if \(stationMode\)[\s\S]*reloadStationSaleCatalog/.test(posPage)) {
+        throw new Error("refresh must use reloadStationSaleCatalog in stationMode")
+      }
+    }
+  },
+  {
+    name: "POS-35 station categories skip human localStorage persist",
+    run() {
+      if (!/if \(!stationMode\)[\s\S]*localStorage\.setItem\(POS_CATEGORIES_KEY/.test(posPage)) {
+        throw new Error("station must not persist posCategories to localStorage")
+      }
+      if (!/buildStationCategoriesFromCatalogProducts/.test(posPage)) {
+        throw new Error("station categories from RPC mapper")
+      }
+    }
+  },
+  {
+    name: "POS-36 mapper fixture categories search and filter",
+    run() {
+      const fixture = {
+        products: [
+          { id: "p1", name: "Bruschetta", price: 45, category_id: "entradas", category_name: "Entradas", production_ready: true, product_type: "simple" },
+          { id: "p2", name: "Margarita", price: 80, category_id: "pizzas", category_name: "Pizzas", production_ready: true, product_type: "pizza", variants: [{ id: "v1", size: "M", price: 80, is_active: true }] },
+          { id: "p3", name: "Alitas combo", price: 95, category_id: "extras", category_name: "Extras", production_ready: true, product_type: "configurable", option_groups: [{ id: "g1", name: "Salsa" }] },
+          { id: "p4", name: "Cappuccino", price: 28, category_id: "cafeteria", category_name: "Cafetería", production_ready: true, product_type: "simple" }
+        ]
+      }
+      const products = mapStationPosCatalogResponse(fixture)
+      const categories = buildStationCategoriesFromCatalogProducts(products)
+      if (categories.length < 4) throw new Error("expected categories from fixture")
+      const entradas = products.filter((p) => productCategoryIdForPos(p) === "entradas")
+      if (entradas.length !== 1 || entradas[0].nombre !== "Bruschetta") throw new Error("category filter")
+      const search = products.filter((p) => /marg/i.test(p.nombre || p.name))
+      if (search.length !== 1 || !search[0].variants?.length) throw new Error("search + pizza variants")
+      if (!products.every((p) => p.categoriaId && p.productionReady === true && p.estado === "activo")) {
+        throw new Error("mapper aliases")
+      }
+    }
+  },
+  {
+    name: "POS-37 incomplete station port fails closed on catalog",
+    run() {
+      if (!/!stationPosPort\?\.fetchCatalog/.test(posPage)) throw new Error("missing port guard")
+      if (!/Puerto POS estación incompleto \(fetchCatalog\)/.test(posPage)) throw new Error("explicit port error")
+    }
+  },
+  {
+    name: "POS-38 obsolete categoriaActiva resets to first RPC category",
+    run() {
+      if (/if \(stationMode\) return undefined[\s\S]{0,120}localStorage\.setItem\(POS_CATEGORIES_KEY/.test(posPage)) {
+        throw new Error("station must still normalize categoriaActiva, only skip localStorage write")
+      }
+      if (!/setCategoriaActiva\(activeCategories\[0\]\?\.id/.test(posPage)) {
+        throw new Error("fallback to first active category")
+      }
+      const activeCategories = [
+        { id: "entradas", name: "Entradas" },
+        { id: "pizzas", name: "Pizzas" }
+      ]
+      let categoriaActiva = "obsolete-human-cache-id"
+      if (!activeCategories.some((category) => category.id === categoriaActiva)) {
+        categoriaActiva = activeCategories[0]?.id || ""
+      }
+      if (categoriaActiva !== "entradas") {
+        throw new Error("expected first RPC category after obsolete selection")
+      }
     }
   }
 ]
