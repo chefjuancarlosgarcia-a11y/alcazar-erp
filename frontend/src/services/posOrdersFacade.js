@@ -44,6 +44,7 @@ export const getTableOrderEvents = (...args) => call("getTableOrderEvents", ...a
 export const getOrderWithItems = (...args) => call("getOrderWithItems", ...args)
 export const getTableOrderHistory = (...args) => call("getTableOrderHistory", ...args)
 export const markOrderItemServed = (...args) => call("markOrderItemServed", ...args)
+export const fetchFloorLayout = (...args) => call("fetchFloorLayout", ...args)
 export const openPosTableService = (...args) => call("openPosTableService", ...args)
 export const releasePosTableService = (...args) => call("releasePosTableService", ...args)
 export const removeOrderItem = (...args) => call("removeOrderItem", ...args)

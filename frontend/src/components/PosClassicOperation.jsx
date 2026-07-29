@@ -3,6 +3,9 @@ import { PosProductGrid, PosTicketPanel } from "./PosTicketPanel"
 
 export default function PosClassicOperation({
   stationMode = false,
+  floorLayoutLoading = false,
+  floorPlanLoadFailed = false,
+  onRetryFloorLoad = null,
   POS_DEBUG,
   puedeVerAuditoria,
   successInlineStyle,
@@ -125,6 +128,19 @@ export default function PosClassicOperation({
             {POS_DEBUG && puedeVerAuditoria && <div style={successInlineStyle}>Catálogo oficial conectado y consumo por receta activo.</div>}
             {realtimeNotice && <div style={liveNoticeStyle}>{realtimeNotice}</div>}
             {itemsLoading && <div className="pos-classic-notice">Cargando productos POS desde Supabase...</div>}
+            {floorLayoutLoading && salesChannel === "dine_in" && (
+              <div className="pos-classic-notice">Cargando plano de mesas...</div>
+            )}
+            {floorPlanLoadFailed && salesChannel === "dine_in" && (
+              <div className="pos-friendly-empty">
+                <strong>No se pudo cargar el plano de mesas.</strong>
+                {typeof onRetryFloorLoad === "function" && (
+                  <button type="button" className="pos-back-to-floor" onClick={onRetryFloorLoad}>
+                    Reintentar
+                  </button>
+                )}
+              </div>
+            )}
             {invalidActiveProducts.length > 0 && (
               <div style={warningBoxStyle}>{invalidActiveProducts.length} producto(s) activo(s) no se mostrarán para venta porque no están listos para producción.</div>
             )}
@@ -154,7 +170,7 @@ export default function PosClassicOperation({
         workspaceContent={(
           <>
             {salesChannel === "dine_in" && !showProductCatalog ? (
-              areaActiva ? (
+              floorPlanLoadFailed ? null : areaActiva ? (
                 <>
                   <div className="pos-floor-canvas pos-classic-floor" style={{ ...floorPlanStyle, minHeight: `${Math.max(420, areaActivaHeight || 520)}px` }}>
                     {areaActiva.mesas.map((mesa, index) => (
@@ -178,6 +194,8 @@ export default function PosClassicOperation({
                     <span><i className="legend-late" /> Tiempo extendido</span>
                   </div>
                 </>
+              ) : floorLayoutLoading ? (
+                <div className="pos-friendly-empty">Cargando plano de mesas...</div>
               ) : (
                 <div className="pos-friendly-empty">Agrega una zona física en Plano del restaurante para ver las mesas aquí.</div>
               )
