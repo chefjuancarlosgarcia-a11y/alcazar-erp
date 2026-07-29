@@ -1,0 +1,54 @@
+.station-pos-entry {
+  box-sizing: border-box;
+}
+
+.station-pos-entry--pin-gate {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: min(100dvh, 100vh);
+  padding: var(--erp-space-16);
+}
+
+.station-pos-entry--disabled {
+  display: grid;
+  place-items: center;
+  min-height: min(100dvh, 100vh);
+  padding: var(--erp-space-24);
+}
+
+.station-pos-disabled-card {
+  max-width: 480px;
+  padding: var(--erp-space-24);
+  border-radius: var(--erp-radius-card, 12px);
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: rgba(15, 23, 42, 0.94);
+  text-align: center;
+}
+
+.station-pos-disabled-muted {
+  color: var(--erp-text-muted, #94a3b8);
+}
+
+.station-pos-entry-banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--erp-space-16);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--erp-space-16);
+  margin-bottom: var(--erp-space-16);
+  border-radius: var(--erp-radius-card, 12px);
+  background: rgba(15, 23, 42, 0.88);
+}
+
+.station-pos-entry-banner button {
+  min-height: var(--erp-btn-height, 48px);
+  padding: 0 var(--erp-space-16);
+  border: 0;
+  border-radius: var(--erp-radius-card, 12px);
+  background: #0ea5a4;
+  color: #022c2c;
+  font-weight: 700;
+  cursor: pointer;
+}

@@ -69,7 +69,9 @@ export async function verifyOperationalPin({ pin, module = "cash", idempotencyKe
     saveOperatorSession(body.session_token, {
       operatorName: body.operator_name,
       operatorProfileId: body.operator_profile_id,
-      idleExpiresAt: body.idle_expires_at
+      idleExpiresAt: body.idle_expires_at,
+      absoluteExpiresAt: body.absolute_expires_at || null,
+      module: body.module || module
     })
   }
   return { data: body, error: null }

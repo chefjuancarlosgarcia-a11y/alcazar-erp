@@ -2,6 +2,7 @@ import PosServiceTerminal from "./PosServiceTerminal"
 import { PosProductGrid, PosTicketPanel } from "./PosTicketPanel"
 
 export default function PosClassicOperation({
+  stationMode = false,
   POS_DEBUG,
   puedeVerAuditoria,
   successInlineStyle,
@@ -231,6 +232,7 @@ export default function PosClassicOperation({
         ticketContent={(
           <>
             <PosTicketPanel
+              stationMode={stationMode}
               mesaCargando={mesaCargando}
               ordenMesa={ordenMesa}
               salesChannel={salesChannel}
@@ -275,7 +277,7 @@ export default function PosClassicOperation({
               onRequestBill={() => solicitarCuenta(currentOrder)}
               onPrintPreBill={() => imprimirPrecuenta(currentOrder)}
               onSendCashier={() => enviarCuentaACaja(currentOrder)}
-              onSplitBill={dividirCuentaIgual}
+              onSplitBill={stationMode ? undefined : dividirCuentaIgual}
               onExit={salirOrdenActual}
               onReleaseTable={handleReleaseTableService}
               canReleaseTable={canReleaseTable}

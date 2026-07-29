@@ -29,9 +29,8 @@ export default function OperationalAccessSection({ profileId, canManage }) {
       if (sumRes.error) setError(sumRes.error.message)
       else setSummary(sumRes.data)
       if (!stRes.error) {
-        const cashStations = (stRes.data || []).filter((s) => s.station_type === "cash")
-        setStations(cashStations)
-        if (cashStations[0]?.id) setStationId(cashStations[0].id)
+        setStations(stRes.data || [])
+        if (stRes.data?.[0]?.id) setStationId(stRes.data[0].id)
       }
     })()
   }, [profileId, canManage])
@@ -68,7 +67,7 @@ export default function OperationalAccessSection({ profileId, canManage }) {
 
   async function handleAssign() {
     if (!stationId) {
-      setError("Seleccione una estación Caja.")
+      setError("Seleccione una estación operativa.")
       return
     }
     setBusy(true)
@@ -111,12 +110,12 @@ export default function OperationalAccessSection({ profileId, canManage }) {
       )}
       <div className="erp-form-grid">
         <label>
-          Estación Caja
+          Estación operativa
           <select value={stationId} onChange={(e) => setStationId(e.target.value)}>
             <option value="">Seleccionar</option>
             {stations.map((s) => (
               <option key={s.id} value={s.id}>
-                {s.name} ({s.station_code})
+                {s.name} ({s.station_code}) — {s.station_type}
               </option>
             ))}
           </select>
@@ -127,7 +126,7 @@ export default function OperationalAccessSection({ profileId, canManage }) {
           Generar / resetear PIN operativo
         </button>
         <button type="button" disabled={busy || !stationId} onClick={handleAssign}>
-          Asignar a estación Caja
+          Asignar a estación seleccionada
         </button>
       </div>
     </section>
