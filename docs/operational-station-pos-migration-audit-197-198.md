@@ -1,6 +1,6 @@
 # Auditoría local — migraciones 197 y 198 (POS estación)
 
-**Estado:** revisión para commit local / Draft PR. **No aplicar en remoto** hasta postflight en staging.
+**Estado:** migraciones **197 y 198 ya aplicadas en remoto** (test **6/6** y **44/44**; postflight **22 wrappers**; flag **false**). **No reaplicar** 197/198 en ese entorno — solo auditoría read-only o migración fix-forward si hay deriva vs repo (`7ecb4b7` en PR #13). Pendiente operativo: merge PR, deploy `main`, verificación, flag y smoke (autorización aparte).
 
 ---
 
@@ -56,14 +56,16 @@ Una sola transacción `begin` … `commit`. Modularización documentada en `supa
 
 ---
 
-## Checklist pre-remoto (staging)
+## Checklist pre-remoto (staging) — remoto completado
 
-1. `diagnose_operational_station_pos_preflight_198.sql`
-2. Aplicar 197 si falta → postflight 197
-3. Aplicar 198 en transacción única
-4. `diagnose_operational_station_pos_postflight_198.sql`
-5. `198_test_operational_station_pos_shared.sql` (BEGIN/ROLLBACK)
-6. Smoke staging: pizza tamaño + extras; configurable mitades; enviar a caja
+1. ~~Preflight 198~~ — **hecho**
+2. ~~Aplicar 197~~ — **hecho** (6/6)
+3. ~~Aplicar 198~~ — **hecho** (44/44, 22 wrappers postflight)
+4. ~~Postflight 198~~ — **hecho**; flag sigue **false**
+5. ~~Tests estructurales~~ — **hecho** en remoto
+6. **Pendiente:** smoke staging (tras merge, deploy y autorización de flag)
+
+**Prohibido:** volver a ejecutar los archivos `197_*.sql` / `198_*.sql` de apply en el mismo entorno remoto ya migrado.
 
 ---
 

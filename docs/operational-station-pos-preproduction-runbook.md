@@ -1,20 +1,22 @@
-# Operational station POS — preproduction runbook (future)
+# Operational station POS — preproduction runbook
 
-**Do not execute remotely until authorized.** Flag defaults false. **No SQL remoto** until staging postflight passes.
+**Remote SQL gate (197/198):** backup, apply, tests, and postflight are **completed** on the target remote DB (**6/6**, **44/44**, **22 wrappers**; flag **false**). **Do not reapply** migrations 197 or 198 on that database.
+
+**Still pending (separate authorization):** merge PR #13, deploy frontend from `main`, post-deploy verification, flag enable, controlled smoke. Flag must remain **false** until smoke gate approves enablement.
 
 ## Gates A–T (manual checklist)
 
 | Gate | Action | Pass criteria |
 |------|--------|---------------|
-| A | Backup | Staging DB backup confirmed before any apply |
-| B | Commit/PR | Exact SHA and Draft PR reviewed |
-| C | Preflight 197 | `ready_to_apply_197` true |
-| D | Apply 197 | Single migration, no errors |
-| E | Test/postflight 197 | `197_test_*` failed_total=0; postflight blockers green |
-| F | Preflight 198 | `ready_to_apply_198` true |
-| G | Apply 198 | Single transaction completes |
-| H | Test/postflight 198 | Structural test + pricing fixtures + postflight |
-| I | Flag | `operational_station_pos_enabled` still false |
+| A | Backup | **Done (remote)** — before 197/198 apply |
+| B | Commit/PR | PR #13 reviewed; **merge pending** |
+| C | Preflight 197 | **Done (remote)** |
+| D | Apply 197 | **Done (remote)** — **do not reapply** |
+| E | Test/postflight 197 | **Done** — **6/6** |
+| F | Preflight 198 | **Done (remote)** |
+| G | Apply 198 | **Done (remote)** — **do not reapply** |
+| H | Test/postflight 198 | **Done** — **44/44**, **22 wrappers** |
+| I | Flag | **false (remote)** — keep false until smoke authorization |
 | J | Test station | Create POS test station (staging only) |
 | K | PIN assignment | Test mesero PIN + assignment |
 | L | Enable flag | **Only** with explicit product authorization |
