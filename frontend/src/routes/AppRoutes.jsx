@@ -68,6 +68,7 @@ const BakeryProductionHub = lazyWithPerformanceLogging("bakery", () => import(".
 const OperationalStationsSettings = lazyWithPerformanceLogging("operational_stations", () => import("../pages/OperationalStationsSettings"))
 const StationEnroll = lazyWithPerformanceLogging("station_enroll", () => import("../pages/StationEnroll"))
 const StationCashEntry = lazyWithPerformanceLogging("station_cash", () => import("../pages/StationCashEntry"))
+const StationPosEntry = lazyWithPerformanceLogging("station_pos", () => import("../pages/StationPosEntry"))
 
 function PageLoadingFallback() {
   return <p>Cargando módulo...</p>
@@ -95,6 +96,14 @@ function AppRoutes() {
             element={
               <StationDeviceRoute>
                 <StationCashEntry />
+              </StationDeviceRoute>
+            }
+          />
+          <Route
+            path="/station/pos"
+            element={
+              <StationDeviceRoute>
+                <StationPosEntry />
               </StationDeviceRoute>
             }
           />

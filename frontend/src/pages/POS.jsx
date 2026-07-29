@@ -95,7 +95,7 @@ import {
   updateOrderSalesChannel,
   updateOrderItemNotes,
   updateOrderItemQuantity
-} from "../services/posOrdersService"
+} from "../services/posOrdersFacade"
 import {
   deletePosFloorTable,
   deletePosFloorZone,
@@ -773,7 +773,7 @@ function TableWithChairs({ table, selected = false, editing = false, zoom = 1, o
   )
 }
 
-function POS() {
+function POS({ stationMode = false, stationPosPort = null, onStationTerminalAction = null }) {
   const location = useLocation()
   const { user, loading: authLoading } = useAuth()
   const params = new URLSearchParams(location.search)
@@ -1189,6 +1189,19 @@ function POS() {
     setItemsLoading(true)
     invalidatePOSProductsCache()
 
+    if (stationMode && stationPosPort) {
+      stationPosPort.fetchCatalog().then(({ data, error }) => {
+        if (!mounted) return
+        if (error) {
+          setOrdenError(`No se pudo cargar el catálogo POS estación: ${error.message || error}`)
+          setItems([])
+        } else {
+          setItems(data || [])
+          setPosCategories(loadPosCategories(data || []))
+        }
+        setItemsLoading(false)
+      })
+    } else {
     getProductionAreas().then(({ data, error }) => {
       if (!mounted) return
       if (error) {
@@ -1219,11 +1232,12 @@ function POS() {
       }
       setItemsLoading(false)
     })
+    }
 
     return () => {
       mounted = false
     }
-  }, [authLoading, user?.id])
+  }, [authLoading, user?.id, stationMode, stationPosPort])
 
   useEffect(() => {
     if (authLoading || !user || section !== "agregar-item") return undefined
@@ -1389,6 +1403,20 @@ function POS() {
 
   const reloadFloorFromCloud = useCallback(async (fromRemote = false) => {
     if (floorLayoutSkipRemoteRef.current) return
+    if (stationMode && stationPosPort) {
+      const result = await stationPosPort.fetchFloorLayout()
+      if (result.error || !result.data?.areas?.length) {
+        if (fromRemote) return
+        setLayoutError(result.message || "No se pudo recargar el plano de estación.")
+        setFloorSyncStatus("error")
+        return
+      }
+      applyHydratedLayout(
+        { areas: result.data.areas, tables: result.data.tables, settings: result.data.settings },
+        "supabase"
+      )
+      return
+    }
     const result = await getPosFloorLayout()
     if (result.error || !result.data?.areas?.length) {
       if (fromRemote) return
@@ -1406,7 +1434,7 @@ function POS() {
     if (fromRemote) {
       showToast("Plano actualizado desde otro dispositivo.", "info", 3000)
     }
-  }, [applyHydratedLayout, floorSyncStatus, showToast])
+  }, [applyHydratedLayout, floorSyncStatus, showToast, stationMode, stationPosPort])
 
   useEffect(() => {
     let cancelled = false
@@ -3311,6 +3339,7 @@ function POS() {
     let selectedVariant = null
     let selectedOptions = []
     let modifierLabels = []
+    let modifierIds = []
     let finalUnitPrice = Number(productToAdd.price ?? productToAdd.precio ?? 0)
     let effectiveRecipeId = productRecipeId(productToAdd)
     let effectiveAreaId = productProductionAreaId(productToAdd)
@@ -3341,6 +3370,7 @@ function POS() {
       }
       const selectedModifiers = getActiveProductModifiers(productToAdd).filter((modifier) => configuracionPendiente.modifierKeys.includes(String(modifier.id || `${modifier.modifierType}-${modifier.name}`)))
       modifierLabels = selectedModifiers.map(formatModifierDisplay)
+      const modifierIds = selectedModifiers.map((m) => m.id).filter(Boolean)
     const variantPrice = selectedVariant ? Number(selectedVariant.price || 0) : Number(productToAdd.price ?? productToAdd.precio ?? 0)
       finalUnitPrice = variantPrice + getSelectedModifiersTotal(selectedModifiers)
       effectiveRecipeId = selectedVariant?.recipeId || selectedVariant?.recipe_id || effectiveRecipeId
@@ -3423,6 +3453,7 @@ function POS() {
         }, safeQuantity, {
           notes: notas,
           modifiers: modifierLabels,
+          modifierIds: productType === "pizza" ? modifierIds : [],
           selectedOptions,
           unitPrice: finalUnitPrice,
           recipeId: effectiveRecipeId,
@@ -3898,6 +3929,20 @@ function POS() {
     const { skipDraftCheck = false } = options
     if (!skipDraftCheck && draftItems.length) throw new Error("Envía o quita los productos nuevos antes de enviar a caja.")
     if (!deliveryDataReady) throw new Error("Completa los datos obligatorios de delivery antes de enviar a caja.")
+    if (stationMode) {
+      if (order.status === "open") {
+        const requested = await requestOrderBill(order.id)
+        if (requested.error) throw new Error(requested.message || requested.error.message)
+      }
+      const refreshed = await getOrderWithItems(order.id)
+      if (refreshed.error) throw new Error(refreshed.message || refreshed.error.message)
+      if (refreshed.data.status !== "sent_to_cashier") {
+        const result = await sendOrderToCashier(order.id)
+        if (result.error) throw new Error(result.message || result.error.message)
+      }
+      onStationTerminalAction?.("send_to_cashier")
+      return refreshed.data
+    }
     if (order.status === "open") {
       const requested = await requestOrderBill(order.id)
       if (requested.error) throw new Error(requested.message || requested.error.message)
@@ -4982,6 +5027,7 @@ function POS() {
       ) : (
         <>
           <PosClassicOperation
+            stationMode={stationMode}
             POS_DEBUG={POS_DEBUG}
             puedeVerAuditoria={puedeVerAuditoria}
             successInlineStyle={successInlineStyle}

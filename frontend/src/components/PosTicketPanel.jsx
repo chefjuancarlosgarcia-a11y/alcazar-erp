@@ -1,4 +1,5 @@
 export function PosTicketPanel({
+  stationMode = false,
   mesaCargando,
   ordenMesa,
   salesChannel,
@@ -289,11 +290,13 @@ export function PosTicketPanel({
         </div>
 
         <div className="pos-ticket-actions-utilities">
-          <button type="button" className="pos-action-btn utility" onClick={onSplitBill} disabled={!sentItems.length}>Separar</button>
+          {!stationMode && (
+            <button type="button" className="pos-action-btn utility" onClick={onSplitBill} disabled={!sentItems.length}>Separar</button>
+          )}
           <button type="button" className="pos-action-btn utility" onClick={onPrintPreBill} disabled={!orden.length || billingBusy}>
             {billingBusy ? "Imprimiendo..." : "Imprimir"}
           </button>
-          {canRequestCashier && (
+          {!stationMode && canRequestCashier && (
             <button type="button" className="pos-action-btn utility" onClick={onRequestBill} disabled={billingBusy}>
               {billingBusy ? "Procesando..." : "Solicitar cobro"}
             </button>
