@@ -4244,7 +4244,8 @@ function POS({ stationMode = false, stationPosPort = null, onStationTerminalActi
     setTrasladoActivo(false)
   }
 
-  if (!POS_ROLES.includes(user?.role)) {
+  const canAccessPos = stationMode || POS_ROLES.includes(user?.role)
+  if (!canAccessPos) {
     return <section style={pageStyle}><h1>Punto de Venta</h1><div style={errorBoxStyle}>No tienes permiso para acceder al Punto de Venta.</div></section>
   }
 
