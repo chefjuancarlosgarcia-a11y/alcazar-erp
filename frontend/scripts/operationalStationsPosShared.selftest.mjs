@@ -4,14 +4,17 @@ import { fileURLToPath } from "node:url"
 import {
   buildStationCategoriesFromCatalogProducts,
   mapStationPosCatalogResponse,
+  normalizeStationPosCatalogResponse,
   productCategoryIdForPos
-} from "../src/utils/stationPosCatalogMapper.js"
+} from "../src/utils/posCatalogCanonical.js"
+import { DEFAULT_POS_CATEGORIES } from "../src/constants/posDefaultCategories.js"
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const read = (rel) => fs.readFileSync(path.join(root, rel), "utf8")
 
 const mig197 = read("supabase/schema/197_fix_operational_pin_module_station_type.sql")
 const mig198 = read("supabase/schema/198_operational_station_pos_shared_foundation.sql")
+const canonical = read("frontend/src/utils/posCatalogCanonical.js")
 const mig198test = read("supabase/schema/198_test_operational_station_pos_shared.sql")
 const routes = read("frontend/src/routes/AppRoutes.jsx")
 const posEntry = read("frontend/src/pages/StationPosEntry.jsx")
@@ -401,9 +404,12 @@ const tests = [
           { id: "p4", name: "Cappuccino", price: 28, category_id: "cafeteria", category_name: "Cafetería", production_ready: true, product_type: "simple" }
         ]
       }
-      const products = mapStationPosCatalogResponse(fixture)
-      const categories = buildStationCategoriesFromCatalogProducts(products)
+      const products = normalizeStationPosCatalogResponse(fixture)
+      const categories = buildStationCategoriesFromCatalogProducts(products, DEFAULT_POS_CATEGORIES)
       if (categories.length < 4) throw new Error("expected categories from fixture")
+      if (categories.find((c) => c.id === "pizzas")?.icon !== "🍕") {
+        throw new Error("canonical category icon expected for pizzas")
+      }
       const entradas = products.filter((p) => productCategoryIdForPos(p) === "entradas")
       if (entradas.length !== 1 || entradas[0].nombre !== "Bruschetta") throw new Error("category filter")
       const search = products.filter((p) => /marg/i.test(p.nombre || p.name))
@@ -440,6 +446,118 @@ const tests = [
       if (categoriaActiva !== "entradas") {
         throw new Error("expected first RPC category after obsolete selection")
       }
+    }
+  },
+  {
+    name: "POS-39 parity A station catalog RPC",
+    run() {
+      if (!/get_station_pos_catalog/.test(stationPos)) throw new Error("station catalog RPC")
+    }
+  },
+  {
+    name: "POS-40 parity B obsolete category normalizes",
+    run() {
+      if (!/setCategoriaActiva\(activeCategories\[0\]\?\.id/.test(posPage)) throw new Error("normalize categoriaActiva")
+    }
+  },
+  {
+    name: "POS-41 parity C station never writes POS_CATEGORIES_KEY",
+    run() {
+      if (!/if \(!stationMode\)[\s\S]*localStorage\.setItem\(POS_CATEGORIES_KEY/.test(posPage)) {
+        throw new Error("localStorage guard")
+      }
+      const stationBlock = posPage.match(/if \(stationMode\) \{[\s\S]*?return \(\) => \{\s*mounted = false\s*\}/)
+      if (stationBlock && /localStorage\.setItem\(POS_CATEGORIES_KEY/.test(stationBlock[0])) {
+        throw new Error("station must not write POS_CATEGORIES_KEY")
+      }
+    }
+  },
+  {
+    name: "POS-42 parity D image_url maps to imagen",
+    run() {
+      const row = normalizeStationPosCatalogResponse({
+        products: [{ id: "p1", name: "Taco", price: 10, category_id: "entradas", image_url: "https://x.test/t.jpg", production_ready: true }]
+      })
+      if (row[0].imagen !== "https://x.test/t.jpg") throw new Error("imagen missing")
+    }
+  },
+  {
+    name: "POS-43 parity E monogram only without image",
+    run() {
+      const row = normalizeStationPosCatalogResponse({
+        products: [{ id: "p2", name: "Agua", price: 5, category_id: "barra", production_ready: true }]
+      })
+      if (row[0].imagen) throw new Error("imagen must be empty without image_url")
+    }
+  },
+  {
+    name: "POS-44 parity F mesa selection no server open claim",
+    run() {
+      if (!/Mesa disponible\. Agrega productos/.test(posPage)) throw new Error("empty mesa copy")
+      if (/Mesa en servicio/.test(posPage) && /seleccionarMesaOperacion[\s\S]{0,800}Mesa en servicio/.test(posPage)) {
+        throw new Error("must not claim server open on select alone")
+      }
+    }
+  },
+  {
+    name: "POS-45 parity G add uses confirmed order_id",
+    run() {
+      if (!/openPosTableService/.test(posPage)) throw new Error("open before add")
+      if (!/orderId = created\.data\.id/.test(posPage)) throw new Error("order_id from open response")
+    }
+  },
+  {
+    name: "POS-46 parity H owner mismatch message",
+    run() {
+      if (!/Esta mesa está siendo atendida por otro mesero/.test(posPage)) throw new Error("owner message")
+      if (!/STATION_POS_ORDER_OWNER_MISMATCH/.test(read("frontend/src/services/posOrdersService.js"))) {
+        throw new Error("error code mapping")
+      }
+    }
+  },
+  {
+    name: "POS-47 parity I human catalog unchanged",
+    run() {
+      if (!/getPOSProducts\(\)/.test(posPage)) throw new Error("human getPOSProducts")
+      if (!/from \"\.\.\/utils\/posCatalogCanonical\"/.test(read("frontend/src/services/posProductsService.js"))) {
+        throw new Error("human reuses canonical mapper")
+      }
+    }
+  },
+  {
+    name: "POS-48 parity J no payments in stationMode",
+    run() {
+      if (/create_pos_split_payment/.test(stationPos)) throw new Error("no split in station service")
+      if (!/!stationMode/.test(posTicket)) throw new Error("ticket hides payments in station")
+    }
+  },
+  {
+    name: "POS-49 parity K canonical category colors",
+    run() {
+      const categories = buildStationCategoriesFromCatalogProducts(
+        normalizeStationPosCatalogResponse({
+          products: [{ id: "p1", name: "X", category_id: "pizzas", production_ready: true }]
+        }),
+        DEFAULT_POS_CATEGORIES
+      )
+      const pizzas = categories.find((c) => c.id === "pizzas")
+      if (!pizzas || pizzas.color !== "#f97316" || pizzas.icon !== "🍕") throw new Error("canonical pizza tab")
+      if (pizzas.icon === "M") throw new Error("no artificial M icon")
+    }
+  },
+  {
+    name: "POS-52 parity N open error blocks add",
+    run() {
+      if (!/if \(created\.error\) throw new Error\(formatStationPosRpcError/.test(posPage)) {
+        throw new Error("open error throws before add")
+      }
+    }
+  },
+  {
+    name: "POS-53 parity O idempotency key ref",
+    run() {
+      if (!/tableOpenIdempotencyRef/.test(posPage)) throw new Error("table open idempotency ref")
+      if (!/createPosRpcIdempotencyKey/.test(posPage)) throw new Error("UUID idempotency key")
     }
   }
 ]

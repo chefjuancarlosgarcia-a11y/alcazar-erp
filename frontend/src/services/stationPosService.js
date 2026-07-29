@@ -4,10 +4,8 @@ import { runStationPosIdempotentRpc } from "./stationPosIdempotency"
 import { mapPosTableServiceError } from "./posOrdersService"
 import {
   buildStationCategoriesFromCatalogProducts,
-  mapStationPosCatalogResponse
-} from "../utils/stationPosCatalogMapper"
-
-export { buildStationCategoriesFromCatalogProducts, mapStationPosCatalogResponse }
+  normalizeStationPosCatalogResponse
+} from "../utils/posCatalogCanonical"
 
 const STATION_POS_DISABLED = "POS en estación no está habilitado en esta fase."
 
@@ -173,7 +171,7 @@ export async function fetchStationPosCatalog(token) {
     "catálogo POS estación"
   )
   if (error) return { data: [], error, message }
-  return { data: mapStationPosCatalogResponse(data), error: null, message: "" }
+  return { data: normalizeStationPosCatalogResponse(data), error: null, message: "" }
 }
 
 export async function fetchStationPosFloorLayout(token) {
