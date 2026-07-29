@@ -382,7 +382,7 @@ const tests = [
   {
     name: "POS-35 station categories skip human localStorage persist",
     run() {
-      if (!/if \(stationMode\) return undefined[\s\S]*localStorage\.setItem\(POS_CATEGORIES_KEY/.test(posPage)) {
+      if (!/if \(!stationMode\)[\s\S]*localStorage\.setItem\(POS_CATEGORIES_KEY/.test(posPage)) {
         throw new Error("station must not persist posCategories to localStorage")
       }
       if (!/buildStationCategoriesFromCatalogProducts/.test(posPage)) {
@@ -418,6 +418,28 @@ const tests = [
     run() {
       if (!/!stationPosPort\?\.fetchCatalog/.test(posPage)) throw new Error("missing port guard")
       if (!/Puerto POS estación incompleto \(fetchCatalog\)/.test(posPage)) throw new Error("explicit port error")
+    }
+  },
+  {
+    name: "POS-38 obsolete categoriaActiva resets to first RPC category",
+    run() {
+      if (/if \(stationMode\) return undefined[\s\S]{0,120}localStorage\.setItem\(POS_CATEGORIES_KEY/.test(posPage)) {
+        throw new Error("station must still normalize categoriaActiva, only skip localStorage write")
+      }
+      if (!/setCategoriaActiva\(activeCategories\[0\]\?\.id/.test(posPage)) {
+        throw new Error("fallback to first active category")
+      }
+      const activeCategories = [
+        { id: "entradas", name: "Entradas" },
+        { id: "pizzas", name: "Pizzas" }
+      ]
+      let categoriaActiva = "obsolete-human-cache-id"
+      if (!activeCategories.some((category) => category.id === categoriaActiva)) {
+        categoriaActiva = activeCategories[0]?.id || ""
+      }
+      if (categoriaActiva !== "entradas") {
+        throw new Error("expected first RPC category after obsolete selection")
+      }
     }
   }
 ]

@@ -1452,8 +1452,9 @@ function POS({ stationMode = false, stationPosPort = null, onStationTerminalActi
   }, [section, catalogPage, catalogSearch, catalogCategoryFilter, catalogStatusFilter, stationMode, reloadStationSaleCatalog])
 
   useEffect(() => {
-    if (stationMode) return undefined
-    localStorage.setItem(POS_CATEGORIES_KEY, JSON.stringify(posCategories))
+    if (!stationMode) {
+      localStorage.setItem(POS_CATEGORIES_KEY, JSON.stringify(posCategories))
+    }
     if (!activeCategories.some((category) => category.id === categoriaActiva)) {
       const timeout = window.setTimeout(() => setCategoriaActiva(activeCategories[0]?.id || ""), 0)
       return () => window.clearTimeout(timeout)
