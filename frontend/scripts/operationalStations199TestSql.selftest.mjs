@@ -63,6 +63,47 @@ const tests = [
       if (/get_pos_product_image_url/.test(mig199)) throw new Error("no per-product image RPC in SQL")
       if (/get_pos_product_image_url/.test(stationPos)) throw new Error("station service must not N+1 images")
     }
+  },
+  {
+    name: "199-MIG-3 open preserves service_opened event",
+    run() {
+      if (!/insert into public\.pos_order_events/.test(mig199)) throw new Error("pos_order_events insert")
+      if (!/'service_opened'/.test(mig199)) throw new Error("service_opened event_type")
+      if (!/v_operator_id/.test(mig199)) throw new Error("created_by v_operator_id")
+    }
+  },
+  {
+    name: "199-TEST-5 service_opened static and runtime scenarios",
+    run() {
+      for (const s of [
+        "open_service_opened_insert_static",
+        "open_service_opened_type_static",
+        "open_service_opened_created_by_operator",
+        "open_new_service_opened_once",
+        "open_idempotency_replay_no_duplicate_event",
+        "open_valid_reuse_no_second_event"
+      ]) {
+        if (!new RegExp(s).test(testSql)) throw new Error(`missing ${s}`)
+      }
+      if (!/test_operational_station_pos_open_runtime_199/.test(testSql)) {
+        throw new Error("runtime open test function")
+      }
+      if (!/set_config\('request\.jwt\.claim\.sub', '19900000-0000-4000-8000-000000000030'/.test(testSql)) {
+        throw new Error("device jwt for open runtime")
+      }
+    }
+  },
+  {
+    name: "199-PREFLIGHT-1 service_opened gate",
+    run() {
+      const preflight = fs.readFileSync(
+        path.join(root, "supabase/schema/diagnose_operational_station_pos_catalog_preflight_199.sql"),
+        "utf8"
+      )
+      if (!/baseline_open_preserves_service_opened/.test(preflight)) throw new Error("baseline gate")
+      if (!/ready_to_apply_199/.test(preflight)) throw new Error("ready boolean")
+      if (!/199_partial/.test(preflight)) throw new Error("partial blocker")
+    }
   }
 ]
 

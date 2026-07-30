@@ -211,6 +211,19 @@ begin
       return v_result;
   end;
 
+  insert into public.pos_order_events (
+    order_id,
+    event_type,
+    description,
+    created_by
+  )
+  values (
+    v_order.id,
+    'service_opened',
+    'Servicio abierto en ' || coalesce(v_order.table_name, v_table_id) || '.',
+    v_operator_id
+  );
+
   v_result := jsonb_build_object(
     'created', true,
     'reused', false,

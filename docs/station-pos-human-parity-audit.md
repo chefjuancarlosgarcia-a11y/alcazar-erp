@@ -1,9 +1,23 @@
 # Auditoría paridad POS humano vs estación — implementación local
 
-**Rama:** `fix/station-pos-human-parity` (commits locales, sin push).
+**Rama:** `fix/station-pos-human-parity` (PR #17 Draft).
 
 **Repo:** `C:\Users\chefj\alcazar-inventario-os1`
 **Estado remoto:** sin cambios; flags OFF; operador bloqueado; 199 **no** aplicada remoto.
+
+---
+
+## 0. Regresión hotfix — `service_opened` en migración 199
+
+**Problema:** el `CREATE OR REPLACE` de `open_station_pos_table_service` en **199** conservó guards de ownership e idempotencia, pero **omitió** el `INSERT` en `public.pos_order_events` que **198** ejecuta al crear una orden nueva (`event_type = 'service_opened'`, `created_by = v_operator_id`).
+
+**Impacto:** aperturas nuevas desde estación no registraban el evento de servicio abierto; replay/reuse no debían duplicarlo (y no lo hacían porque el insert faltaba por completo).
+
+**Corrección (commit hotfix):** restaurar el bloque exacto de 198 **solo** tras `INSERT INTO pos_orders` exitoso (rama `created = true`), sin insertarlo en replay idempotente ni en reuse temprano/`unique_violation`.
+
+**Verificación:** tests SQL 199 (`pg_get_functiondef` + runtime `open_station_pos_table_service`: new / idempotency replay / valid reuse) y preflight 199 (`baseline_open_preserves_service_opened`).
+
+**Nota lab runtime:** el trigger `audit_pos_order_created` registra `order_created` con `auth.uid()` (JWT del dispositivo). El fixture cc199 incluye perfil mínimo para el auth user del device para que el FK `pos_order_events.created_by` no bloquee la apertura antes del insert de `service_opened`.
 
 ---
 
@@ -119,14 +133,7 @@ Cambios: `get_station_pos_catalog` (+`image_url`, `description`, `production_are
 Script: `scripts/run-parity-lab-199.mjs`
 Evidencia: `.local-backup/pg-lab/evidence/parity-199/199_test.log`
 
-**13 escenarios; 12 passed** (última corrida):
-
-- `remote_p0001_owner_mismatch_repro` → **PASS** (`STATION_POS_ORDER_OWNER_MISMATCH`)
-- `same_owner_reuse_assert` → PASS
-- `order_not_open_blocked` → PASS (`STATION_POS_ORDER_NOT_OPEN`)
-- `pizza_requires_variant` → PASS (`STATION_POS_PRICING_GAP`)
-- `catalog_batch_image_url` → PASS (sin N+1)
-- `lab_flags_enabled` → corregido en test (jsonb `enabled: true`)
+**Escenarios lab (última corrida post-hotfix):** ver `199_test.log` — incluye `service_opened` estático + runtime (new / replay / reuse).
 
 ---
 
@@ -134,11 +141,12 @@ Evidencia: `.local-backup/pg-lab/evidence/parity-199/199_test.log`
 
 | Suite | Resultado |
 |-------|-----------|
-| `operationalStationsPosShared.selftest.mjs` | **54/54 PASS** |
+| `operationalStationsPosShared.selftest.mjs` | **51/51 PASS** |
 | `stationPosHumanParity.selftest.mjs` | **8/8 PASS** |
-| `operationalStations199TestSql.selftest.mjs` | **5/5 PASS** |
+| `operationalStations199TestSql.selftest.mjs` | **9/9 PASS** (structure SQL 199) |
+| `run-parity-lab-199.mjs` (PG lab) | **20/20 PASS** |
 | OS1 / OS2 / OS2 Cash / PIN UX | **PASS** |
-| POS humano 187 (selftest + SQL) | **16/16 + 8/8 PASS** |
+| POS humano 187 (selftest + SQL) | **PASS** |
 | `npm run build --prefix frontend` | **PASS** |
 | `git diff --check` | **PASS** |
 | `service_role` en frontend tocado | **0** |
@@ -170,14 +178,11 @@ Evidencia: `.local-backup/pg-lab/evidence/parity-199/199_test.log`
 
 ### **APROBAR CON CONDICIONES**
 
-Listo para **commit local** y revisión PR con condiciones:
+PR #17 (Draft): hotfix `service_opened` aplicado en 199 local; listo para revisión con condiciones:
 
 1. Aplicar 199 en staging (no producción) antes de smoke operativo.
 2. Validar visualmente catálogo/imágenes con flags ON y operador desbloqueado en entorno controlado.
 3. Confirmar que no hay mesas con órdenes humanas activas mezcladas en prueba real.
+4. Ejecutar `diagnose_operational_station_pos_catalog_preflight_199.sql` remoto antes de apply; `ready_to_apply_199` debe ser true.
 
 ---
-
-## Autorización solicitada para commit
-
-Cambios locales completos, sin push/PR. ¿Autoriza **commit** en `fix/station-pos-human-parity`?

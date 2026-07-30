@@ -101,6 +101,16 @@ async function main() {
     "199_test"
   )
 
+  const log = fs.readFileSync(path.join(EVIDENCE, "199_test.log"), "utf8")
+  const failedRows = [...log.matchAll(/\|\s*f\s*\|/g)].length
+  const summaryMatch = log.match(/(\d+)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\r?\n\s*\(\d+ filas?\)/)
+  const failedTotal = summaryMatch ? Number(summaryMatch[3]) : failedRows
+  if (failedTotal > 0) {
+    console.error(`FAIL 199_test scenarios: ${summaryMatch?.[2] ?? "?"}/${summaryMatch?.[1] ?? "?"} passed (${failedTotal} failed)`)
+    await embedded.stop()
+    process.exit(1)
+  }
+
   await embedded.stop()
   if (fs.existsSync(DATA_DIR)) fs.rmSync(DATA_DIR, { recursive: true, force: true })
   process.exit(testOk ? 0 : 1)

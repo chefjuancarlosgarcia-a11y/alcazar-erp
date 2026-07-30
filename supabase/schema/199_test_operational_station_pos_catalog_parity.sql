@@ -15,6 +15,7 @@ declare
   v_order_open uuid := '19900000-0000-4000-8000-000000000010'::uuid;
   v_order_closed uuid := '19900000-0000-4000-8000-000000000011'::uuid;
   v_table_id text := 'cc199-lab-m1';
+  v_open_def text;
   v_prod_simple uuid := '19900000-0000-4000-8000-000000000020'::uuid;
   v_prod_pizza uuid := '19900000-0000-4000-8000-000000000021'::uuid;
   v_var_med uuid := '19900000-0000-4000-8000-000000000022'::uuid;
@@ -23,6 +24,8 @@ declare
   v_err text;
   v_catalog_def text;
 begin
+  perform set_config('request.jwt.claim.sub', '', true);
+
   -- Static: catalog batch fields present (no N+1 RPC)
   v_catalog_def := pg_get_functiondef('public.get_station_pos_catalog(text)'::regprocedure);
   return query select 'catalog_batch_image_url'::text,
@@ -47,6 +50,21 @@ begin
     )) > 0,
     'function station_pos_assert_order_open_for_drafts; status <> open'::text;
 
+  v_open_def := pg_get_functiondef('public.open_station_pos_table_service(text, text, text, text, text, text)'::regprocedure);
+
+  return query select 'open_service_opened_insert_static'::text,
+    position('insert into public.pos_order_events' in v_open_def) > 0,
+    'open_station_pos_table_service logs pos_order_events'::text;
+
+  return query select 'open_service_opened_type_static'::text,
+    position('''service_opened''' in v_open_def) > 0,
+    'event_type service_opened present in function body'::text;
+
+  return query select 'open_service_opened_created_by_operator'::text,
+    position('created_by' in v_open_def) > 0
+      and position('v_operator_id' in v_open_def) > 0,
+    'created_by uses v_operator_id'::text;
+
   if to_regclass('public.pos_orders') is null or to_regclass('public.profiles') is null then
     return query select 'schema_pos_tables'::text, false, 'pos_orders/profiles missing'::text;
     return;
@@ -54,9 +72,16 @@ begin
 
   select p.id into v_owner_a
   from public.profiles p
-  where p.status = 'active'
-  order by p.created_at
-  limit 1;
+  where p.id = '19900000-0000-4000-8000-000000000001'::uuid
+    and p.status = 'active';
+
+  if v_owner_a is null then
+    select p.id into v_owner_a
+    from public.profiles p
+    where p.status = 'active'
+    order by p.created_at
+    limit 1;
+  end if;
 
   if v_owner_a is null then
     v_owner_a := '19900000-0000-4000-8000-000000000001'::uuid;
@@ -201,28 +226,302 @@ end;
 $$;
 
 revoke all on function public.test_operational_station_pos_catalog_parity_199() from public, anon, authenticated;
-grant execute on function public.test_operational_station_pos_catalog_parity_199() to service_role;
+grant execute on function public.test_operational_station_pos_catalog_parity_199() to postgres, service_role;
+
+create or replace function public.test_operational_station_pos_open_runtime_199()
+returns table (scenario text, passed boolean, detail text)
+language plpgsql
+set search_path = ''
+as $$
+declare
+  v_operator_id constant uuid := '19900000-0000-4000-8000-000000000001'::uuid;
+  v_device_auth_id constant text := '19900000-0000-4000-8000-000000000030';
+  v_lab_token constant text := 'cc199-lab-operator-session-token-local-only';
+  v_table_id text := 'cc199-open-new-1';
+  v_prod_simple constant uuid := '19900000-0000-4000-8000-000000000020'::uuid;
+  v_idem_new text;
+  v_idem_reuse text;
+  v_open_result jsonb;
+  v_open_order_id uuid;
+  v_event_count int;
+  v_reuse_id uuid;
+begin
+  perform set_config('request.jwt.claim.sub', v_device_auth_id, true);
+  perform set_config('request.jwt.claim.role', 'authenticated', true);
+
+  v_idem_new := gen_random_uuid()::text;
+  v_idem_reuse := gen_random_uuid()::text;
+
+  begin
+    v_open_result := public.open_station_pos_table_service(
+      v_lab_token,
+      v_table_id,
+      'Mesa Open New',
+      'cc199-zone',
+      'CC199 Lab',
+      v_idem_new
+    );
+    v_open_order_id := nullif(v_open_result ->> 'order_id', '')::uuid;
+  exception
+    when others then
+      return query select 'open_new_service_opened_once'::text, false, sqlerrm::text;
+      return query select 'open_new_service_opened_created_by'::text, false, sqlerrm::text;
+      return query select 'open_idempotency_replay_no_duplicate_event'::text, false, sqlerrm::text;
+      return query select 'open_valid_reuse_no_second_event'::text, false, sqlerrm::text;
+      return;
+  end;
+
+  select count(*) into v_event_count
+  from public.pos_order_events e
+  where e.order_id = v_open_order_id
+    and e.event_type = 'service_opened';
+
+  return query select 'open_new_service_opened_once'::text,
+    coalesce((v_open_result ->> 'created')::boolean, false)
+      and v_open_order_id is not null
+      and v_event_count = 1,
+    format('order_id=%s service_opened_count=%s', v_open_order_id, v_event_count)::text;
+
+  return query select 'open_new_service_opened_created_by'::text,
+    exists (
+      select 1 from public.pos_order_events e
+      where e.order_id = v_open_order_id
+        and e.event_type = 'service_opened'
+        and e.created_by = v_operator_id
+    ),
+    format('created_by=%s operator=%s', v_operator_id, v_operator_id)::text;
+
+  begin
+    v_open_result := public.open_station_pos_table_service(
+      v_lab_token,
+      v_table_id,
+      'Mesa Open New',
+      'cc199-zone',
+      'CC199 Lab',
+      v_idem_new
+    );
+
+    select count(*) into v_event_count
+    from public.pos_order_events e
+    where e.order_id = v_open_order_id
+      and e.event_type = 'service_opened';
+
+    return query select 'open_idempotency_replay_no_duplicate_event'::text,
+      v_open_result is not null
+        and coalesce((v_open_result ->> 'order_id')::uuid, v_open_order_id) = v_open_order_id
+        and v_event_count = 1,
+      format('order_id=%s service_opened_count=%s after replay', v_open_order_id, v_event_count)::text;
+  exception
+    when others then
+      return query select 'open_idempotency_replay_no_duplicate_event'::text, false, sqlerrm::text;
+  end;
+
+  begin
+    insert into public.pos_order_items (
+      order_id, product_id, product_name, quantity, unit_price, total_price, status
+    ) values (
+      v_open_order_id,
+      v_prod_simple,
+      'CC199 Simple',
+      1,
+      30,
+      30,
+      'draft'
+    );
+
+    v_open_result := public.open_station_pos_table_service(
+      v_lab_token,
+      v_table_id,
+      'Mesa Open New',
+      'cc199-zone',
+      'CC199 Lab',
+      v_idem_reuse
+    );
+    v_reuse_id := nullif(v_open_result ->> 'order_id', '')::uuid;
+
+    select count(*) into v_event_count
+    from public.pos_order_events e
+    where e.order_id = v_open_order_id
+      and e.event_type = 'service_opened';
+
+    return query select 'open_valid_reuse_no_second_event'::text,
+      coalesce((v_open_result ->> 'reused')::boolean, false)
+        and coalesce((v_open_result ->> 'created')::boolean, true) = false
+        and v_reuse_id = v_open_order_id
+        and v_event_count = 1,
+      format('order_id=%s service_opened_count=%s reuse probe', v_open_order_id, v_event_count)::text;
+  exception
+    when others then
+      return query select 'open_valid_reuse_no_second_event'::text, false, sqlerrm::text;
+  end;
+end;
+$$;
+
+revoke all on function public.test_operational_station_pos_open_runtime_199() from public, anon;
+grant execute on function public.test_operational_station_pos_open_runtime_199() to authenticated, postgres, service_role;
+
+create temp table if not exists _199_parity_results (
+  scenario text,
+  passed boolean,
+  detail text
+) on commit drop;
+
+insert into _199_parity_results
+select * from public.test_operational_station_pos_catalog_parity_199();
+
+-- Station open runtime fixture (cc199-*), mirrors concurrency lab.
+update public.app_settings
+set value = jsonb_build_object('enabled', true, 'updated_at', now()),
+    updated_at = now()
+where key in ('operational_stations_enabled', 'operational_station_pos_enabled');
+
+select set_config('session_replication_role', 'replica', true);
+
+insert into auth.users (id, email, role, aud)
+values (
+  '19900000-0000-4000-8000-000000000001'::uuid,
+  'cc199-owner-a@lab.local',
+  'authenticated',
+  'authenticated'
+)
+on conflict (id) do nothing;
+
+insert into auth.users (id, email, role, aud, raw_app_meta_data)
+values (
+  '19900000-0000-4000-8000-000000000030'::uuid,
+  'cc199-device@lab.local',
+  'authenticated',
+  'authenticated',
+  '{"operational_station_device": true}'::jsonb
+)
+on conflict (id) do update set raw_app_meta_data = excluded.raw_app_meta_data;
+
+alter table public.profiles disable trigger protect_profile_managed_fields;
+
+insert into public.profiles (id, email, username, full_name, role, status)
+values (
+  '19900000-0000-4000-8000-000000000001'::uuid,
+  'cc199-owner-a@lab.local',
+  'cc199-owner-a',
+  'CC199 Owner A',
+  'mesero',
+  'active'
+)
+on conflict (id) do update set status = 'active', role = 'mesero';
+
+insert into public.profiles (id, email, username, full_name, role, status)
+values (
+  '19900000-0000-4000-8000-000000000030'::uuid,
+  'cc199-device@lab.local',
+  'cc199-device',
+  'CC199 Device Auth',
+  'mesero',
+  'active'
+)
+on conflict (id) do update set status = 'active', role = 'mesero';
+
+alter table public.profiles enable trigger protect_profile_managed_fields;
+
+select set_config('session_replication_role', 'origin', true);
+
+insert into public.operational_stations (
+  id, station_code, name, station_type, status, identity_mode, pos_floor_zone
+) values (
+  '19900000-0000-4000-8000-000000000031'::uuid,
+  'cc199-lab-pos',
+  'CC199 Lab POS',
+  'pos',
+  'active',
+  'individual',
+  'mesas'
+) on conflict (id) do update set status = 'active', station_type = 'pos';
+
+insert into public.operational_station_devices (
+  id, station_id, device_label, status, auth_user_id, activated_at
+) values (
+  '19900000-0000-4000-8000-000000000032'::uuid,
+  '19900000-0000-4000-8000-000000000031'::uuid,
+  'cc199-lab-device',
+  'active',
+  '19900000-0000-4000-8000-000000000030'::uuid,
+  now()
+) on conflict (id) do update
+  set status = 'active', auth_user_id = excluded.auth_user_id, station_id = excluded.station_id;
+
+insert into public.operational_station_assignments (profile_id, station_id, active)
+values (
+  '19900000-0000-4000-8000-000000000001'::uuid,
+  '19900000-0000-4000-8000-000000000031'::uuid,
+  true
+)
+on conflict (profile_id, station_id) do update set active = true;
+
+insert into public.operational_operator_sessions (
+  id, operational_station_device_id, operational_station_id,
+  operator_profile_id, module, session_token_hash,
+  idle_expires_at, absolute_expires_at
+) values (
+  '19900000-0000-4000-8000-000000000033'::uuid,
+  '19900000-0000-4000-8000-000000000032'::uuid,
+  '19900000-0000-4000-8000-000000000031'::uuid,
+  '19900000-0000-4000-8000-000000000001'::uuid,
+  'pos',
+  encode(extensions.digest('cc199-lab-operator-session-token-local-only', 'sha256'), 'hex'),
+  now() + interval '4 hours',
+  now() + interval '4 hours'
+) on conflict (id) do update set
+  revoked_at = null,
+  idle_expires_at = now() + interval '4 hours',
+  absolute_expires_at = now() + interval '4 hours',
+  session_token_hash = excluded.session_token_hash;
+
+select set_config('request.jwt.claim.sub', '19900000-0000-4000-8000-000000000030', true);
+select set_config('request.jwt.claim.role', 'authenticated', true);
+
+insert into _199_parity_results
+select * from public.test_operational_station_pos_open_runtime_199();
+
+select set_config('request.jwt.claim.sub', '', true);
+select set_config('request.jwt.claim.role', '', true);
 
 select scenario, passed, detail
-from public.test_operational_station_pos_catalog_parity_199()
+from _199_parity_results
 order by passed asc, scenario asc;
 
 select
   count(*) as total,
   count(*) filter (where passed) as passed_total,
   count(*) filter (where not passed) as failed_total
-from public.test_operational_station_pos_catalog_parity_199();
+from _199_parity_results;
 
 drop function if exists public.test_operational_station_pos_catalog_parity_199();
+drop function if exists public.test_operational_station_pos_open_runtime_199();
 
 -- Cleanup lab rows
+delete from public.pos_order_items where order_id in (
+  select id from public.pos_orders
+  where table_id like 'cc199-%'
+    or id in (
+      '19900000-0000-4000-8000-000000000010'::uuid,
+      '19900000-0000-4000-8000-000000000011'::uuid
+    )
+);
 delete from public.pos_product_modifiers where id = '19900000-0000-4000-8000-000000000023'::uuid;
 delete from public.pos_product_variants where id = '19900000-0000-4000-8000-000000000022'::uuid;
 delete from public.pos_products where id in (
   '19900000-0000-4000-8000-000000000020'::uuid,
   '19900000-0000-4000-8000-000000000021'::uuid
 );
-delete from public.pos_orders where id in (
+delete from public.pos_order_events where order_id in (
+  select id from public.pos_orders where table_id like 'cc199-%'
+);
+delete from public.operational_station_pos_idempotency where device_id = '19900000-0000-4000-8000-000000000032'::uuid;
+delete from public.operational_station_pos_action_audit where operational_station_device_id = '19900000-0000-4000-8000-000000000032'::uuid;
+delete from public.operational_operator_sessions where id = '19900000-0000-4000-8000-000000000033'::uuid;
+delete from public.operational_station_assignments where station_id = '19900000-0000-4000-8000-000000000031'::uuid;
+delete from public.operational_station_devices where id = '19900000-0000-4000-8000-000000000032'::uuid;
+delete from public.operational_stations where id = '19900000-0000-4000-8000-000000000031'::uuid;
+delete from public.pos_orders where table_id like 'cc199-%' or id in (
   '19900000-0000-4000-8000-000000000010'::uuid,
   '19900000-0000-4000-8000-000000000011'::uuid
 );
