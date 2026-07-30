@@ -104,6 +104,53 @@ const tests = [
       if (!/ready_to_apply_199/.test(preflight)) throw new Error("ready boolean")
       if (!/199_partial/.test(preflight)) throw new Error("partial blocker")
     }
+  },
+  {
+    name: "199-PREFLIGHT-2 search_path via pg_proc not functiondef",
+    run() {
+      const preflight = fs.readFileSync(
+        path.join(root, "supabase/schema/diagnose_operational_station_pos_catalog_preflight_199.sql"),
+        "utf8"
+      )
+      const securityGates = [
+        "open_security_definer_search_path",
+        "assert_security_definer_search_path",
+        "catalog_security_definer_search_path"
+      ]
+      for (const gate of securityGates) {
+        if (!new RegExp(gate).test(preflight)) throw new Error(`missing ${gate}`)
+      }
+      if (/pg_get_functiondef\([^)]+\)[^;]*ilike[^;]*search_path/is.test(preflight)) {
+        throw new Error("must not detect search_path via pg_get_functiondef")
+      }
+      if (!/pg_proc/.test(preflight)) throw new Error("must inspect pg_proc")
+      if (!/prosecdef/.test(preflight)) throw new Error("must inspect prosecdef")
+      if (!/proconfig/.test(preflight)) throw new Error("must inspect proconfig")
+      if (!/split_part\(cfg, '=', 1\)\)\) = 'search_path'/.test(preflight)) {
+        throw new Error("must normalize empty search_path proconfig")
+      }
+    }
+  },
+  {
+    name: "199-PREFLIGHT-3 single grid and is_blocker semantics",
+    run() {
+      const preflight = fs.readFileSync(
+        path.join(root, "supabase/schema/diagnose_operational_station_pos_catalog_preflight_199.sql"),
+        "utf8"
+      )
+      if ((preflight.match(/with fn as \(/g) || []).length !== 1) {
+        throw new Error("expected a single preflight query block")
+      }
+      if (/;\s*\n\s*with fn as \(/m.test(preflight)) {
+        throw new Error("expected a single result grid statement")
+      }
+      if (!/gate_passed/.test(preflight)) throw new Error("gate_passed column")
+      if (!/not gate_passed as is_blocker/.test(preflight)) throw new Error("is_blocker reflects gate_passed")
+      if (!/cross join ready r/.test(preflight)) throw new Error("ready_to_apply_199 on each row")
+      if (!/migration_199_state[\s\S]*'199_absent'/.test(preflight)) {
+        throw new Error("199_absent must be the passing pre-apply state")
+      }
+    }
   }
 ]
 
