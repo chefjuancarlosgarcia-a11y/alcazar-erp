@@ -18,7 +18,7 @@ let erpPerfFetchWrapper = null
 let persistTimer = null
 
 export function isErpPerfDebugEnabled() {
-  return import.meta.env.VITE_ERP_PERF_DEBUG === "true"
+  return import.meta.env?.VITE_ERP_PERF_DEBUG === "true"
 }
 
 function nowMs() {

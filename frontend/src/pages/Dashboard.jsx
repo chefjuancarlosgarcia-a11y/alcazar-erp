@@ -50,7 +50,7 @@ function ExecutiveCommandCenter({ recentTasks = [] }) {
     {
       key: "salesToday",
       label: "Ventas hoy",
-      value: money(kpis?.salesToday),
+      value: kpis ? money(kpis.salesToday) : "—",
       delta: formatDelta(percentChange(curr.day?.total, prev.day?.total)),
       hint: "Ingresos del día",
       tone: "accent",
@@ -60,7 +60,7 @@ function ExecutiveCommandCenter({ recentTasks = [] }) {
     {
       key: "salesMonth",
       label: "Ventas mes",
-      value: money(kpis?.salesMonth),
+      value: kpis ? money(kpis.salesMonth) : "—",
       delta: formatDelta(percentChange(curr.month?.total, prev.month?.total)),
       hint: "Acumulado mensual",
       tone: "accent",
@@ -70,7 +70,7 @@ function ExecutiveCommandCenter({ recentTasks = [] }) {
     {
       key: "ordersToday",
       label: "Órdenes hoy",
-      value: Number(kpis?.ordersToday || 0),
+      value: kpis != null ? Number(kpis.ordersToday || 0) : "—",
       delta: formatDelta(percentChange(curr.day?.orders, prev.day?.orders)),
       hint: "Transacciones registradas",
       tone: "neutral",
@@ -80,7 +80,7 @@ function ExecutiveCommandCenter({ recentTasks = [] }) {
     {
       key: "averageTicket",
       label: "Ticket promedio",
-      value: money(kpis?.averageTicket),
+      value: kpis ? money(kpis.averageTicket) : "—",
       delta: formatDelta(percentChange(curr.day?.averageTicket, prev.day?.averageTicket)),
       hint: "Promedio por orden",
       tone: "neutral",
@@ -90,7 +90,7 @@ function ExecutiveCommandCenter({ recentTasks = [] }) {
     {
       key: "activeTables",
       label: "Mesas activas",
-      value: Number(kpis?.activeTables || 0),
+      value: kpis != null ? Number(kpis.activeTables || 0) : "—",
       delta: { label: "En vivo", tone: "flat" },
       hint: "Órdenes abiertas ahora",
       tone: kpis?.activeTables ? "warn" : "good",
@@ -100,7 +100,7 @@ function ExecutiveCommandCenter({ recentTasks = [] }) {
     {
       key: "activeTickets",
       label: "Tickets producción",
-      value: Number(kpis?.activeTickets || 0),
+      value: kpis != null ? Number(kpis.activeTickets || 0) : "—",
       delta: { label: cc.productionLate ? `${cc.productionLate} atrasados` : "Al día", tone: cc.productionLate ? "down" : "up" },
       hint: "KDS en curso",
       tone: kpis?.activeTickets ? "warn" : "good",
@@ -110,7 +110,7 @@ function ExecutiveCommandCenter({ recentTasks = [] }) {
     {
       key: "lowStock",
       label: "Stock bajo",
-      value: Number(kpis?.lowStock || 0),
+      value: kpis != null ? Number(kpis.lowStock || 0) : "—",
       delta: { label: cc.inventoryOut ? `${cc.inventoryOut} agotados` : "Controlado", tone: cc.inventoryOut ? "down" : "up" },
       hint: "Productos bajo mínimo",
       tone: kpis?.lowStock ? "danger" : "good",
@@ -120,7 +120,7 @@ function ExecutiveCommandCenter({ recentTasks = [] }) {
     {
       key: "pendingRequisitions",
       label: "Requisiciones",
-      value: Number(kpis?.pendingRequisitions || 0),
+      value: kpis != null ? Number(kpis.pendingRequisitions || 0) : "—",
       delta: { label: kpis?.pendingRequisitions ? "Pendientes" : "Al día", tone: kpis?.pendingRequisitions ? "down" : "up" },
       hint: kpis?.partialRequisitions
         ? `${kpis.partialRequisitions} parcialmente surtida${kpis.partialRequisitions === 1 ? "" : "s"}`
@@ -131,17 +131,33 @@ function ExecutiveCommandCenter({ recentTasks = [] }) {
     }
   ]), [kpis, curr, prev, cc.productionLate, cc.inventoryOut])
 
-  if (cc.loading) {
+  if (cc.initialLoading) {
     return (
-      <div className="cc-loading">
-        <span>Cargando centro de comando...</span>
-        <div className="cc-loading__bar"><i /></div>
+      <div className="cc-dashboard cc-dashboard--loading" aria-busy="true" aria-label="Cargando centro de comando">
+        <div className="cc-loading cc-loading--skeleton">
+          <div className="cc-skeleton-grid">
+            {Array.from({ length: 4 }).map((_, index) => (
+              <div key={index} className="cc-skeleton-card" aria-hidden="true" />
+            ))}
+          </div>
+          <div className="cc-skeleton-kpi-grid">
+            {Array.from({ length: 8 }).map((_, index) => (
+              <div key={index} className="cc-skeleton-kpi" aria-hidden="true" />
+            ))}
+          </div>
+        </div>
       </div>
     )
   }
 
   return (
     <div className="cc-dashboard">
+      {cc.refreshing ? (
+        <p className="cc-refresh-banner" role="status">Actualizando indicadores…</p>
+      ) : null}
+      {cc.refreshError ? (
+        <p className="cc-error cc-error--inline" role="alert">{cc.refreshError}</p>
+      ) : null}
       <CommandCenterHeader now={cc.now} overallStatus={cc.overallStatus} showActions />
       {cc.error && <p className="cc-error" role="alert">{cc.error}</p>}
 

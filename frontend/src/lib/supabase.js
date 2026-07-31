@@ -29,18 +29,18 @@ logSupabaseClientBootstrap(resolved, supabase)
 
 export const isSupabaseClientConfigured = config.configured
 
-/** Solo diagnóstico DEV — prefijos de key usados por el singleton. */
+/** Solo diagnóstico DEV — indicadores booleanos; sin fragmentos de key. */
 export function getSupabaseClientAuditSnapshot() {
   return {
-    url: resolved.url,
-    keyPrefix: resolved.anonKey.slice(0, 20),
+    urlConfigured: Boolean(resolved.url),
+    anonKeyPresent: Boolean(resolved.anonKey),
     keyType: resolved.anonKey.startsWith("sb_publishable_")
       ? "publishable"
       : resolved.anonKey.startsWith("eyJ")
         ? "legacy"
         : "unknown",
-    clientKeyPrefix: String(supabase.supabaseKey || "").slice(0, 20),
-    clientUrl: supabase.supabaseUrl || "",
+    clientKeyPresent: Boolean(supabase.supabaseKey),
+    clientUrlMatchesResolved: (supabase.supabaseUrl || "") === resolved.url,
     keysMatch: supabase.supabaseKey === resolved.anonKey
   }
 }

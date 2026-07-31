@@ -332,12 +332,15 @@ export function CommandCenterActivity({ activity }) {
 export default function CommandCenterLayer({ recentTasks = [], showHeaderActions = false }) {
   const state = useCommandCenter(recentTasks)
 
-  if (state.loading) {
+  if (state.initialLoading) {
     return (
-      <div className="cc-layer">
-        <div className="cc-loading">
-          <span>Cargando centro de comando...</span>
-          <div className="cc-loading__bar"><i /></div>
+      <div className="cc-layer cc-layer--loading" aria-busy="true" aria-label="Cargando centro de comando">
+        <div className="cc-loading cc-loading--skeleton">
+          <div className="cc-skeleton-grid">
+            {Array.from({ length: 4 }).map((_, index) => (
+              <div key={index} className="cc-skeleton-card" aria-hidden="true" />
+            ))}
+          </div>
         </div>
       </div>
     )
@@ -345,6 +348,12 @@ export default function CommandCenterLayer({ recentTasks = [], showHeaderActions
 
   return (
     <div className="cc-layer cc-dashboard cc-dashboard--compact">
+      {state.refreshing ? (
+        <p className="cc-refresh-banner" role="status">Actualizando indicadores…</p>
+      ) : null}
+      {state.refreshError ? (
+        <p className="cc-error cc-error--inline" role="alert">{state.refreshError}</p>
+      ) : null}
       <CommandCenterHeader now={state.now} overallStatus={state.overallStatus} showActions={showHeaderActions} />
       {state.error && <p className="cc-error" role="alert">{state.error}</p>}
       <CommandCenterSemaphores

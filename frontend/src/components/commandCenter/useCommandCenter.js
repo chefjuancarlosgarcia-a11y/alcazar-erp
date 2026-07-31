@@ -1,10 +1,8 @@
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   getFoodCostReport,
   getCommandCenterExecutiveBundle,
-  getInventoryReport,
-  getOperationalAlerts,
-  getProductionReport
+  getOperationalAlertsBundle
 } from "../../services/reportsService"
 import {
   getAttendanceDailyLateArrivals,
@@ -13,6 +11,7 @@ import {
 } from "../../services/attendanceService"
 import { getYieldDashboardMetrics } from "../../services/yieldCostingService"
 import { computeAttendanceReportMetrics, getLocalDateString } from "../../modules/attendance/attendanceReportsHelpers"
+import { logReportsPerf } from "../../utils/reportsPerf"
 import {
   buildActivityTimeline,
   buildAlertList,
@@ -25,73 +24,82 @@ import {
 
 export default function useCommandCenter(recentTasks = []) {
   const [now, setNow] = useState(() => new Date())
-  const [loading, setLoading] = useState(true)
+  const [initialLoading, setInitialLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [requestCompleted, setRequestCompleted] = useState(false)
   const [error, setError] = useState("")
+  const [refreshError, setRefreshError] = useState("")
+  const hasCachedDataRef = useRef(false)
+
   const [kpis, setKpis] = useState(null)
   const [executiveReport, setExecutiveReport] = useState(null)
   const [alerts, setAlerts] = useState([])
   const [production, setProduction] = useState(null)
   const [inventory, setInventory] = useState(null)
-  const [hr, setHr] = useState({ late: 0, absences: 0, active: 0 })
-  const [costs, setCosts] = useState({
-    financialImpact: 0,
-    zeroCostRecipes: 0,
-    yieldBelowMinimum: 0,
-    avgFoodCost: 0
-  })
+  const [hr, setHr] = useState(null)
+  const [costs, setCosts] = useState(null)
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 30_000)
     return () => window.clearInterval(timer)
   }, [])
 
-  useEffect(() => {
-    let mounted = true
-    async function load() {
-      setLoading(true)
+  const load = useCallback(async ({ background = false } = {}) => {
+    const hasCache = hasCachedDataRef.current
+    if (background && hasCache) {
+      setRefreshing(true)
+      setRefreshError("")
+    } else if (!hasCache) {
+      setInitialLoading(true)
       setError("")
-      const today = getLocalDateString()
-      try {
-        const [
-          executiveBundle,
-          alertsResult,
-          productionResult,
-          inventoryResult,
-          yieldResult,
-          foodCostResult,
-          lateResult,
-          marksResult,
-          profilesResult
-        ] = await Promise.all([
-          getCommandCenterExecutiveBundle(),
-          getOperationalAlerts(),
-          getProductionReport({ preset: "today" }),
-          getInventoryReport({ preset: "today" }),
-          getYieldDashboardMetrics({ preset: "week" }),
-          getFoodCostReport(),
-          getAttendanceDailyLateArrivals(today),
-          getAttendanceMarks(false),
-          getAttendanceTerminalProfiles()
-        ])
+    }
 
-        if (!mounted) return
+    const started = performance.now()
+    const today = getLocalDateString()
 
-        const loadError = [
-          executiveBundle.error,
-          alertsResult.error,
-          productionResult.error,
-          inventoryResult.error
-        ].find(Boolean)
+    try {
+      const [
+        executiveBundle,
+        operationalBundle,
+        yieldResult,
+        foodCostResult,
+        lateResult,
+        marksResult,
+        profilesResult
+      ] = await Promise.all([
+        getCommandCenterExecutiveBundle(),
+        getOperationalAlertsBundle({ preset: "today" }),
+        getYieldDashboardMetrics({ preset: "week" }),
+        getFoodCostReport(),
+        getAttendanceDailyLateArrivals(today),
+        getAttendanceMarks(false),
+        getAttendanceTerminalProfiles()
+      ])
 
-        if (loadError) {
-          setError(typeof loadError === "string" ? loadError : loadError.message || "No se pudo cargar el centro de comando.")
+      const fatalError = [
+        executiveBundle.error,
+        operationalBundle.error
+      ].find(Boolean)
+
+      if (fatalError && !hasCache) {
+        setError(typeof fatalError === "string" ? fatalError : fatalError.message || "No se pudo cargar el centro de comando.")
+      } else if (fatalError && hasCache) {
+        setRefreshError(typeof fatalError === "string" ? fatalError : fatalError.message || "No se pudieron actualizar los datos.")
+      } else {
+        setError("")
+        setRefreshError("")
+      }
+
+      if (!fatalError || hasCache) {
+        if (executiveBundle.data) {
+          setExecutiveReport(executiveBundle.data.executiveReport || null)
+          setKpis(executiveBundle.data.kpis || null)
         }
-
-        setExecutiveReport(executiveBundle.data?.executiveReport || null)
-        setKpis(executiveBundle.data?.kpis || null)
-        setProduction(productionResult.data || null)
-        setInventory(inventoryResult.data || null)
-        setAlerts(buildAlertList(alertsResult.data || [], yieldResult.data?.alerts || []))
+        if (operationalBundle.data) {
+          setProduction(operationalBundle.data.production || null)
+          setInventory(operationalBundle.data.inventory || null)
+          setAlerts(buildAlertList(operationalBundle.data.alerts || [], yieldResult.data?.alerts || []))
+        }
 
         const attendanceMetrics = computeAttendanceReportMetrics({
           asistenciaMovimientos: mapAttendanceMarks(marksResult.data || []),
@@ -107,25 +115,43 @@ export default function useCommandCenter(recentTasks = []) {
           active: attendanceMetrics.colaboradoresDentroTurno.length
         })
 
-        const foodRows = foodCostResult.data || []
+        const foodRows = foodCostResult.error ? [] : (foodCostResult.data || [])
         setCosts({
           financialImpact: Number(yieldResult.data?.summary?.financialImpact || 0),
-          zeroCostRecipes: (alertsResult.data || []).filter((row) => row.type === "Receta sin costo").length,
+          zeroCostRecipes: (operationalBundle.data?.alerts || []).filter((row) => row.type === "Receta sin costo").length,
           yieldBelowMinimum: Number(yieldResult.data?.summary?.belowMinimumCount || 0),
           avgFoodCost: foodRows.length
             ? foodRows.reduce((sum, row) => sum + Number(row.foodCostPercent || 0), 0) / foodRows.length
-            : 0
+            : null
         })
-      } catch (loadError) {
-        if (!mounted) return
-        setError(loadError?.message || "No se pudo cargar el centro de comando.")
-      } finally {
-        if (mounted) setLoading(false)
+
+        hasCachedDataRef.current = true
       }
+
+      logReportsPerf("command_center_loaded", {
+        operation: "useCommandCenter.load",
+        duration_ms: Math.round(performance.now() - started),
+        request_count: 7,
+        background,
+        had_cache: hasCache,
+        had_error: Boolean(fatalError)
+      })
+    } catch (loadError) {
+      if (!hasCache) {
+        setError(loadError?.message || "No se pudo cargar el centro de comando.")
+      } else {
+        setRefreshError(loadError?.message || "No se pudieron actualizar los datos.")
+      }
+    } finally {
+      setRequestCompleted(true)
+      setInitialLoading(false)
+      setRefreshing(false)
     }
-    load()
-    return () => { mounted = false }
   }, [])
+
+  useEffect(() => {
+    load()
+  }, [load])
 
   const productionSummary = production?.summary || {}
   const productionActive = Number(productionSummary.pending || 0)
@@ -140,22 +166,41 @@ export default function useCommandCenter(recentTasks = []) {
   const inventoryLow = (inventory?.low || []).length
   const pendingRequisitions = Number(kpis?.pendingRequisitions || 0)
 
-  const semaphores = trafficLevel(productionSummary, inventory, hr, costs)
+  const hrSafe = hr || { late: null, absences: null, active: null }
+  const costsSafe = costs || { financialImpact: null, zeroCostRecipes: null, yieldBelowMinimum: null, avgFoodCost: null }
+
+  const semaphores = trafficLevel(productionSummary, inventory, hrSafe, costsSafe)
   const overallStatus = resolveOverallStatus(alerts, semaphores)
   const activity = useMemo(
     () => buildActivityTimeline(production, inventory, recentTasks),
     [production, inventory, recentTasks]
   )
 
+  const loading = initialLoading && !hasCachedDataRef.current
+  const viewState = loading
+    ? "initial-loading"
+    : refreshing
+      ? "background-refresh"
+      : error && !hasCachedDataRef.current
+        ? "error-without-cache"
+        : refreshError || (error && hasCachedDataRef.current)
+          ? "error-with-cache"
+          : "success-with-data"
+
   return {
     now,
     loading,
+    initialLoading: loading,
+    refreshing,
+    requestCompleted,
+    viewState,
     error,
+    refreshError,
     kpis,
     executiveReport,
     alerts,
-    hr,
-    costs,
+    hr: hrSafe,
+    costs: costsSafe,
     semaphores,
     overallStatus,
     activity,
@@ -164,6 +209,7 @@ export default function useCommandCenter(recentTasks = []) {
     productionAvg,
     inventoryOut,
     inventoryLow,
-    pendingRequisitions
+    pendingRequisitions,
+    reload: () => load({ background: true })
   }
 }

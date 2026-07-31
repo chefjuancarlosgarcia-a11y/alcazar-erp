@@ -73,49 +73,51 @@ export function getSupabaseKeyType(anonKey) {
   return "unknown"
 }
 
-/** Logs DEV al crear el cliente — comparar env vs createClient vs instancia. */
+/** Logs DEV al crear el cliente — solo indicadores booleanos, sin fragmentos de credenciales. */
 export function logSupabaseClientBootstrap(resolved, clientInstance = null) {
   if (!import.meta.env.DEV) return
   const { url, anonKey } = resolved
   const envKey = String(import.meta.env.VITE_SUPABASE_ANON_KEY || "").trim()
-  console.log("SUPABASE URL", url)
-  console.log("SUPABASE KEY PREFIX", anonKey.slice(0, 20))
+  console.log("[Supabase audit] project url configured:", Boolean(url))
+  console.log("[Supabase audit] anon key present:", Boolean(anonKey))
   console.log(
-    "KEY TYPE",
+    "[Supabase audit] key type:",
     anonKey.startsWith("sb_publishable_")
       ? "publishable"
       : anonKey.startsWith("eyJ")
         ? "legacy"
         : "unknown"
   )
-  console.log("[Supabase audit] import.meta.env.VITE_SUPABASE_ANON_KEY prefix:", envKey.slice(0, 20))
-  console.log("[Supabase audit] resolved.anonKey === trim(env):", anonKey === envKey)
+  console.log("[Supabase audit] resolved anon key matches env:", anonKey === envKey)
   console.log("[Supabase audit] createClient source: resolveSupabaseClientConfig() (frontend/src/lib/supabase.js)")
   if (clientInstance?.supabaseKey != null) {
-    console.log("[Supabase audit] client.supabaseKey prefix:", String(clientInstance.supabaseKey).slice(0, 20))
-    console.log("[Supabase audit] client.supabaseKey === resolved.anonKey:", clientInstance.supabaseKey === anonKey)
+    console.log("[Supabase audit] client supabaseKey present:", Boolean(clientInstance.supabaseKey))
+    console.log("[Supabase audit] client supabaseKey matches resolved:", clientInstance.supabaseKey === anonKey)
   }
   if (clientInstance?.supabaseUrl != null) {
-    console.log("[Supabase audit] client.supabaseUrl:", clientInstance.supabaseUrl)
-    console.log("[Supabase audit] client.supabaseUrl === resolved.url:", clientInstance.supabaseUrl === url)
+    console.log("[Supabase audit] client supabaseUrl matches resolved:", clientInstance.supabaseUrl === url)
   }
 }
 
-/** Interceptor DEV: muestra apikey/authorization real en cada /rest/v1/*. */
+/** Interceptor DEV: indicadores de headers en /rest/v1/* sin exponer credenciales. */
 export function createDevRestFetchLogger() {
   if (!import.meta.env.DEV) return undefined
-  const { anonKey: bootAnonPrefix } = resolveSupabaseClientConfig()
+  const { anonKey: bootAnonKey } = resolveSupabaseClientConfig()
   return async (input, init) => {
     const requestUrl = typeof input === "string" ? input : input?.url || ""
     if (requestUrl.includes("/rest/v1/")) {
       const headers = new Headers(init?.headers || {})
       const apikey = headers.get("apikey") || headers.get("Apikey") || ""
       const authorization = headers.get("authorization") || headers.get("Authorization") || ""
+      const bearerToken = authorization.replace(/^Bearer\s+/i, "").trim()
       console.group(`[Supabase REST audit] ${requestUrl.replace(/^https?:\/\/[^/]+/, "")}`)
-      console.log("apikey prefix:", apikey ? apikey.slice(0, 20) : "(missing)")
-      console.log("apikey matches boot key:", apikey === bootAnonPrefix)
-      console.log("authorization prefix:", authorization ? authorization.slice(0, 30) : "(missing)")
-      console.log("authorization bearer is session JWT (not anon):", Boolean(authorization && !authorization.includes(bootAnonPrefix.slice(0, 12))))
+      console.log("apikey header present:", Boolean(apikey))
+      console.log("apikey matches boot key:", Boolean(apikey && bootAnonKey && apikey === bootAnonKey))
+      console.log("authorization header present:", Boolean(authorization))
+      console.log(
+        "authorization is session JWT (not anon key):",
+        Boolean(bearerToken && bootAnonKey && bearerToken !== bootAnonKey)
+      )
       console.groupEnd()
     }
     return fetch(input, init)

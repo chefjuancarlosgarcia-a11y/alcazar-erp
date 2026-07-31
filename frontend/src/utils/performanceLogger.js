@@ -6,13 +6,22 @@ const MAX_STRING_LENGTH = 200
 
 const METADATA_ALLOWLIST = new Set([
   "cache_key_prefix",
+  "cache_key",
   "ttl_ms",
   "format",
   "tab",
   "route",
   "http_status",
   "error_code",
-  "source"
+  "source",
+  "invalidate_origin",
+  "keys_removed",
+  "miss_reason",
+  "channel",
+  "table",
+  "operation",
+  "record_id",
+  "subscription_instance_id"
 ])
 
 const EMAIL_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g

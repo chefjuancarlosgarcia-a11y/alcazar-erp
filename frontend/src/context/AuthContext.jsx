@@ -8,6 +8,11 @@ import {
   logSupabaseQueryAttempt,
   logSupabaseQueryFailure
 } from "../utils/authProfileDiagnostics"
+import {
+  buildQueryCacheScopeFromUser,
+  resetQueryCache,
+  setQueryCacheScope
+} from "../services/queryCache"
 
 const isSupabaseConfigured = Boolean(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY)
 
@@ -219,6 +224,7 @@ export function AuthProvider({ children }) {
       setChecklistModuleAccess(false)
       setProfileError("")
       syncLegacyUser(null)
+      resetQueryCache({ origin: "signed_out" })
       return { ok: true, user: null, profile: null }
     }
 
@@ -264,6 +270,7 @@ export function AuthProvider({ children }) {
       setUser(null)
       setProfileError("No se pudo cargar tu perfil. Contacta administración.")
       syncLegacyUser(null)
+      resetQueryCache({ origin: "session_interrupted" })
       window.dispatchEvent(new CustomEvent("auth:session-interrupted", {
         detail: { reason: "profile_load_failed", message: error.message || "profile_query_error" }
       }))
@@ -280,6 +287,7 @@ export function AuthProvider({ children }) {
       setUser(null)
       setProfileError("Tu usuario no tiene perfil configurado. Contacta administración.")
       syncLegacyUser(null)
+      resetQueryCache({ origin: "session_interrupted" })
       window.dispatchEvent(new CustomEvent("auth:session-interrupted", {
         detail: { reason: "profile_missing", message: "profile_not_found" }
       }))
@@ -295,6 +303,7 @@ export function AuthProvider({ children }) {
       window.dispatchEvent(new CustomEvent("auth:session-interrupted", {
         detail: { reason: "profile_inactive", message: data.status || "inactive" }
       }))
+      resetQueryCache({ origin: "session_interrupted" })
       await supabase.auth.signOut({ scope: "local" })
       syncLegacyUser(null)
       return { ok: false, message: statusMessage }
@@ -315,6 +324,7 @@ export function AuthProvider({ children }) {
     setChecklistModuleAccess(hasChecklistAccess)
     setProfileError("")
     syncLegacyUser(currentUser)
+    setQueryCacheScope(buildQueryCacheScopeFromUser(currentUser))
     return { ok: true, user: currentUser, profile: data }
   }, [])
 
@@ -348,6 +358,9 @@ export function AuthProvider({ children }) {
     const { data: authListener } = supabase.auth.onAuthStateChange((event, nextSession) => {
       setTimeout(async () => {
         if (!mounted) return
+        if (event === "SIGNED_OUT") {
+          resetQueryCache({ origin: "signed_out" })
+        }
         if (["TOKEN_REFRESHED", "USER_UPDATED"].includes(event) && nextSession?.user?.id && nextSession.user.id === userRef.current?.id) {
           setSession(nextSession)
           return
@@ -362,6 +375,14 @@ export function AuthProvider({ children }) {
       authListener.subscription.unsubscribe()
     }
   }, [loadProfileForSession])
+
+  useEffect(() => {
+    function handleSessionInterrupted() {
+      resetQueryCache({ origin: "session_interrupted" })
+    }
+    window.addEventListener("auth:session-interrupted", handleSessionInterrupted)
+    return () => window.removeEventListener("auth:session-interrupted", handleSessionInterrupted)
+  }, [])
 
   const refreshProfile = useCallback(async () => {
     if (!session) return { ok: false, message: "No existe una sesión activa." }
@@ -398,6 +419,7 @@ export function AuthProvider({ children }) {
   }, [loadProfileForSession])
 
   const logout = useCallback(async (reason = "manual_logout") => {
+    resetQueryCache({ origin: "logout" })
     window.dispatchEvent(new CustomEvent("auth:session-interrupted", {
       detail: { reason }
     }))
@@ -448,6 +470,7 @@ export function AuthProvider({ children }) {
     setProfile(data)
     setUser(currentUser)
     syncLegacyUser(currentUser)
+    setQueryCacheScope(buildQueryCacheScopeFromUser(currentUser))
     return { ok: true, user: currentUser }
   }, [session])
 

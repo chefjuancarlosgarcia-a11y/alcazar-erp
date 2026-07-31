@@ -1,7 +1,19 @@
 import { supabase } from "../lib/supabase"
 import { getActiveAreas } from "./areasService"
-import { CACHE_KEYS, CACHE_TTL } from "./cacheConfig"
+import {
+  CACHE_KEYS,
+  CACHE_TTL,
+  operationalAlertsBundleCacheKey,
+  ordersFiltersCacheKey,
+  ordersRangeCacheKey,
+  reportFiltersCacheKey,
+  ttlForExecutiveDashboard,
+  ttlForOperationalReport,
+  ttlForOrdersRange,
+  ttlForReportFilters
+} from "./cacheConfig"
 import { cachedQuery } from "./queryCache"
+import { logReportsPerf } from "../utils/reportsPerf"
 
 function number(value) {
   return Number(value || 0)
@@ -13,6 +25,76 @@ function message(error) {
 
 function empty(data, error = null) {
   return { data, error: error ? message(error) : "" }
+}
+
+function failed(fallbackShape, error) {
+  return { data: fallbackShape, error: message(error) }
+}
+
+function normalizeOrdersRows(data) {
+  return Array.isArray(data) ? data.filter((row) => row && typeof row === "object") : []
+}
+
+async function queryOrdersByRange(range) {
+  const started = performance.now()
+  const { data, error } = await supabase
+    .from("pos_orders")
+    .select("*, items:pos_order_items(*)")
+    .neq("status", "cancelled")
+    .gte("created_at", range.start)
+    .lte("created_at", range.end)
+    .order("created_at", { ascending: false })
+
+  logReportsPerf("orders_by_range", {
+    operation: "fetchOrdersByRange",
+    range_start: range.start,
+    range_end: range.end,
+    duration_ms: Math.round(performance.now() - started),
+    row_count: normalizeOrdersRows(data).length,
+    had_error: Boolean(error)
+  })
+
+  if (error) return { data: null, error }
+  return { data: normalizeOrdersRows(data), error: null }
+}
+
+async function queryOrders(filters = {}) {
+  const range = getReportDateRange(filters)
+  const started = performance.now()
+  const { data, error } = await withDates(
+    supabase.from("pos_orders").select("*, items:pos_order_items(*)").neq("status", "cancelled"),
+    filters
+  ).order("created_at", { ascending: false })
+
+  logReportsPerf("orders_by_filters", {
+    operation: "fetchOrders",
+    preset: filters.preset || "custom",
+    range_start: range.start,
+    range_end: range.end,
+    shift: filters.shift || "",
+    duration_ms: Math.round(performance.now() - started),
+    row_count: normalizeOrdersRows(data).length,
+    had_error: Boolean(error)
+  })
+
+  if (error) return { data: null, error }
+  return { data: normalizeOrdersRows(data), error: null }
+}
+
+function fetchOrdersByRange(range) {
+  return cachedQuery(
+    ordersRangeCacheKey(range),
+    () => queryOrdersByRange(range),
+    ttlForOrdersRange(range)
+  )
+}
+
+function fetchOrders(filters = {}) {
+  return cachedQuery(
+    ordersFiltersCacheKey(filters),
+    () => queryOrders(filters),
+    ttlForReportFilters(filters)
+  )
 }
 
 const REQUISITION_WORKFLOW_PENDING_STATUSES = ["draft", "pending", "approved"]
@@ -99,33 +181,14 @@ function dayKey(value) {
   return new Date(value).toLocaleDateString("es-GT", { day: "2-digit", month: "short", year: "numeric" })
 }
 
-async function fetchOrders(filters = {}) {
-  const query = withDates(
-    supabase.from("pos_orders").select("*, items:pos_order_items(*)").neq("status", "cancelled"),
-    filters
-  )
-  const { data, error } = await query.order("created_at", { ascending: false })
-  return { data: Array.isArray(data) ? data.filter((row) => row && typeof row === "object") : [], error }
-}
-
-async function fetchOrdersByRange(range) {
-  const { data, error } = await supabase
-    .from("pos_orders")
-    .select("*, items:pos_order_items(*)")
-    .neq("status", "cancelled")
-    .gte("created_at", range.start)
-    .lte("created_at", range.end)
-    .order("created_at", { ascending: false })
-  return { data: Array.isArray(data) ? data.filter((row) => row && typeof row === "object") : [], error }
-}
-
 async function fetchProducts() {
   return cachedQuery(CACHE_KEYS.POS_PRODUCTS_REPORT, async () => {
     const { data, error } = await supabase
       .from("pos_products")
       .select("*, recipe:standard_recipes(id, name, estimated_cost, active, production_area_id)")
-    return { data: data || [], error }
-  }, CACHE_TTL.REPORT_CATALOG)
+    if (error) return { data: null, error }
+    return { data: data || [], error: null }
+  }, CACHE_TTL.CATALOG)
 }
 
 const ACTIVE_TABLE_STATUSES = ["open", "awaiting_bill", "sent_to_cashier"]
@@ -189,6 +252,7 @@ export async function getExecutiveKPIs(filters = {}) {
     supabase.from("requisitions").select("id,status").eq("is_test", false).in("status", REQUISITION_OPEN_STATUSES)
   ])
   const errors = [todayOrders.error, monthOrders.error, tickets.error, stock.error, requisitions.error].filter(Boolean)
+  if (errors.length) return failed(null, errors[0])
   const ordersToday = todayOrders.data || []
   const salesToday = ordersToday.reduce((sum, order) => sum + number(order.total), 0)
   const activeTables = countActiveTables(ordersToday)
@@ -205,11 +269,12 @@ export async function getExecutiveKPIs(filters = {}) {
     workflowPendingRequisitions: requisitionSummary.pending,
     partialRequisitions: requisitionSummary.partial,
     range: getReportDateRange(filters)
-  }, errors[0])
+  })
 }
 
 export async function getExecutiveDashboardReport() {
   return cachedQuery(CACHE_KEYS.EXECUTIVE_DASHBOARD, async () => {
+    const started = performance.now()
     const ranges = {
       day: rangeForPreset("today"),
       week: rangeForPreset("week"),
@@ -235,10 +300,21 @@ export async function getExecutiveDashboardReport() {
       fetchOrdersByRange(previousRange(ranges.month)),
       fetchOrdersByRange(previousRange(ranges.year))
     ])
-    const errors = [dayOrders, weekOrders, monthOrders, yearOrders, prevDayOrders, prevWeekOrders, prevMonthOrders, prevYearOrders].map((item) => item.error).filter(Boolean)
+    const rangeResults = [dayOrders, weekOrders, monthOrders, yearOrders, prevDayOrders, prevWeekOrders, prevMonthOrders, prevYearOrders]
+    const errors = rangeResults.map((item) => item.error).filter(Boolean)
+    if (errors.length) {
+      logReportsPerf("executive_dashboard_failed", {
+        operation: "getExecutiveDashboardReport",
+        duration_ms: Math.round(performance.now() - started),
+        request_count: 8,
+        had_error: true
+      })
+      return failed(null, errors[0])
+    }
     const summarize = (orders) => {
-      const total = orders.reduce((sum, order) => sum + number(order.total), 0)
-      return { total, orders: orders.length, averageTicket: orders.length ? total / orders.length : 0 }
+      const rows = orders || []
+      const total = rows.reduce((sum, order) => sum + number(order.total), 0)
+      return { total, orders: rows.length, averageTicket: rows.length ? total / rows.length : 0 }
     }
     const current = {
       day: summarize(dayOrders.data),
@@ -252,39 +328,53 @@ export async function getExecutiveDashboardReport() {
       month: summarize(prevMonthOrders.data),
       year: summarize(prevYearOrders.data)
     }
+    logReportsPerf("executive_dashboard_loaded", {
+      operation: "getExecutiveDashboardReport",
+      duration_ms: Math.round(performance.now() - started),
+      request_count: 8,
+      row_count: (dayOrders.data?.length || 0) + (monthOrders.data?.length || 0)
+    })
     return empty({
       current,
       previous,
       ranges,
-      activeTables: countActiveTables(dayOrders.data)
-    }, errors[0])
-  }, CACHE_TTL.REPORT_CATALOG)
+      activeTables: countActiveTables(dayOrders.data || [])
+    })
+  }, ttlForExecutiveDashboard())
 }
 
 export async function getSalesAnalyticsReport(filters = {}) {
-  const ordersResult = await fetchOrders(filters)
-  if (ordersResult.error) return empty({ summary: {}, byDay: [], byWeek: [], byMonth: [], byHour: [] }, ordersResult.error)
-  const orders = ordersResult.data || []
-  const totalSales = orders.reduce((sum, order) => sum + number(order.total), 0)
-  const byDay = groupOrdersBy(orders, (order) => dayKey(order.created_at), "date")
-  const byWeek = groupOrdersBy(orders, (order) => weekKey(order.created_at), "week")
-  const byMonth = groupOrdersBy(orders, (order) => monthKey(order.created_at), "month")
-  const byHour = groupOrdersBy(orders, (order) => `${new Date(order.created_at).getHours().toString().padStart(2, "0")}:00`, "hour")
-  const bestDay = [...byDay].sort((a, b) => b.sales - a.sales)[0]
-  const bestHour = [...byHour].sort((a, b) => b.sales - a.sales)[0]
-  return empty({
-    summary: {
-      totalSales,
-      orders: orders.length,
-      averageTicket: orders.length ? totalSales / orders.length : 0,
-      bestHour: bestHour?.hour || "-",
-      bestDay: bestDay?.date || "-"
+  return cachedQuery(
+    reportFiltersCacheKey(CACHE_KEYS.SALES_ANALYTICS_PREFIX, filters),
+    async () => {
+      const ordersResult = await fetchOrders(filters)
+      if (ordersResult.error) {
+        return failed({ summary: {}, byDay: [], byWeek: [], byMonth: [], byHour: [] }, ordersResult.error)
+      }
+      const orders = ordersResult.data || []
+      const totalSales = orders.reduce((sum, order) => sum + number(order.total), 0)
+      const byDay = groupOrdersBy(orders, (order) => dayKey(order.created_at), "date")
+      const byWeek = groupOrdersBy(orders, (order) => weekKey(order.created_at), "week")
+      const byMonth = groupOrdersBy(orders, (order) => monthKey(order.created_at), "month")
+      const byHour = groupOrdersBy(orders, (order) => `${new Date(order.created_at).getHours().toString().padStart(2, "0")}:00`, "hour")
+      const bestDay = [...byDay].sort((a, b) => b.sales - a.sales)[0]
+      const bestHour = [...byHour].sort((a, b) => b.sales - a.sales)[0]
+      return empty({
+        summary: {
+          totalSales,
+          orders: orders.length,
+          averageTicket: orders.length ? totalSales / orders.length : 0,
+          bestHour: bestHour?.hour || "-",
+          bestDay: bestDay?.date || "-"
+        },
+        byDay,
+        byWeek,
+        byMonth,
+        byHour
+      })
     },
-    byDay,
-    byWeek,
-    byMonth,
-    byHour
-  })
+    ttlForReportFilters(filters)
+  )
 }
 
 function groupOrdersBy(orders, getKey, keyName) {
@@ -313,9 +403,9 @@ function monthKey(value) {
 
 export async function getSalesReport(filters = {}) {
   const ordersResult = await fetchOrders(filters)
-  if (ordersResult.error) return empty([], ordersResult.error)
+  if (ordersResult.error) return failed([], ordersResult.error)
   const grouped = new Map()
-  ordersResult.data.forEach((order) => {
+  ;(ordersResult.data || []).forEach((order) => {
     const key = dayKey(order.created_at)
     const current = grouped.get(key) || { date: key, sales: 0, orders: 0, averageTicket: 0 }
     current.sales += number(order.total)
@@ -327,10 +417,10 @@ export async function getSalesReport(filters = {}) {
 
 export async function getSalesByCategory(filters = {}) {
   const [ordersResult, productsResult] = await Promise.all([fetchOrders(filters), fetchProducts()])
-  if (ordersResult.error || productsResult.error) return empty([], ordersResult.error || productsResult.error)
-  const products = new Map(productsResult.data.map((product) => [product.id, product]))
+  if (ordersResult.error || productsResult.error) return failed([], ordersResult.error || productsResult.error)
+  const products = new Map((productsResult.data || []).map((product) => [product.id, product]))
   const grouped = new Map()
-  ordersResult.data.flatMap((order) => order.items || []).filter((item) => item.status !== "cancelled").forEach((item) => {
+  ;(ordersResult.data || []).flatMap((order) => order.items || []).filter((item) => item.status !== "cancelled").forEach((item) => {
     const product = products.get(item.product_id)
     const category = product?.category_name || product?.category_id || "Sin categoría"
     const row = grouped.get(category) || { category, quantity: 0, sales: 0 }
@@ -343,9 +433,9 @@ export async function getSalesByCategory(filters = {}) {
 
 export async function getTopProducts(filters = {}) {
   const ordersResult = await fetchOrders(filters)
-  if (ordersResult.error) return empty([], ordersResult.error)
+  if (ordersResult.error) return failed([], ordersResult.error)
   const grouped = new Map()
-  ordersResult.data.flatMap((order) => Array.isArray(order.items) ? order.items : []).filter((item) => item && item.status !== "cancelled").forEach((item) => {
+  ;(ordersResult.data || []).flatMap((order) => Array.isArray(order.items) ? order.items : []).filter((item) => item && item.status !== "cancelled").forEach((item) => {
     const row = grouped.get(item.product_id) || { productId: item.product_id, product: item.product_name, quantity: 0, sales: 0 }
     row.quantity += number(item.quantity)
     row.sales += number(item.total_price)
@@ -356,7 +446,7 @@ export async function getTopProducts(filters = {}) {
 
 export async function getSalesByWaiter(filters = {}) {
   const ordersResult = await fetchOrders(filters)
-  if (ordersResult.error) return empty([], ordersResult.error)
+  if (ordersResult.error) return failed([], ordersResult.error)
   const grouped = new Map()
   ;(Array.isArray(ordersResult.data) ? ordersResult.data : []).filter((order) => order && matchesShift(order.created_at, filters.shift)).forEach((order) => {
     const waiter = order.waiter_name || "Sin asignar"
@@ -456,70 +546,82 @@ function roleDepartment(role) {
 }
 
 export async function getProductionReport(filters = {}) {
-  const { data, error } = await withDates(
-    supabase.from("production_tickets").select("*, items:production_ticket_items(*)"),
-    filters
-  ).order("created_at", { ascending: false })
-  if (error) return empty({ summary: {}, areas: [], recent: [] }, error)
-  const tickets = data || []
-  const now = Date.now()
-  const active = tickets.filter((ticket) => !["served", "cancelled"].includes(ticket.status))
-  const byArea = new Map()
-  tickets.forEach((ticket) => {
-    const area = ticket.area_name || ticket.area_id
-    const row = byArea.get(area) || { area, tickets: 0, active: 0, minutesTotal: 0, timed: 0 }
-    row.tickets += 1
-    if (!["served", "cancelled"].includes(ticket.status)) row.active += 1
-    if (ticket.ready_at) {
-      row.minutesTotal += (new Date(ticket.ready_at) - new Date(ticket.created_at)) / 60000
-      row.timed += 1
-    }
-    byArea.set(area, row)
-  })
-  return empty({
-    summary: {
-      pending: active.filter((row) => row.status === "pending").length,
-      inProduction: active.filter((row) => row.status === "in_production").length,
-      ready: active.filter((row) => row.status === "ready").length,
-      late: active.filter((row) => (now - new Date(row.created_at).getTime()) / 60000 > 15).length
+  return cachedQuery(
+    reportFiltersCacheKey(CACHE_KEYS.PRODUCTION_REPORT_PREFIX, filters),
+    async () => {
+      const { data, error } = await withDates(
+        supabase.from("production_tickets").select("*, items:production_ticket_items(*)"),
+        filters
+      ).order("created_at", { ascending: false })
+      if (error) return failed({ summary: {}, areas: [], recent: [] }, error)
+      const tickets = data || []
+      const now = Date.now()
+      const active = tickets.filter((ticket) => !["served", "cancelled"].includes(ticket.status))
+      const byArea = new Map()
+      tickets.forEach((ticket) => {
+        const area = ticket.area_name || ticket.area_id
+        const row = byArea.get(area) || { area, tickets: 0, active: 0, minutesTotal: 0, timed: 0 }
+        row.tickets += 1
+        if (!["served", "cancelled"].includes(ticket.status)) row.active += 1
+        if (ticket.ready_at) {
+          row.minutesTotal += (new Date(ticket.ready_at) - new Date(ticket.created_at)) / 60000
+          row.timed += 1
+        }
+        byArea.set(area, row)
+      })
+      return empty({
+        summary: {
+          pending: active.filter((row) => row.status === "pending").length,
+          inProduction: active.filter((row) => row.status === "in_production").length,
+          ready: active.filter((row) => row.status === "ready").length,
+          late: active.filter((row) => (now - new Date(row.created_at).getTime()) / 60000 > 15).length
+        },
+        areas: [...byArea.values()].map((row) => ({ ...row, averageMinutes: row.timed ? Math.round(row.minutesTotal / row.timed) : 0 })),
+        recent: tickets.slice(0, 30)
+      })
     },
-    areas: [...byArea.values()].map((row) => ({ ...row, averageMinutes: row.timed ? Math.round(row.minutesTotal / row.timed) : 0 })),
-    recent: tickets.slice(0, 30)
-  })
+    ttlForOperationalReport(filters)
+  )
 }
 
 export async function getInventoryReport(filters = {}) {
-  console.info("[InventarioCritico] Consultando Supabase", { filters })
-  const [stock, movements] = await Promise.all([
-    supabase.from("area_inventory").select("*, item:inventory_items(id,name,category,base_unit), area:areas(id,name)"),
-    withDates(supabase.from("inventory_movements").select("*, item:inventory_items(name), from_area:areas!inventory_movements_from_area_id_fkey(name), to_area:areas!inventory_movements_to_area_id_fkey(name)").eq("is_test", false), filters)
-      .order("created_at", { ascending: false }).limit(100)
-  ])
-  if (stock.error || movements.error) {
-    console.error("[InventarioCritico] Error de consulta Supabase", { stockError: stock.error, movementsError: movements.error })
-    return empty({ low: [], out: [], stock: [], movements: [], consumption: [], transfers: [] }, stock.error || movements.error)
-  }
-  let stocks = Array.isArray(stock.data) ? stock.data.filter((row) => row && typeof row === "object") : []
-  if (filters.areaId) stocks = stocks.filter((row) => row.area_id === filters.areaId)
-  if (filters.category) stocks = stocks.filter((row) => row.item?.category === filters.category)
-  let rows = Array.isArray(movements.data) ? movements.data.filter((row) => row && typeof row === "object") : []
-  if (filters.areaId) rows = rows.filter((row) => row.from_area_id === filters.areaId || row.to_area_id === filters.areaId)
-  if (filters.movementType) rows = rows.filter((row) => row.movement_type === filters.movementType)
-  const consumption = new Map()
-  rows.filter((row) => row.movement_type === "consumption").forEach((row) => {
-    const name = row.item?.name || row.item_id
-    consumption.set(name, number(consumption.get(name)) + number(row.quantity))
-  })
-  const report = {
-    low: stocks.filter((row) => number(row.quantity) > 0 && number(row.quantity) <= number(row.minimum_quantity)),
-    out: stocks.filter((row) => number(row.quantity) <= 0),
-    stock: stocks,
-    movements: rows,
-    consumption: [...consumption].map(([item, quantity]) => ({ item, quantity })).sort((a, b) => b.quantity - a.quantity),
-    transfers: rows.filter((row) => row.movement_type === "transfer")
-  }
-  console.info("[InventarioCritico] Datos normalizados", { stock: stocks.length, movements: rows.length, low: report.low.length, out: report.out.length })
-  return empty(report)
+  return cachedQuery(
+    reportFiltersCacheKey(CACHE_KEYS.INVENTORY_REPORT_PREFIX, filters),
+    async () => {
+      console.info("[InventarioCritico] Consultando Supabase", { filters })
+      const [stock, movements] = await Promise.all([
+        supabase.from("area_inventory").select("*, item:inventory_items(id,name,category,base_unit), area:areas(id,name)"),
+        withDates(supabase.from("inventory_movements").select("*, item:inventory_items(name), from_area:areas!inventory_movements_from_area_id_fkey(name), to_area:areas!inventory_movements_to_area_id_fkey(name)").eq("is_test", false), filters)
+          .order("created_at", { ascending: false }).limit(100)
+      ])
+      if (stock.error || movements.error) {
+        console.error("[InventarioCritico] Error de consulta Supabase", { stockError: stock.error, movementsError: movements.error })
+        return failed({ low: [], out: [], stock: [], movements: [], consumption: [], transfers: [] }, stock.error || movements.error)
+      }
+      let stocks = Array.isArray(stock.data) ? stock.data.filter((row) => row && typeof row === "object") : []
+      if (filters.areaId) stocks = stocks.filter((row) => row.area_id === filters.areaId)
+      if (filters.category) stocks = stocks.filter((row) => row.item?.category === filters.category)
+      let rows = Array.isArray(movements.data) ? movements.data.filter((row) => row && typeof row === "object") : []
+      if (filters.areaId) rows = rows.filter((row) => row.from_area_id === filters.areaId || row.to_area_id === filters.areaId)
+      if (filters.movementType) rows = rows.filter((row) => row.movement_type === filters.movementType)
+      const consumption = new Map()
+      rows.filter((row) => row.movement_type === "consumption").forEach((row) => {
+        const name = row.item?.name || row.item_id
+        consumption.set(name, number(consumption.get(name)) + number(row.quantity))
+      })
+      const report = {
+        low: stocks.filter((row) => number(row.quantity) > 0 && number(row.quantity) <= number(row.minimum_quantity)),
+        out: stocks.filter((row) => number(row.quantity) <= 0),
+        stock: stocks,
+        movements: rows,
+        consumption: [...consumption].map(([item, quantity]) => ({ item, quantity })).sort((a, b) => b.quantity - a.quantity),
+        transfers: rows.filter((row) => row.movement_type === "transfer")
+      }
+      console.info("[InventarioCritico] Datos normalizados", { stock: stocks.length, movements: rows.length, low: report.low.length, out: report.out.length })
+      return empty(report)
+    },
+    ttlForOperationalReport(filters)
+  )
 }
 
 export async function getRequisitionReport(filters = {}) {
@@ -554,7 +656,7 @@ export async function getRequisitionReport(filters = {}) {
 
 export async function getFoodCostReport() {
   const productsResult = await fetchProducts()
-  if (productsResult.error) return empty([], productsResult.error)
+  if (productsResult.error) return failed([], productsResult.error)
   const rows = (Array.isArray(productsResult.data) ? productsResult.data : []).filter((product) => product?.active && product.recipe_id).map((product) => {
     const price = number(product.price)
     const cost = number(product.recipe?.estimated_cost)
@@ -567,24 +669,30 @@ export async function getFoodCostReport() {
 }
 
 export async function getMenuEngineeringReport(filters = {}) {
-  const [top, food] = await Promise.all([getTopProducts(filters), getFoodCostReport()])
-  if (top.error || food.error) return empty([], top.error || food.error)
-  const safeTop = Array.isArray(top.data) ? top.data.filter(Boolean) : []
-  const safeFood = Array.isArray(food.data) ? food.data.filter(Boolean) : []
-  const salesByProduct = new Map(safeTop.map((row) => [row.productId, row]))
-  const rows = safeFood.map((row) => {
-    const sales = salesByProduct.get(row.productId) || { quantity: 0, sales: 0 }
-    return { ...row, quantity: sales.quantity, sales: sales.sales, estimatedProfit: row.grossMargin * sales.quantity }
-  })
-  const averageQuantity = rows.length ? rows.reduce((sum, row) => sum + row.quantity, 0) / rows.length : 0
-  const averageMargin = rows.length ? rows.reduce((sum, row) => sum + row.grossMargin, 0) / rows.length : 0
-  return empty(rows.map((row) => {
-    const popular = row.quantity >= averageQuantity
-    const profitable = row.grossMargin >= averageMargin
-    const classification = popular && profitable ? "star" : popular ? "horse" : profitable ? "puzzle" : "dog"
-    const recommendation = { star: "Mantener y destacar", horse: "Revisar costos o precio", puzzle: "Promocionar mejor", dog: "Evaluar rediseño o retiro" }[classification]
-    return { ...row, classification, recommendation }
-  }))
+  return cachedQuery(
+    reportFiltersCacheKey(CACHE_KEYS.MENU_ENGINEERING_PREFIX, filters),
+    async () => {
+      const [top, food] = await Promise.all([getTopProducts(filters), getFoodCostReport()])
+      if (top.error || food.error) return failed([], top.error || food.error)
+      const safeTop = Array.isArray(top.data) ? top.data.filter(Boolean) : []
+      const safeFood = Array.isArray(food.data) ? food.data.filter(Boolean) : []
+      const salesByProduct = new Map(safeTop.map((row) => [row.productId, row]))
+      const rows = safeFood.map((row) => {
+        const sales = salesByProduct.get(row.productId) || { quantity: 0, sales: 0 }
+        return { ...row, quantity: sales.quantity, sales: sales.sales, estimatedProfit: row.grossMargin * sales.quantity }
+      })
+      const averageQuantity = rows.length ? rows.reduce((sum, row) => sum + row.quantity, 0) / rows.length : 0
+      const averageMargin = rows.length ? rows.reduce((sum, row) => sum + row.grossMargin, 0) / rows.length : 0
+      return empty(rows.map((row) => {
+        const popular = row.quantity >= averageQuantity
+        const profitable = row.grossMargin >= averageMargin
+        const classification = popular && profitable ? "star" : popular ? "horse" : profitable ? "puzzle" : "dog"
+        const recommendation = { star: "Mantener y destacar", horse: "Revisar costos o precio", puzzle: "Promocionar mejor", dog: "Evaluar rediseño o retiro" }[classification]
+        return { ...row, classification, recommendation }
+      }))
+    },
+    ttlForReportFilters(filters)
+  )
 }
 
 export async function getAreaPerformanceReport(filters = {}) {
@@ -622,20 +730,12 @@ export async function getEmployeePerformanceReport(filters = {}) {
   return empty(sales.data.map((row) => ({ ...row, tickets: ticketMap.get(row.waiter) || 0 })))
 }
 
-export async function getOperationalAlerts() {
-  const [inventory, production, requisitions, products, recipes] = await Promise.all([
-    getInventoryReport({ preset: "today" }),
-    getProductionReport({ preset: "today" }),
-    getRequisitionReport({ preset: "month" }),
-    supabase.from("pos_products").select("name,production_ready,active,production_area_id,recipe_id").eq("active", true),
-    supabase.from("standard_recipes").select("name,estimated_cost,active").eq("active", true)
-  ])
-  const errors = [inventory.error, production.error, requisitions.error, products.error && message(products.error), recipes.error && message(recipes.error)].filter(Boolean)
+function buildOperationalAlertsFromReports(inventory, production, requisitions, products, recipes) {
   const alerts = []
-  inventory.data.out.forEach((row) => alerts.push({ priority: "critical", type: "Stock agotado", area: row.area?.name || row.area_id, detail: row.item?.name, action: "Generar requisición" }))
-  inventory.data.low.forEach((row) => alerts.push({ priority: "high", type: "Stock bajo", area: row.area?.name || row.area_id, detail: row.item?.name, action: "Revisar abastecimiento" }))
-  if (production.data.summary.late) alerts.push({ priority: "high", type: "KDS atrasado", area: "Producción", detail: `${production.data.summary.late} ticket(s) con más de 15 min`, action: "Revisar estación" })
-  const reqSummary = requisitions.data.summary || {}
+  ;(inventory?.out || []).forEach((row) => alerts.push({ priority: "critical", type: "Stock agotado", area: row.area?.name || row.area_id, detail: row.item?.name, action: "Generar requisición" }))
+  ;(inventory?.low || []).forEach((row) => alerts.push({ priority: "high", type: "Stock bajo", area: row.area?.name || row.area_id, detail: row.item?.name, action: "Revisar abastecimiento" }))
+  if (production?.summary?.late) alerts.push({ priority: "high", type: "KDS atrasado", area: "Producción", detail: `${production.summary.late} ticket(s) con más de 15 min`, action: "Revisar estación" })
+  const reqSummary = requisitions?.summary || {}
   if (reqSummary.open) {
     const partialNote = reqSummary.partial
       ? ` (${reqSummary.partial} parcialmente surtida${reqSummary.partial === 1 ? "" : "s"})`
@@ -648,7 +748,49 @@ export async function getOperationalAlerts() {
       action: "Aprobar, completar o surtir faltantes"
     })
   }
-  ;(products.data || []).filter((product) => !product.production_ready || !product.recipe_id || !product.production_area_id).forEach((product) => alerts.push({ priority: "high", type: "Producto POS incompleto", area: "POS", detail: product.name, action: "Conectar receta y área" }))
-  ;(recipes.data || []).filter((recipe) => number(recipe.estimated_cost) === 0).forEach((recipe) => alerts.push({ priority: "medium", type: "Receta sin costo", area: "Recetas", detail: recipe.name, action: "Actualizar ingredientes/costos" }))
-  return empty(alerts, errors[0])
+  ;(products || []).filter((product) => !product.production_ready || !product.recipe_id || !product.production_area_id).forEach((product) => alerts.push({ priority: "high", type: "Producto POS incompleto", area: "POS", detail: product.name, action: "Conectar receta y área" }))
+  ;(recipes || []).filter((recipe) => number(recipe.estimated_cost) === 0).forEach((recipe) => alerts.push({ priority: "medium", type: "Receta sin costo", area: "Recetas", detail: recipe.name, action: "Actualizar ingredientes/costos" }))
+  return alerts
+}
+
+export async function getOperationalAlertsBundle(filters = { preset: "today" }) {
+  return cachedQuery(operationalAlertsBundleCacheKey(filters), async () => {
+    const monthFilters = { preset: "month" }
+    const [inventoryResult, productionResult, requisitionsResult, products, recipes] = await Promise.all([
+      getInventoryReport(filters),
+      getProductionReport(filters),
+      getRequisitionReport(monthFilters),
+      supabase.from("pos_products").select("name,production_ready,active,production_area_id,recipe_id").eq("active", true),
+      supabase.from("standard_recipes").select("name,estimated_cost,active").eq("active", true)
+    ])
+    const errors = [
+      inventoryResult.error,
+      productionResult.error,
+      requisitionsResult.error,
+      products.error && message(products.error),
+      recipes.error && message(recipes.error)
+    ].filter(Boolean)
+    if (errors.length) {
+      return failed({ alerts: [], production: null, inventory: null, requisitions: null }, errors[0])
+    }
+    const alerts = buildOperationalAlertsFromReports(
+      inventoryResult.data,
+      productionResult.data,
+      requisitionsResult.data,
+      products.data || [],
+      recipes.data || []
+    )
+    return empty({
+      alerts,
+      production: productionResult.data,
+      inventory: inventoryResult.data,
+      requisitions: requisitionsResult.data
+    })
+  }, CACHE_TTL.REPORT_OPERATIONAL)
+}
+
+export async function getOperationalAlerts() {
+  const result = await getOperationalAlertsBundle()
+  if (result.error) return failed([], result.error)
+  return empty(result.data?.alerts || [])
 }

@@ -1,11 +1,8 @@
-import { Component, useEffect, useMemo, useState } from "react"
+import { Component, useEffect, useMemo, useRef, useState } from "react"
 import { useActionGuard } from "../../hooks/useActionGuard"
 import { logPerformanceEvent } from "../../utils/performanceLogger"
 import { useErpPerfModule } from "../../hooks/useErpPerfModule"
 import { useNavigate, useSearchParams } from "react-router-dom"
-import jsPDF from "jspdf"
-import autoTable from "jspdf-autotable"
-import * as XLSX from "xlsx"
 import { useAuth } from "../../context/AuthContext"
 import {
   copyFixedCostsFromPreviousMonth,
@@ -36,6 +33,20 @@ import { getYieldDashboardMetrics } from "../../services/yieldCostingService"
 import YieldReportsSection from "./YieldReportsSection"
 import CommandCenterLayer from "../../components/commandCenter/CommandCenterLayer"
 import MigrationModeReportWarning from "../../components/inventory/MigrationModeReportWarning"
+import {
+  createReportsTabCacheStore,
+  hasReportsTabCacheEntry,
+  isReportsDataEmpty,
+  peekReportsTabCacheEntry,
+  resolveReportsViewState,
+  serializeReportsTabCacheKey,
+  setReportsTabCacheEntry,
+  syncReportsTabCacheScope,
+  shouldShowReportsContent,
+  shouldShowReportsEmpty
+} from "./reportsViewState"
+import { getQueryCacheScopeKey } from "../../services/queryCache"
+import { logReportsPerf } from "../../utils/reportsPerf"
 import "./ReportsDashboard.css"
 
 const EXECUTIVE_ROLES = ["admin", "ceo", "gerente_general"]
@@ -77,10 +88,19 @@ function ReportsDashboard() {
   const [debouncedCollaborator, setDebouncedCollaborator] = useState("")
   const [debouncedCategory, setDebouncedCategory] = useState("")
   const [data, setData] = useState(null)
-  const [loading, setLoading] = useState(false)
+  const [initialLoading, setInitialLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [requestCompleted, setRequestCompleted] = useState(false)
   const [error, setError] = useState("")
+  const [refreshError, setRefreshError] = useState("")
   const [tabReloadKey, setTabReloadKey] = useState(0)
   const [fixedCostsFeedback, setFixedCostsFeedback] = useState("")
+  const [exportError, setExportError] = useState("")
+  const tabCacheStoreRef = useRef(createReportsTabCacheStore())
+  const forceRefreshRef = useRef(false)
+  const activeTabRef = useRef(tab)
+  const activeCacheKeyRef = useRef("")
+  const reportsScopeKey = getQueryCacheScopeKey()
   const { busy: exportBusy, run: runExport } = useActionGuard()
 
   useEffect(() => {
@@ -100,6 +120,51 @@ function ReportsDashboard() {
   }), [filters, debouncedCollaborator, debouncedCategory])
 
   useEffect(() => {
+    const scopeChanged = syncReportsTabCacheScope(tabCacheStoreRef.current, reportsScopeKey)
+    if (scopeChanged) {
+      setData(null)
+      setError("")
+      setRefreshError("")
+      setRequestCompleted(false)
+      setInitialLoading(Boolean(reportsScopeKey))
+    }
+  }, [reportsScopeKey])
+
+  useEffect(() => {
+    function handleSessionInterrupted() {
+      syncReportsTabCacheScope(tabCacheStoreRef.current, "")
+      setData(null)
+      setError("")
+      setRefreshError("")
+      setRequestCompleted(false)
+      setInitialLoading(true)
+    }
+    window.addEventListener("auth:session-interrupted", handleSessionInterrupted)
+    return () => window.removeEventListener("auth:session-interrupted", handleSessionInterrupted)
+  }, [])
+
+  const cacheKey = useMemo(
+    () => serializeReportsTabCacheKey(tab, queryFilters),
+    [tab, queryFilters]
+  )
+
+  activeTabRef.current = tab
+  activeCacheKeyRef.current = cacheKey
+
+  const hasTabCache = hasReportsTabCacheEntry(tabCacheStoreRef.current, cacheKey, tab)
+
+  const viewState = resolveReportsViewState({
+    loading: initialLoading,
+    refreshing,
+    error,
+    refreshError,
+    requestCompleted,
+    hasCachedData: hasTabCache,
+    data,
+    isEmptyData: requestCompleted && !error && isReportsDataEmpty(tab, data)
+  })
+
+  useEffect(() => {
     const requestedTab = searchParams.get("tab")
     if (requestedTab && availableTabs.some(([key]) => key === requestedTab)) {
       setTab(requestedTab)
@@ -112,31 +177,98 @@ function ReportsDashboard() {
       setTab(availableTabs[0]?.[0] || "goals")
       return
     }
+
+    const requestTab = tab
+    const requestCacheKey = cacheKey
+    const peek = peekReportsTabCacheEntry(tabCacheStoreRef.current, cacheKey, tab)
+    const hasCachedData = peek != null
+    const forceRefresh = forceRefreshRef.current
+    forceRefreshRef.current = false
+    const needsBackgroundRefresh = hasCachedData && (peek.isStale || forceRefresh)
+    const needsInitialFetch = !hasCachedData
+
+    if (hasCachedData) {
+      setData(peek.data)
+      setInitialLoading(false)
+      setRefreshing(needsBackgroundRefresh)
+      if (!needsBackgroundRefresh) setRequestCompleted(true)
+    } else {
+      setInitialLoading(true)
+      setRefreshing(false)
+    }
+    setRefreshError("")
+    if (!hasCachedData) setError("")
+
+    if (!needsBackgroundRefresh && !needsInitialFetch) {
+      return undefined
+    }
+
     let mounted = true
+    const started = performance.now()
+
     const timer = window.setTimeout(async () => {
-      setLoading(true)
-      setError("")
-      console.info(`[DashboardEjecutivo:${tab}] Iniciando carga`, { filters: queryFilters })
+      logReportsPerf("tab_load_start", {
+        operation: "ReportsDashboard.load",
+        tab: requestTab,
+        cache_key: requestCacheKey,
+        refetch_reason: needsBackgroundRefresh ? "background_refresh" : "initial",
+        had_visible_data: hasCachedData
+      })
+
       try {
-        const result = await loadExecutiveReport(tab, queryFilters)
-        if (!mounted) return
-        console.info(`[DashboardEjecutivo:${tab}] Carga finalizada`, { error: result?.error || "", dataType: Array.isArray(result?.data) ? "array" : typeof result?.data })
-        setData(result?.data ?? null)
-        setError(result?.error || "")
+        const result = await loadExecutiveReport(requestTab, queryFilters)
+        const stillCurrent = mounted
+          && requestTab === activeTabRef.current
+          && requestCacheKey === activeCacheKeyRef.current
+        if (!stillCurrent) return
+
+        logReportsPerf("tab_load_end", {
+          operation: "ReportsDashboard.load",
+          tab: requestTab,
+          duration_ms: Math.round(performance.now() - started),
+          had_error: Boolean(result?.error),
+          row_count: Array.isArray(result?.data) ? result.data.length : undefined
+        })
+
+        if (result?.error) {
+          if (hasCachedData) {
+            setRefreshError(typeof result.error === "string" ? result.error : result.error.message || "No se pudieron actualizar los datos.")
+          } else {
+            setError(typeof result.error === "string" ? result.error : result.error.message || "No fue posible cargar el reporte.")
+            setData(null)
+          }
+        } else {
+          setReportsTabCacheEntry(tabCacheStoreRef.current, requestCacheKey, requestTab, result.data)
+          setData(result.data)
+          setError("")
+          setRefreshError("")
+        }
       } catch (loadError) {
-        if (!mounted) return
-        console.error(`[DashboardEjecutivo:${tab}] Error durante la carga`, loadError)
-        setData(null)
-        setError(loadError?.message || "No fue posible cargar el reporte.")
+        const stillCurrent = mounted
+          && requestTab === activeTabRef.current
+          && requestCacheKey === activeCacheKeyRef.current
+        if (!stillCurrent) return
+        const message = loadError?.message || "No fue posible cargar el reporte."
+        if (hasCachedData) setRefreshError(message)
+        else {
+          setError(message)
+          setData(null)
+        }
       } finally {
-        if (mounted) setLoading(false)
+        if (mounted) {
+          setRequestCompleted(true)
+          setInitialLoading(false)
+          setRefreshing(false)
+        }
       }
     }, 0)
+
     return () => {
       mounted = false
       window.clearTimeout(timer)
+      setRefreshing(false)
     }
-  }, [availableTabs, canView, tab, queryFilters, tabReloadKey])
+  }, [availableTabs, cacheKey, canView, queryFilters, tab, tabReloadKey])
 
   const rowsToExport = useMemo(() => {
     try {
@@ -157,6 +289,8 @@ function ReportsDashboard() {
       setError(result.error.message || "No se pudieron cargar los costos fijos.")
       return null
     }
+    const cacheKeyFixed = serializeReportsTabCacheKey("fixedCosts", { ...filters, month })
+    setReportsTabCacheEntry(tabCacheStoreRef.current, cacheKeyFixed, "fixedCosts", result.data)
     setData(result.data)
     setError("")
     return result.data
@@ -164,20 +298,26 @@ function ReportsDashboard() {
 
   function changeTab(nextTab) {
     if (nextTab === tab) return
-    setData(null)
-    setError("")
-    setLoading(true)
+    const nextKey = serializeReportsTabCacheKey(nextTab, queryFilters)
+    const peek = peekReportsTabCacheEntry(tabCacheStoreRef.current, nextKey, nextTab)
     setTab(nextTab)
+    setRefreshError("")
+    if (peek) {
+      setData(peek.data)
+      setInitialLoading(false)
+      setError("")
+    }
   }
 
   function retryTab() {
-    setData(null)
+    setRefreshError("")
     setError("")
-    setLoading(true)
+    forceRefreshRef.current = true
     setTabReloadKey((current) => current + 1)
   }
 
   async function handleExport(format) {
+    setExportError("")
     await runExport(async () => {
       const started = performance.now()
       const action = format === "pdf" ? "export_pdf" : "export_excel"
@@ -191,9 +331,9 @@ function ReportsDashboard() {
       })
       try {
         if (format === "pdf") {
-          exportPDF(rowsToExport, currentTabLabel(tab))
+          await exportPDF(rowsToExport, currentTabLabel(tab))
         } else {
-          exportExcel(rowsToExport, tab)
+          await exportExcel(rowsToExport, tab)
         }
         logPerformanceEvent({
           module: "reports",
@@ -204,7 +344,9 @@ function ReportsDashboard() {
           duration_ms: performance.now() - started,
           metadata: { format, tab }
         })
-      } catch (error) {
+      } catch (exportErr) {
+        const message = exportErr?.message || "No se pudo exportar el reporte."
+        setExportError(message)
         logPerformanceEvent({
           module: "reports",
           action,
@@ -212,14 +354,17 @@ function ReportsDashboard() {
           status: "error",
           severity: "error",
           duration_ms: performance.now() - started,
-          error_message: error?.message || "Export failed",
+          error_message: message,
           message: "Export failed",
           metadata: { format, tab }
         })
-        throw error
+        throw exportErr
       }
     })
   }
+
+  const showContent = shouldShowReportsContent(viewState)
+  const showEmpty = shouldShowReportsEmpty(viewState)
 
   return (
     <section className="reports-page executive">
@@ -253,28 +398,42 @@ function ReportsDashboard() {
       )}
       {!["executive", "fixedCosts", "goals"].includes(tab) && <GlobalFilters filters={filters} onChange={(field, value) => setFilters((current) => ({ ...current, [field]: value }))} showMonth={false} showDateRange={tab !== "goals"} showCategory={tab === "menu"} showCollaborator={["waiters", "comparison"].includes(tab)} />}
       {fixedCostsFeedback && tab === "fixedCosts" && <p className="reports-success-banner" role="status">{fixedCostsFeedback}</p>}
+      {exportError && <p className="reports-warning" role="alert">{exportError}</p>}
+      {refreshing && showContent ? (
+        <p className="reports-refresh-banner" role="status">Actualizando {currentTabLabel(tab).toLowerCase()}…</p>
+      ) : null}
+      {refreshError && showContent ? (
+        <div className="reports-warning reports-warning--inline" role="alert">
+          <span>{refreshError}</span>
+          <button type="button" onClick={retryTab}>Reintentar</button>
+        </div>
+      ) : null}
       <MigrationModeReportWarning tab={tab} />
       <ReportTabBoundary key={`${tab}-${tabReloadKey}`} tab={tab} onRetry={retryTab}>
-        {loading
-          ? <div className="reports-loading">Cargando {currentTabLabel(tab).toLowerCase()}...</div>
-          : error
-            ? <ReportTabError tab={tab} error={error} onRetry={retryTab} />
-            : tab === "inventory"
-              ? <CriticalInventory data={data} />
-              : tab === "yields"
-                ? <YieldReportsSection filters={filters} data={data} />
-                : <ExecutiveContent
-                  tab={tab}
-                  data={data}
-                  filters={filters}
-                  canManageFixedCosts={canManageFixedCosts}
-                  onFixedCostsChange={async (message) => {
-                    if (message) setFixedCostsFeedback(message)
-                    await reloadFixedCosts(filters.month)
-                  }}
-                  onConfigureGoals={() => navigate("/reports/goals/settings")}
-                  canManageGoals={["admin", "gerente_general"].includes(user?.role)}
-                />}
+        {viewState === "initial-loading" ? (
+          <ReportsTabSkeleton tab={tab} />
+        ) : viewState === "error-without-cache" ? (
+          <ReportTabError tab={tab} error={error} onRetry={retryTab} />
+        ) : showEmpty ? (
+          <Empty text="No existen datos suficientes para este período." />
+        ) : showContent ? (
+          tab === "inventory"
+            ? <CriticalInventory data={data} />
+            : tab === "yields"
+              ? <YieldReportsSection filters={filters} data={data} />
+              : <ExecutiveContent
+                tab={tab}
+                data={data}
+                filters={filters}
+                canManageFixedCosts={canManageFixedCosts}
+                onFixedCostsChange={async (message) => {
+                  if (message) setFixedCostsFeedback(message)
+                  await reloadFixedCosts(filters.month)
+                }}
+                onConfigureGoals={() => navigate("/reports/goals/settings")}
+                canManageGoals={["admin", "gerente_general"].includes(user?.role)}
+              />
+        ) : null}
       </ReportTabBoundary>
     </section>
   )
@@ -353,8 +512,30 @@ function ExecutiveContent(props) {
   if (props.tab === "menu" && props.data) {
     return <MenuReport rows={filterMenuRows(props.data, props.filters)} />
   }
-  if (!props.data) return <Empty />
-  return <Empty />
+  return null
+}
+
+function ReportsTabSkeleton({ tab }) {
+  const isKpiTab = ["executive", "sales", "goals", "purchases", "payroll", "fixedCosts"].includes(tab)
+  return (
+    <div className="reports-skeleton" aria-busy="true" aria-label="Cargando reporte">
+      {isKpiTab ? (
+        <div className="reports-skeleton__kpi-grid">
+          {Array.from({ length: tab === "executive" ? 8 : 4 }).map((_, index) => (
+            <div key={index} className="reports-skeleton__kpi" aria-hidden="true" />
+          ))}
+        </div>
+      ) : null}
+      <div className="reports-skeleton__panel" aria-hidden="true" />
+      {tab === "executive" || tab === "sales" ? (
+        <div className="reports-skeleton__grid">
+          {Array.from({ length: 2 }).map((_, index) => (
+            <div key={index} className="reports-skeleton__panel" aria-hidden="true" />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
 }
 
 function ExecutiveDashboard({ data }) {
@@ -865,13 +1046,18 @@ function finiteNumber(value) {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
-function exportExcel(rows, tab) {
+async function exportExcel(rows, tab) {
+  const XLSX = await import("xlsx")
   const workbook = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), "Reporte")
   XLSX.writeFile(workbook, `reporte-ejecutivo-${tab}.xlsx`)
 }
 
-function exportPDF(rows, title) {
+async function exportPDF(rows, title) {
+  const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+    import("jspdf"),
+    import("jspdf-autotable")
+  ])
   const doc = new jsPDF()
   doc.text(title, 14, 18)
   autoTable(doc, { startY: 26, head: [Object.keys(rows[0] || {})], body: rows.map((row) => Object.values(row)) })
