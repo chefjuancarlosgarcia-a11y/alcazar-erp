@@ -17,7 +17,8 @@ const PosProductQuickSearch = forwardRef(function PosProductQuickSearch({
   getProductBasePrice,
   productCategoryId,
   posCategories,
-  onAddProduct
+  onAddProduct,
+  stationMode = false
 }, ref) {
   const listboxId = useId()
   const containerRef = useRef(null)
@@ -30,6 +31,43 @@ const PosProductQuickSearch = forwardRef(function PosProductQuickSearch({
   const [quantity, setQuantity] = useState(1)
   const [adding, setAdding] = useState(false)
   const [dropdownRect, setDropdownRect] = useState(null)
+  const mountEpochRef = useRef(0)
+
+  useEffect(() => {
+    mountEpochRef.current += 1
+    setQuery("")
+    setOpen(false)
+    setPendingProduct(null)
+    setQuantity(1)
+    return () => {
+      mountEpochRef.current += 1
+    }
+  }, [stationMode])
+
+  useEffect(() => {
+    if (!import.meta.env.DEV || !stationMode) return undefined
+    function logInputEvent(event) {
+      if (!containerRef.current?.contains(event.target)) return
+      console.debug("[station-pos-search-probe]", {
+        type: event.type,
+        repeat: Boolean(event.repeat),
+        key: event.key,
+        code: event.code,
+        inputType: event.inputType || null,
+        isTrusted: event.isTrusted,
+        mountEpoch: mountEpochRef.current
+      })
+    }
+    const inputEl = containerRef.current?.querySelector("input")
+    inputEl?.addEventListener("keydown", logInputEvent)
+    inputEl?.addEventListener("beforeinput", logInputEvent)
+    inputEl?.addEventListener("input", logInputEvent)
+    return () => {
+      inputEl?.removeEventListener("keydown", logInputEvent)
+      inputEl?.removeEventListener("beforeinput", logInputEvent)
+      inputEl?.removeEventListener("input", logInputEvent)
+    }
+  }, [stationMode])
 
   const results = useMemo(
     () => filterPosProductQuickSearch(items, query, getRecipe, 12),
@@ -317,15 +355,17 @@ const PosProductQuickSearch = forwardRef(function PosProductQuickSearch({
           </span>
           <input
             ref={ref}
-            type="search"
+            type="text"
+            inputMode="search"
             className="pos-quick-search__input"
             placeholder="Buscar producto rápido…"
             value={query}
-            role="combobox"
+            role="searchbox"
             aria-expanded={showDropdown}
             aria-controls={listboxId}
             aria-autocomplete="list"
             autoComplete="off"
+            spellCheck={false}
             onChange={(event) => {
               setQuery(event.target.value)
               setPendingProduct(null)

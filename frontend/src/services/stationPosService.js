@@ -240,7 +240,14 @@ export function createStationPosPort(operatorSessionToken, { onOperatorLocked, o
         })
       )
       if (result.error) {
-        return { data: null, error: mapPosTableServiceError(result.error), idempotencyUnknown: result.idempotencyUnknown }
+        const mapped = mapPosTableServiceError(result.error)
+        return {
+          data: null,
+          error: result.error,
+          message: mapped.userMessage,
+          code: mapped.code,
+          idempotencyUnknown: result.idempotencyUnknown
+        }
       }
       const orderId = result.data?.order_id
       if (!orderId) {
@@ -333,7 +340,13 @@ export function createStationPosPort(operatorSessionToken, { onOperatorLocked, o
       )
       if (result.error) {
         const mapped = mapPosTableServiceError(result.error)
-        return { data: null, error: result.error, message: mapped.userMessage || mapped.message, idempotencyUnknown: result.idempotencyUnknown }
+        return {
+          data: null,
+          error: result.error,
+          message: mapped.userMessage,
+          code: mapped.code,
+          idempotencyUnknown: result.idempotencyUnknown
+        }
       }
       const refreshed = await fetchOrderWithItemsTracked(orderId)
       const itemId = result.data?.item_id

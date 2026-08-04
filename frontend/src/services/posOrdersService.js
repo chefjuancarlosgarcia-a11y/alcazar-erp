@@ -72,9 +72,22 @@ export function createPosRpcIdempotencyKey() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
+function extractRpcErrorText(error) {
+  if (!error) return ""
+  let text = String(error.message || "").trim()
+  for (let i = 0; i < 3; i += 1) {
+    const nested = text.match(/^message:\s*(.+)$/i)
+    if (!nested) break
+    text = nested[1].trim()
+    const pipeIdx = text.indexOf(" | details:")
+    if (pipeIdx >= 0) text = text.slice(0, pipeIdx).trim()
+  }
+  return text
+}
+
 export function mapPosTableServiceError(error) {
-  const raw = formatSupabaseError(error)
-  const text = String(raw || error?.message || "")
+  const text = extractRpcErrorText(error)
+  const codeHint = String(error?.code || "")
   if (/POS_TABLE_PENDING_RELEASE/i.test(text)) {
     return {
       code: "POS_TABLE_PENDING_RELEASE",
@@ -141,11 +154,18 @@ export function mapPosTableServiceError(error) {
       userMessage: "Esta mesa está siendo atendida por otro mesero."
     }
   }
-  if (/STATION_POS_ORDER_NOT_OPEN/i.test(text)) {
+  if (/STATION_POS_ORDER_NOT_OPEN/i.test(text) || codeHint === "STATION_POS_ORDER_NOT_OPEN") {
     return {
       code: "STATION_POS_ORDER_NOT_OPEN",
       message: text,
-      userMessage: "La orden de esta mesa ya no está abierta. Recarga la mesa e intenta de nuevo."
+      userMessage: "La comanda ya no está abierta. Actualiza la mesa."
+    }
+  }
+  if (/STATION_POS_AUDIT_ACTOR_INVALID/i.test(text) || codeHint === "STATION_POS_AUDIT_ACTOR_INVALID") {
+    return {
+      code: "STATION_POS_AUDIT_ACTOR_INVALID",
+      message: text,
+      userMessage: "No se pudo atribuir la operación al mesero. Bloquea la sesión e ingresa nuevamente."
     }
   }
   if (/STATION_POS_PRICING_GAP/i.test(text)) {
@@ -162,10 +182,18 @@ export function mapPosTableServiceError(error) {
       userMessage: "Sesión expirada. Vuelve a ingresar tu PIN."
     }
   }
-  if (/Operacion no permitida/i.test(text)) {
-    return { code: "STATION_POS_FORBIDDEN", message: text, userMessage: text }
+  if (/Operacion no permitida/i.test(text) || codeHint === "P0001") {
+    return {
+      code: "STATION_POS_FORBIDDEN",
+      message: text,
+      userMessage: "Operación no permitida en esta estación. Actualiza la mesa e intenta nuevamente."
+    }
   }
-  return { code: "POS_RPC_ERROR", message: text, userMessage: text }
+  return {
+    code: codeHint || "POS_RPC_ERROR",
+    message: text,
+    userMessage: text || "No se pudo completar la operación. Intenta nuevamente."
+  }
 }
 
 export async function getOpenOrderByTable(tableId) {

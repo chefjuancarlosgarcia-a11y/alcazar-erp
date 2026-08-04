@@ -98,7 +98,7 @@ import {
   updateOrderItemNotes,
   updateOrderItemQuantity
 } from "../services/posOrdersFacade"
-import { mapPosTableServiceError } from "../services/posOrdersService"
+import { normalizeStationPosError, stationPosErrorMessage } from "../utils/normalizeStationPosError"
 import { usePosOrdersPort } from "../services/posOrdersPortContext"
 import { loadOperatorSessionMeta } from "../services/operationalStationAccessService"
 import {
@@ -769,19 +769,20 @@ function stationOperatorProfileId() {
   return loadOperatorSessionMeta()?.operatorProfileId || ""
 }
 
-function formatStationPosRpcError(error) {
-  const mapped = mapPosTableServiceError(error)
-  return mapped.userMessage || mapped.message || error?.message || "Operación no permitida."
-}
-
 function resolvePosOpenOrderId(created) {
   return created?.data?.id || created?.data?.order_id || created?.openMeta?.order_id || ""
 }
 
+function formatStationPosRpcError(error) {
+  return stationPosErrorMessage(error, { operation: "pos_rpc" })
+}
+
 function formatStationPosAddError(error) {
-  const mapped = formatStationPosRpcError(error)
-  if (mapped && !/^Supabase no devolvió/i.test(mapped)) return mapped
-  return "No se pudo agregar el producto. Intenta nuevamente."
+  const normalized = normalizeStationPosError(error, { operation: "add_item" })
+  if (/^Supabase no devolvió/i.test(normalized.rawMessage || "")) {
+    return "No se pudo agregar el producto. Actualiza la mesa e intenta nuevamente."
+  }
+  return normalized.userMessage
 }
 
 function stationOrderOwnerConflict(order, stationMode) {
