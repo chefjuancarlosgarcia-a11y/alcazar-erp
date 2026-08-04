@@ -6,6 +6,8 @@ import { useErpPerfModule } from "../hooks/useErpPerfModule"
 import { useActionGuard } from "../hooks/useActionGuard"
 import { useToast } from "../hooks/useToast"
 import { ToastContainer } from "../components/ToastContainer"
+import PosClassicOperation from "../components/PosClassicOperation"
+import PosDishCatalog from "../components/PosDishCatalog"
 import { useInventoryDeductionMode } from "../context/InventoryMigrationModeProvider"
 import {
   getProductSaleState,
