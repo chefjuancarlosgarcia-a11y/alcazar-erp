@@ -3,7 +3,8 @@
 **Rama:** `fix/station-pos-human-parity` (PR #17 Draft).
 
 **Repo:** `C:\Users\chefj\alcazar-inventario-os1`
-**Estado remoto:** sin cambios; flags OFF; operador bloqueado; 199 **no** aplicada remoto.
+**Head:** `f413b1e6a2a268ea54b8a7f7d481f81b7a57b6b6`
+**Estado remoto:** migración **199 aplicada y verificada** (una sola vez); flags OFF; operador bloqueado; sin smoke, PIN, órdenes, comandas ni pagos.
 
 ---
 
@@ -15,9 +16,38 @@
 
 **Corrección (commit hotfix):** restaurar el bloque exacto de 198 **solo** tras `INSERT INTO pos_orders` exitoso (rama `created = true`), sin insertarlo en replay idempotente ni en reuse temprano/`unique_violation`.
 
-**Verificación:** tests SQL 199 (`pg_get_functiondef` + runtime `open_station_pos_table_service`: new / idempotency replay / valid reuse) y preflight 199 (`baseline_open_preserves_service_opened`).
+**Verificación:** tests SQL 199 (`pg_get_functiondef` + runtime lab `open_station_pos_table_service`: new / idempotency replay / valid reuse) y preflight/postflight 199 (`baseline_open_preserves_service_opened`).
 
 **Nota lab runtime:** el trigger `audit_pos_order_created` registra `order_created` con `auth.uid()` (JWT del dispositivo). El fixture cc199 incluye perfil mínimo para el auth user del device para que el FK `pos_order_events.created_by` no bloquee la apertura antes del insert de `service_opened`.
+
+---
+
+## 0.1 Gate remoto 199 — aplicada y verificada
+
+> **NO REAPLICAR 199** — ni 197 ni 198. La migración 199 ya está presente en Supabase remoto; repetir apply puede dejar estado parcial o romper funciones.
+
+| Gate | Resultado | Detalle |
+|------|-----------|---------|
+| Preflight 199 | **16/16**, `ready_to_apply_199=true` | Read-only; `pg_proc.proconfig`; flags false |
+| Apply 199 | **Aplicada una sola vez** | Forward-fix catalog parity + owner guards |
+| Test remoto seguro | **21/21**, `failed_total=0` | Read-only estructural; sin DML operativo |
+| Postflight 199 | **14/14**, `failed_total=0`, `ready_after_199=true` | Funciones seguras, ACL, markers, flags false |
+| Lab runtime local | **20/20** | `199_lab_operational_station_pos_catalog_parity_runtime.sql` |
+| Selftest SQL estructural | **11/11** | `operationalStations199TestSql.selftest.mjs` |
+| Flags remoto | **false / false** | `operational_stations_enabled`, `operational_station_pos_enabled` |
+| Operador remoto | **Bloqueado** | Sin smoke, PIN, órdenes, comandas ni pagos |
+
+### Incidente primer test remoto (resuelto)
+
+El primer intento de `199_test_operational_station_pos_catalog_parity.sql` en Supabase administrado **abortó** en la primera llamada (~línea 88):
+
+- **Error:** `42501 permission denied to set parameter session_replication_role`
+- **Causa:** el test original era un lab PostgreSQL con privilegios elevados (`session_replication_role`, `INSERT auth.users`, toggles de trigger, `UPDATE app_settings`, fixtures cc199-*).
+- **Corrección (commit `f413b1e`):** separación estricta:
+  - **A — Test remoto:** read-only estructural (`BEGIN/ROLLBACK`, catálogo + `pg_get_functiondef` + `pg_proc.proconfig`).
+  - **B — Lab local:** runtime 20/20 con fixtures elevados vía `run-parity-lab-199.mjs`.
+
+Transacción abortada/revertida en el intento fallido; **sin fixtures persistentes** en remoto.
 
 ---
 
@@ -114,12 +144,13 @@ Lecturas (`get_station_pos_catalog`, floor, …): solo `auth.uid()` null → gen
 
 ---
 
-## 6. Migración 199 (propuesta, no remota)
+## 6. Migración 199 — aplicada remoto
 
 Archivos:
 
 - `supabase/schema/199_fix_operational_station_pos_catalog_parity.sql`
-- `supabase/schema/199_test_operational_station_pos_catalog_parity.sql`
+- `supabase/schema/199_test_operational_station_pos_catalog_parity.sql` (remoto read-only)
+- `supabase/schema/199_lab_operational_station_pos_catalog_parity_runtime.sql` (lab local 20/20)
 - `supabase/schema/diagnose_operational_station_pos_catalog_preflight_199.sql`
 - `supabase/schema/diagnose_operational_station_pos_catalog_postflight_199.sql`
 - `supabase/rollback/199_fix_operational_station_pos_catalog_parity.rollback.sql`
@@ -131,9 +162,12 @@ Cambios: `get_station_pos_catalog` (+`image_url`, `description`, `production_are
 ## 7. Evidencia PostgreSQL local
 
 Script: `scripts/run-parity-lab-199.mjs`
-Evidencia: `.local-backup/pg-lab/evidence/parity-199/199_test.log`
+Evidencia: `.local-backup/pg-lab/evidence/parity-199/`
 
-**Escenarios lab (última corrida post-hotfix):** ver `199_test.log` — incluye `service_opened` estático + runtime (new / replay / reuse).
+| Capa | Escenarios |
+|------|------------|
+| Test remoto seguro (lab) | **21/21** estructural |
+| Lab runtime | **20/20** (`service_opened`, replay, reuse, owner mismatch, pricing) |
 
 ---
 
@@ -143,8 +177,8 @@ Evidencia: `.local-backup/pg-lab/evidence/parity-199/199_test.log`
 |-------|-----------|
 | `operationalStationsPosShared.selftest.mjs` | **51/51 PASS** |
 | `stationPosHumanParity.selftest.mjs` | **8/8 PASS** |
-| `operationalStations199TestSql.selftest.mjs` | **9/9 PASS** (structure SQL 199) |
-| `run-parity-lab-199.mjs` (PG lab) | **20/20 PASS** |
+| `operationalStations199TestSql.selftest.mjs` | **11/11 PASS** (remote-safe + lab separation) |
+| `run-parity-lab-199.mjs` (PG lab) | **21/21 structural + 20/20 runtime PASS** |
 | OS1 / OS2 / OS2 Cash / PIN UX | **PASS** |
 | POS humano 187 (selftest + SQL) | **PASS** |
 | `npm run build --prefix frontend` | **PASS** |
@@ -159,9 +193,11 @@ Evidencia: `.local-backup/pg-lab/evidence/parity-199/199_test.log`
 
 **Frontend:** `posCatalogCanonical.js`, `posDefaultCategories.js`, `posProductsService.js`, `stationPosCatalogMapper.js`, `stationPosService.js`, `posOrdersService.js`, `POS.jsx`
 
-**SQL:** 199 + test + diagnose + rollback
+**SQL:** 199 + test remoto + lab runtime + diagnose + rollback
 
 **Scripts:** `operationalStationsPosShared.selftest.mjs`, `stationPosHumanParity.selftest.mjs`, `operationalStations199TestSql.selftest.mjs`, `run-parity-lab-199.mjs`
+
+**Docs:** `docs/station-pos-human-parity-audit.md`
 
 ---
 
@@ -169,20 +205,29 @@ Evidencia: `.local-backup/pg-lab/evidence/parity-199/199_test.log`
 
 1. Categorías custom solo en `localStorage` humano no aparecen en estación (documentado).
 2. Transferencia de servicio entre meseros → fase futura (no implementada).
-3. 199 debe aplicarse en staging antes de smoke remoto con flags ON.
-4. Verificación visual 1366×768 / zoom pendiente post-merge.
+3. Verificación visual 1366×768 / zoom pendiente post-merge.
+4. Gate operativo posterior: flags ON, operador desbloqueado, smoke controlado — **autorización separada**.
 
 ---
 
 ## 11. Veredicto final
 
-### **APROBAR CON CONDICIONES**
+### **APROBAR PARA READY/MERGE, CON GATE OPERATIVO POSTERIOR**
 
-PR #17 (Draft): hotfix `service_opened` aplicado en 199 local; listo para revisión con condiciones:
+PR #17 (Draft): migración 199 aplicada y verificada en remoto; frontend + SQL alineados.
 
-1. Aplicar 199 en staging (no producción) antes de smoke operativo.
-2. Validar visualmente catálogo/imágenes con flags ON y operador desbloqueado en entorno controlado.
-3. Confirmar que no hay mesas con órdenes humanas activas mezcladas en prueba real.
-4. Ejecutar `diagnose_operational_station_pos_catalog_preflight_199.sql` remoto antes de apply; `ready_to_apply_199` debe ser true.
+**Completado:**
+
+- Preflight 16/16 → apply 199 (una vez) → test remoto 21/21 → postflight 14/14
+- Lab runtime 20/20; selftest SQL 11/11
+- Flags remoto false; operador bloqueado
+
+**Pendiente (autorización separada):**
+
+1. Marcar PR Ready y merge a `main`
+2. Deploy frontend a producción
+3. Gate operativo: habilitar flags + smoke controlado (sin órdenes reales ni pagos hasta autorización explícita)
+
+**Prohibición:** **NO REAPLICAR 197 / 198 / 199**.
 
 ---
