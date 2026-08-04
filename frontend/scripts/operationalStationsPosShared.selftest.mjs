@@ -25,7 +25,49 @@ const stationPos = read("frontend/src/services/stationPosService.js")
 const posPage = read("frontend/src/pages/POS.jsx")
 const posTicket = read("frontend/src/components/PosTicketPanel.jsx")
 const posClassic = read("frontend/src/components/PosClassicOperation.jsx")
+const posDishCatalog = read("frontend/src/components/PosDishCatalog.jsx")
 const access = read("frontend/src/components/OperationalAccessSection.jsx")
+
+function stripSourceComments(source) {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n\r]*/g, "")
+}
+
+function collectComponentImports(source) {
+  const imports = new Set()
+  const defaultRe = /import\s+([A-Z][A-Za-z0-9]*)\s+from\s+["']([^"']+)["']/g
+  const namedRe = /import\s+\{([^}]+)\}\s+from\s+["']([^"']+)["']/g
+  let match
+  while ((match = defaultRe.exec(source))) imports.add(match[1])
+  while ((match = namedRe.exec(source))) {
+    match[1].split(",").forEach((part) => {
+      const name = part.trim().split(/\s+as\s+/)[0].trim()
+      if (/^[A-Z]/.test(name)) imports.add(name)
+    })
+  }
+  return imports
+}
+
+function collectLocalFunctionComponents(source) {
+  const names = new Set()
+  const re = /function\s+([A-Z][A-Za-z0-9]*)\s*\(/g
+  let match
+  while ((match = re.exec(source))) names.add(match[1])
+  return names
+}
+
+function collectJsxComponentTags(source) {
+  const tags = new Set()
+  const re = /<([A-Z][A-Za-z0-9]*)\b/g
+  let match
+  while ((match = re.exec(source))) tags.add(match[1])
+  return tags
+}
+
+const EXTRACTED_POS_COMPONENTS = [
+  { tag: "PosClassicOperation", importPath: "../components/PosClassicOperation", file: posClassic },
+  { tag: "PosDishCatalog", importPath: "../components/PosDishCatalog", file: posDishCatalog },
+  { tag: "ToastContainer", importPath: "../components/ToastContainer", file: read("frontend/src/components/ToastContainer.jsx") }
+]
 
 const tests = [
   {
@@ -558,6 +600,49 @@ const tests = [
     run() {
       if (!/tableOpenIdempotencyRef/.test(posPage)) throw new Error("table open idempotency ref")
       if (!/createPosRpcIdempotencyKey/.test(posPage)) throw new Error("UUID idempotency key")
+    }
+  },
+  {
+    name: "POS-54 POS imports PosClassicOperation default",
+    run() {
+      if (!/import\s+PosClassicOperation\s+from\s+["']\.\.\/components\/PosClassicOperation["']/.test(posPage)) {
+        throw new Error("missing PosClassicOperation default import")
+      }
+      if (!/export default function PosClassicOperation/.test(posClassic)) {
+        throw new Error("PosClassicOperation.jsx must export default")
+      }
+    }
+  },
+  {
+    name: "POS-55 POS imports PosDishCatalog default",
+    run() {
+      if (!/import\s+PosDishCatalog\s+from\s+["']\.\.\/components\/PosDishCatalog["']/.test(posPage)) {
+        throw new Error("missing PosDishCatalog default import")
+      }
+      if (!/export default function PosDishCatalog/.test(posDishCatalog)) {
+        throw new Error("PosDishCatalog.jsx must export default")
+      }
+    }
+  },
+  {
+    name: "POS-56 POS extracted JSX components have import or local definition",
+    run() {
+      const executable = stripSourceComments(posPage)
+      const imports = collectComponentImports(posPage)
+      const localFns = collectLocalFunctionComponents(posPage)
+      const jsxTags = collectJsxComponentTags(executable)
+      for (const { tag, importPath } of EXTRACTED_POS_COMPONENTS) {
+        if (!jsxTags.has(tag)) continue
+        if (!imports.has(tag)) throw new Error(`${tag} used in JSX but not imported`)
+        if (!posPage.includes(`from "${importPath}"`) && !posPage.includes(`from '${importPath}'`)) {
+          throw new Error(`${tag} import path must be ${importPath}`)
+        }
+      }
+      for (const tag of jsxTags) {
+        if (EXTRACTED_POS_COMPONENTS.some((row) => row.tag === tag)) continue
+        if (imports.has(tag) || localFns.has(tag)) continue
+        throw new Error(`${tag} JSX tag without import or local function definition`)
+      }
     }
   }
 ]
