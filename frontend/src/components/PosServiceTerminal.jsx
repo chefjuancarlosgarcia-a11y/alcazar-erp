@@ -55,6 +55,7 @@ export default function PosServiceTerminal({
             ))}
             <PosProductQuickSearch
               ref={quickSearchRef}
+              stationMode={stationMode}
               items={searchItems}
               getRecipe={getSearchRecipe}
               getItemState={getSearchItemState}

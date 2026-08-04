@@ -98,6 +98,9 @@ export default function StationPosEntry() {
           monogram={BRANDING.monogram}
           logoUrl={BRANDING.logoUrl}
           onVerified={() => {
+            if (typeof document !== "undefined" && document.activeElement instanceof HTMLElement) {
+              document.activeElement.blur()
+            }
             setSessionToken(loadOperatorSessionToken())
             setOperatorMeta(loadOperatorSessionMeta())
           }}

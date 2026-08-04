@@ -664,10 +664,16 @@ const tests = [
   {
     name: "POS-58 interaction workspace body scroll in station",
     run() {
-      if (!/station-pos-entry--active \.pos-classic-workspace-body[\s\S]*overflow-y:\s*auto/.test(posCss)) {
-        throw new Error("workspace body scroll")
+      if (!/height:\s*100dvh/.test(stationPosEntryCss)) throw new Error("station shell scroll height")
+      if (!/overflow-y:\s*auto/.test(stationPosEntryCss)) throw new Error("station shell scroll")
+      const stationWorkspace = posCss.match(/\.station-pos-entry--active \.pos-classic-workspace-body\s*\{[^}]+\}/)
+      if (!stationWorkspace) throw new Error("station workspace rule missing")
+      if (/overflow-y:\s*auto/.test(stationWorkspace[0])) {
+        throw new Error("nested workspace scroll must not compete with shell")
       }
-      if (!/overscroll-behavior:\s*contain/.test(posCss)) throw new Error("overscroll contain")
+      if (!/overflow:\s*visible/.test(stationWorkspace[0])) {
+        throw new Error("workspace body in document flow")
+      }
     }
   },
   {
