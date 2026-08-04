@@ -65,6 +65,12 @@ const tests = [
     run() {
       if (!/gate_code/.test(pre200) || !/ready_to_apply_200/.test(pre200)) throw new Error("preflight")
       if (!/ready_after_200/.test(post200)) throw new Error("postflight")
+      if (!/gates_base\s*\(\s*gate_code,\s*gate_passed,\s*blocker_when_failed,\s*detail\s*\)/.test(pre200)) {
+        throw new Error("preflight gates_base")
+      }
+      if (!/blocker_when_failed and not gate_passed/.test(pre200)) throw new Error("preflight is_blocker formula")
+      if (!/cross join ready r/.test(pre200)) throw new Error("preflight ready cross join")
+      if (!/bool_and\(gate_passed\)/.test(pre200)) throw new Error("preflight ready bool_and")
     }
   },
   {
@@ -111,6 +117,54 @@ const tests = [
     name: "200-12 no session_replication in 200 forward",
     run() {
       if (/session_replication_role/.test(mig200)) throw new Error("no replication in forward fix")
+    }
+  },
+  {
+    name: "200-13 preflight no constant is_blocker",
+    run() {
+      if (/\btrue\s+as\s+is_blocker\b/i.test(pre200)) throw new Error("constant true is_blocker")
+      if (/\bfalse\s+as\s+is_blocker\b/i.test(pre200)) throw new Error("constant false is_blocker")
+      if (/\'ready_to_apply_200\'/.test(pre200) && /union all[\s\S]*ready_to_apply_200[\s\S]*gates_base/.test(pre200)) {
+        throw new Error("ready must not be a gate row")
+      }
+    }
+  },
+  {
+    name: "200-14 preflight ready not migration_state only",
+    run() {
+      if (/ready_to_apply_200[\s\S]*migration_state[\s\S]*= 'needs_200'[\s\S]*;\s*$/.test(pre200)) {
+        throw new Error("ready only migration_state")
+      }
+      if (!/200-P6-audit_safe_search_path/.test(pre200)) throw new Error("search_path gate")
+      const searchPathGate = pre200.match(/200-P6-audit_safe_search_path[\s\S]*?(?=union all|,\s*\n\s*gates as)/i)?.[0] || ""
+      if (!/true,/.test(searchPathGate) || !/unsafe or missing empty search_path/.test(searchPathGate)) {
+        throw new Error("search_path must be blocker")
+      }
+      if (!/200-P4-migration_state_not_partial/.test(pre200)) throw new Error("partial blocker gate")
+    }
+  },
+  {
+    name: "200-15 postflight gate-safe ready",
+    run() {
+      if (/\btrue\s+as\s+is_blocker\b/i.test(post200)) throw new Error("constant true is_blocker")
+      if (!/gates_base/.test(post200)) throw new Error("postflight gates_base")
+      if (!/blocker_when_failed and not gate_passed/.test(post200)) throw new Error("postflight is_blocker formula")
+      if (!/cross join ready r/.test(post200)) throw new Error("postflight ready cross join")
+      if (!/bool_and\(gate_passed\)/.test(post200)) throw new Error("postflight ready bool_and")
+      if (!/200-F7-audit_security_definer_search_path/.test(post200)) throw new Error("audit search_path gate")
+      if (!/200-F8-actor_security_definer_search_path/.test(post200)) throw new Error("actor search_path gate")
+      if (!/200-F10-audit_signature_preserved/.test(post200)) throw new Error("audit signature gate")
+    }
+  },
+  {
+    name: "200-16 preflight already_applied not blocker",
+    run() {
+      if (!/200-P3-migration_state_needs_200/.test(pre200)) throw new Error("needs_200 gate")
+      if (!/Already applied — do not reapply/.test(pre200)) throw new Error("already applied detail")
+      const needsGate = pre200.match(/200-P3-migration_state_needs_200[\s\S]*?(?=union all)/i)?.[0] || ""
+      if (!/=\s*'needs_200',\s*\n\s*false,/.test(needsGate)) {
+        throw new Error("needs_200 gate must not block when already applied")
+      }
     }
   }
 ]
