@@ -96,18 +96,15 @@ import {
   updateOrderItemNotes,
   updateOrderItemQuantity
 } from "../services/posOrdersFacade"
+import { mapPosTableServiceError } from "../services/posOrdersService"
 import { usePosOrdersPort } from "../services/posOrdersPortContext"
+import { loadOperatorSessionMeta } from "../services/operationalStationAccessService"
 import {
-  deletePosFloorTable,
-  deletePosFloorZone,
-  getPosFloorLayout,
-  migrateLocalFloorLayout,
-  sanitizeManualTableStatus,
-  savePosFloorLayout
-} from "../services/posFloorPlanService"
-import PosClassicOperation from "../components/PosClassicOperation"
-import PosDishCatalog from "../components/PosDishCatalog"
-import { buildStationCategoriesFromCatalogProducts } from "../utils/stationPosCatalogMapper"
+  buildStationCategoriesFromCatalogProducts,
+  deriveProductionAreasFromCatalogProducts,
+  isStationOrderOwnedByOperator
+} from "../utils/posCatalogCanonical"
+import { DEFAULT_POS_CATEGORIES } from "../constants/posDefaultCategories"
 import "./POS.css"
 
 const POS_CATEGORIES_KEY = "posCategories"
@@ -123,15 +120,6 @@ const SALES_CHANNELS = [
   { id: "dine_in", label: "Salón", tableLabel: "Mesa" },
   { id: "delivery", label: "Delivery", tableLabel: "Delivery" },
   { id: "takeout", label: "Para llevar", tableLabel: "Para llevar" }
-]
-const DEFAULT_POS_CATEGORIES = [
-  { id: "entradas", name: "Entradas", description: "", productionAreaId: "cocina", active: true, sortOrder: 1, color: "#0ea5a4", icon: "🥗" },
-  { id: "pizzas", name: "Pizzas", description: "Pizzas de la casa", productionAreaId: "pizzeria", active: true, sortOrder: 2, color: "#f97316", icon: "🍕" },
-  { id: "sandwiches", name: "Sándwiches", description: "", productionAreaId: "cocina", active: true, sortOrder: 3, color: "#eab308", icon: "🍔" },
-  { id: "postres", name: "Postres", description: "", productionAreaId: "reposteria", active: true, sortOrder: 4, color: "#ec4899", icon: "🍰" },
-  { id: "cafeteria", name: "Cafetería", description: "", productionAreaId: "cafeteria", active: true, sortOrder: 5, color: "#14b8a6", icon: "☕" },
-  { id: "barra", name: "Barra", description: "", productionAreaId: "barra", active: true, sortOrder: 6, color: "#38bdf8", icon: "🍹" },
-  { id: "extras", name: "Extras", description: "", productionAreaId: "cocina", active: true, sortOrder: 7, color: "#a78bfa", icon: "🍟" }
 ]
 const POS_ROLES = ["admin", "gerente_general", "supervisor", "mesero", "caja"]
 const CROQUIS_ROLES = ["admin", "gerente", "gerente_general", "gerente_operaciones"]
@@ -775,6 +763,22 @@ function TableWithChairs({ table, selected = false, editing = false, zoom = 1, o
   )
 }
 
+function stationOperatorProfileId() {
+  return loadOperatorSessionMeta()?.operatorProfileId || ""
+}
+
+function formatStationPosRpcError(error) {
+  const mapped = mapPosTableServiceError(error)
+  return mapped.userMessage || mapped.message || error?.message || "Operación no permitida."
+}
+
+function stationOrderOwnerConflict(order, stationMode) {
+  if (!stationMode || !order) return null
+  const operatorId = stationOperatorProfileId()
+  if (!operatorId || isStationOrderOwnedByOperator(order, operatorId)) return null
+  return "Esta mesa está siendo atendida por otro mesero."
+}
+
 function POS({ stationMode = false, stationPosPort = null, onStationTerminalAction = null }) {
   const location = useLocation()
   const { user, loading: authLoading } = useAuth()
@@ -1228,7 +1232,8 @@ function POS({ stationMode = false, stationPosPort = null, onStationTerminalActi
           setPosCategories([])
         } else {
           setItems(data || [])
-          setPosCategories(buildStationCategoriesFromCatalogProducts(data || []))
+          setProductionAreas(deriveProductionAreasFromCatalogProducts(data || []))
+          setPosCategories(buildStationCategoriesFromCatalogProducts(data || [], DEFAULT_POS_CATEGORIES))
         }
         setItemsLoading(false)
       })
@@ -1400,7 +1405,8 @@ function POS({ stationMode = false, stationPosPort = null, onStationTerminalActi
       setPosCategories([])
     } else {
       setItems(data || [])
-      setPosCategories(buildStationCategoriesFromCatalogProducts(data || []))
+      setProductionAreas(deriveProductionAreasFromCatalogProducts(data || []))
+      setPosCategories(buildStationCategoriesFromCatalogProducts(data || [], DEFAULT_POS_CATEGORIES))
     }
     setItemsLoading(false)
   }, [stationMode, stationPosPort])
@@ -2290,6 +2296,15 @@ function POS({ stationMode = false, stationPosPort = null, onStationTerminalActi
     }
     try {
       const order = await cargarMesaDesdeSupabase(selectedTable)
+      const ownerConflict = stationOrderOwnerConflict(order, stationMode)
+      if (ownerConflict) {
+        setCurrentOrder(null)
+        setActiveOrderId("")
+        setOrden([])
+        setPosStep(3)
+        setOrdenError(ownerConflict)
+        return
+      }
       if (order && posOrderIsZombieOpen(order)) {
         setPosStep(3)
         setOrdenMessage("Mesa pendiente de cierre. Libera el servicio anterior o pide ayuda a un supervisor.")
@@ -3488,6 +3503,10 @@ function POS({ stationMode = false, stationPosPort = null, onStationTerminalActi
     let itemSaved = false
     try {
       let orderId = activeOrderId
+      const ownerConflictBeforeAdd = stationOrderOwnerConflict(currentOrder, stationMode)
+      if (ownerConflictBeforeAdd) {
+        throw new Error(ownerConflictBeforeAdd)
+      }
       const customerData = await ensureCustomerForSalesChannel()
       if (!orderId) {
         const openAttemptKey = tableOpenIdempotencyRef.current || createPosRpcIdempotencyKey()
@@ -3516,8 +3535,10 @@ function POS({ stationMode = false, stationPosPort = null, onStationTerminalActi
             externalSource: salesChannel === "online" ? "wix" : null
           }, user)
         const created = openTable
-        if (created.error) throw new Error(created.message || created.error.message)
+        if (created.error) throw new Error(formatStationPosRpcError(created.error))
         if (!created.data?.id) throw new Error("Supabase no devolvió la orden creada. Verifica la migración 010_pos_orders.sql.")
+        const openOwnerConflict = stationOrderOwnerConflict(created.data, stationMode)
+        if (openOwnerConflict) throw new Error(openOwnerConflict)
         orderId = created.data.id
         setCurrentOrder(created.data)
         setActiveOrderId(orderId)
@@ -3545,7 +3566,7 @@ function POS({ stationMode = false, stationPosPort = null, onStationTerminalActi
       )
       if (existe) {
         const result = await updateOrderItemQuantity(existe.lineId, existe.cantidad + safeQuantity, existe.precio)
-        if (result.error) throw new Error(result.message || result.error.message)
+        if (result.error) throw new Error(formatStationPosRpcError(result.error))
       } else {
         const saleState = getProductSaleState(
           productToAdd,
@@ -3569,7 +3590,7 @@ function POS({ stationMode = false, stationPosPort = null, onStationTerminalActi
           productName,
           productionReady: productToAdd.productionReady === true || saleState.productionReady === true
         })
-        if (result.error) throw new Error(result.message || result.error.message)
+        if (result.error) throw new Error(formatStationPosRpcError(result.error))
       }
       await cargarMesaDesdeSupabase(ordenMesa, orderId)
       itemSaved = true

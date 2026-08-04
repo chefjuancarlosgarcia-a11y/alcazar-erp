@@ -16,6 +16,9 @@ import {
   serializeConfigurableGroupsForSave,
   validateConfigurableCatalogForm
 } from "../utils/posConfigurableProduct"
+import { mapPOSProductFromSupabase } from "../utils/posCatalogCanonical"
+
+export { mapPOSProductFromSupabase } from "../utils/posCatalogCanonical"
 
 const CATALOG_PAGE_SIZE_DEFAULT = 50
 const SALE_PRODUCTS_LIMIT = 500
@@ -397,131 +400,6 @@ function mergeCatalogProducts(products, children) {
     modifier_options: children.modifiersByProduct.get(product.id) || [],
     option_groups: children.groupsByProduct.get(product.id) || []
   }))
-}
-
-function mapVariantFromSupabase(variant) {
-  if (!variant) return null
-  return {
-    ...variant,
-    price: Number(variant.price || 0),
-    prep_time_minutes: Number(variant.prep_time_minutes || 0),
-    prepTimeMinutes: Number(variant.prep_time_minutes || 0),
-    recipeId: variant.recipe_id || "",
-    productionAreaId: variant.production_area_id || "",
-    is_active: variant.is_active === true,
-    isActive: variant.is_active === true,
-    recipe: variant.recipe || null
-  }
-}
-
-function mapModifierFromSupabase(modifier) {
-  if (!modifier) return null
-  return {
-    ...modifier,
-    modifierType: modifier.modifier_type || "remove",
-    price_delta: Number(modifier.price_delta || 0),
-    priceDelta: Number(modifier.price_delta || 0),
-    is_active: modifier.is_active !== false,
-    isActive: modifier.is_active !== false
-  }
-}
-
-function mapOptionChoiceFromSupabase(choice) {
-  if (!choice) return null
-  return {
-    ...choice,
-    price: Number(choice.price || 0),
-    priceMode: choice.price_mode || "none",
-    price_mode: choice.price_mode || "none",
-    recipeId: choice.recipe_id || "",
-    is_active: choice.is_active !== false,
-    isActive: choice.is_active !== false,
-    sortOrder: Number(choice.sort_order || 0)
-  }
-}
-
-function mapOptionGroupFromSupabase(group) {
-  if (!group) return null
-  const choices = Array.isArray(group.choices)
-    ? [...group.choices]
-        .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0))
-        .map(mapOptionChoiceFromSupabase)
-    : []
-  return {
-    ...group,
-    selectionMode: group.selection_mode || "single",
-    selection_mode: group.selection_mode || "single",
-    minSelections: Number(group.min_selections ?? 0),
-    maxSelections: group.max_selections ?? null,
-    is_active: group.is_active !== false,
-    isActive: group.is_active !== false,
-    sortOrder: Number(group.sort_order || 0),
-    choices
-  }
-}
-
-export function mapPOSProductFromSupabase(row) {
-  if (!row) return row
-  const variants = Array.isArray(row.variants)
-    ? [...row.variants]
-        .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0))
-        .map(mapVariantFromSupabase)
-    : []
-  const modifierOptions = Array.isArray(row.modifier_options)
-    ? [...row.modifier_options]
-        .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0))
-        .map(mapModifierFromSupabase)
-    : []
-  const optionGroups = Array.isArray(row.option_groups)
-    ? [...row.option_groups]
-        .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0))
-        .map(mapOptionGroupFromSupabase)
-    : []
-  return {
-    ...row,
-    name: row.name,
-    nombre: row.name,
-    description: row.description || "",
-    descripcion: row.description || "",
-    price: Number(row.price || 0),
-    precio: Number(row.price || 0),
-    image: row.image_url || "",
-    imagen: row.image_url || "",
-    categoryId: row.category_id || "",
-    categoriaId: row.category_id || "",
-    categoryName: row.category_name || row.category_id || "",
-    categoria: row.category_name || row.category_id || "",
-    recipeId: row.recipe_id || "",
-    productionAreaId: row.production_area_id || "",
-    areaProduccion: row.production_area_id || "",
-    active: row.active === true,
-    estado: row.active === true ? "activo" : "inactivo",
-    productionReady: row.production_ready === true,
-    production_ready: row.production_ready === true,
-    activeOptionGroupsCount: row.active_option_groups_count != null ? Number(row.active_option_groups_count) : null,
-    active_option_groups_count: row.active_option_groups_count != null ? Number(row.active_option_groups_count) : null,
-    inventoryTrackingEnabled: row.inventory_tracking_enabled === true,
-    inventory_tracking_enabled: row.inventory_tracking_enabled === true,
-    recipeRequiredForSale: row.recipe_required_for_sale === true,
-    recipe_required_for_sale: row.recipe_required_for_sale === true,
-    recipeStatus: row.recipe_status || "missing",
-    recipe_status: row.recipe_status || "missing",
-    isTestItem: row.is_test_item === true,
-    is_test_item: row.is_test_item === true,
-    productType: row.product_type || "simple",
-    product_type: row.product_type || "simple",
-    allowKitchenNotes: row.allow_kitchen_notes === true,
-    allow_kitchen_notes: row.allow_kitchen_notes === true,
-    prepTimeMinutes: Number(row.prep_time_minutes || 0),
-    prep_time_minutes: Number(row.prep_time_minutes || 0),
-    recipe: row.recipe,
-    productionArea: row.production_area,
-    variants,
-    modifierOptions,
-    modifiers: modifierOptions,
-    optionGroups,
-    option_groups: optionGroups
-  }
 }
 
 function serializeProduct(product) {

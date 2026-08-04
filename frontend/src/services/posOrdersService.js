@@ -134,6 +134,37 @@ export function mapPosTableServiceError(error) {
   if (/No tienes permiso/i.test(text)) {
     return { code: "POS_FORBIDDEN", message: text, userMessage: text }
   }
+  if (/STATION_POS_ORDER_OWNER_MISMATCH/i.test(text)) {
+    return {
+      code: "STATION_POS_ORDER_OWNER_MISMATCH",
+      message: text,
+      userMessage: "Esta mesa está siendo atendida por otro mesero."
+    }
+  }
+  if (/STATION_POS_ORDER_NOT_OPEN/i.test(text)) {
+    return {
+      code: "STATION_POS_ORDER_NOT_OPEN",
+      message: text,
+      userMessage: "La orden de esta mesa ya no está abierta. Recarga la mesa e intenta de nuevo."
+    }
+  }
+  if (/STATION_POS_PRICING_GAP/i.test(text)) {
+    return {
+      code: "STATION_POS_PRICING_GAP",
+      message: text,
+      userMessage: "Selecciona un tamaño de pizza antes de agregarla."
+    }
+  }
+  if (/PIN o acceso no valido/i.test(text)) {
+    return {
+      code: "STATION_POS_SESSION_INVALID",
+      message: text,
+      userMessage: "Sesión expirada. Vuelve a ingresar tu PIN."
+    }
+  }
+  if (/Operacion no permitida/i.test(text)) {
+    return { code: "STATION_POS_FORBIDDEN", message: text, userMessage: text }
+  }
   return { code: "POS_RPC_ERROR", message: text, userMessage: text }
 }
 
