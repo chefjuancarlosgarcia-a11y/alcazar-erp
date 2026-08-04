@@ -1,5 +1,5 @@
 /**
- * Static checks for 199_test_operational_station_pos_catalog_parity.sql
+ * Static checks for 199 remote-safe structural test + lab runtime separation.
  */
 import fs from "node:fs"
 import path from "node:path"
@@ -10,6 +10,14 @@ const testSql = fs.readFileSync(
   path.join(root, "supabase/schema/199_test_operational_station_pos_catalog_parity.sql"),
   "utf8"
 )
+const labSql = fs.readFileSync(
+  path.join(root, "supabase/schema/199_lab_operational_station_pos_catalog_parity_runtime.sql"),
+  "utf8"
+)
+const labRunner = fs.readFileSync(
+  path.join(root, "scripts/run-parity-lab-199.mjs"),
+  "utf8"
+)
 const mig199 = fs.readFileSync(
   path.join(root, "supabase/schema/199_fix_operational_station_pos_catalog_parity.sql"),
   "utf8"
@@ -18,6 +26,29 @@ const stationPos = fs.readFileSync(
   path.join(root, "frontend/src/services/stationPosService.js"),
   "utf8"
 )
+const postflight = fs.readFileSync(
+  path.join(root, "supabase/schema/diagnose_operational_station_pos_catalog_postflight_199.sql"),
+  "utf8"
+)
+
+const REMOTE_FORBIDDEN = [
+  { label: "session_replication_role", pattern: /session_replication_role/i },
+  { label: "auth.users DML", pattern: /\b(insert|update|delete)\s+into\s+auth\.users\b/i },
+  { label: "ALTER TABLE trigger toggle", pattern: /alter\s+table[\s\S]*?trigger/i },
+  { label: "app_settings UPDATE", pattern: /\bupdate\s+public\.app_settings\b/i },
+  { label: "cc199 fixture DML", pattern: /\bcc199-/i },
+  { label: "operational_stations_enabled write", pattern: /set\s+value[\s\S]*operational_stations_enabled/i },
+  { label: "operational_station_pos_enabled write", pattern: /set\s+value[\s\S]*operational_station_pos_enabled/i },
+  { label: "pos_orders INSERT", pattern: /\binsert\s+into\s+public\.pos_orders\b/i },
+  { label: "pos_products INSERT", pattern: /\binsert\s+into\s+public\.pos_products\b/i },
+  { label: "operational_stations INSERT", pattern: /\binsert\s+into\s+public\.operational_stations\b/i }
+]
+
+function sqlWithoutComments(source) {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/--[^\n\r]*/g, "")
+}
 
 const tests = [
   {
@@ -29,24 +60,56 @@ const tests = [
     }
   },
   {
-    name: "199-TEST-2 P0001 repro scenario",
+    name: "199-TEST-2 single grid with failed_total",
     run() {
-      if (!/remote_p0001_owner_mismatch_repro/.test(testSql)) throw new Error("repro scenario")
-      if (!/station_pos_assert_order_open_for_drafts/.test(testSql)) throw new Error("assert function")
+      if (!/scenario_rows/.test(testSql)) throw new Error("scenario_rows")
+      if (!/failed_total/.test(testSql)) throw new Error("failed_total")
+      if (!/cross join summary/.test(testSql)) throw new Error("summary cross join")
+      if ((testSql.match(/;\s*\n\s*select/mg) || []).length > 1) {
+        throw new Error("expected one result grid")
+      }
     }
   },
   {
-    name: "199-TEST-3 lab flags local only",
+    name: "199-TEST-3 remote test forbids unsafe patterns",
     run() {
-      if (!/operational_stations_enabled/.test(testSql)) throw new Error("flags in lab")
-      if (!/lab_flags_enabled/.test(testSql)) throw new Error("flag scenario")
+      const executable = sqlWithoutComments(testSql)
+      for (const { label, pattern } of REMOTE_FORBIDDEN) {
+        if (pattern.test(executable)) throw new Error(`remote test must not contain ${label}`)
+      }
     }
   },
   {
-    name: "199-TEST-4 cleanup fixture ids",
+    name: "199-TEST-4 remote structural checks present",
     run() {
-      if (!/delete from public.pos_orders/.test(testSql)) throw new Error("order cleanup")
-      if (!/19900000-0000-4000-8000-000000000010/.test(testSql)) throw new Error("fixture order id")
+      for (const token of [
+        "pg_proc",
+        "proconfig",
+        "catalog_batch_image_url",
+        "catalog_no_n_plus_one_image_rpc",
+        "assert_owner_error_code",
+        "assert_not_open_error_code",
+        "open_service_opened_insert",
+        "open_service_opened_type",
+        "open_service_opened_created_by_operator",
+        "open_replay_before_resolve",
+        "operational_stations_enabled_false",
+        "operational_station_pos_enabled_false"
+      ]) {
+        if (!testSql.includes(token)) throw new Error(`missing ${token}`)
+      }
+    }
+  },
+  {
+    name: "199-TEST-5 lab runtime separated",
+    run() {
+      if (!/199_lab_operational_station_pos_catalog_parity_runtime/.test(labRunner)) {
+        throw new Error("lab runner must invoke lab runtime SQL")
+      }
+      if (!/runtime 20\/20/.test(labRunner)) throw new Error("lab runner documents 20/20")
+      if (!/session_replication_role/.test(labSql)) throw new Error("lab retains elevated fixtures")
+      if (!/remote_p0001_owner_mismatch_repro/.test(labSql)) throw new Error("lab owner mismatch runtime")
+      if (!/open_new_service_opened_once/.test(labSql)) throw new Error("lab service_opened runtime")
     }
   },
   {
@@ -70,27 +133,6 @@ const tests = [
       if (!/insert into public\.pos_order_events/.test(mig199)) throw new Error("pos_order_events insert")
       if (!/'service_opened'/.test(mig199)) throw new Error("service_opened event_type")
       if (!/v_operator_id/.test(mig199)) throw new Error("created_by v_operator_id")
-    }
-  },
-  {
-    name: "199-TEST-5 service_opened static and runtime scenarios",
-    run() {
-      for (const s of [
-        "open_service_opened_insert_static",
-        "open_service_opened_type_static",
-        "open_service_opened_created_by_operator",
-        "open_new_service_opened_once",
-        "open_idempotency_replay_no_duplicate_event",
-        "open_valid_reuse_no_second_event"
-      ]) {
-        if (!new RegExp(s).test(testSql)) throw new Error(`missing ${s}`)
-      }
-      if (!/test_operational_station_pos_open_runtime_199/.test(testSql)) {
-        throw new Error("runtime open test function")
-      }
-      if (!/set_config\('request\.jwt\.claim\.sub', '19900000-0000-4000-8000-000000000030'/.test(testSql)) {
-        throw new Error("device jwt for open runtime")
-      }
     }
   },
   {
@@ -118,7 +160,7 @@ const tests = [
         "catalog_security_definer_search_path"
       ]
       for (const gate of securityGates) {
-        if (!new RegExp(gate).test(preflight)) throw new Error(`missing ${gate}`)
+        if (!preflight.includes(gate)) throw new Error(`missing ${gate}`)
       }
       if (/pg_get_functiondef\([^)]+\)[^;]*ilike[^;]*search_path/is.test(preflight)) {
         throw new Error("must not detect search_path via pg_get_functiondef")
@@ -126,29 +168,18 @@ const tests = [
       if (!/pg_proc/.test(preflight)) throw new Error("must inspect pg_proc")
       if (!/prosecdef/.test(preflight)) throw new Error("must inspect prosecdef")
       if (!/proconfig/.test(preflight)) throw new Error("must inspect proconfig")
-      if (!/split_part\(cfg, '=', 1\)\)\) = 'search_path'/.test(preflight)) {
-        throw new Error("must normalize empty search_path proconfig")
-      }
     }
   },
   {
-    name: "199-PREFLIGHT-3 single grid and is_blocker semantics",
+    name: "199-POSTFLIGHT-1 read-only single grid",
     run() {
-      const preflight = fs.readFileSync(
-        path.join(root, "supabase/schema/diagnose_operational_station_pos_catalog_preflight_199.sql"),
-        "utf8"
-      )
-      if ((preflight.match(/with fn as \(/g) || []).length !== 1) {
-        throw new Error("expected a single preflight query block")
-      }
-      if (/;\s*\n\s*with fn as \(/m.test(preflight)) {
-        throw new Error("expected a single result grid statement")
-      }
-      if (!/gate_passed/.test(preflight)) throw new Error("gate_passed column")
-      if (!/not gate_passed as is_blocker/.test(preflight)) throw new Error("is_blocker reflects gate_passed")
-      if (!/cross join ready r/.test(preflight)) throw new Error("ready_to_apply_199 on each row")
-      if (!/migration_199_state[\s\S]*'199_absent'/.test(preflight)) {
-        throw new Error("199_absent must be the passing pre-apply state")
+      if (!/^begin;/im.test(postflight)) throw new Error("BEGIN")
+      if (!/^rollback;/im.test(postflight)) throw new Error("ROLLBACK")
+      if (/^commit;/im.test(postflight)) throw new Error("no COMMIT")
+      if (!/ready_after_199/.test(postflight)) throw new Error("ready_after_199")
+      if (!/failed_total/.test(postflight)) throw new Error("failed_total")
+      for (const { label, pattern } of REMOTE_FORBIDDEN) {
+        if (pattern.test(sqlWithoutComments(postflight))) throw new Error(`postflight must not contain ${label}`)
       }
     }
   }

@@ -1,6 +1,7 @@
 /**
- * Apply 199 + run 199_test on embedded local Postgres (not remote).
- * Requires .local-backup/pg-lab deps: npm install in that folder once.
+ * Apply 199 + run remote-safe structural test + lab runtime (20/20) on embedded local Postgres.
+ * Remote test: 199_test_operational_station_pos_catalog_parity.sql (read-only, Supabase-safe).
+ * Runtime test: 199_lab_operational_station_pos_catalog_parity_runtime.sql (elevated lab only).
  */
 import fs from "fs"
 import path from "path"
@@ -35,6 +36,20 @@ function runPsqlFile(database, filePath, label) {
   console.log(r.status === 0 ? `OK ${label}` : `FAIL ${label}`)
   if (r.status !== 0) console.error(combined.slice(-2000))
   return r.status === 0
+}
+
+function parseSummary(logPath, expectedTotal = null) {
+  const log = fs.readFileSync(logPath, "utf8")
+  const failedRows = [...log.matchAll(/\|\s*f\s*\|/g)].length
+  const summaryMatch = log.match(/(\d+)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\r?\n\s*\(\d+ filas?\)/)
+  const total = summaryMatch ? Number(summaryMatch[1]) : null
+  const passedTotal = summaryMatch ? Number(summaryMatch[2]) : null
+  const failedTotal = summaryMatch ? Number(summaryMatch[3]) : failedRows
+  if (expectedTotal != null && total !== expectedTotal) {
+    console.error(`Expected ${expectedTotal} scenarios, got ${total ?? "?"}`)
+    return { ok: false, total, passedTotal, failedTotal }
+  }
+  return { ok: failedTotal === 0, total, passedTotal, failedTotal }
 }
 
 function listBaselineMigrations() {
@@ -95,25 +110,39 @@ async function main() {
     }
   }
 
-  const testOk = runPsqlFile(
+  const structuralOk = runPsqlFile(
     LAB_DB,
     path.join(SCHEMA_DIR, "199_test_operational_station_pos_catalog_parity.sql"),
     "199_test"
   )
-
-  const log = fs.readFileSync(path.join(EVIDENCE, "199_test.log"), "utf8")
-  const failedRows = [...log.matchAll(/\|\s*f\s*\|/g)].length
-  const summaryMatch = log.match(/(\d+)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\r?\n\s*\(\d+ filas?\)/)
-  const failedTotal = summaryMatch ? Number(summaryMatch[3]) : failedRows
-  if (failedTotal > 0) {
-    console.error(`FAIL 199_test scenarios: ${summaryMatch?.[2] ?? "?"}/${summaryMatch?.[1] ?? "?"} passed (${failedTotal} failed)`)
+  const structuralSummary = parseSummary(path.join(EVIDENCE, "199_test.log"))
+  if (!structuralOk || !structuralSummary.ok) {
+    console.error(
+      `FAIL 199_test structural: ${structuralSummary.passedTotal ?? "?"}/${structuralSummary.total ?? "?"} passed (${structuralSummary.failedTotal ?? "?"} failed)`
+    )
     await embedded.stop()
     process.exit(1)
   }
+  console.log(`OK 199_test structural ${structuralSummary.passedTotal}/${structuralSummary.total}`)
+
+  const runtimeOk = runPsqlFile(
+    LAB_DB,
+    path.join(SCHEMA_DIR, "199_lab_operational_station_pos_catalog_parity_runtime.sql"),
+    "199_lab_runtime"
+  )
+  const runtimeSummary = parseSummary(path.join(EVIDENCE, "199_lab_runtime.log"), 20)
+  if (!runtimeOk || !runtimeSummary.ok) {
+    console.error(
+      `FAIL 199_lab_runtime: ${runtimeSummary.passedTotal ?? "?"}/${runtimeSummary.total ?? "?"} passed (${runtimeSummary.failedTotal ?? "?"} failed)`
+    )
+    await embedded.stop()
+    process.exit(1)
+  }
+  console.log(`OK 199_lab_runtime ${runtimeSummary.passedTotal}/${runtimeSummary.total} (runtime 20/20)`)
 
   await embedded.stop()
   if (fs.existsSync(DATA_DIR)) fs.rmSync(DATA_DIR, { recursive: true, force: true })
-  process.exit(testOk ? 0 : 1)
+  process.exit(0)
 }
 
 main().catch((e) => {
