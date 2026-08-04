@@ -774,6 +774,16 @@ function formatStationPosRpcError(error) {
   return mapped.userMessage || mapped.message || error?.message || "Operación no permitida."
 }
 
+function resolvePosOpenOrderId(created) {
+  return created?.data?.id || created?.data?.order_id || created?.openMeta?.order_id || ""
+}
+
+function formatStationPosAddError(error) {
+  const mapped = formatStationPosRpcError(error)
+  if (mapped && !/^Supabase no devolvió/i.test(mapped)) return mapped
+  return "No se pudo agregar el producto. Intenta nuevamente."
+}
+
 function stationOrderOwnerConflict(order, stationMode) {
   if (!stationMode || !order) return null
   const operatorId = stationOperatorProfileId()
@@ -905,6 +915,7 @@ function POS({ stationMode = false, stationPosPort = null, onStationTerminalActi
   const draftItemsRef = useRef([])
   const sendingToKitchenRef = useRef(false)
   const tableOpenIdempotencyRef = useRef(null)
+  const productAddInFlightRef = useRef(false)
 
   const activeCategories = useMemo(() => posCategories.filter((category) => category.active !== false).sort((a, b) => Number(a.sortOrder) - Number(b.sortOrder)), [posCategories])
   const classicCategories = useMemo(
@@ -3434,12 +3445,17 @@ function POS({ stationMode = false, stationPosPort = null, onStationTerminalActi
       mesa: ordenMesa,
       ordenActual: orden
     })
+    if (!productNeedsQuickConfiguration(item)) {
+      void confirmarAgregarItem(item, 1)
+      return
+    }
     abrirConfiguracionProducto(item)
   }
 
   async function confirmarAgregarItem(productOverride = itemPendiente, quantity = 1) {
     const productToAdd = productOverride || itemPendiente
     if (!productToAdd) return false
+    if (productAddInFlightRef.current) return false
     const safeQuantity = Math.max(1, Number(quantity) || 1)
     if (!ordenMesa) {
       setOrdenError("Selecciona una mesa o tipo de orden antes de agregar productos.")
@@ -3503,6 +3519,7 @@ function POS({ stationMode = false, stationPosPort = null, onStationTerminalActi
     }
 
     let itemSaved = false
+    productAddInFlightRef.current = true
     try {
       let orderId = activeOrderId
       const ownerConflictBeforeAdd = stationOrderOwnerConflict(currentOrder, stationMode)
@@ -3538,11 +3555,14 @@ function POS({ stationMode = false, stationPosPort = null, onStationTerminalActi
           }, user)
         const created = openTable
         if (created.error) throw new Error(formatStationPosRpcError(created.error))
-        if (!created.data?.id) throw new Error("Supabase no devolvió la orden creada. Verifica la migración 010_pos_orders.sql.")
-        const openOwnerConflict = stationOrderOwnerConflict(created.data, stationMode)
-        if (openOwnerConflict) throw new Error(openOwnerConflict)
-        orderId = created.data.id
-        setCurrentOrder(created.data)
+        const resolvedOrderId = resolvePosOpenOrderId(created)
+        if (!resolvedOrderId) throw new Error("No se pudo abrir el servicio de mesa. Intenta nuevamente.")
+        if (created.data) {
+          const openOwnerConflict = stationOrderOwnerConflict(created.data, stationMode)
+          if (openOwnerConflict) throw new Error(openOwnerConflict)
+          setCurrentOrder(created.data)
+        }
+        orderId = resolvedOrderId
         setActiveOrderId(orderId)
       } else if (salesChannel !== "dine_in") {
         const channelResult = await updateOrderSalesChannel(orderId, {
@@ -3598,8 +3618,9 @@ function POS({ stationMode = false, stationPosPort = null, onStationTerminalActi
       itemSaved = true
     } catch (error) {
       console.error("Supabase POS add item error:", error)
-      setOrdenError(`No se pudo agregar el producto: ${error.message}`)
+      setOrdenError(formatStationPosAddError(error))
     } finally {
+      productAddInFlightRef.current = false
       setItemPendiente(null)
       setConfiguracionPendiente({ variantId: "", modifierKeys: [], customNote: "", optionSelections: {} })
     }

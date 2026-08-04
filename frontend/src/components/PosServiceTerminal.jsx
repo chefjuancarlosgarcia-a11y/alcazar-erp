@@ -1,6 +1,7 @@
 import PosProductQuickSearch from "./PosProductQuickSearch"
 
 export default function PosServiceTerminal({
+  stationMode = false,
   notices,
   categories,
   activeCategoryId,
@@ -32,7 +33,7 @@ export default function PosServiceTerminal({
     : "channel"
 
   return (
-    <div className="pos-classic-terminal">
+    <div className={`pos-classic-terminal${stationMode ? " pos-classic-terminal--station" : ""}`}>
       {notices}
 
       <header className="pos-classic-topbar">

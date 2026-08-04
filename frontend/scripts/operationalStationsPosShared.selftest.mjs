@@ -26,6 +26,10 @@ const posPage = read("frontend/src/pages/POS.jsx")
 const posTicket = read("frontend/src/components/PosTicketPanel.jsx")
 const posClassic = read("frontend/src/components/PosClassicOperation.jsx")
 const posDishCatalog = read("frontend/src/components/PosDishCatalog.jsx")
+const posServiceTerminal = read("frontend/src/components/PosServiceTerminal.jsx")
+const posQuickSearch = read("frontend/src/components/PosProductQuickSearch.jsx")
+const stationPosEntryCss = read("frontend/src/pages/StationPosEntry.css")
+const posCss = read("frontend/src/pages/POS.css")
 const access = read("frontend/src/components/OperationalAccessSection.jsx")
 
 function stripSourceComments(source) {
@@ -545,7 +549,8 @@ const tests = [
     name: "POS-45 parity G add uses confirmed order_id",
     run() {
       if (!/openPosTableService/.test(posPage)) throw new Error("open before add")
-      if (!/orderId = created\.data\.id/.test(posPage)) throw new Error("order_id from open response")
+      if (!/resolvePosOpenOrderId\(created\)/.test(posPage)) throw new Error("resolve order_id from open response")
+      if (!/orderId = resolvedOrderId/.test(posPage)) throw new Error("assign resolved order id")
     }
   },
   {
@@ -643,6 +648,136 @@ const tests = [
         if (imports.has(tag) || localFns.has(tag)) continue
         throw new Error(`${tag} JSX tag without import or local function definition`)
       }
+    }
+  },
+  {
+    name: "POS-57 interaction scroll station entry overflow",
+    run() {
+      if (!/station-pos-entry--active[\s\S]*overflow-y:\s*auto/.test(stationPosEntryCss)) {
+        throw new Error("station entry allows vertical scroll")
+      }
+      if (!/station-pos-entry--active[\s\S]*min-height:\s*0/.test(stationPosEntryCss)) {
+        throw new Error("station entry flex min-height chain")
+      }
+    }
+  },
+  {
+    name: "POS-58 interaction workspace body scroll in station",
+    run() {
+      if (!/station-pos-entry--active \.pos-classic-workspace-body[\s\S]*overflow-y:\s*auto/.test(posCss)) {
+        throw new Error("workspace body scroll")
+      }
+      if (!/overscroll-behavior:\s*contain/.test(posCss)) throw new Error("overscroll contain")
+    }
+  },
+  {
+    name: "POS-59 interaction no global wheel lock in POS",
+    run() {
+      if (/addEventListener\(["']wheel["']/.test(posPage)) throw new Error("global wheel listener")
+      if (/document\.body\.style\.overflow\s*=\s*["']hidden["']/.test(posPage)) throw new Error("body scroll lock in POS")
+    }
+  },
+  {
+    name: "POS-60 interaction quick search keydown repeat guard",
+    run() {
+      if (!/event\.repeat/.test(posQuickSearch)) throw new Error("repeat guard")
+      if (!/removeEventListener\(["']mousedown["']/.test(posQuickSearch)) throw new Error("mousedown cleanup")
+    }
+  },
+  {
+    name: "POS-61 interaction port provider cleanup on unmount",
+    run() {
+      if (!/useEffect\(\(\) => \(\) => clearStationPosOrdersDelegate\(\)/.test(posEntry)) throw new Error("delegate cleanup")
+      if (!/return setStationPosOrdersDelegate\(port\)/.test(portCtx)) throw new Error("provider registers delegate once")
+    }
+  },
+  {
+    name: "POS-62 interaction grid passes agregarAOrden",
+    run() {
+      if (!/onAddProduct=\{agregarAOrden\}/.test(posClassic)) throw new Error("grid callback")
+    }
+  },
+  {
+    name: "POS-63 interaction simple product skips config modal",
+    run() {
+      if (!/if \(!productNeedsQuickConfiguration\(item\)\)/.test(posPage)) throw new Error("simple product fast path")
+      if (!/void confirmarAgregarItem\(item, 1\)/.test(posPage)) throw new Error("direct add for simple product")
+    }
+  },
+  {
+    name: "POS-64 interaction open before add when no order",
+    run() {
+      if (!/if \(!orderId\)/.test(posPage)) throw new Error("open guard")
+      if (!/await openPosTableService/.test(posPage)) throw new Error("openPosTableService call")
+    }
+  },
+  {
+    name: "POS-65 interaction open failure blocks add",
+    run() {
+      if (!/if \(created\.error\) throw new Error\(formatStationPosRpcError/.test(posPage)) {
+        throw new Error("open error throws")
+      }
+    }
+  },
+  {
+    name: "POS-66 interaction double add guard",
+    run() {
+      if (!/productAddInFlightRef/.test(posPage)) throw new Error("in-flight guard ref")
+      if (!/productAddInFlightRef\.current = false/.test(posPage)) throw new Error("guard reset")
+    }
+  },
+  {
+    name: "POS-67 interaction visible add error message",
+    run() {
+      if (!/formatStationPosAddError/.test(posPage)) throw new Error("add error formatter")
+      if (!/setOrdenError\(formatStationPosAddError/.test(posPage)) throw new Error("stable add error")
+    }
+  },
+  {
+    name: "POS-68 interaction station terminal class",
+    run() {
+      if (!/stationMode=\{stationMode\}/.test(posClassic)) throw new Error("stationMode passed to terminal")
+      if (!/pos-classic-terminal--station/.test(posServiceTerminal)) throw new Error("station terminal class")
+    }
+  },
+  {
+    name: "POS-69 interaction human POS unchanged entry",
+    run() {
+      if (!/path="\/pos"/.test(routes)) throw new Error("/pos route")
+      if (!/<POS\s*\/>/.test(routes)) throw new Error("human POS route element")
+      if (/stationMode/.test(routes)) throw new Error("human route must not pass stationMode")
+    }
+  },
+  {
+    name: "POS-70 interaction station no payments",
+    run() {
+      if (!/stationMode/.test(posPage)) throw new Error("stationMode")
+      if (/create_pos_split_payment/.test(stationPos)) throw new Error("no split payment")
+    }
+  },
+  {
+    name: "POS-71 interaction mesa select no auto open",
+    run() {
+      if (!/Mesa disponible\. Agrega productos/.test(posPage)) throw new Error("no auto open copy")
+    }
+  },
+  {
+    name: "POS-72 interaction search not overwritten by hotkeys",
+    run() {
+      if (/window\.addEventListener\(["']keydown["']/.test(posPage)) throw new Error("global keydown in POS")
+      if (/document\.addEventListener\(["']keydown["']/.test(posPage)) throw new Error("document keydown in POS")
+    }
+  },
+  {
+    name: "POS-73 interaction openMeta order_id fallback",
+    run() {
+      if (!/created\?\.openMeta\?\.order_id/.test(posPage)) throw new Error("openMeta fallback")
+    }
+  },
+  {
+    name: "POS-74 interaction cargar mesa after add",
+    run() {
+      if (!/await cargarMesaDesdeSupabase\(ordenMesa, orderId\)/.test(posPage)) throw new Error("refresh ticket after add")
     }
   }
 ]

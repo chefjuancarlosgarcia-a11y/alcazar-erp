@@ -133,6 +133,11 @@ const PosProductQuickSearch = forwardRef(function PosProductQuickSearch({
   }
 
   function handleKeyDown(event) {
+    if (event.repeat && ["ArrowDown", "ArrowUp", "Enter", "Escape"].includes(event.key)) {
+      event.preventDefault()
+      return
+    }
+
     if (pendingProduct) {
       if (event.key === "Enter") {
         event.preventDefault()

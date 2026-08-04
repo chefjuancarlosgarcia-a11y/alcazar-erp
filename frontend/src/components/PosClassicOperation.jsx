@@ -126,6 +126,7 @@ export default function PosClassicOperation({
   return (
     <>
       <PosServiceTerminal
+        stationMode={stationMode}
         notices={(
           <>
             {POS_DEBUG && puedeVerAuditoria && <div style={successInlineStyle}>Catálogo oficial conectado y consumo por receta activo.</div>}

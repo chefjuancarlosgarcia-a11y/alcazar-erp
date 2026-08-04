@@ -52,3 +52,28 @@
   font-weight: 700;
   cursor: pointer;
 }
+
+.station-pos-entry--active {
+  max-width: none;
+  margin: 0;
+  padding: var(--erp-space-16);
+  min-height: min(100dvh, 100vh);
+  display: flex;
+  flex-direction: column;
+  gap: var(--erp-space-16);
+  overflow-x: hidden;
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+
+.station-pos-entry--active .station-pos-entry-banner {
+  flex: 0 0 auto;
+  margin-bottom: 0;
+}
+
+.station-pos-entry--active > :last-child {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}

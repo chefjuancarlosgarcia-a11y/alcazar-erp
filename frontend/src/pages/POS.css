@@ -2670,6 +2670,42 @@
   overflow: auto;
 }
 
+.station-pos-entry--active .pos-classic-terminal {
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.station-pos-entry--active .pos-classic-main {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.station-pos-entry--active .pos-classic-workspace {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.station-pos-entry--active .pos-classic-workspace-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.station-pos-entry--active .pos-classic-ticket {
+  max-height: none;
+  min-height: 0;
+}
+
+.station-pos-entry--active .pos-ticket-lines {
+  overflow-y: auto;
+  min-height: 0;
+}
+
 .pos-classic-floor {
   position: relative;
   min-height: 420px !important;
