@@ -1,7 +1,9 @@
 # FELplex — Fase 1A.2: endurecimiento transaccional y de seguridad
 
-**Estado:** implementación local revisable.  
-**No desplegado.** **No ejecutado contra Stage/Producción.** **No llamadas FELplex.** **No SQL ejecutado.**
+**Estado:** implementación y corrección pre-merge locales revisables.
+**No desplegado.** **Sin llamadas FELplex.** **La corrección 230000 no se ejecutó contra Stage/Producción.**
+
+Los resultados SQL históricos de `20260808220000` fueron ejecutados y reportados por el operador; no fueron reejecutados durante esta corrección local.
 
 Switches obligatorios permanecen **OFF**:
 
@@ -75,6 +77,12 @@ fel_finalize_pos_fel_certification_attempt(
 - `SECURITY DEFINER`, `SET search_path = ''`
 - `REVOKE ALL` de `public`, `anon`, `authenticated` en claim, finalize y `fel_actor_can_request_certification`
 - `GRANT EXECUTE` únicamente a `service_role` en claim/finalize
+- Acceso directo de `service_role`: `SELECT` en `pos_fel_documents`; sin privilegios directos en `pos_fel_attempts`
+- Escritura de documentos/intentos únicamente dentro de los RPC `SECURITY DEFINER`
+
+### Normalización de rol
+
+Edge replica la normalización PostgreSQL: el alias histórico `administrador` se normaliza a `admin`. Esto corrige una denegación incorrecta; no añade operadores canónicos, no autoriza roles nuevos y mantiene obligatorio `status='active'`.
 
 ---
 
@@ -115,6 +123,15 @@ Módulo `rpcErrors.ts`:
 
 Finalize invoca el validador antes de persistir.
 
+`fel_validate_request_payload` valida por separado el request construido por Edge:
+
+- acepta `NULL` u objeto JSON;
+- máximo serializado de 32 KiB;
+- rechaza recursivamente claves sensibles, sin distinción de mayúsculas;
+- no define una allowlist contractual mientras FELplex continúe sin confirmar.
+
+En `outcome='success'`, finalize vuelve a comprobar que la orden siga `paid`, completamente conciliada y con saldo cero antes de marcar el documento `certified`.
+
 ---
 
 ## 7. Allowlist estricta
@@ -151,8 +168,14 @@ Incluye escenarios 1A.1 y 1A.2 (finalize incierto, claim emission gate, handler 
 
 Builder bloqueado (`FELPLEX_CONTRACT_UNCONFIRMED`). Sin HTTP operativo hasta confirmación oficial.
 
+Los switches continúan apagados por defecto: `emission_enabled=false`, `auto_issue_paid_orders=false`, `formal_contingency_enabled=false` y `FELPLEX_HTTP_ENABLED` unset/false.
+
+Un documento `processing` atascado permanece fail-closed y requiere reconciliación manual. Recovery automático y concurrencia PostgreSQL real siguen pendientes antes de emisión real.
+
 ---
 
 ## 10. Rollback
 
 `supabase/rollback/20260808220000_pos_fel_attempt_lifecycle.rollback.sql`
+
+El hardening aditivo usa `20260808230000_pos_fel_premerge_hardening.sql`. Su rollback aborta deliberadamente porque restaurar las definiciones previas degradaría los controles de Stage, payload y privilegios.

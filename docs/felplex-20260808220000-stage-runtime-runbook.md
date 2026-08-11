@@ -2,7 +2,10 @@
 
 **Proyecto Stage:** `tgrqarxfmpwgrkntvgma`  
 **Alcance:** validación operativa local de RPCs `claim` / `finalize` (Fase 1A.3)  
-**Estado del repo:** diseño + script listo para revisión externa — **no ejecutado en esta entrega**
+**Evidencia histórica:** resultados ejecutados y reportados por el operador el 2026-08-10.
+**Corrección pre-merge actual:** revisión local; **no volvió a ejecutar SQL** ni conectó a Stage.
+
+La migración aditiva `20260808230000_pos_fel_premerge_hardening.sql` y sus tests están pendientes de aplicación y validación en Stage. Los resultados históricos de este runbook corresponden únicamente a `20260808220000`.
 
 ---
 
@@ -148,6 +151,10 @@ Una validación de concurrencia PostgreSQL real requeriría, como mínimo:
 
 Hasta contar con ese diseño aprobado, la concurrencia permanece **pendiente** y **fuera de alcance** del runtime 1A.3.
 
+### Processing atascado
+
+Un documento que quede en `processing` por resultado incierto continúa fail-closed. Esta corrección no añade reintento ni recuperación automática: requiere reconciliación manual. La política de recovery sigue pendiente antes de cualquier emisión real.
+
 ---
 
 ## 8. Postcondiciones (consulta separada tras ROLLBACK)
@@ -237,6 +244,8 @@ Prohibido en este runbook:
 3. Ejecutar runtime (`20260808220000_pos_fel_attempt_lifecycle.runtime.sql`).
 4. Verificar postcondiciones (sección 8).
 5. **No** ejecutar prueba de concurrencia hasta contar con runbook separado aprobado (sección 7).
+
+La validación futura de `20260808230000` requiere autorización separada. No reutilizar los conteos 25/25 y 9/9 como evidencia de esa migración.
 
 ---
 

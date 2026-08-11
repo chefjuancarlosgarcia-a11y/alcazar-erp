@@ -1,4 +1,4 @@
-# Cierre oficial — FELplex Fase 1A.3 en Supabase Stage
+# Evidencia histórica reportada — FELplex Fase 1A.3 en Supabase Stage
 
 | Campo | Valor |
 |-------|-------|
@@ -15,17 +15,19 @@
 
 ## 2. Resumen ejecutivo
 
-FELplex Fase 1A.3 fue validada en Supabase Stage mediante:
+Según los resultados ejecutados y reportados por el operador, FELplex Fase 1A.3 fue validada en Supabase Stage mediante:
 
 1. **Pruebas estructurales** (`20260808220000_test_pos_fel_attempt_lifecycle.sql`) — 25 escenarios `executed=true`, todos `passed=true`; 9 escenarios conceptuales honestamente `NOT EXECUTED`.
 2. **Runtime transaccional** (`20260808220000_pos_fel_attempt_lifecycle.runtime.sql`) — 9 escenarios operativos `executed=true`, todos `passed=true`; 1 escenario de concurrencia deliberadamente no ejecutado.
 3. **Post-ROLLBACK** — configuración FEL y datos fixture restaurados; cero intentos persistidos; cero filas con identificadores ficticios de certificación.
 
-**Veredicto:** **PASS — FELplex Fase 1A.3 validada en Supabase Stage para flujo transaccional secuencial claim/finalize, con rollback limpio.**
+**Veredicto histórico reportado por el operador:** **PASS — FELplex Fase 1A.3 validada en Supabase Stage para flujo transaccional secuencial claim/finalize, con rollback limpio.**
 
 **CONCURRENCIA POSTGRESQL REAL: NOT EXECUTED / PENDIENTE.**
 
 **Este cierre no autoriza deploy de Edge Function, habilitación permanente de `emission_enabled`, llamada HTTP a FELplex ni uso en Producción.**
+
+Este registro no valida la migración posterior `20260808230000_pos_fel_premerge_hardening.sql`. Esa corrección permanece pendiente de aplicación y pruebas en Stage.
 
 ---
 
@@ -221,16 +223,20 @@ Resultado reportado por el operador y revisado contra los criterios del runbook.
 | P3 | Edge Function deploy | Media | Requiere fase posterior con gates HTTP + secretos Stage |
 | P4 | Primera llamada FELplex real | Alta | Fuera de alcance 1A.3 |
 | P5 | Producción | Alta | Explícitamente no autorizada por este cierre |
+| P6 | Aplicación y tests de 230000 en Stage | Alta | **NOT EXECUTED**; no reutilizar los conteos históricos |
+| P7 | Recovery de documentos `processing` | Alta | Fail-closed; reconciliación manual hasta definir política |
 
 ---
 
-## 12. Veredicto
+## 12. Veredicto histórico y estado actual
 
-**PASS — FELplex Fase 1A.3 validada en Supabase Stage para flujo transaccional secuencial claim/finalize, con rollback limpio.**
+**PASS histórico reportado por el operador — 25/25 estructurales y 9/9 runtime ejecutados para 20260808220000.**
 
 **CONCURRENCIA POSTGRESQL REAL: NOT EXECUTED / PENDIENTE.**
 
 **Este cierre no autoriza deploy de Edge Function, habilitación permanente de `emission_enabled`, llamada HTTP a FELplex ni uso en Producción.**
+
+**20260808230000: NOT EXECUTED / PENDIENTE DE APLICACIÓN Y VALIDACIÓN STAGE. No existe cierre definitivo de 230000.**
 
 ---
 
@@ -256,7 +262,7 @@ Hashes calculados **localmente** sobre copias en repositorio (sin alterar archiv
 | `supabase/migrations/20260808220000_pos_fel_attempt_lifecycle.sql` | 16 405 | `9BD5C4666EB7A4893E34DB23CEBDA328AD9BE1CAAFFD3BF7A45A6B1E67161C5A` |
 | `supabase/schema/20260808220000_test_pos_fel_attempt_lifecycle.sql` | 12 743 | `823190BADE58AF2A12B6BEE7FCCBF45CAE5339D15C0C0FC252F7C32AF55CB259` |
 | `supabase/stage-tests/20260808220000_pos_fel_attempt_lifecycle.runtime.sql` | 23 620 | `8EF1C2178327E8D1041FCFB90554110C6A197AFE9D142894BDA5A30A478EA759` |
-| `docs/felplex-20260808220000-stage-runtime-runbook.md` | 10 761 | `4B388B277C23F3E3AE3F364D00B1CB67D9D2584DB48F88DBFE513FE6FAF6CBA5` |
+| `docs/felplex-20260808220000-stage-runtime-runbook.md` | 11 522 | `43627438C7CC3162CB37ECE2C00E9C63818BB828BE7A49EC11420B6F814D9867` |
 
 ### Referencia base (no re-hasheada en esta entrega)
 
@@ -267,6 +273,48 @@ Hashes calculados **localmente** sobre copias en repositorio (sin alterar archiv
 - Cursor **no** verificó directamente la base remota Stage.
 - Resultados numéricos de ejecución: **resultado reportado por el operador y revisado contra los criterios del runbook.**
 - Este documento es evidencia documental local; no sustituye logs exportados del SQL Editor si se requieren en auditoría externa.
+
+## 15. Corrección pre-merge local posterior
+
+La corrección local de 2026-08-11 se limita a:
+
+- revisión estática y validador local de artefactos;
+- tests y type-check Deno locales;
+- guard del baseline, seed no destructivo y validación canónica del trigger;
+- migración/rollback/tests `20260808230000`;
+- normalización Edge de `administrador` a `admin`;
+- CI sin secretos, SQL remoto ni deploy.
+
+Clasificación de evidencia:
+
+| Fuente | Estado |
+|--------|--------|
+| Stage 25/25 y 9/9 de 220000 | Histórico, reportado por operador |
+| Tests Deno de la corrección | Local |
+| Revisión de SQL/CI/secretos | Estática local |
+| SQL y tests 230000 | **NOT EXECUTED** |
+| Concurrencia PostgreSQL real | **NOT EXECUTED** |
+| Recovery de `processing` | Pendiente; reconciliación manual |
+
+### Huellas locales de artefactos modificados por la corrección
+
+Estas huellas prueban únicamente contenido local; no prueban aplicación en Stage.
+
+| Artefacto | Bytes | SHA-256 |
+|-----------|------:|---------|
+| `supabase/migrations/20260808180000_erp_schema_baseline.sql` | 2 111 471 | `46523BB69A2C38D17588C511737F7314615E9D93F74A5F81698581C51BC5C476` |
+| `supabase/migrations/20260808230000_pos_fel_premerge_hardening.sql` | 20 101 | `5ABEE7136779FB6F33ABC1ECE00133EB47C2079CCE882CFB5ADE53AEF40BC835` |
+| `supabase/rollback/20260808230000_pos_fel_premerge_hardening.rollback.sql` | 2 107 | `1CF30B68203D4BE6CD48D7D911EFCD453546122B5ABF41FD939EC690043039D1` |
+| `supabase/schema/20260808230000_test_pos_fel_premerge_hardening.sql` | 10 849 | `E738EF4FB6306DD1EDE7B436F097AF65503134C40F5673E155C8556173D63D4D` |
+| `supabase/functions/_shared/felplex/auth.ts` | 1 050 | `A10B30C6A6DF5E3715696A62159393FCE7BD5E02E557A1502924605D36DB8750` |
+| `supabase/functions/_shared/felplex/felplex_phase_1a.test.ts` | 30 684 | `E711CA9B82C4B4077E3E29C3C8CED93BA62B8FD16080CD9EB3D0AD0DF0C8F23C` |
+| `scripts/validate-felplex-migration-safety.mjs` | 10 263 | `C19F206C18C6585338024C5434EBEE80ABA3E66334B66993D50C1345E4BD50AD` |
+| `.github/workflows/felplex-ci.yml` | 1 442 | `2377858DFF5AE6BC11372FECEB7540B522ADD4935C7444E193A1A90BC88D1A67` |
+| `package.json` | 555 | `DC1525F9FA9E71B76061C2892F43D9724A0410618821388C614A4F38DBDD36C5` |
+| `docs/felplex-phase-1-edge-function.md` | 7 003 | `87A1670F11037F6C439112016302B45F26D71AADBA87F41AD099EF2E26DDED96` |
+| `docs/felplex-baseline-adoption-runbook.md` | 2 336 | `706A618A4304283A9EA0D7A508F5A78CD283A2E38246F3369416B3E27455EE80` |
+
+El sufijo histórico real extraído del `HEAD` inicial mide 2 109 667 bytes y tiene SHA-256 `619CD1480F439C0B198A11E0E71CB9088C60EC0C2BEFE791C3BAD16A9EB03DE9`; tras el guard permanece byte-idéntico. La referencia suministrada `F0A9AA71…` se conserva como referencia documental, pero no coincide con ese blob Git y no se presenta como recalculada.
 
 ---
 
