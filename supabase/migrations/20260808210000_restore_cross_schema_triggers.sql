@@ -46,11 +46,21 @@ begin
         and t.tgname = 'on_auth_user_created'
         and fn_ns.nspname = 'public'
         and p.proname = 'handle_new_user'
-        and (t.tgtype & 2) = 0   -- AFTER (not BEFORE)
-        and (t.tgtype & 4) <> 0  -- INSERT event
-        and (t.tgtype & 1) <> 0  -- FOR EACH ROW
+        and p.pronargs = 0
+        and t.tgtype = 5          -- exactly AFTER INSERT FOR EACH ROW
+        and t.tgenabled = 'O'     -- enabled in the canonical/default mode
+        and t.tgqual is null      -- no WHEN condition
+        and t.tgnargs = 0
+        and octet_length(t.tgargs) = 0
+        and t.tgconstraint = 0    -- not a constraint trigger
+        and not t.tgisinternal
     ) then
-      v_actual_def := pg_get_triggerdef(v_trigger_oid, true);
+      v_actual_def := regexp_replace(
+        pg_get_triggerdef(v_trigger_oid, true),
+        '[[:cntrl:]]+',
+        ' ',
+        'g'
+      );
       raise exception
         'auth.users trigger on_auth_user_created exists with unexpected definition: %. Expected AFTER INSERT ON auth.users FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user().',
         v_actual_def;

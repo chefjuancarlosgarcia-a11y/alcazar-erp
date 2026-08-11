@@ -6,7 +6,9 @@
 --
 -- 034_fix_hr_schedule_permissions re-inserts recursos_humanos/rrhh already present in 033.
 -- Does NOT copy functions, RPC, triggers, RLS, or profile updates.
--- Idempotent: ON CONFLICT (role_key) DO UPDATE syncs catalog columns.
+-- Bootstrap inserts missing canonical roles but never overwrites live configuration.
+-- Future catalog reconciliations require an explicit, separately reviewed migration.
+-- Idempotent: existing role_key rows remain unchanged.
 
 insert into public.user_roles (
   role_key,
@@ -69,12 +71,4 @@ values
     false,
     false
   )
-on conflict (role_key) do update set
-  role_name = excluded.role_name,
-  description = excluded.description,
-  category = excluded.category,
-  is_system = excluded.is_system,
-  is_active = excluded.is_active,
-  is_deprecated = excluded.is_deprecated,
-  hr_assignable = excluded.hr_assignable,
-  updated_at = now();
+on conflict (role_key) do nothing;

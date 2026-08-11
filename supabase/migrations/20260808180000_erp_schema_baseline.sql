@@ -1,3 +1,49 @@
+-- ERP baseline bootstrap guard. The historical dump below is byte-identical to HEAD.
+-- This migration is valid only for a Supabase project whose public schema has no relations.
+do $erp_baseline_guard$
+declare
+  v_existing_relation text;
+begin
+  if not exists (
+       select 1 from pg_catalog.pg_namespace where nspname = 'auth'
+     )
+     or pg_catalog.to_regclass('auth.users') is null
+     or not exists (
+       select 1 from pg_catalog.pg_namespace where nspname = 'storage'
+     )
+     or pg_catalog.to_regclass('storage.buckets') is null
+     or not exists (
+       select 1 from pg_catalog.pg_extension where extname = 'pgcrypto'
+     ) then
+    raise exception 'ERP_BASELINE_REQUIRES_SUPABASE_PLATFORM: auth.users, storage.buckets and pgcrypto must exist before bootstrap.'
+      using errcode = 'P0001';
+  end if;
+
+  if pg_catalog.to_regclass('public.profiles') is not null
+     or pg_catalog.to_regclass('public.pos_orders') is not null
+     or pg_catalog.to_regclass('public.user_roles') is not null
+     or pg_catalog.to_regclass('public.areas') is not null then
+    raise exception 'ERP_BASELINE_REQUIRES_EMPTY_PUBLIC: ERP sentinel object detected (profiles, pos_orders, user_roles or areas).'
+      using errcode = 'P0001';
+  end if;
+
+  select pg_catalog.format('%I.%I (relkind=%s)', n.nspname, c.relname, c.relkind)
+  into v_existing_relation
+  from pg_catalog.pg_class c
+  join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+  where n.nspname = 'public'
+    and c.relkind in ('r', 'p', 'v', 'm', 'S', 'f')
+  order by c.relname
+  limit 1;
+
+  if v_existing_relation is not null then
+    raise exception 'ERP_BASELINE_REQUIRES_EMPTY_PUBLIC: pre-existing relation % prevents bootstrap.',
+      v_existing_relation
+      using errcode = 'P0001';
+  end if;
+end;
+$erp_baseline_guard$;
+
 
 
 
