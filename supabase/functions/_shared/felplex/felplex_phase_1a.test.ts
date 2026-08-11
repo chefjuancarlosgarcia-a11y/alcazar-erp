@@ -15,6 +15,7 @@ import {
 import { validateFelplexStageUrl } from "./urlAllowlist.ts"
 import { assertNoRawProviderBodyPersisted, isSafeProviderPayload } from "./safePayload.ts"
 import { InMemoryFelRepository, FinalizeError } from "./repository.ts"
+import { assertCashOperator, isCashOperator, normalizeProfileRole } from "./auth.ts"
 import {
   envGetter,
   FIXED_DATETIME,
@@ -104,6 +105,25 @@ async function runCertify(
     },
   )
 }
+
+Deno.test("Role alias administrador matches PostgreSQL admin normalization", () => {
+  const actor = makeCashActor({ role: "Administrador" })
+  assertEquals(normalizeProfileRole(actor.role), "admin")
+  assertEquals(isCashOperator(actor), true)
+  assertEquals(assertCashOperator(actor), null)
+  record("Role alias administrador normalizado", "PASSED")
+})
+
+Deno.test("Role normalization does not expand operators or bypass inactive status", () => {
+  const waiter = makeCashActor({ role: "mesero" })
+  const inactiveAdminAlias = makeCashActor({ role: "administrador", status: "inactive" })
+  assertEquals(normalizeProfileRole(waiter.role), "mesero")
+  assertEquals(isCashOperator(waiter), false)
+  assertEquals(assertCashOperator(waiter), "FEL_UNAUTHORIZED")
+  assertEquals(isCashOperator(inactiveAdminAlias), false)
+  assertEquals(assertCashOperator(inactiveAdminAlias), "FEL_UNAUTHORIZED")
+  record("Role normalization fail-closed", "PASSED")
+})
 
 Deno.test("Q297 IVA incluido (preservado)", () => {
   const totals = extractVatIncluded(297)
