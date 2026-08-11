@@ -5,7 +5,8 @@
     "xlsx": "^0.18.5"
   },
   "scripts": {
-    "test:felplex-1a": "npx --yes deno@2.9.5 test --allow-env --allow-read=supabase/migrations supabase/functions/_shared/felplex/felplex_phase_1a.test.ts",
-    "check:felplex-1a": "npx --yes deno@2.9.5 check supabase/functions/felplex-certify-invoice/index.ts supabase/functions/_shared/felplex/*.ts"
+    "validate:felplex-migration-safety": "node scripts/validate-felplex-migration-safety.mjs",
+    "test:felplex-1a": "npx --yes deno@2.9.5 test --no-lock --allow-env --allow-read=supabase/migrations supabase/functions/_shared/felplex/felplex_phase_1a.test.ts",
+    "check:felplex-1a": "npx --yes deno@2.9.5 check --no-lock supabase/functions/felplex-certify-invoice/index.ts supabase/functions/_shared/felplex/*.ts"
   }
 }

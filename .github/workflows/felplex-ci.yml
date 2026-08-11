@@ -1,0 +1,48 @@
+name: FELplex safety
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/felplex-ci.yml"
+      - "package.json"
+      - "scripts/validate-felplex-migration-safety.mjs"
+      - "supabase/migrations/**"
+      - "supabase/rollback/**"
+      - "supabase/schema/**fel**"
+      - "supabase/functions/**felplex**"
+      - "docs/**felplex**"
+  push:
+    paths:
+      - ".github/workflows/felplex-ci.yml"
+      - "package.json"
+      - "scripts/validate-felplex-migration-safety.mjs"
+      - "supabase/migrations/**"
+      - "supabase/rollback/**"
+      - "supabase/schema/**fel**"
+      - "supabase/functions/**felplex**"
+      - "docs/**felplex**"
+
+permissions:
+  contents: read
+
+jobs:
+  static-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Deno 2.9.5
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.9.5
+
+      - name: Validate local migration safety
+        run: node scripts/validate-felplex-migration-safety.mjs
+
+      - name: Run FELplex Deno tests
+        run: deno test --no-lock --allow-env --allow-read=supabase/migrations supabase/functions/_shared/felplex/felplex_phase_1a.test.ts
+
+      - name: Type-check FELplex Edge code
+        run: deno check --no-lock supabase/functions/felplex-certify-invoice/index.ts supabase/functions/_shared/felplex/*.ts
