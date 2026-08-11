@@ -3,5 +3,9 @@
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",
     "xlsx": "^0.18.5"
+  },
+  "scripts": {
+    "test:felplex-1a": "npx --yes deno@2.9.5 test --allow-env --allow-read=supabase/migrations supabase/functions/_shared/felplex/felplex_phase_1a.test.ts",
+    "check:felplex-1a": "npx --yes deno@2.9.5 check supabase/functions/felplex-certify-invoice/index.ts supabase/functions/_shared/felplex/*.ts"
   }
 }
