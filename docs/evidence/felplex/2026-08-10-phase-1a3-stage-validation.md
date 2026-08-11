@@ -302,19 +302,20 @@ Estas huellas prueban únicamente contenido local; no prueban aplicación en Sta
 
 | Artefacto | Bytes | SHA-256 |
 |-----------|------:|---------|
-| `supabase/migrations/20260808180000_erp_schema_baseline.sql` | 2 111 471 | `46523BB69A2C38D17588C511737F7314615E9D93F74A5F81698581C51BC5C476` |
+| `.gitattributes` | 103 | `F73746903F637183E39AD57E88744067B97545DDB994F15F399E982C453877E0` |
+| `supabase/migrations/20260808180000_erp_schema_baseline.sql` | 2 143 111 | `B6EDBB9BD063D7BE9A71D3DCD5481DC4B0FA14FDF9583376F0470A99C4B7C575` |
 | `supabase/migrations/20260808230000_pos_fel_premerge_hardening.sql` | 20 101 | `5ABEE7136779FB6F33ABC1ECE00133EB47C2079CCE882CFB5ADE53AEF40BC835` |
 | `supabase/rollback/20260808230000_pos_fel_premerge_hardening.rollback.sql` | 2 107 | `1CF30B68203D4BE6CD48D7D911EFCD453546122B5ABF41FD939EC690043039D1` |
 | `supabase/schema/20260808230000_test_pos_fel_premerge_hardening.sql` | 10 849 | `E738EF4FB6306DD1EDE7B436F097AF65503134C40F5673E155C8556173D63D4D` |
 | `supabase/functions/_shared/felplex/auth.ts` | 1 050 | `A10B30C6A6DF5E3715696A62159393FCE7BD5E02E557A1502924605D36DB8750` |
 | `supabase/functions/_shared/felplex/felplex_phase_1a.test.ts` | 30 684 | `E711CA9B82C4B4077E3E29C3C8CED93BA62B8FD16080CD9EB3D0AD0DF0C8F23C` |
-| `scripts/validate-felplex-migration-safety.mjs` | 10 263 | `C19F206C18C6585338024C5434EBEE80ABA3E66334B66993D50C1345E4BD50AD` |
+| `scripts/validate-felplex-migration-safety.mjs` | 11 855 | `9F72C1BFF95858E894CC680983ED7525DE67437C3088563E7734D321745657C4` |
 | `.github/workflows/felplex-ci.yml` | 1 442 | `2377858DFF5AE6BC11372FECEB7540B522ADD4935C7444E193A1A90BC88D1A67` |
 | `package.json` | 555 | `DC1525F9FA9E71B76061C2892F43D9724A0410618821388C614A4F38DBDD36C5` |
 | `docs/felplex-phase-1-edge-function.md` | 7 003 | `87A1670F11037F6C439112016302B45F26D71AADBA87F41AD099EF2E26DDED96` |
-| `docs/felplex-baseline-adoption-runbook.md` | 2 336 | `706A618A4304283A9EA0D7A508F5A78CD283A2E38246F3369416B3E27455EE80` |
+| `docs/felplex-baseline-adoption-runbook.md` | 2 302 | `37555FCEBA86C9FC057E88836C745FAE965C334A02AE0F46657B87DAFE1098C7` |
 
-El sufijo histórico real extraído del `HEAD` inicial mide 2 109 667 bytes y tiene SHA-256 `619CD1480F439C0B198A11E0E71CB9088C60EC0C2BEFE791C3BAD16A9EB03DE9`; tras el guard permanece byte-idéntico. La referencia suministrada `F0A9AA71…` se conserva como referencia documental, pero no coincide con ese blob Git y no se presenta como recalculada.
+La fuente binaria autorizada y el sufijo posterior al guard miden exactamente 2 141 307 bytes, comparten SHA-256 `F0A9AA71F46D78084D40DBDF5454ABB5BB55F809F4AA3D145B36E090C1FAAD35` y son byte-idénticos. El baseline protegido completo contiene 1 804 bytes de guard más el snapshot aprobado.
 
 ---
 

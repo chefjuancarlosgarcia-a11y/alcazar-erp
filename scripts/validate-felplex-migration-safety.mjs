@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto"
 import { existsSync, readFileSync, readdirSync } from "node:fs"
 import { dirname, join, relative, resolve } from "node:path"
+import { spawnSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..")
@@ -78,6 +79,14 @@ const baselineBuffer = existsSync(absolute(paths.baseline))
   ? readFileSync(absolute(paths.baseline))
   : Buffer.alloc(0)
 const baseline = baselineBuffer.toString("utf8")
+const guardBoundary = Buffer.from("$erp_baseline_guard$;\n\n", "ascii")
+const guardBoundaryAt = baselineBuffer.indexOf(guardBoundary)
+const secondGuardBoundaryAt = guardBoundaryAt >= 0
+  ? baselineBuffer.indexOf(guardBoundary, guardBoundaryAt + guardBoundary.length)
+  : -1
+requireCheck(guardBoundaryAt >= 0, "Exact baseline guard/snapshot boundary is missing")
+requireCheck(secondGuardBoundaryAt < 0, "Baseline guard/snapshot boundary is ambiguous")
+
 const guardStart = baseline.indexOf("do $erp_baseline_guard$")
 const guardEndMarker = "$erp_baseline_guard$;"
 const guardEnd = baseline.indexOf(guardEndMarker, guardStart)
@@ -111,15 +120,45 @@ for (const token of [
 }
 requireCheck(!/\bcascade\b/i.test(guardText), "Baseline guard must not use CASCADE")
 
-if (guardEnd >= 0) {
-  const suffixStart = guardEnd + guardEndMarker.length + 2
+if (guardBoundaryAt >= 0) {
+  const suffixStart = guardBoundaryAt + guardBoundary.length
   const suffix = baselineBuffer.subarray(suffixStart)
   const suffixHash = createHash("sha256").update(suffix).digest("hex").toUpperCase()
   requireCheck(
-    suffixHash === "619CD1480F439C0B198A11E0E71CB9088C60EC0C2BEFE791C3BAD16A9EB03DE9",
-    `Baseline historical suffix changed (actual ${suffixHash})`,
+    suffix.length === 2141307,
+    `Baseline reviewed suffix must contain 2141307 bytes (actual ${suffix.length})`,
+  )
+  requireCheck(
+    suffixHash === "F0A9AA71F46D78084D40DBDF5454ABB5BB55F809F4AA3D145B36E090C1FAAD35",
+    `Baseline reviewed suffix changed (actual ${suffixHash})`,
   )
 }
+
+const baselineAttr = spawnSync(
+  "git",
+  ["check-attr", "text", "--", paths.baseline],
+  { cwd: root, encoding: "utf8" },
+)
+requireCheck(baselineAttr.status === 0, "Unable to inspect baseline Git text attribute")
+requireCheck(
+  baselineAttr.stdout.trim().endsWith(": text: unset"),
+  `Baseline Git text attribute must be unset (actual: ${baselineAttr.stdout.trim()})`,
+)
+
+const filteredObject = spawnSync(
+  "git",
+  ["hash-object", "--stdin", `--path=${paths.baseline}`],
+  { cwd: root, input: baselineBuffer, encoding: "utf8" },
+)
+const rawObjectId = createHash("sha1")
+  .update(Buffer.from(`blob ${baselineBuffer.length}\0`, "ascii"))
+  .update(baselineBuffer)
+  .digest("hex")
+requireCheck(filteredObject.status === 0, "Unable to test Git baseline clean filtering")
+requireCheck(
+  filteredObject.stdout.trim() === rawObjectId,
+  "Git clean filtering would normalize the reviewed baseline snapshot",
+)
 
 const seed = read(paths.seed)
 const seedCode = stripSqlComments(seed)

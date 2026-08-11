@@ -41,4 +41,4 @@ La huella histórica suministrada para control documental fue:
 - bytes: `2,141,307`;
 - SHA-256: `F0A9AA71F46D78084D40DBDF5454ABB5BB55F809F4AA3D145B36E090C1FAAD35`.
 
-La verificación local pre-merge detectó que esa referencia no coincide con el blob real del HEAD inicial. La auditoría final debe reportar ambas huellas y utilizar el blob de Git como prueba de identidad del sufijo, sin presentar la referencia histórica como recalculada.
+La fuente binaria autorizada fue verificada con esa huella antes de reconstruir el baseline protegido. El sufijo posterior al guard conserva exactamente los 2,141,307 bytes aprobados y `.gitattributes` deshabilita su normalización de texto.
