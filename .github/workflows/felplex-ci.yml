@@ -3,6 +3,7 @@ name: FELplex safety
 on:
   pull_request:
     paths:
+      - ".gitattributes"
       - ".github/workflows/felplex-ci.yml"
       - "package.json"
       - "scripts/validate-felplex-migration-safety.mjs"
@@ -13,6 +14,7 @@ on:
       - "docs/**felplex**"
   push:
     paths:
+      - ".gitattributes"
       - ".github/workflows/felplex-ci.yml"
       - "package.json"
       - "scripts/validate-felplex-migration-safety.mjs"

@@ -12,6 +12,16 @@ begin
   if exists (
     select 1
     from public.fel_emission_config c
+    where c.id = 1
+      and c.emission_enabled is distinct from false
+  ) then
+    raise exception 'FEL_HARDENING_REQUIRES_EMISSION_DISABLED: emission_enabled debe estar en false antes de aplicar 230000.'
+      using errcode = 'P0001';
+  end if;
+
+  if exists (
+    select 1
+    from public.fel_emission_config c
     where c.id <> 1
        or c.environment <> 'stage'
        or c.auto_issue_paid_orders

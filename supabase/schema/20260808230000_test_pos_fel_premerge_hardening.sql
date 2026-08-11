@@ -29,6 +29,21 @@ begin
   return query select 'source_trigger_migration_checks_enabled_when_args'::text, false, false,
     'NOT EXECUTED: source artifact invariant is executed by scripts/validate-felplex-migration-safety.mjs'::text;
 
+  return query select 'static_hardening_requires_emission_disabled'::text,
+    (
+      select coalesce(
+        (
+          select count(*) = 0
+          from public.fel_emission_config c
+          where c.id = 1
+            and c.emission_enabled is distinct from false
+        ),
+        true
+      )
+    ),
+    true,
+    '230000 aborts unless id=1 emission_enabled is exactly false; source guard verified by local validator'::text;
+
   return query
   select 'trigger_auth_users_is_canonical'::text,
     exists (

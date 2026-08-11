@@ -214,6 +214,32 @@ for (const path of [paths.felBase, paths.lifecycle, paths.hardening]) {
   validateSqlDelimiters(path, read(path))
 }
 
+const hardening = read(paths.hardening)
+const hardeningCode = stripSqlComments(hardening)
+const hardeningGuardEnd = hardening.indexOf("$fel_premerge_config_guard$;")
+const hardeningGuardText = hardeningGuardEnd >= 0
+  ? hardening.slice(0, hardeningGuardEnd + "$fel_premerge_config_guard$;".length)
+  : ""
+requireCheck(hardeningGuardEnd >= 0, "230000 pre-merge config guard terminator is missing")
+requireCheck(
+  /emission_enabled\s+is\s+distinct\s+from\s+false/i.test(hardeningGuardText),
+  "230000 guard must fail closed when emission_enabled is distinct from false",
+)
+requireCheck(
+  hardeningGuardText.includes("FEL_HARDENING_REQUIRES_EMISSION_DISABLED"),
+  "230000 guard must raise FEL_HARDENING_REQUIRES_EMISSION_DISABLED",
+)
+requireCheck(
+  !/\bupdate\b[\s\S]*fel_emission_config[\s\S]*emission_enabled\s*=\s*false/i.test(hardeningCode),
+  "230000 must not auto-disable emission_enabled with UPDATE",
+)
+requireCheck(
+  !/\b(?:alter\s+table|create\s+or\s+replace\s+function|revoke\s+all|grant\s+)\b/i.test(
+    stripSqlComments(hardening.slice(0, hardeningGuardEnd)),
+  ),
+  "230000 config guard must execute before the first mutation",
+)
+
 const fixtureEnv = read(paths.fixtureEnv)
 requireCheck(
   /\[\s*["']FELPLEX_HTTP_ENABLED["']\s*,\s*["']false["']\s*\]/.test(fixtureEnv),
@@ -253,6 +279,20 @@ for (const key of ["name:", "on:", "permissions:", "jobs:"]) {
     `Workflow YAML is missing top-level key ${key}`,
   )
 }
+const pullRequestPaths = workflow.match(
+  /pull_request:\s*\n\s*paths:\s*\n([\s\S]*?)(?:\n\s*push:|\n\s*permissions:)/,
+)?.[1] ?? ""
+const pushPaths = workflow.match(
+  /push:\s*\n\s*paths:\s*\n([\s\S]*?)(?:\n\s*permissions:|\n\s*jobs:)/,
+)?.[1] ?? ""
+requireCheck(
+  /-\s+"\.gitattributes"/.test(pullRequestPaths),
+  "Workflow pull_request.paths must include .gitattributes",
+)
+requireCheck(
+  /-\s+"\.gitattributes"/.test(pushPaths),
+  "Workflow push.paths must include .gitattributes",
+)
 const ciSurface = [
   JSON.stringify(packageJson.scripts ?? {}),
   workflow,
