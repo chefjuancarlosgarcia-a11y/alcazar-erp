@@ -233,6 +233,10 @@ export function deactivateInventoryItem(id) {
   return supabase.from("inventory_items").update({ active: false }).eq("id", id).select("*").single()
 }
 
+export function reactivateInventoryItem(id) {
+  return supabase.from("inventory_items").update({ active: true }).eq("id", id).select("*").single()
+}
+
 export async function getAreaInventory(areaId) {
   const { data, error } = await supabase
     .from("area_inventory")
