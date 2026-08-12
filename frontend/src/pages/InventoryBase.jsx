@@ -15,6 +15,7 @@ import {
   adjustAreaInventory,
   createInventoryItem,
   deactivateInventoryItem,
+  reactivateInventoryItem,
   deleteInventoryImage,
   checkBarcodeExists,
   generateInternalBarcode,
@@ -608,6 +609,25 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
     await refresh()
   }
 
+  async function activate(item) {
+    if (item.merged_into_item_id) {
+      setError("Este producto fue fusionado en otro catálogo y no puede reactivarse.")
+      return
+    }
+    if (!window.confirm(`¿Activar ${item.name}? Volverá a aparecer en requisiciones y otros módulos.`)) return
+    const { error: actionError } = await reactivateInventoryItem(item.id)
+    if (actionError) {
+      setError(actionError.message || "No se pudo activar el producto.")
+      return
+    }
+    setMessage("Producto activado.")
+    if (editingItem?.id === item.id) {
+      setEditingItem((current) => (current ? { ...current, active: true } : current))
+      setItemForm((current) => ({ ...current, active: true }))
+    }
+    await refresh()
+  }
+
   function openAdjustment(item, areaId = areaFilter === "todos" ? "almacen" : areaFilter) {
     setAdjustment({
       ...EMPTY_ADJUSTMENT,
@@ -794,6 +814,7 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
           canManage={canManage}
           onEdit={openEdit}
           onDeactivate={deactivate}
+          onActivate={activate}
           onAdjust={openAdjustment}
         />
       )}
@@ -819,6 +840,7 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
           onClearFieldError={clearItemFormError}
           onSave={saveItem}
           onDelete={deactivate}
+          onActivate={activate}
           onClose={() => {
             if (savingItem) return
             setShowItemForm(false)
@@ -849,7 +871,7 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
   )
 }
 
-function InventoryCatalog({ loading, items, areas, query, setQuery, areaFilter, setAreaFilter, canManage, onEdit, onDeactivate, onAdjust }) {
+function InventoryCatalog({ loading, items, areas, query, setQuery, areaFilter, setAreaFilter, canManage, onEdit, onDeactivate, onActivate, onAdjust }) {
   const [page, setPage] = useState(1)
   const pagedItems = pageItems(items, page)
   const totalInvestment = items.reduce((total, item) => (
@@ -901,7 +923,15 @@ function InventoryCatalog({ loading, items, areas, query, setQuery, areaFilter, 
               <div className="inventory-row-actions">
                 {canManage && <button type="button" onClick={() => onAdjust(item)}>Ajustar stock</button>}
                 {canManage && <button type="button" onClick={() => onEdit(item)}>Editar</button>}
-                {canManage && item.active && <button type="button" className="danger" onClick={() => onDeactivate(item)}>Desactivar</button>}
+                {canManage && !item.merged_into_item_id && (
+                  <button
+                    type="button"
+                    className={item.active ? "danger" : "primary"}
+                    onClick={() => (item.active ? onDeactivate(item) : onActivate(item))}
+                  >
+                    {item.active ? "Desactivar" : "Activar"}
+                  </button>
+                )}
               </div>
             </article>
           )
@@ -1114,6 +1144,7 @@ function ItemModal({
   onClearFieldError,
   onSave,
   onDelete,
+  onActivate,
   onClose
 }) {
   const editing = Boolean(editingItem)
@@ -1501,9 +1532,14 @@ function ItemModal({
       <InventoryItemYieldPanel itemId={editingItem.id} item={editingItem} canManage={true} />
     )}
     <div className="inventory-modal-actions">
-      {editingItem?.active !== false && (
+      {canManageInventory && editingItem?.active !== false && (
         <button type="button" className="danger inventory-delete-action" onClick={() => onDelete(editingItem)} disabled={saving}>
-          Eliminar producto
+          Desactivar producto
+        </button>
+      )}
+      {canManageInventory && editingItem?.active === false && !editingItem?.merged_into_item_id && (
+        <button type="button" className="primary inventory-delete-action" onClick={() => onActivate(editingItem)} disabled={saving}>
+          Activar producto
         </button>
       )}
       <button type="button" className="secondary" onClick={onClose} disabled={saving}>Cancelar</button>
