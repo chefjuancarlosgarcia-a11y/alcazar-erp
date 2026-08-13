@@ -127,10 +127,17 @@ begin
       from pg_catalog.pg_proc p
       cross join lateral pg_catalog.aclexplode(coalesce(p.proacl, acldefault('f', p.proowner)))
         as a
-      join pg_catalog.pg_roles r on r.oid = a.grantee
       where p.oid = 'public.fel_payload_key_is_forbidden(text)'::regprocedure
-        and r.rolname in ('public', 'anon', 'authenticated', 'service_role')
-        and a.privilege_type = 'EXECUTE'
+        and lower(a.privilege_type) = 'execute'
+        and (
+          a.grantee = 0
+          or exists (
+            select 1
+            from pg_catalog.pg_roles r
+            where r.oid = a.grantee
+              and r.rolname in ('anon', 'authenticated', 'service_role')
+          )
+        )
     ),
     true,
     'payload helper EXECUTE is not granted to client or service roles'::text;
@@ -261,10 +268,9 @@ begin
       from pg_catalog.pg_proc p
       cross join lateral pg_catalog.aclexplode(coalesce(p.proacl, acldefault('f', p.proowner)))
         as a
-      join pg_catalog.pg_roles r on r.oid = a.grantee
       where p.oid = 'public.fel_order_payment_reconciliation(uuid)'::regprocedure
-        and r.rolname = 'public'
-        and a.privilege_type = 'EXECUTE'
+        and a.grantee = 0
+        and lower(a.privilege_type) = 'execute'
     ),
     true,
     'PUBLIC has no EXECUTE on fel_order_payment_reconciliation'::text;
