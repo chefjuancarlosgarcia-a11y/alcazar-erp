@@ -1,52 +1,68 @@
-# Evidencia histórica reportada — FELplex Fase 1A.3 en Supabase Stage
+# Evidencia oficial — FELplex Fase 1A.3 en Supabase Stage
 
 | Campo | Valor |
 |-------|-------|
 | **Entorno validado** | Supabase Stage |
 | **Project ref** | `tgrqarxfmpwgrkntvgma` |
-| **Fase** | FELplex 1A.3 — claim/finalize transaccional |
-| **Fecha de cierre** | 2026-08-10 |
+| **Nombre proyecto** | chefjuancarlosgarcia-a11y's el-gran-alcazar-stage |
+| **Fase** | FELplex 1A.3 — claim/finalize transaccional + pre-merge hardening |
+| **Fecha cierre histórico 220000** | 2026-08-10 |
+| **Fecha actualización 230000** | 2026-08-13 |
 | **Zona horaria documental** | America/Guatemala |
-| **Ejecución** | Manual — Supabase Stage SQL Editor (rol privilegiado) |
+| **Rama documentada** | `integrate/felplex-phase-1a3` @ `e9d639a5eec471be4090e185089a1713032e158f` |
+| **PR** | #21 — OPEN, Draft (no Ready, no merge) |
 | **Producción** | No involucrada |
-| **Documento generado** | Evidencia local de cierre (repositorio) |
+| **Documento** | Evidencia local de cierre y validación estructural 230000 |
 
 ---
 
-## 2. Resumen ejecutivo
+## 1. Veredicto actualizado
 
-Según los resultados ejecutados y reportados por el operador, FELplex Fase 1A.3 fue validada en Supabase Stage mediante:
+### Histórico 220000 (2026-08-10)
 
-1. **Pruebas estructurales** (`20260808220000_test_pos_fel_attempt_lifecycle.sql`) — 25 escenarios `executed=true`, todos `passed=true`; 9 escenarios conceptuales honestamente `NOT EXECUTED`.
-2. **Runtime transaccional** (`20260808220000_pos_fel_attempt_lifecycle.runtime.sql`) — 9 escenarios operativos `executed=true`, todos `passed=true`; 1 escenario de concurrencia deliberadamente no ejecutado.
-3. **Post-ROLLBACK** — configuración FEL y datos fixture restaurados; cero intentos persistidos; cero filas con identificadores ficticios de certificación.
+**PASS histórico reportado por el operador** — 25/25 estructurales y 9/9 runtime ejecutados para `20260808220000`. Concurrencia PostgreSQL real: **NOT EXECUTED / PENDIENTE**.
 
-**Veredicto histórico reportado por el operador:** **PASS — FELplex Fase 1A.3 validada en Supabase Stage para flujo transaccional secuencial claim/finalize, con rollback limpio.**
+### Migración 230000 (2026-08-13)
 
-**CONCURRENCIA POSTGRESQL REAL: NOT EXECUTED / PENDIENTE.**
+**PASS ESTRUCTURAL STAGE PARA MIGRACIÓN 230000**
 
-**Este cierre no autoriza deploy de Edge Function, habilitación permanente de `emission_enabled`, llamada HTTP a FELplex ni uso en Producción.**
+Resultado final del test estructural `20260808230000_test_pos_fel_premerge_hardening.sql` en Stage (reportado por el operador, no re-ejecutado en esta entrega documental):
 
-Este registro no valida la migración posterior `20260808230000_pos_fel_premerge_hardening.sql`. Esa corrección permanece pendiente de aplicación y pruebas en Stage.
+| Métrica | Valor |
+|---------|-------|
+| `executed_passed` | **36** |
+| `executed_failed` | **0** |
+| `not_executed` | **6** |
+| **Total** | **42** |
+
+**Limitaciones explícitas de este veredicto:**
+
+- **No** autoriza deploy de Edge Function.
+- **No** autoriza FELplex HTTP.
+- **No** autoriza activar `emission_enabled` ni `auto_issue_paid_orders`.
+- **No** autoriza Producción.
+- Runtime transaccional con fixture FEL y concurrencia PostgreSQL real **continúan pendientes**.
 
 ---
 
-## 3. Alcance de la validación
+## 2. Alcance
 
-### Incluido
+### Incluido — histórico 220000
 
-- Migración `20260808220000_pos_fel_attempt_lifecycle.sql` aplicada en Stage (confirmado por operador: `db push --dry-run` = up to date).
-- RPCs PostgreSQL:
-  - `fel_claim_pos_fel_certification_attempt(uuid, uuid)`
-  - `fel_finalize_pos_fel_certification_attempt(...)`
-  - Helpers: `fel_actor_can_request_certification`, `fel_validate_safe_response_payload`, `fel_order_payment_reconciliation`
-- Gates DB en claim (`fel_emission_config id=1`, stage, `emission_enabled`, contingencia).
-- Validación de safe response payload en finalize.
-- Flujo secuencial claim → finalize (éxito, fallo, stale, cross-document, idempotencia de processing).
-- Integridad de órdenes y pagos fixture durante RPCs FEL.
-- Reversión completa vía `ROLLBACK` del runtime transaccional.
+- Migración `20260808220000_pos_fel_attempt_lifecycle.sql` aplicada en Stage.
+- RPCs claim/finalize, helpers actor y safe payload.
+- Pruebas estructurales 25/25 y runtime 9/9 (reportado por operador).
+- Post-ROLLBACK runtime limpio.
 
-### Excluido
+### Incluido — 230000 (2026-08-13)
+
+- Migración `20260808230000_pos_fel_premerge_hardening.sql` aplicada **una sola vez** en Stage vía `npx supabase db push` (exit code 0).
+- Validación estructural final 36/0/6/42 en Stage.
+- Correcciones del archivo de prueba (PG17, PUBLIC `grantee=0`, cobertura tres helpers).
+- ACL observado read-only post-validación.
+- Stage intacto; switches apagados confirmados.
+
+### Excluido (ambas fases)
 
 - HTTP / FELplex / Edge Function deploy
 - Certificación SAT real
@@ -54,109 +70,240 @@ Este registro no valida la migración posterior `20260808230000_pos_fel_premerge
 - Concurrencia PostgreSQL con dos sesiones
 - Confirmación del contrato externo del payload FELplex (sigue bloqueado)
 - Habilitación permanente de emisión FEL
+- Runtime con fixture para `concept_finalize_success_with_fixture`
 
 ---
 
-## 4. Artefactos revisados
+## 3. Migraciones aplicadas en Stage
 
-| Artefacto | Rol |
-|-----------|-----|
-| `supabase/migrations/20260808190000_pos_fel_documents.sql` | Referencia base FEL (documentos, intentos, config) |
-| `supabase/migrations/20260808220000_pos_fel_attempt_lifecycle.sql` | Migración 1A.3 (claim/finalize + helpers) |
-| `supabase/schema/20260808220000_test_pos_fel_attempt_lifecycle.sql` | Pruebas estructurales Stage |
-| `supabase/stage-tests/20260808220000_pos_fel_attempt_lifecycle.runtime.sql` | Runtime transaccional con ROLLBACK |
-| `docs/felplex-20260808220000-stage-runtime-runbook.md` | Runbook operativo Stage |
+| Timestamp | Archivo | Estado remoto Stage |
+|-----------|---------|---------------------|
+| `20260808180000` | `erp_schema_baseline.sql` | Aplicada (local/remoto coincidente) |
+| `20260808190000` | `pos_fel_documents.sql` | Aplicada |
+| `20260808200000` | *(FELplex phase artifacts)* | Aplicada |
+| `20260808210000` | *(FELplex phase artifacts)* | Aplicada |
+| `20260808220000` | `pos_fel_attempt_lifecycle.sql` | Aplicada |
+| `20260808230000` | `pos_fel_premerge_hardening.sql` | **Aplicada 2026-08-13** |
 
----
+**230000 — detalle de aplicación (reportado por operador):**
 
-## 5. Preconditions de Stage
-
-Resultado reportado por el operador y revisado contra los criterios del runbook.
-
-| Precondición | Estado |
-|--------------|--------|
-| Project ref `tgrqarxfmpwgrkntvgma` | Confirmado |
-| Migración 20260808220000 aplicada | Confirmado |
-| `fel_emission_config id=1`: `environment=stage` | Confirmado |
-| `emission_enabled=false` (baseline pre-runtime) | Confirmado |
-| `auto_issue_paid_orders=false` | Confirmado |
-| `formal_contingency_enabled=false` | Confirmado |
-| `pos_fel_documents` = 3 (fixture Q297 ficticio) | Confirmado |
-| `pos_fel_attempts` = 0 (pre-runtime) | Confirmado |
-| Usuarios fixture (`cajero@stage-fel.test`, etc.) | Confirmado |
-| Fixture POS (`M-FEL-PAID`, producto `fef00001-…`) | Confirmado |
+- Comando: `npx supabase db push`
+- Exit code: **0**
+- Historial posterior: `20260808230000` presente local y remoto.
+- Dry-run posterior: **Remote database is up to date**
+- **No** se reaplicaron `180000`–`220000`.
+- **No** se ejecutó rollback productivo `20260808230000`.
 
 ---
 
-## 6. Evidencia estructural
+## 4. Preflight Stage antes de aplicar 230000
 
-Resultado reportado por el operador y revisado contra los criterios del runbook.
+Documentado por el operador antes de `db push`:
 
-### Resumen numérico
+| Precondición | Valor |
+|--------------|-------|
+| `config_rows` | 1 |
+| `environment` | stage |
+| `emission_enabled` | false |
+| `auto_issue_paid_orders` | false |
+| `formal_contingency_enabled` | false |
+| `fel_documents` | 3 |
+| `fel_attempts` | 0 |
+| `processing_documents` | 0 |
+| `non_stage_documents` | 0 |
+| `claim_rpc_exists` | true |
+| `finalize_rpc_exists` | true |
+| `reconciliation_rpc_exists` | true |
+
+Enlace local autorizado: project ref `tgrqarxfmpwgrkntvgma`. Producción no involucrada.
+
+---
+
+## 5. Cronología de validación estructural 230000
+
+### Intento 1 — fallo PG17
+
+- Ejecución del test completo en Stage vía CLI enlazada.
+- **PostgreSQL ERROR 42601:** *a column definition list is redundant for a function with OUT parameters*
+- Escenario donde se manifestó: `payload_helpers_revoked_from_clients`
+- Causa: listas manuales redundantes en `pg_catalog.aclexplode(...) AS a(tipos...)`.
+- La transacción revirtió; **no** hubo tabla completa de resultados.
+- Stage operativo intacto (configuración y conteos sin cambio).
+
+### Corrección 1 — compatibilidad PostgreSQL 17
+
+- Commit: `fd791c636356fd44f8e1b1cfb21372bec35593fc`
+- Mensaje: `fix(felplex): make ACL structural tests PostgreSQL 17 compatible`
+- Cambio: alias simple `AS a`; columnas nativas `grantee`, `privilege_type`; eliminación de `priv_type` / `priv`.
+
+### Hallazgo 2 — falso PASS de PUBLIC
+
+- Comprobar PUBLIC mediante `JOIN pg_roles … rolname = 'public'` **no** es equivalente al pseudo-rol PUBLIC (`grantee = 0`).
+- Prueba negativa reportada: fila simulada `grantee=0` + EXECUTE — lógica corregida detecta; lógica legacy con `pg_roles` omite.
+
+### Corrección 2 — PUBLIC vía grantee = 0
+
+- Commit: `d329b81b30ea33873ac25567ecf5a6a8761d0334`
+- Mensaje: `fix(felplex): validate PUBLIC ACL via pseudo-role grantee`
+- Cambio: PUBLIC identificado exclusivamente con `a.grantee = 0`.
+
+### Hallazgo 3 — cobertura ACL incompleta de helpers
+
+- `payload_helpers_revoked_from_clients` solo inspeccionaba `fel_payload_key_is_forbidden(text)`.
+- Faltaban `fel_validate_request_payload_node(jsonb)` y `fel_validate_request_payload(jsonb)`.
+
+### Corrección 3 — tres helpers
+
+- Commit: `e9d639a5eec471be4090e185089a1713032e158f`
+- Mensaje: `fix(felplex): cover ACLs for all payload helpers`
+- Cambio: `p.oid IN (...)` con las tres firmas regprocedure.
+
+### Resultado final válido (Stage, reportado por operador)
 
 | Métrica | Valor |
 |---------|-------|
-| `executed=true`, `passed=true` | **25** |
-| `executed=true`, `passed=false` | **0** |
-| `executed=false` (conceptuales) | **9** |
-| Total escenarios estructurales | **34** |
+| `executed_passed` | 36 |
+| `executed_failed` | 0 |
+| `not_executed` | 6 |
+| **Total** | 42 |
 
-### Controles confirmados (todos passed)
-
-- Firmas de claim, finalize, actor helper y safe payload validator
-- `EXECUTE` de claim/finalize **solo** para `service_role`
-- Sin `EXECUTE` para `anon` / `authenticated` en claim/finalize
-- Helper actor no ejecutable por PUBLIC (ACL `grantee=0`), `anon` ni `authenticated`
-- `SECURITY DEFINER` confirmado vía `pg_proc.prosecdef`
-- `search_path` vacío confirmado vía `proconfig @> array['search_path=""']`
-- Gate `fel_emission_config` presente en claim (post-lock, pre-insert)
-- Finalize invoca `fel_validate_safe_response_payload`
-- Safe payload: `http_status` null o entero 100–599; rechazo de claves prohibidas/desconocidas; límites `safe_code` ≤ 64, `safe_message` ≤ 240
-
-Los 9 escenarios conceptuales permanecen `executed=false` con detail `NOT EXECUTED` (sin afirmar comportamiento no probado en DB).
+Commits de corrección publicados en `origin/integrate/felplex-phase-1a3` (push normal, sin force). Commit de contenido operativo previo: `1a049938b496111e7988516a8dd01023e5fa6fa2` (*resolve pre-merge operational gaps*).
 
 ---
 
-## 7. Evidencia runtime
+## 6. Resultado estructural final — escenarios NOT EXECUTED
 
-Resultado reportado por el operador y revisado contra los criterios del runbook.
+Los seis escenarios con `executed=false` **no** se presentan como PASS:
 
-### Resumen numérico
+| # | Escenario | Razón |
+|---|-----------|-------|
+| 1 | `source_baseline_guard_before_first_ddl` | Delegado a validador local |
+| 2 | `source_role_seed_do_nothing_no_do_update` | Delegado a validador local |
+| 3 | `source_trigger_migration_checks_enabled_when_args` | Delegado a validador local |
+| 4 | `source_rollback_correspondence` | Delegado a validador local |
+| 5 | `concept_finalize_success_with_fixture` | Requiere fixtures Stage aprobados; runtime pendiente |
+| 6 | `concept_postgresql_concurrency` | Requiere runbook two-session; pendiente |
+
+---
+
+## 7. ACL final observado en Stage (read-only)
+
+Reportado por operador mediante catálogos y `aclexplode`:
+
+### Helpers de payload
+
+| Función | EXECUTE concedido a |
+|---------|---------------------|
+| `fel_payload_key_is_forbidden(text)` | postgres únicamente |
+| `fel_validate_request_payload_node(jsonb)` | postgres únicamente |
+| `fel_validate_request_payload(jsonb)` | postgres únicamente |
+
+Sin EXECUTE para PUBLIC (`grantee=0`), anon, authenticated ni service_role.
+
+### Reconciliación
+
+| Función | EXECUTE concedido a |
+|---------|---------------------|
+| `fel_order_payment_reconciliation(uuid)` | postgres, service_role |
+
+Sin EXECUTE para PUBLIC, anon ni authenticated. PUBLIC inspeccionado en test mediante `grantee = 0`.
+
+---
+
+## 8. Estado post-ROLLBACK final (230000)
+
+Después de la última ejecución estructural válida (reportado por operador):
+
+| Campo | Valor |
+|-------|-------|
+| `environment` | stage |
+| `emission_enabled` | false |
+| `auto_issue_paid_orders` | false |
+| `formal_contingency_enabled` | false |
+| `fel_documents` | 3 |
+| `fel_attempts` | 0 |
+| `processing_documents` | 0 |
+| Función temporal `test_pos_fel_premerge_hardening_20260808230000()` | **Ausente** |
+| `db push --dry-run` | Remote database is up to date |
+
+---
+
+## 9. Pruebas locales (evidencia más reciente)
+
+| Prueba | Resultado |
+|--------|-----------|
+| `scripts/validate-felplex-migration-safety.mjs` | PASS |
+| `npm run test:felplex-1a` | 47/47 PASS |
+| `npm run check:felplex-1a` | PASS |
+| `git diff --check` (commits corrección test) | PASS |
+| `deno.lock` | Ausente |
+| `package-lock.json` | Intacto |
+| Secret scan (commits test + este documento) | Sin secretos detectados |
+
+---
+
+## 10. Riesgos y pendientes reales
+
+| ID | Pendiente | Severidad |
+|----|-----------|-----------|
+| P1 | Concurrencia PostgreSQL real (dos sesiones) | Media |
+| P2 | Contrato payload FELplex (`FELPLEX_CONTRACT_UNCONFIRMED`) | Alta |
+| P3 | Deploy Edge Function `felplex-certify-invoice` | Media |
+| P4 | Secretos Stage para Edge | Media |
+| P5 | Primera llamada HTTP real a FELplex | Alta |
+| P6 | Runtime con fixture FEL (`concept_finalize_success_with_fixture`) | Alta |
+| P7 | Recovery operativo documentos `processing` | Alta |
+| P8 | Producción | Alta — no autorizada |
+| P9 | `emission_enabled` permanece **false** | Obligatorio |
+| P10 | `auto_issue_paid_orders` permanece **false** | Obligatorio |
+| P11 | Actualización evidencia PR / revisión externa | Baja |
+
+**Resuelto respecto a estado anterior del documento:**
+
+- ~~P6 anterior: aplicación y tests 230000 en Stage~~ → **230000 aplicada; test estructural 36/0/6/42 aprobado en Stage.**
+
+---
+
+## 11. Restricciones de autorización
+
+Este documento **no** autoriza:
+
+- Deploy de Edge Function
+- `FELPLEX_HTTP_ENABLED` ni llamada HTTP a FELplex
+- Activar `emission_enabled` o `auto_issue_paid_orders` fuera de transacciones de prueba revertidas
+- Uso en Producción
+- Marcar PR #21 Ready o mergear sin hito independiente
+
+PR #21 permanece **OPEN** y **Draft**.
+
+---
+
+## 12. Evidencia histórica 220000 (preservada)
+
+### Resumen ejecutivo histórico
+
+Según resultados reportados por el operador el 2026-08-10:
+
+1. **Pruebas estructurales** (`20260808220000_test_pos_fel_attempt_lifecycle.sql`) — 25 `executed=true` / `passed=true`; 9 conceptuales `NOT EXECUTED`.
+2. **Runtime transaccional** (`20260808220000_pos_fel_attempt_lifecycle.runtime.sql`) — 9/9 operativos; 1 concurrencia no ejecutada.
+3. **Post-ROLLBACK runtime** — configuración y fixtures restaurados.
+
+### Resumen numérico estructural 220000
+
+| Métrica | Valor |
+|---------|-------|
+| `executed=true`, `passed=true` | 25 |
+| `executed=true`, `passed=false` | 0 |
+| `executed=false` | 9 |
+| Total | 34 |
+
+### Resumen runtime 220000
 
 ```json
-{
-  "executed_passed": 9,
-  "executed_failed": 0,
-  "not_executed": 1,
-  "total": 10
-}
+{ "executed_passed": 9, "executed_failed": 0, "not_executed": 1, "total": 10 }
 ```
 
-### Escenarios ejecutados y aprobados (`executed=true`, `passed=true`)
-
-| # | Escenario | Validación |
-|---|-----------|------------|
-| 1 | `runtime_claim_pending_document` | `pending_certification → processing`, intento #1 `pending` |
-| 2 | `runtime_claim_processing_rejected` | Segundo claim → `FEL_ALREADY_PROCESSING`, sin segundo intento |
-| 3 | `runtime_finalize_success` | Finalize ficticio `TEST-ROLLBACK-NOT-CERTIFIED` → `certified` / intento `success` |
-| 4 | `runtime_certified_not_overwritable` | Segundo finalize → `FEL_ALREADY_CERTIFIED`, sin sobrescritura |
-| 5 | `runtime_finalize_failure_retry` | Doc2 failed, `retry_count + 1`, `last_error` sanitizado |
-| 6 | `runtime_reclaim_failed_document` | Re-claim → intento #2 `pending`, doc `processing` |
-| 7 | `runtime_stale_attempt_rejected` | Finalize intento #1 stale → `FEL_FINALIZE_STALE`; intento #2 sigue `pending` |
-| 8 | `runtime_attempt_belongs_to_document` | Cross `attempt_id` → `FEL_ATTEMPT_NOT_FOUND`, sin mutación |
-| 9 | `runtime_order_payment_intact` | Snapshots `pos_orders` / `pos_order_payments` idénticos antes/después |
-
-### Escenario no ejecutado (deliberado)
-
-| Escenario | Estado | Razón |
-|-----------|--------|-------|
-| `runtime_postgres_concurrency` | **PENDIENTE / NOT EXECUTED** | Requiere runbook separado, coordinación de dos sesiones y aprobación explícita. **No** se presenta como aprobado ni fallido. |
-
----
-
-## 8. Evidencia post-ROLLBACK
-
-Resultado reportado por el operador y revisado contra los criterios del runbook.
+### Post-ROLLBACK runtime 220000
 
 ```json
 {
@@ -170,163 +317,68 @@ Resultado reportado por el operador y revisado contra los criterios del runbook.
 }
 ```
 
-### Interpretación obligatoria
-
-- El runtime fue **completamente revertido** mediante `ROLLBACK`.
-- **No** quedaron intentos FEL persistidos (`fel_attempts = 0`).
-- **No** quedaron UUID ni autorizaciones ficticias (`test_certification_rows = 0`).
-- Los **tres** documentos FEL originales permanecieron.
-- `emission_enabled` regresó a **`false`**.
-- Órdenes y pagos permanecieron intactos (corroborado por `runtime_order_payment_intact`).
-- **No** hubo HTTP, `pg_net`, llamada a FELplex ni certificación SAT real.
-- **No** se desplegó la Edge Function.
-- **No** se habilitó emisión automática.
-
 ---
 
-## 9. Controles de seguridad confirmados
+## 13. Trazabilidad e integridad (hashes desde HEAD @ `e9d639a`)
 
-| Control | Estado |
-|---------|--------|
-| Sin secretos en scripts de prueba / runtime | Confirmado (revisión local) |
-| Claim/finalize `service_role` only | Confirmado (estructural) |
-| Actor helper no expuesto a roles frontend | Confirmado (estructural) |
-| Safe payload allowlist en finalize | Confirmado (estructural + runtime) |
-| Toggle `emission_enabled=true` solo intra-transacción | Confirmado (runtime + post-ROLLBACK) |
-| Identificadores `TEST-ROLLBACK-NOT-CERTIFIED` no persistidos | Confirmado (post-ROLLBACK) |
-| Sin DELETE / TRUNCATE / SET ROLE en runtime | Confirmado (revisión local del script) |
-| Producción no involucrada | Confirmado |
-
----
-
-## 10. Elementos expresamente no ejecutados
-
-| Elemento | Estado |
-|----------|--------|
-| Concurrencia PostgreSQL real (dos sesiones) | **NOT EXECUTED / PENDIENTE** |
-| Deploy Edge Function `felplex-certify-invoice` | No ejecutado |
-| HTTP a FELplex | No ejecutado |
-| `FELPLEX_HTTP_ENABLED` | No habilitado |
-| Certificación SAT real | No ejecutada |
-| Producción | No involucrada |
-| Confirmación contrato payload FELplex | Sigue bloqueado (`FELPLEX_CONTRACT_UNCONFIRMED`) |
-| Habilitación permanente `emission_enabled` | No autorizada |
-
----
-
-## 11. Riesgos y pendientes
-
-| ID | Pendiente | Severidad | Notas |
-|----|-----------|-----------|-------|
-| P1 | Concurrencia PostgreSQL real | Media | Runbook separado requerido; receta de dos SQL Editors inválida por bloqueo en `fel_emission_config` |
-| P2 | Contrato payload FELplex | Alta | Builder Edge sigue bloqueado hasta confirmación externa |
-| P3 | Edge Function deploy | Media | Requiere fase posterior con gates HTTP + secretos Stage |
-| P4 | Primera llamada FELplex real | Alta | Fuera de alcance 1A.3 |
-| P5 | Producción | Alta | Explícitamente no autorizada por este cierre |
-| P6 | Aplicación y tests de 230000 en Stage | Alta | **NOT EXECUTED**; no reutilizar los conteos históricos |
-| P7 | Recovery de documentos `processing` | Alta | Fail-closed; reconciliación manual hasta definir política |
-
----
-
-## 12. Veredicto histórico y estado actual
-
-**PASS histórico reportado por el operador — 25/25 estructurales y 9/9 runtime ejecutados para 20260808220000.**
-
-**CONCURRENCIA POSTGRESQL REAL: NOT EXECUTED / PENDIENTE.**
-
-**Este cierre no autoriza deploy de Edge Function, habilitación permanente de `emission_enabled`, llamada HTTP a FELplex ni uso en Producción.**
-
-**20260808230000: NOT EXECUTED / PENDIENTE DE APLICACIÓN Y VALIDACIÓN STAGE. No existe cierre definitivo de 230000.**
-
----
-
-## 13. Criterios para avanzar a la siguiente fase
-
-Antes de considerar Edge deploy o primera integración HTTP controlada:
-
-1. Aprobar y ejecutar (si procede) runbook de concurrencia PostgreSQL con diseño que evite bloqueo mutuo en `fel_emission_config`.
-2. Confirmar o mantener bloqueo del contrato payload FELplex según decisión de producto/arquitectura.
-3. Desplegar Edge Function solo en Stage con `FELPLEX_HTTP_ENABLED` explícitamente off hasta runbook HTTP dedicado.
-4. Mantener `emission_enabled=false` confirmado fuera de transacciones de prueba hasta runbook de emisión controlada.
-5. Repetir postcondiciones post-rollback tras cualquier prueba adicional.
-6. **No** promover a Producción sin hito de aprobación independiente.
-
----
-
-## 14. Trazabilidad e integridad
-
-Hashes calculados **localmente** sobre copias en repositorio (sin alterar archivos). La evidencia de ejecución remota se etiqueta como reportada por el operador.
+Hashes calculados **localmente** sobre blobs en repositorio al momento de esta entrega. Ejecución remota etiquetada como *reportada por el operador*.
 
 | Artefacto | Bytes | SHA-256 |
 |-----------|------:|---------|
+| `supabase/migrations/20260808230000_pos_fel_premerge_hardening.sql` | 21 413 | `E15B68DB0CB710F36A880269636F5B5ADB5BEAD4C91F22B86587A8E20B4E54F5` |
+| `supabase/schema/20260808230000_test_pos_fel_premerge_hardening.sql` | 16 471 | `DFCAF64B6BED576178D705AF431BEEC5535784978A0CDBFD33AE45EB50862C29` |
 | `supabase/migrations/20260808220000_pos_fel_attempt_lifecycle.sql` | 16 405 | `9BD5C4666EB7A4893E34DB23CEBDA328AD9BE1CAAFFD3BF7A45A6B1E67161C5A` |
 | `supabase/schema/20260808220000_test_pos_fel_attempt_lifecycle.sql` | 12 743 | `823190BADE58AF2A12B6BEE7FCCBF45CAE5339D15C0C0FC252F7C32AF55CB259` |
 | `supabase/stage-tests/20260808220000_pos_fel_attempt_lifecycle.runtime.sql` | 23 620 | `8EF1C2178327E8D1041FCFB90554110C6A197AFE9D142894BDA5A30A478EA759` |
 | `docs/felplex-20260808220000-stage-runtime-runbook.md` | 11 522 | `43627438C7CC3162CB37ECE2C00E9C63818BB828BE7A49EC11420B6F814D9867` |
+| `supabase/migrations/20260808180000_erp_schema_baseline.sql` (completo) | 2 143 116 | `1FFBB4C022025C617C5FF92D1856E8B11343CDC88E7C5C16B654EEE504E99C55` |
 
-### Referencia base (no re-hasheada en esta entrega)
+### Sufijo aprobado del baseline (sin cambio)
 
-- `supabase/migrations/20260808190000_pos_fel_documents.sql` — migración FEL Phase 0 (prerequisito)
+| Medida | Valor |
+|--------|-------|
+| Bytes | **2 141 307** |
+| SHA-256 | `F0A9AA71F46D78084D40DBDF5454ABB5BB55F809F4AA3D145B36E090C1FAAD35` |
 
-### Limitaciones de trazabilidad
+El baseline protegido completo contiene guard (incluye `relkind='c'`) más snapshot aprobado byte-idéntico al sufijo.
 
-- Cursor **no** verificó directamente la base remota Stage.
-- Resultados numéricos de ejecución: **resultado reportado por el operador y revisado contra los criterios del runbook.**
-- Este documento es evidencia documental local; no sustituye logs exportados del SQL Editor si se requieren en auditoría externa.
+### Commits de trazabilidad (test estructural 230000)
 
-## 15. Corrección pre-merge local posterior
+| SHA | Descripción |
+|-----|-------------|
+| `1a049938b496111e7988516a8dd01023e5fa6fa2` | Contenido operativo 230000 (*resolve pre-merge operational gaps*) |
+| `fd791c636356fd44f8e1b1cfb21372bec35593fc` | PG17 — `aclexplode` columnas nativas |
+| `d329b81b30ea33873ac25567ecf5a6a8761d0334` | PUBLIC — `grantee = 0` |
+| `e9d639a5eec471be4090e185089a1713032e158f` | Cobertura ACL tres helpers payload |
 
-La corrección local de 2026-08-11 se limita a:
-
-- revisión estática y validador local de artefactos;
-- tests y type-check Deno locales;
-- guard del baseline, seed no destructivo y validación canónica del trigger;
-- migración/rollback/tests `20260808230000`;
-- normalización Edge de `administrador` a `admin`;
-- CI sin secretos, SQL remoto ni deploy.
-
-Corrección adicional local (commit 6, sin push):
-
-- guard `230000` exige `emission_enabled=false` en la fila viva antes de mutar;
-- workflow FELplex CI se dispara también ante cambios aislados en `.gitattributes`.
-
-Corrección adicional local (commit 7, sin push):
-
-- `230000`: `GRANT EXECUTE` explícito de `fel_order_payment_reconciliation(uuid)` solo a `service_role`;
-- `230000`: bloqueo `FOR UPDATE` de `pos_orders` en finalize success antes de reconciliar pagos;
-- `230000`: validación recursiva de alias secretos en `request_payload` vía `fel_payload_key_is_forbidden`;
-- `180000` guard: detección de tipos compuestos (`relkind='c'`) sin alterar el sufijo aprobado;
-- validador local ampliado con auto-pruebas negativas; tests estructurales 230000 ampliados.
-
-Serialización finalize vs pagos POS: demostrada estáticamente porque `create_pos_split_payment` es el único escritor SQL de `pos_order_payments` y bloquea `pos_orders` con `FOR UPDATE` al inicio de la transacción.
-
-Clasificación de evidencia:
+### Clasificación de evidencia
 
 | Fuente | Estado |
 |--------|--------|
 | Stage 25/25 y 9/9 de 220000 | Histórico, reportado por operador |
-| Tests Deno de la corrección | Local |
-| Revisión de SQL/CI/secretos | Estática local |
-| SQL y tests 230000 | **NOT EXECUTED** |
+| Migración 230000 aplicada Stage | Reportado por operador |
+| Test estructural 230000 36/0/6/42 | Ejecutado Stage, reportado por operador |
+| Tests Deno / validador / type-check | Local |
 | Concurrencia PostgreSQL real | **NOT EXECUTED** |
-| Recovery de `processing` | Pendiente; reconciliación manual |
+| Runtime fixture finalize 230000 | **NOT EXECUTED** |
+| Edge deploy / FELplex HTTP | **NOT EXECUTED** |
+| Producción | **No involucrada** |
 
-### Huellas locales de artefactos modificados por la corrección
+### Limitaciones de trazabilidad
 
-Estas huellas prueban únicamente contenido local; no prueban aplicación en Stage.
-
-| Artefacto | Bytes | SHA-256 |
-|-----------|------:|---------|
-| `.gitattributes` | 103 | `F73746903F637183E39AD57E88744067B97545DDB994F15F399E982C453877E0` |
-| `supabase/migrations/20260808180000_erp_schema_baseline.sql` | 2 143 116 | `1FFBB4C022025C617C5FF92D1856E8B11343CDC88E7C5C16B654EEE504E99C55` |
-| `supabase/migrations/20260808230000_pos_fel_premerge_hardening.sql` | 21 413 | `E15B68DB0CB710F36A880269636F5B5ADB5BEAD4C91F22B86587A8E20B4E54F5` |
-| `supabase/rollback/20260808230000_pos_fel_premerge_hardening.rollback.sql` | 2 384 | `586D6CEB5168D7A37F05002423980858C2883ED5137CAF5313CF8079BC3E6CB0` |
-| `supabase/schema/20260808230000_test_pos_fel_premerge_hardening.sql` | 16 564 | `F512BB284D7F0846A747794BABCBAADE683A28992E972332630E11091DA833BF` |
-| `scripts/validate-felplex-migration-safety.mjs` | 17 907 | `153CA5C50FDA2D80B7E9EDCE4C7599A959D3E8FF0A0D504303B3AB543465DD42` |
-| `docs/felplex-baseline-adoption-runbook.md` | 2 336 | `896245E89966A93E42BDF7DEE703B61DDB6FE6929E67E1F1D21D0EB117B32373` |
-
-La fuente binaria autorizada y el sufijo posterior al guard miden exactamente 2 141 307 bytes, comparten SHA-256 `F0A9AA71F46D78084D40DBDF5454ABB5BB55F809F4AA3D145B36E090C1FAAD35` y son byte-idénticos. El baseline protegido completo contiene 1 809 bytes de guard (incluye `relkind='c'`) más el snapshot aprobado.
+- Este documento es evidencia documental local.
+- Resultados numéricos de ejecución remota: **reportados por el operador** salvo hashes recalculados desde HEAD.
+- No sustituye logs exportados del SQL Editor / CLI si se requieren en auditoría externa.
 
 ---
 
-*Fin del registro de cierre — FELplex Fase 1A.3 — Supabase Stage — 2026-08-10 (America/Guatemala)*
+## 14. Confirmación — Producción no involucrada
+
+- Project ref Stage: `tgrqarxfmpwgrkntvgma` únicamente para operaciones documentadas.
+- Producción no autorizada en ninguna fase de este registro.
+- Sin deploy Edge, sin HTTP FELplex, sin activación de emisión.
+- PR #21 permanece Draft.
+
+---
+
+*Fin del registro — FELplex Fase 1A.3 — Supabase Stage — actualizado 2026-08-13 (America/Guatemala)*
