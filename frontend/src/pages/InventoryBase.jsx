@@ -24,6 +24,7 @@ import {
   getInventoryMovements,
   INVENTORY_IMAGE_ALLOWED_TYPES,
   INVENTORY_IMAGE_MAX_BYTES,
+  mapInventoryError,
   updateInventoryItemImage,
   uploadInventoryImage,
   updateInventoryItem
@@ -181,6 +182,7 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
   const [itemFormFocusField, setItemFormFocusField] = useState("")
   const [globalUnitConversions, setGlobalUnitConversions] = useState([])
   const [unitChangeWarning, setUnitChangeWarning] = useState(null)
+  const [statusToggleItemId, setStatusToggleItemId] = useState("")
   const { toasts, showToast, dismissToast } = useToast()
   const [testFlowFilter, setTestFlowFilter] = useState(TEST_FLOW_FILTER.REAL)
   const realtimeTimerRef = useRef(null)
@@ -594,38 +596,55 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
     }
   }
 
-  async function deactivate(item) {
-    if (!window.confirm(`¿Desactivar ${item.name}? No se eliminará el historial.`)) return
-    const { error: actionError } = await deactivateInventoryItem(item.id)
-    if (actionError) {
-      setError(actionError.message || "No se pudo desactivar el producto.")
-      return
-    }
-    setMessage("Producto desactivado.")
-    if (editingItem?.id === item.id) {
-      setShowItemForm(false)
-      setEditingItem(null)
-    }
-    await refresh()
-  }
+  async function toggleProductActive(item) {
+    if (!item?.id || statusToggleItemId) return
 
-  async function activate(item) {
-    if (item.merged_into_item_id) {
-      setError("Este producto fue fusionado en otro catálogo y no puede reactivarse.")
+    const isActive = item.active !== false
+    if (!isActive && item.merged_into_item_id) {
+      const blockedMessage = "Este producto fue fusionado en otro catálogo y no puede reactivarse."
+      setError(blockedMessage)
+      showToast(blockedMessage, "error", 5000)
       return
     }
-    if (!window.confirm(`¿Activar ${item.name}? Volverá a aparecer en requisiciones y otros módulos.`)) return
-    const { error: actionError } = await reactivateInventoryItem(item.id)
-    if (actionError) {
-      setError(actionError.message || "No se pudo activar el producto.")
-      return
+
+    const confirmMessage = isActive ? "¿Desactivar este producto?" : "¿Activar este producto?"
+    if (!window.confirm(confirmMessage)) return
+
+    setStatusToggleItemId(item.id)
+    setError("")
+    try {
+      const result = isActive
+        ? await deactivateInventoryItem(item.id)
+        : await reactivateInventoryItem(item.id)
+
+      if (result.error || !result.data?.id) {
+        const message = mapInventoryError(result.error).message
+        setError(message)
+        showToast(message, "error", 5000)
+        return
+      }
+
+      upsertItemInState(result.data)
+      const successMessage = isActive ? "Producto desactivado." : "Producto activado."
+      setMessage(successMessage)
+      showToast(successMessage, "success", 3500)
+
+      if (editingItem?.id === item.id) {
+        if (isActive) {
+          setShowItemForm(false)
+          setEditingItem(null)
+        } else {
+          setEditingItem((current) => (current ? { ...current, active: true } : current))
+          setItemForm((current) => ({ ...current, active: true }))
+        }
+      }
+    } catch (unexpectedError) {
+      const message = mapInventoryError(unexpectedError).message
+      setError(message)
+      showToast(message, "error", 5000)
+    } finally {
+      setStatusToggleItemId("")
     }
-    setMessage("Producto activado.")
-    if (editingItem?.id === item.id) {
-      setEditingItem((current) => (current ? { ...current, active: true } : current))
-      setItemForm((current) => ({ ...current, active: true }))
-    }
-    await refresh()
   }
 
   function openAdjustment(item, areaId = areaFilter === "todos" ? "almacen" : areaFilter) {
@@ -812,9 +831,9 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
           areaFilter={areaFilter}
           setAreaFilter={setAreaFilter}
           canManage={canManage}
+          statusToggleItemId={statusToggleItemId}
           onEdit={openEdit}
-          onDeactivate={deactivate}
-          onActivate={activate}
+          onToggleActive={toggleProductActive}
           onAdjust={openAdjustment}
         />
       )}
@@ -836,11 +855,11 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
           formErrors={itemFormErrors}
           focusField={itemFormFocusField}
           saving={savingItem}
+          statusToggleItemId={statusToggleItemId}
           formError={error}
           onClearFieldError={clearItemFormError}
           onSave={saveItem}
-          onDelete={deactivate}
-          onActivate={activate}
+          onToggleActive={toggleProductActive}
           onClose={() => {
             if (savingItem) return
             setShowItemForm(false)
@@ -871,7 +890,7 @@ function InventoryBase({ section = "inventario", initialAreaId = "todos" }) {
   )
 }
 
-function InventoryCatalog({ loading, items, areas, query, setQuery, areaFilter, setAreaFilter, canManage, onEdit, onDeactivate, onActivate, onAdjust }) {
+function InventoryCatalog({ loading, items, areas, query, setQuery, areaFilter, setAreaFilter, canManage, statusToggleItemId, onEdit, onToggleActive, onAdjust }) {
   const [page, setPage] = useState(1)
   const pagedItems = pageItems(items, page)
   const totalInvestment = items.reduce((total, item) => (
@@ -906,6 +925,8 @@ function InventoryCatalog({ loading, items, areas, query, setQuery, areaFilter, 
           const areaStock = areaFilter === "todos" ? item.totalQuantity : stockOf(item, areaFilter)
           const minimum = areaFilter === "todos" ? minimumOf(item, "almacen") : minimumOf(item, areaFilter)
           const investment = Number(item.totalQuantity || 0) * Number(item.cost_per_base_unit || 0)
+          const isActive = item.active !== false
+          const togglingStatus = statusToggleItemId === item.id
           return (
             <article className="inventory-row" key={item.id}>
               <div className="inventory-product-cell">
@@ -921,15 +942,16 @@ function InventoryCatalog({ loading, items, areas, query, setQuery, areaFilter, 
                 <StockBadge quantity={areaStock} minimum={minimum} active={item.active} />
               </div>
               <div className="inventory-row-actions">
-                {canManage && <button type="button" onClick={() => onAdjust(item)}>Ajustar stock</button>}
-                {canManage && <button type="button" onClick={() => onEdit(item)}>Editar</button>}
+                {canManage && <button type="button" onClick={() => onAdjust(item)} disabled={togglingStatus}>Ajustar stock</button>}
+                {canManage && <button type="button" onClick={() => onEdit(item)} disabled={togglingStatus}>Editar</button>}
                 {canManage && !item.merged_into_item_id && (
                   <button
                     type="button"
-                    className={item.active ? "danger" : "primary"}
-                    onClick={() => (item.active ? onDeactivate(item) : onActivate(item))}
+                    className={isActive ? "danger" : "primary"}
+                    disabled={togglingStatus}
+                    onClick={() => onToggleActive(item)}
                   >
-                    {item.active ? "Desactivar" : "Activar"}
+                    {togglingStatus ? "Procesando…" : isActive ? "Desactivar" : "Activar"}
                   </button>
                 )}
               </div>
@@ -1140,14 +1162,16 @@ function ItemModal({
   formErrors = {},
   focusField = "",
   saving = false,
+  statusToggleItemId = "",
   formError = "",
   onClearFieldError,
   onSave,
-  onDelete,
-  onActivate,
+  onToggleActive,
   onClose
 }) {
   const editing = Boolean(editingItem)
+  const isActive = editingItem?.active !== false
+  const togglingStatus = Boolean(editingItem?.id && statusToggleItemId === editingItem.id)
   const [imageError, setImageError] = useState("")
   const [imageStatus, setImageStatus] = useState("")
   const [imageStatusMessage, setImageStatusMessage] = useState("")
@@ -1532,18 +1556,18 @@ function ItemModal({
       <InventoryItemYieldPanel itemId={editingItem.id} item={editingItem} canManage={true} />
     )}
     <div className="inventory-modal-actions">
-      {canManageInventory && editingItem?.active !== false && (
-        <button type="button" className="danger inventory-delete-action" onClick={() => onDelete(editingItem)} disabled={saving}>
-          Desactivar producto
+      {canManageInventory && isActive && (
+        <button type="button" className="danger inventory-delete-action" onClick={() => onToggleActive(editingItem)} disabled={saving || togglingStatus}>
+          {togglingStatus ? "Procesando…" : "Desactivar producto"}
         </button>
       )}
-      {canManageInventory && editingItem?.active === false && !editingItem?.merged_into_item_id && (
-        <button type="button" className="primary inventory-delete-action" onClick={() => onActivate(editingItem)} disabled={saving}>
-          Activar producto
+      {canManageInventory && !isActive && !editingItem?.merged_into_item_id && (
+        <button type="button" className="primary inventory-delete-action" onClick={() => onToggleActive(editingItem)} disabled={saving || togglingStatus}>
+          {togglingStatus ? "Procesando…" : "Activar producto"}
         </button>
       )}
-      <button type="button" className="secondary" onClick={onClose} disabled={saving}>Cancelar</button>
-      <button type="submit" className="primary" disabled={saving || imageBusy}>
+      <button type="button" className="secondary" onClick={onClose} disabled={saving || togglingStatus}>Cancelar</button>
+      <button type="submit" className="primary" disabled={saving || imageBusy || togglingStatus}>
         {saving ? "Guardando…" : "Guardar"}
       </button>
     </div>
@@ -1632,7 +1656,8 @@ function ProductImage({ item, small = false, large = false }) {
 }
 
 function StockBadge({ quantity, minimum, active = true }) {
-  const state = !active ? "inactive" : quantity <= 0 ? "empty" : minimum > 0 && quantity <= minimum ? "low" : "ok"
+  const isActive = active !== false
+  const state = !isActive ? "inactive" : quantity <= 0 ? "empty" : minimum > 0 && quantity <= minimum ? "low" : "ok"
   const label = { inactive: "Inactivo", empty: "Agotado", low: "Bajo", ok: "OK" }[state]
   return <span className={`inventory-stock-badge ${state}`}>{label}</span>
 }
