@@ -127,7 +127,11 @@ begin
       from pg_catalog.pg_proc p
       cross join lateral pg_catalog.aclexplode(coalesce(p.proacl, acldefault('f', p.proowner)))
         as a
-      where p.oid = 'public.fel_payload_key_is_forbidden(text)'::regprocedure
+      where p.oid in (
+        'public.fel_payload_key_is_forbidden(text)'::regprocedure,
+        'public.fel_validate_request_payload_node(jsonb)'::regprocedure,
+        'public.fel_validate_request_payload(jsonb)'::regprocedure
+      )
         and lower(a.privilege_type) = 'execute'
         and (
           a.grantee = 0
