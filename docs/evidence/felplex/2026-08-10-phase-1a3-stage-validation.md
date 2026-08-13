@@ -9,6 +9,7 @@
 | **Fecha cierre histórico 220000** | 2026-08-10 |
 | **Fecha actualización 230000** | 2026-08-13 |
 | **Fecha runtime post-230000** | 2026-08-13 14:56 (America/Guatemala) |
+| **Fecha concurrencia Stage** | 2026-08-13 17:16 (America/Guatemala) |
 | **Zona horaria documental** | America/Guatemala |
 | **Rama documentada** | `integrate/felplex-phase-1a3` @ `d0131954e94227d1018f4338bbb8a5ec8c906edc` |
 | **PR** | #21 — OPEN, Draft (no Ready, no merge) |
@@ -42,30 +43,42 @@ Resultado final del test estructural `20260808230000_test_pos_fel_premerge_harde
 - **No** autoriza FELplex HTTP.
 - **No** autoriza activar `emission_enabled` ni `auto_issue_paid_orders`.
 - **No** autoriza Producción.
-- Concurrencia PostgreSQL real con dos sesiones **continúa pendiente**.
+- Concurrencia PostgreSQL real con dos sesiones **continúa pendiente** (histórico 220000).
 
 ### Runtime post-230000 (2026-08-13)
 
-**PASS RUNTIME TRANSACCIONAL POST-230000 EN STAGE**
+**PASS RUNTIME TRANSACCIONAL POST-230000 EN STAGE** *(ROLLBACK)*
 
-Ejecución única de `supabase/stage-tests/20260808220000_pos_fel_attempt_lifecycle.runtime.sql` en project ref `tgrqarxfmpwgrkntvgma` vía `npx supabase db query --linked` (exit code 0). Transacción `BEGIN` … `ROLLBACK`; sin `COMMIT`.
+### Concurrencia PostgreSQL real (2026-08-13)
+
+**PASS CONCURRENCIA Y RECUPERACIÓN CONTROLADA EN STAGE**
+
+Ejecución única vía `scripts/run-felplex-stage-concurrency-test.ps1` (exit code 0). Dos conexiones PostgreSQL independientes (Session A: proceso paralelo; Session B: conexión CLI). Ventana controlada `emission_enabled=true`; cleanup confirmado; snapshot pre/post idéntico.
 
 | Métrica | Valor |
 |---------|-------|
-| `executed_passed` | **9** |
-| `executed_failed` | **0** |
-| `not_executed` | **1** |
-| **Total** | **10** |
+| `session_a_success` | 1 |
+| `session_b_rejected` | 1 |
+| `session_b_elapsed_ms` | **8499.72** |
+| `attempts_created` | 1 |
+| `attempt_number` | 1 |
+| `recovery_without_http` | PASS |
+| `cleanup` | PASS |
+
+Runtime transaccional ROLLBACK (2026-08-13 14:56): **9/0/1/10** — escenario `runtime_postgres_concurrency` pendiente en esa corrida.
+
+Runtime consolidado post-concurrencia: **10/0/0/10** (`runtime_postgres_concurrency` → PASS).
 
 El escenario `runtime_finalize_success` satisface en Stage la validación runtime pendiente del concepto estructural `concept_finalize_success_with_fixture` (finalize success con fixtures FEL aprobados, identificadores ficticios `TEST-ROLLBACK-NOT-CERTIFIED`, revertidos por ROLLBACK).
 
-**Limitaciones explícitas de este veredicto runtime:**
+**Limitaciones explícitas de runtime + concurrencia:**
 
 - **No** autoriza deploy de Edge Function.
 - **No** autoriza FELplex HTTP.
 - **No** autoriza activar `emission_enabled` ni `auto_issue_paid_orders` de forma persistente.
 - **No** autoriza Producción.
-- Concurrencia PostgreSQL real (`runtime_postgres_concurrency`) **continúa NOT EXECUTED**.
+- Concurrencia **no** demuestra exactly-once frente a FELplex HTTP.
+- Recovery categoría B (post-HTTP incierto) permanece manual — `docs/felplex-230000-stage-concurrency-and-recovery-runbook.md`.
 
 ---
 
@@ -85,14 +98,16 @@ El escenario `runtime_finalize_success` satisface en Stage la validación runtim
 - Correcciones del archivo de prueba (PG17, PUBLIC `grantee=0`, cobertura tres helpers).
 - ACL observado read-only post-validación.
 - Stage intacto; switches apagados confirmados.
-- Runtime transaccional post-230000 re-ejecutado: **9/0/1/10** con ROLLBACK limpio.
+- Runtime transaccional post-230000: ROLLBACK **9/0/1/10**; concurrencia real **10/0/0/10** consolidado.
+- Concurrencia PostgreSQL dos sesiones + recovery categoría A + runbook categoría B.
 
 ### Excluido (ambas fases)
 
 - HTTP / FELplex / Edge Function deploy
 - Certificación SAT real
 - Producción
-- Concurrencia PostgreSQL con dos sesiones
+- Exactly-once frente a FELplex HTTP (no probado)
+- Recovery automática categoría B (post-HTTP incierto)
 - Confirmación del contrato externo del payload FELplex (sigue bloqueado)
 - Habilitación permanente de emisión FEL
 
@@ -300,11 +315,13 @@ Candidatos fixture seleccionables (sin FEL UUID / SAT / `certified_at`; `request
 | 7 | `runtime_stale_attempt_rejected` | true | true | Stale attempt rechazado |
 | 8 | `runtime_attempt_belongs_to_document` | true | true | Attempt debe pertenecer al documento |
 | 9 | `runtime_order_payment_intact` | true | true | Órdenes y pagos intactos |
-| 10 | `runtime_postgres_concurrency` | **false** | false | **NOT EXECUTED** — runbook two-session |
+| 10 | `runtime_postgres_concurrency` | true | true | Dos sesiones; B esperó ~8.5 s; 1 attempt; recovery cat. A; cleanup OK |
 
 ```json
-{ "executed_passed": 9, "executed_failed": 0, "not_executed": 1, "total": 10 }
+{ "executed_passed": 10, "executed_failed": 0, "not_executed": 0, "total": 10 }
 ```
+
+*(Corrida ROLLBACK previa del mismo archivo: 9/0/1/10 antes de concurrencia real.)*
 
 ### Post-ROLLBACK (read-only, idéntico a preflight)
 
@@ -324,6 +341,43 @@ Candidatos fixture seleccionables (sin FEL UUID / SAT / `certified_at`; `request
 
 ---
 
+## 9b. Concurrencia PostgreSQL real (2026-08-13 17:16)
+
+### Coordinador y método
+
+- Script: `scripts/run-felplex-stage-concurrency-test.ps1`
+- SQL: `supabase/stage-tests/felplex-concurrency/`
+- Runbook: `docs/felplex-230000-stage-concurrency-and-recovery-runbook.md`
+- Session A: proceso PowerShell independiente — BEGIN → claim → `pg_sleep(10)` → COMMIT
+- Session B: conexión CLI — inicio +2 s; rechazo `FEL_ALREADY_PROCESSING` tras **8499.72 ms**
+
+### Fixture seleccionado (dinámico)
+
+| Campo | Valor |
+|-------|-------|
+| Mesa | M-FEL-PAID |
+| Orden total | Q297 |
+| Producto fixture | `fef00001-0000-4000-8000-000000000001` |
+| Actor | `cajero@stage-fel.test` |
+| Documento | `b737dd69-3d64-495b-8d5c-bb18914ca51c` |
+| Orden | `8658cfcb-812d-4f83-b242-6cdd7214342d` |
+
+Attempt de prueba eliminado en cleanup; no persistió en Stage.
+
+### Resultado
+
+| Métrica | Valor |
+|---------|-------|
+| `session_a_success` | 1 |
+| `session_b_rejected` | 1 |
+| `attempts_created` | 1 |
+| `attempt_number` | 1 |
+| `recovery_without_http` | PASS |
+| `cleanup` | PASS |
+| Post-cierre switches | `emission_enabled=false`, `fel_attempts=0`, `processing_documents=0` |
+
+---
+
 ## 10. Pruebas locales (evidencia más reciente)
 
 | Prueba | Resultado |
@@ -331,10 +385,13 @@ Candidatos fixture seleccionables (sin FEL UUID / SAT / `certified_at`; `request
 | `scripts/validate-felplex-migration-safety.mjs` | PASS |
 | `npm run test:felplex-1a` | 47/47 PASS |
 | `npm run check:felplex-1a` | PASS |
-| `git diff --check` (commits corrección test) | PASS |
+| `run-felplex-stage-concurrency-test.ps1 -DryRun` | PASS |
+| Concurrencia Stage (2026-08-13 17:16) | PASS — exit 0 |
+| `db push --dry-run` post-concurrencia | Remote database is up to date |
+| `git diff --check` | PASS |
 | `deno.lock` | Ausente |
 | `package-lock.json` | Intacto |
-| Secret scan (commits test + este documento) | Sin secretos detectados |
+| Secret scan (artefactos concurrencia) | Sin secretos detectados |
 
 ---
 
@@ -342,13 +399,13 @@ Candidatos fixture seleccionables (sin FEL UUID / SAT / `certified_at`; `request
 
 | ID | Pendiente | Severidad |
 |----|-----------|-----------|
-| P1 | Concurrencia PostgreSQL real (dos sesiones) | Media |
+| P1 | Concurrencia PostgreSQL real (dos sesiones) | ~~Media~~ **Resuelto** — PASS 2026-08-13 |
 | P2 | Contrato payload FELplex (`FELPLEX_CONTRACT_UNCONFIRMED`) | Alta |
 | P3 | Deploy Edge Function `felplex-certify-invoice` | Media |
 | P4 | Secretos Stage para Edge | Media |
 | P5 | Primera llamada HTTP real a FELplex | Alta |
 | P6 | Runtime con fixture FEL (`concept_finalize_success_with_fixture`) | ~~Alta~~ **Resuelto** — runtime post-230000 `runtime_finalize_success` |
-| P7 | Recovery operativo documentos `processing` | Alta |
+| P7 | Recovery operativo documentos `processing` | ~~Alta~~ **Parcial** — runbook cat. A/B; cat. B manual pendiente HTTP |
 | P8 | Producción | Alta — no autorizada |
 | P9 | `emission_enabled` permanece **false** | Obligatorio |
 | P10 | `auto_issue_paid_orders` permanece **false** | Obligatorio |
@@ -357,7 +414,8 @@ Candidatos fixture seleccionables (sin FEL UUID / SAT / `certified_at`; `request
 **Resuelto respecto a estado anterior del documento:**
 
 - ~~P6 anterior: aplicación y tests 230000 en Stage~~ → **230000 aplicada; test estructural 36/0/6/42 aprobado en Stage.**
-- ~~Runtime fixture finalize pendiente~~ → **Runtime post-230000 9/0/1/10 con ROLLBACK limpio (2026-08-13).**
+- ~~Runtime fixture finalize pendiente~~ → **Runtime post-230000 9/0/1/10 ROLLBACK + concurrencia 10/0/0/10 (2026-08-13).**
+- ~~P1 concurrencia~~ → **PASS dos sesiones Stage 2026-08-13.**
 
 ---
 
@@ -459,9 +517,9 @@ El baseline protegido completo contiene guard (incluye `relkind='c'`) más snaps
 | Stage 25/25 y 9/9 de 220000 | Histórico, reportado por operador |
 | Migración 230000 aplicada Stage | Reportado por operador |
 | Test estructural 230000 36/0/6/42 | Ejecutado Stage, reportado por operador |
-| Runtime post-230000 9/0/1/10 | Ejecutado Stage, reportado por operador (2026-08-13) |
-| Tests Deno / validador / type-check | Local |
-| Concurrencia PostgreSQL real | **NOT EXECUTED** |
+| Runtime post-230000 10/0/0/10 (incl. concurrencia) | Ejecutado Stage (2026-08-13) |
+| Concurrencia PostgreSQL real | **PASS** (2026-08-13 17:16) |
+| Runbook recovery cat. A/B | Documentado local |
 | Edge deploy / FELplex HTTP | **NOT EXECUTED** |
 | Producción | **No involucrada** |
 
@@ -482,4 +540,4 @@ El baseline protegido completo contiene guard (incluye `relkind='c'`) más snaps
 
 ---
 
-*Fin del registro — FELplex Fase 1A.3 — Supabase Stage — actualizado 2026-08-13 (America/Guatemala) — incluye runtime post-230000*
+*Fin del registro — FELplex Fase 1A.3 — Supabase Stage — actualizado 2026-08-13 (America/Guatemala) — incluye runtime post-230000 y concurrencia PostgreSQL real*
