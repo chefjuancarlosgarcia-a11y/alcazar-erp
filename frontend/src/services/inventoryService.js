@@ -229,8 +229,24 @@ export async function updateInventoryItem(id, updates, options = {}) {
   return { data: mapped?.id ? mapped : null, error: mapped?.id ? null : { message: "No se pudo confirmar el producto actualizado." } }
 }
 
-export function deactivateInventoryItem(id) {
-  return supabase.from("inventory_items").update({ active: false }).eq("id", id).select("*").single()
+export async function deactivateInventoryItem(id) {
+  const { data, error } = await withInventoryTimeout(
+    supabase.from("inventory_items").update({ active: false }).eq("id", id).select("*, area_inventory(*)").single()
+  )
+  if (error) return { data: null, error: mapInventoryError(error) }
+  if (!data?.id) return { data: null, error: { message: "No se pudo confirmar la desactivación del producto." } }
+  const mapped = mapItem(data)
+  return { data: mapped?.id ? mapped : null, error: mapped?.id ? null : { message: "No se pudo confirmar la desactivación del producto." } }
+}
+
+export async function reactivateInventoryItem(id) {
+  const { data, error } = await withInventoryTimeout(
+    supabase.from("inventory_items").update({ active: true }).eq("id", id).select("*, area_inventory(*)").single()
+  )
+  if (error) return { data: null, error: mapInventoryError(error) }
+  if (!data?.id) return { data: null, error: { message: "No se pudo confirmar la activación del producto." } }
+  const mapped = mapItem(data)
+  return { data: mapped?.id ? mapped : null, error: mapped?.id ? null : { message: "No se pudo confirmar la activación del producto." } }
 }
 
 export async function getAreaInventory(areaId) {
