@@ -27,7 +27,10 @@ begin
       using errcode = 'P0001';
   end if;
 
-  if pg_catalog.to_regprocedure('public.fel_validate_request_payload(jsonb)') is null
+  if pg_catalog.to_regprocedure('public.fel_payload_key_is_forbidden(text)') is null
+     or pg_catalog.to_regprocedure('public.fel_validate_request_payload_node(jsonb)') is null
+     or pg_catalog.to_regprocedure('public.fel_validate_request_payload(jsonb)') is null
+     or pg_catalog.to_regprocedure('public.fel_order_payment_reconciliation(uuid)') is null
      or pg_catalog.to_regprocedure(
        'public.request_pos_fel_certification(uuid,text,text,text,text,numeric)'
      ) is null

@@ -32,7 +32,7 @@ begin
   from pg_catalog.pg_class c
   join pg_catalog.pg_namespace n on n.oid = c.relnamespace
   where n.nspname = 'public'
-    and c.relkind in ('r', 'p', 'v', 'm', 'S', 'f')
+    and c.relkind in ('r', 'p', 'v', 'm', 'S', 'f', 'c')
   order by c.relname
   limit 1;
 

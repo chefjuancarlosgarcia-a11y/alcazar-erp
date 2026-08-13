@@ -290,6 +290,16 @@ Corrección adicional local (commit 6, sin push):
 - guard `230000` exige `emission_enabled=false` en la fila viva antes de mutar;
 - workflow FELplex CI se dispara también ante cambios aislados en `.gitattributes`.
 
+Corrección adicional local (commit 7, sin push):
+
+- `230000`: `GRANT EXECUTE` explícito de `fel_order_payment_reconciliation(uuid)` solo a `service_role`;
+- `230000`: bloqueo `FOR UPDATE` de `pos_orders` en finalize success antes de reconciliar pagos;
+- `230000`: validación recursiva de alias secretos en `request_payload` vía `fel_payload_key_is_forbidden`;
+- `180000` guard: detección de tipos compuestos (`relkind='c'`) sin alterar el sufijo aprobado;
+- validador local ampliado con auto-pruebas negativas; tests estructurales 230000 ampliados.
+
+Serialización finalize vs pagos POS: demostrada estáticamente porque `create_pos_split_payment` es el único escritor SQL de `pos_order_payments` y bloquea `pos_orders` con `FOR UPDATE` al inicio de la transacción.
+
 Clasificación de evidencia:
 
 | Fuente | Estado |
@@ -308,19 +318,14 @@ Estas huellas prueban únicamente contenido local; no prueban aplicación en Sta
 | Artefacto | Bytes | SHA-256 |
 |-----------|------:|---------|
 | `.gitattributes` | 103 | `F73746903F637183E39AD57E88744067B97545DDB994F15F399E982C453877E0` |
-| `supabase/migrations/20260808180000_erp_schema_baseline.sql` | 2 143 111 | `B6EDBB9BD063D7BE9A71D3DCD5481DC4B0FA14FDF9583376F0470A99C4B7C575` |
-| `supabase/migrations/20260808230000_pos_fel_premerge_hardening.sql` | 20 414 | `D97D57A02252DD0BFAF08B8CD8ADE7B4340E58B6C26957955B6999D324A350AE` |
-| `supabase/rollback/20260808230000_pos_fel_premerge_hardening.rollback.sql` | 2 107 | `1CF30B68203D4BE6CD48D7D911EFCD453546122B5ABF41FD939EC690043039D1` |
-| `supabase/schema/20260808230000_test_pos_fel_premerge_hardening.sql` | 11 300 | `A89C1B8409275B46D7A0B0BE8CD69FC5412C78535FE2BFB82CF7E93DD4DDD410` |
-| `supabase/functions/_shared/felplex/auth.ts` | 1 050 | `A10B30C6A6DF5E3715696A62159393FCE7BD5E02E557A1502924605D36DB8750` |
-| `supabase/functions/_shared/felplex/felplex_phase_1a.test.ts` | 30 684 | `E711CA9B82C4B4077E3E29C3C8CED93BA62B8FD16080CD9EB3D0AD0DF0C8F23C` |
-| `scripts/validate-felplex-migration-safety.mjs` | 13 534 | `5DB2EF0CA577A6AE6E3C04FABF14E9A7A5B17D18733C792E07DDAF058F8387F9` |
-| `.github/workflows/felplex-ci.yml` | 1 494 | `8F5FB0759C86CFEDD52DAAAD1F99CB5ECD26CB49AB01A14AF7FFA85315679796` |
-| `package.json` | 555 | `DC1525F9FA9E71B76061C2892F43D9724A0410618821388C614A4F38DBDD36C5` |
-| `docs/felplex-phase-1-edge-function.md` | 7 003 | `87A1670F11037F6C439112016302B45F26D71AADBA87F41AD099EF2E26DDED96` |
-| `docs/felplex-baseline-adoption-runbook.md` | 2 302 | `37555FCEBA86C9FC057E88836C745FAE965C334A02AE0F46657B87DAFE1098C7` |
+| `supabase/migrations/20260808180000_erp_schema_baseline.sql` | 2 143 116 | `1FFBB4C022025C617C5FF92D1856E8B11343CDC88E7C5C16B654EEE504E99C55` |
+| `supabase/migrations/20260808230000_pos_fel_premerge_hardening.sql` | 21 413 | `E15B68DB0CB710F36A880269636F5B5ADB5BEAD4C91F22B86587A8E20B4E54F5` |
+| `supabase/rollback/20260808230000_pos_fel_premerge_hardening.rollback.sql` | 2 384 | `586D6CEB5168D7A37F05002423980858C2883ED5137CAF5313CF8079BC3E6CB0` |
+| `supabase/schema/20260808230000_test_pos_fel_premerge_hardening.sql` | 16 564 | `F512BB284D7F0846A747794BABCBAADE683A28992E972332630E11091DA833BF` |
+| `scripts/validate-felplex-migration-safety.mjs` | 17 907 | `153CA5C50FDA2D80B7E9EDCE4C7599A959D3E8FF0A0D504303B3AB543465DD42` |
+| `docs/felplex-baseline-adoption-runbook.md` | 2 336 | `896245E89966A93E42BDF7DEE703B61DDB6FE6929E67E1F1D21D0EB117B32373` |
 
-La fuente binaria autorizada y el sufijo posterior al guard miden exactamente 2 141 307 bytes, comparten SHA-256 `F0A9AA71F46D78084D40DBDF5454ABB5BB55F809F4AA3D145B36E090C1FAAD35` y son byte-idénticos. El baseline protegido completo contiene 1 804 bytes de guard más el snapshot aprobado.
+La fuente binaria autorizada y el sufijo posterior al guard miden exactamente 2 141 307 bytes, comparten SHA-256 `F0A9AA71F46D78084D40DBDF5454ABB5BB55F809F4AA3D145B36E090C1FAAD35` y son byte-idénticos. El baseline protegido completo contiene 1 809 bytes de guard (incluye `relkind='c'`) más el snapshot aprobado.
 
 ---
 

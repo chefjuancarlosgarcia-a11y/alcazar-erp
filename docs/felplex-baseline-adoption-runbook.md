@@ -7,7 +7,7 @@
 El guard inicial aborta antes del dump cuando:
 
 - faltan `auth.users`, `storage.buckets` o la extensión `pgcrypto`;
-- `public` contiene tablas ordinarias o particionadas, vistas, vistas materializadas, secuencias o foreign tables;
+- `public` contiene tablas ordinarias o particionadas, vistas, vistas materializadas, secuencias, foreign tables o tipos compuestos (`relkind='c'`);
 - aparecen sentinelas ERP como `profiles`, `pos_orders`, `user_roles` o `areas`.
 
 El guard no elimina objetos, no usa `CASCADE`, no deshabilita triggers/RLS y no cambia privilegios.

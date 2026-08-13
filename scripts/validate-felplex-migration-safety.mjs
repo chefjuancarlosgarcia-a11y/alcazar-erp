@@ -114,11 +114,15 @@ for (const token of [
   "auth.users",
   "storage.buckets",
   "pgcrypto",
-  "'r', 'p', 'v', 'm', 'S', 'f'",
+  "'r', 'p', 'v', 'm', 'S', 'f', 'c'",
 ]) {
   requireCheck(guardText.includes(token), `Baseline guard is missing required token: ${token}`)
 }
 requireCheck(!/\bcascade\b/i.test(guardText), "Baseline guard must not use CASCADE")
+requireCheck(
+  /relkind\s+in\s*\([^)]*'c'/.test(guardText),
+  "Baseline guard must detect composite types (relkind 'c')",
+)
 
 if (guardBoundaryAt >= 0) {
   const suffixStart = guardBoundaryAt + guardBoundary.length
@@ -250,9 +254,55 @@ requireCheck(
   "FELPLEX_CONTRACT_UNCONFIRMED fail-closed marker disappeared",
 )
 
+requireCheck(
+  hardeningCode.includes("fel_payload_key_is_forbidden"),
+  "230000 must define fel_payload_key_is_forbidden(text)",
+)
+requireCheck(
+  hardeningCode.includes("fel_validate_request_payload_node"),
+  "230000 must define fel_validate_request_payload_node(jsonb)",
+)
+requireCheck(
+  /lower\s*\(\s*regexp_replace\s*\(\s*lower\s*\(\s*coalesce\s*\(\s*p_key/.test(hardeningCode),
+  "230000 payload key normalization must lowercase and strip non-alphanumeric separators",
+)
+for (const canonical of [
+  "serviceaccount",
+  "credentials",
+  "passwd",
+  "xauthorization",
+  "clientsecret",
+]) {
+  requireCheck(
+    hardeningCode.includes(`'${canonical}'`),
+    `230000 payload denylist must include canonical alias ${canonical}`,
+  )
+}
+requireCheck(
+  /revoke\s+all\s+on\s+function\s+public\.fel_order_payment_reconciliation\(uuid\)[\s\S]*from\s+public,\s*anon,\s*authenticated/i.test(
+    hardening,
+  ),
+  "230000 must revoke fel_order_payment_reconciliation from client roles",
+)
+requireCheck(
+  /grant\s+execute\s+on\s+function\s+public\.fel_order_payment_reconciliation\(uuid\)[\s\S]*to\s+service_role/i.test(
+    hardening,
+  ),
+  "230000 must grant fel_order_payment_reconciliation EXECUTE to service_role",
+)
+requireCheck(
+  /from\s+public\.pos_orders[\s\S]*for\s+update[\s\S]*fel_order_payment_reconciliation\(v_doc\.order_id\)/i.test(
+    hardeningCode,
+  ),
+  "230000 finalize success path must lock pos_orders before payment reconciliation",
+)
+
 const rollback230 = read(paths.hardeningRollback)
 for (const token of [
+  "fel_payload_key_is_forbidden(text)",
+  "fel_validate_request_payload_node(jsonb)",
   "fel_validate_request_payload(jsonb)",
+  "fel_order_payment_reconciliation(uuid)",
   "request_pos_fel_certification",
   "fel_finalize_pos_fel_certification_attempt",
   "FEL_PREMERGE_ROLLBACK_UNSAFE",
@@ -329,6 +379,83 @@ validateSqlDelimiters(
   "supabase/schema/20260808230000_test_pos_fel_premerge_hardening.sql",
   read("supabase/schema/20260808230000_test_pos_fel_premerge_hardening.sql"),
 )
+
+function expectNegative(label, fn) {
+  try {
+    fn()
+    failures.push(`Negative self-test should have failed: ${label}`)
+  } catch (error) {
+    if (error?.message !== "NEGATIVE_EXPECTED") {
+      failures.push(`Negative self-test ${label} threw unexpectedly: ${error?.message ?? error}`)
+    }
+  }
+}
+
+expectNegative("baseline relkind c missing", () => {
+  const stripped = guardText.replace(", 'c'", "")
+  if (/relkind\s+in\s*\([^)]*'c'/.test(stripped)) return
+  throw new Error("NEGATIVE_EXPECTED")
+})
+
+expectNegative("baseline suffix tampered", () => {
+  const suffixStart = guardBoundaryAt + guardBoundary.length
+  const tampered = Buffer.from(baselineBuffer)
+  tampered[suffixStart] = tampered[suffixStart] === 65 ? 66 : 65
+  const tamperedHash = createHash("sha256")
+    .update(tampered.subarray(suffixStart))
+    .digest("hex")
+    .toUpperCase()
+  if (tamperedHash === "F0A9AA71F46D78084D40DBDF5454ABB5BB55F809F4AA3D145B36E090C1FAAD35") return
+  throw new Error("NEGATIVE_EXPECTED")
+})
+
+expectNegative("230000 missing reconciliation service_role grant", () => {
+  const stripped = hardening.replace(
+    /grant\s+execute\s+on\s+function\s+public\.fel_order_payment_reconciliation\(uuid\)[\s\S]*?to\s+service_role\s*;/i,
+    "",
+  )
+  if (
+    !/grant\s+execute\s+on\s+function\s+public\.fel_order_payment_reconciliation\(uuid\)[\s\S]*to\s+service_role/i.test(
+      stripped,
+    )
+  ) {
+    throw new Error("NEGATIVE_EXPECTED")
+  }
+})
+
+expectNegative("230000 client grant on reconciliation", () => {
+  const poisoned = hardening.replace(
+    /grant\s+execute\s+on\s+function\s+public\.fel_order_payment_reconciliation\(uuid\)\s*\n\s*to\s+service_role\s*;/i,
+    "",
+  )
+  if (
+    /grant\s+execute\s+on\s+function\s+public\.fel_order_payment_reconciliation\(uuid\)[\s\S]*to\s+service_role/i.test(
+      poisoned,
+    )
+  ) {
+    return
+  }
+  throw new Error("NEGATIVE_EXPECTED")
+})
+
+expectNegative("230000 payload alias normalization removed", () => {
+  const stripped = hardening.replace(
+    /lower\s*\(\s*regexp_replace\s*\(\s*lower\s*\(\s*coalesce\s*\(\s*p_key[^)]*\)[^)]*\)[^)]*\)/,
+    "lower(coalesce(p_key, ''))",
+  )
+  if (
+    /lower\s*\(\s*regexp_replace\s*\(\s*lower\s*\(\s*coalesce\s*\(\s*p_key/.test(stripped)
+  ) {
+    return
+  }
+  throw new Error("NEGATIVE_EXPECTED")
+})
+
+expectNegative("230000 payload alias xauthorization removed", () => {
+  const stripped = hardening.replace("'xauthorization',", "")
+  if (stripped.includes("'xauthorization'")) return
+  throw new Error("NEGATIVE_EXPECTED")
+})
 
 if (failures.length > 0) {
   console.error(`FELplex migration safety validation failed (${failures.length}):`)

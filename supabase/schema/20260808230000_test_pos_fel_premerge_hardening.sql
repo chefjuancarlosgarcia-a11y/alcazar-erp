@@ -19,6 +19,7 @@ declare
   v_request_def text;
   v_finalize_def text;
   v_value jsonb;
+  v_alias jsonb;
 begin
   return query select 'source_baseline_guard_before_first_ddl'::text, false, false,
     'NOT EXECUTED: source artifact invariant is executed by scripts/validate-felplex-migration-safety.mjs'::text;
@@ -114,9 +115,62 @@ begin
     'request RPC requires Stage and fully paid reconciliation before idempotent reuse'::text;
 
   return query select 'request_payload_validator_exists'::text,
-    pg_catalog.to_regprocedure('public.fel_validate_request_payload(jsonb)') is not null,
+    pg_catalog.to_regprocedure('public.fel_validate_request_payload(jsonb)') is not null
+      and pg_catalog.to_regprocedure('public.fel_payload_key_is_forbidden(text)') is not null
+      and pg_catalog.to_regprocedure('public.fel_validate_request_payload_node(jsonb)') is not null,
     true,
-    'fel_validate_request_payload(jsonb) exists'::text;
+    'payload validator helpers exist'::text;
+
+  return query select 'payload_helpers_revoked_from_clients'::text,
+    not exists (
+      select 1
+      from pg_catalog.pg_proc p
+      cross join lateral pg_catalog.aclexplode(coalesce(p.proacl, acldefault('f', p.proowner)))
+        as a(grantee oid, grantor oid, priv_type text, priv bool, grantable bool)
+      join pg_catalog.pg_roles r on r.oid = a.grantee
+      where p.oid = 'public.fel_payload_key_is_forbidden(text)'::regprocedure
+        and r.rolname in ('public', 'anon', 'authenticated', 'service_role')
+        and a.priv_type = 'EXECUTE'
+        and a.priv
+    ),
+    true,
+    'payload helper EXECUTE is not granted to client or service roles'::text;
+
+  begin
+    v_value := public.fel_validate_request_payload('{"type":"FACT","currency":"GTQ","external_id":"M-FEL-1"}'::jsonb);
+    return query select 'request_payload_contract_keys_accepted'::text,
+      v_value = '{"type":"FACT","currency":"GTQ","external_id":"M-FEL-1"}'::jsonb,
+      true, 'legitimate FELplex contract keys accepted'::text;
+  exception when others then
+    return query select 'request_payload_contract_keys_accepted'::text, false, true, sqlerrm;
+  end;
+
+  for v_alias in
+    select unnest(array[
+      '{"X-Authorization":"redacted"}'::jsonb,
+      '{"x_authorization":"redacted"}'::jsonb,
+      '{"x.authorization":"redacted"}'::jsonb,
+      '{"x-api-key":"redacted"}'::jsonb,
+      '{"x_api_key":"redacted"}'::jsonb,
+      '{"api.key":"redacted"}'::jsonb,
+      '{"access-token":"redacted"}'::jsonb,
+      '{"access_token":"redacted"}'::jsonb,
+      '{"client-secret":"redacted"}'::jsonb,
+      '{"service_role_token":"redacted"}'::jsonb,
+      '{"items":[{"metadata":{"nested":{"api_key":"redacted"}}}]}'::jsonb,
+      jsonb_build_array(jsonb_build_object('x-api-key', 'redacted'))
+    ])
+  loop
+    begin
+      perform public.fel_validate_request_payload(v_alias);
+      return query select ('request_payload_alias_rejected_' || md5(v_alias::text))::text,
+        false, true, 'expected FEL_REQUEST_PAYLOAD_INVALID for alias payload'::text;
+    exception when sqlstate 'P0001' then
+      return query select ('request_payload_alias_rejected_' || md5(v_alias::text))::text,
+        sqlerrm ilike 'FEL_REQUEST_PAYLOAD_INVALID:%', true,
+        'alias payload rejected'::text;
+    end;
+  end loop;
 
   begin
     v_value := public.fel_validate_request_payload(null);
@@ -183,6 +237,69 @@ begin
       and v_finalize_def ilike '%fel_order_payment_reconciliation(v_doc.order_id)%',
     true,
     'success path rechecks paid status, totals and zero balance'::text;
+
+  return query select 'finalize_locks_pos_orders_before_reconcile'::text,
+    v_finalize_def ilike '%from public.pos_orders%'
+      and v_finalize_def ilike '%for update%'
+      and position(lower('for update') in lower(v_finalize_def)) > 0
+      and position(lower('for update') in lower(v_finalize_def))
+        < position(lower('fel_order_payment_reconciliation(v_doc.order_id)') in lower(v_finalize_def)),
+    true,
+    'success path locks pos_orders before payment reconciliation'::text;
+
+  return query select 'reconciliation_execute_service_role'::text,
+    has_function_privilege(
+      'service_role',
+      'public.fel_order_payment_reconciliation(uuid)',
+      'EXECUTE'
+    ),
+    true,
+    'service_role may execute fel_order_payment_reconciliation'::text;
+
+  return query select 'reconciliation_public_execute_denied'::text,
+    not exists (
+      select 1
+      from pg_catalog.pg_proc p
+      cross join lateral pg_catalog.aclexplode(coalesce(p.proacl, acldefault('f', p.proowner)))
+        as a(grantee oid, grantor oid, priv_type text, priv bool, grantable bool)
+      join pg_catalog.pg_roles r on r.oid = a.grantee
+      where p.oid = 'public.fel_order_payment_reconciliation(uuid)'::regprocedure
+        and r.rolname = 'public'
+        and a.priv_type = 'EXECUTE'
+        and a.priv
+    ),
+    true,
+    'PUBLIC has no EXECUTE on fel_order_payment_reconciliation'::text;
+
+  return query select 'reconciliation_anon_execute_denied'::text,
+    not exists (
+      select 1
+      from pg_catalog.pg_proc p
+      cross join lateral pg_catalog.aclexplode(coalesce(p.proacl, acldefault('f', p.proowner)))
+        as a(grantee oid, grantor oid, priv_type text, priv bool, grantable bool)
+      join pg_catalog.pg_roles r on r.oid = a.grantee
+      where p.oid = 'public.fel_order_payment_reconciliation(uuid)'::regprocedure
+        and r.rolname = 'anon'
+        and a.priv_type = 'EXECUTE'
+        and a.priv
+    ),
+    true,
+    'anon has no EXECUTE on fel_order_payment_reconciliation'::text;
+
+  return query select 'reconciliation_authenticated_execute_denied'::text,
+    not exists (
+      select 1
+      from pg_catalog.pg_proc p
+      cross join lateral pg_catalog.aclexplode(coalesce(p.proacl, acldefault('f', p.proowner)))
+        as a(grantee oid, grantor oid, priv_type text, priv bool, grantable bool)
+      join pg_catalog.pg_roles r on r.oid = a.grantee
+      where p.oid = 'public.fel_order_payment_reconciliation(uuid)'::regprocedure
+        and r.rolname = 'authenticated'
+        and a.priv_type = 'EXECUTE'
+        and a.priv
+    ),
+    true,
+    'authenticated has no EXECUTE on fel_order_payment_reconciliation'::text;
 
   return query select 'table_grants_minimal'::text,
     has_table_privilege('service_role', 'public.pos_fel_documents', 'SELECT')

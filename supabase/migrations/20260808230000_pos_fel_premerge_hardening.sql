@@ -307,8 +307,22 @@ comment on function public.request_pos_fel_certification(uuid, text, text, text,
   'Does not call FELplex. Does not build request_payload. Idempotent per order.';
 
 -- 3. Request payload validation: object-or-NULL, 32 KiB maximum, recursive denylist.
-create or replace function public.fel_validate_request_payload(p_payload jsonb)
-returns jsonb
+create or replace function public.fel_payload_key_is_forbidden(p_key text)
+returns boolean
+language sql
+immutable
+parallel safe
+set search_path = ''
+as $$
+  select lower(regexp_replace(lower(coalesce(p_key, '')), '[^a-z0-9]', '', 'g')) = any(array[
+    'authorization', 'xauthorization', 'apikey', 'xapikey', 'accesstoken', 'refreshtoken',
+    'serviceroletoken', 'serviceaccount', 'secret', 'clientsecret', 'credential', 'credentials',
+    'password', 'passwd', 'bearer', 'token', 'headers', 'cookie', 'servicerolekey'
+  ]);
+$$;
+
+create or replace function public.fel_validate_request_payload_node(p_node jsonb)
+returns void
 language plpgsql
 immutable
 set search_path = ''
@@ -316,10 +330,37 @@ as $$
 declare
   v_key text;
   v_value jsonb;
-  v_forbidden constant text[] := array[
-    'authorization', 'api_key', 'apikey', 'token', 'secret', 'password',
-    'credential', 'headers', 'cookie', 'service_role_key'
-  ];
+  v_element jsonb;
+begin
+  if p_node is null then
+    return;
+  end if;
+
+  if jsonb_typeof(p_node) = 'object' then
+    for v_key, v_value in select key, value from jsonb_each(p_node)
+    loop
+      if public.fel_payload_key_is_forbidden(v_key) then
+        raise exception 'FEL_REQUEST_PAYLOAD_INVALID: clave sensible prohibida.'
+          using errcode = 'P0001';
+      end if;
+
+      perform public.fel_validate_request_payload_node(v_value);
+    end loop;
+  elsif jsonb_typeof(p_node) = 'array' then
+    for v_element in select value from jsonb_array_elements(p_node)
+    loop
+      perform public.fel_validate_request_payload_node(v_element);
+    end loop;
+  end if;
+end;
+$$;
+
+create or replace function public.fel_validate_request_payload(p_payload jsonb)
+returns jsonb
+language plpgsql
+immutable
+set search_path = ''
+as $$
 begin
   if p_payload is null then
     return null;
@@ -335,34 +376,16 @@ begin
       using errcode = 'P0001';
   end if;
 
-  for v_key, v_value in select key, value from jsonb_each(p_payload)
-  loop
-    if lower(v_key) = any(v_forbidden) then
-      raise exception 'FEL_REQUEST_PAYLOAD_INVALID: clave sensible prohibida %.', v_key
-        using errcode = 'P0001';
-    end if;
-
-    if jsonb_typeof(v_value) = 'object' then
-      perform public.fel_validate_request_payload(v_value);
-    elsif jsonb_typeof(v_value) = 'array' then
-      for v_value in select value from jsonb_array_elements(v_value)
-      loop
-        if jsonb_typeof(v_value) = 'object' then
-          perform public.fel_validate_request_payload(v_value);
-        elsif jsonb_typeof(v_value) = 'array' then
-          perform public.fel_validate_request_payload(
-            jsonb_build_object('_array', v_value)
-          );
-        end if;
-      end loop;
-    end if;
-  end loop;
+  perform public.fel_validate_request_payload_node(p_payload);
 
   return p_payload;
 end;
 $$;
 
-revoke all on function public.fel_validate_request_payload(jsonb)
+revoke all on function
+  public.fel_payload_key_is_forbidden(text),
+  public.fel_validate_request_payload_node(jsonb),
+  public.fel_validate_request_payload(jsonb)
 from public, anon, authenticated, service_role;
 
 -- 4. Finalize validates request payload and rechecks payment before success.
@@ -457,6 +480,12 @@ begin
   v_safe_message := public.fel_sanitize_public_error(p_error_message);
 
   if p_outcome = 'success' then
+    -- Serialize with create_pos_split_payment: the only POS payment writer locks this row first.
+    perform 1
+    from public.pos_orders o
+    where o.id = v_doc.order_id
+    for update;
+
     v_reconciliation := public.fel_order_payment_reconciliation(v_doc.order_id);
 
     if coalesce(v_reconciliation ->> 'order_status', '') <> 'paid'
@@ -586,6 +615,13 @@ grant execute on function
   public.fel_finalize_pos_fel_certification_attempt(
     uuid, uuid, text, text, text, text, text, timestamptz, integer, text, text, jsonb, jsonb
   )
+to service_role;
+
+-- 6. Edge reconciliation RPC: service_role-only EXECUTE (190000 revokes client roles only).
+revoke all on function public.fel_order_payment_reconciliation(uuid)
+from public, anon, authenticated;
+
+grant execute on function public.fel_order_payment_reconciliation(uuid)
 to service_role;
 
 -- Cross-order audit: get_pos_fel_document_status accepts order_id, not document_id.
