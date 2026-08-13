@@ -8,11 +8,12 @@
 | **Fase** | FELplex 1A.3 — claim/finalize transaccional + pre-merge hardening |
 | **Fecha cierre histórico 220000** | 2026-08-10 |
 | **Fecha actualización 230000** | 2026-08-13 |
+| **Fecha runtime post-230000** | 2026-08-13 14:56 (America/Guatemala) |
 | **Zona horaria documental** | America/Guatemala |
-| **Rama documentada** | `integrate/felplex-phase-1a3` @ `e9d639a5eec471be4090e185089a1713032e158f` |
+| **Rama documentada** | `integrate/felplex-phase-1a3` @ `d0131954e94227d1018f4338bbb8a5ec8c906edc` |
 | **PR** | #21 — OPEN, Draft (no Ready, no merge) |
 | **Producción** | No involucrada |
-| **Documento** | Evidencia local de cierre y validación estructural 230000 |
+| **Documento** | Evidencia local de validación estructural 230000 y runtime post-230000 |
 
 ---
 
@@ -41,7 +42,30 @@ Resultado final del test estructural `20260808230000_test_pos_fel_premerge_harde
 - **No** autoriza FELplex HTTP.
 - **No** autoriza activar `emission_enabled` ni `auto_issue_paid_orders`.
 - **No** autoriza Producción.
-- Runtime transaccional con fixture FEL y concurrencia PostgreSQL real **continúan pendientes**.
+- Concurrencia PostgreSQL real con dos sesiones **continúa pendiente**.
+
+### Runtime post-230000 (2026-08-13)
+
+**PASS RUNTIME TRANSACCIONAL POST-230000 EN STAGE**
+
+Ejecución única de `supabase/stage-tests/20260808220000_pos_fel_attempt_lifecycle.runtime.sql` en project ref `tgrqarxfmpwgrkntvgma` vía `npx supabase db query --linked` (exit code 0). Transacción `BEGIN` … `ROLLBACK`; sin `COMMIT`.
+
+| Métrica | Valor |
+|---------|-------|
+| `executed_passed` | **9** |
+| `executed_failed` | **0** |
+| `not_executed` | **1** |
+| **Total** | **10** |
+
+El escenario `runtime_finalize_success` satisface en Stage la validación runtime pendiente del concepto estructural `concept_finalize_success_with_fixture` (finalize success con fixtures FEL aprobados, identificadores ficticios `TEST-ROLLBACK-NOT-CERTIFIED`, revertidos por ROLLBACK).
+
+**Limitaciones explícitas de este veredicto runtime:**
+
+- **No** autoriza deploy de Edge Function.
+- **No** autoriza FELplex HTTP.
+- **No** autoriza activar `emission_enabled` ni `auto_issue_paid_orders` de forma persistente.
+- **No** autoriza Producción.
+- Concurrencia PostgreSQL real (`runtime_postgres_concurrency`) **continúa NOT EXECUTED**.
 
 ---
 
@@ -61,6 +85,7 @@ Resultado final del test estructural `20260808230000_test_pos_fel_premerge_harde
 - Correcciones del archivo de prueba (PG17, PUBLIC `grantee=0`, cobertura tres helpers).
 - ACL observado read-only post-validación.
 - Stage intacto; switches apagados confirmados.
+- Runtime transaccional post-230000 re-ejecutado: **9/0/1/10** con ROLLBACK limpio.
 
 ### Excluido (ambas fases)
 
@@ -70,7 +95,6 @@ Resultado final del test estructural `20260808230000_test_pos_fel_premerge_harde
 - Concurrencia PostgreSQL con dos sesiones
 - Confirmación del contrato externo del payload FELplex (sigue bloqueado)
 - Habilitación permanente de emisión FEL
-- Runtime con fixture para `concept_finalize_success_with_fixture`
 
 ---
 
@@ -181,7 +205,7 @@ Los seis escenarios con `executed=false` **no** se presentan como PASS:
 | 2 | `source_role_seed_do_nothing_no_do_update` | Delegado a validador local |
 | 3 | `source_trigger_migration_checks_enabled_when_args` | Delegado a validador local |
 | 4 | `source_rollback_correspondence` | Delegado a validador local |
-| 5 | `concept_finalize_success_with_fixture` | Requiere fixtures Stage aprobados; runtime pendiente |
+| 5 | `concept_finalize_success_with_fixture` | Permanece `executed=false` en test estructural; **cubierto por runtime** `runtime_finalize_success` post-230000 (§9) |
 | 6 | `concept_postgresql_concurrency` | Requiere runbook two-session; pendiente |
 
 ---
@@ -228,7 +252,79 @@ Después de la última ejecución estructural válida (reportado por operador):
 
 ---
 
-## 9. Pruebas locales (evidencia más reciente)
+## 9. Runtime transaccional post-230000 en Stage
+
+### Preflight read-only (2026-08-13 14:56 America/Guatemala)
+
+| Precondición | Valor |
+|--------------|-------|
+| Project ref | `tgrqarxfmpwgrkntvgma` |
+| `config_rows` | 1 |
+| `environment` | stage |
+| `emission_enabled` | false |
+| `auto_issue_paid_orders` | false |
+| `formal_contingency_enabled` | false |
+| `fel_documents` | 3 |
+| `fel_attempts` | 0 |
+| `processing_documents` | 0 |
+| `non_stage_documents` | 0 |
+| Candidatos fixture válidos (`M-FEL-PAID`, Q297, pagado, producto `fef00001…`) | **3** (≥2 requeridos) |
+| Intentos previos en candidatos | 0 |
+| `db push --dry-run` | Remote database is up to date |
+
+Candidatos fixture seleccionables (sin FEL UUID / SAT / `certified_at`; `request_payload` nulo):
+
+| Documento | Orden | Mesa | Estado doc | `retry_count` |
+|-----------|-------|------|------------|--------------:|
+| `711fccf2-2152-4d46-a15b-930498fcc7ac` | `7d41dee2-6978-4e01-a078-baf82099bbce` | M-FEL-PAID | pending_certification | 0 |
+| `798ae286-b17a-4312-95d6-d10034a26503` | `ed1bd4b6-358e-471e-8162-82bb3e5cab10` | M-FEL-PAID | pending_certification | 0 |
+| `b737dd69-3d64-495b-8d5c-bb18914ca51c` | `8658cfcb-812d-4f83-b242-6cdd7214342d` | M-FEL-PAID | pending_certification | 0 |
+
+### Ejecución
+
+- Comando: `npx supabase db query --linked --project-ref tgrqarxfmpwgrkntvgma -f supabase/stage-tests/20260808220000_pos_fel_attempt_lifecycle.runtime.sql`
+- Exit code: **0**
+- Una sola ejecución; `BEGIN` … `ROLLBACK`; toggle temporal `emission_enabled=true` revertido.
+- Artefacto runtime @ HEAD blob: 22 844 bytes (`9F16453C…BF437`); invoca RPCs desplegadas post-230000.
+
+### Resultado por escenario
+
+| # | Escenario | `executed` | `passed` | Notas |
+|---|-----------|:----------:|:--------:|-------|
+| 1 | `runtime_claim_pending_document` | true | true | Claim documento pendiente |
+| 2 | `runtime_claim_processing_rejected` | true | true | Segundo claim rechazado (`FEL_ALREADY_PROCESSING`) |
+| 3 | `runtime_finalize_success` | true | true | Finalize success; cubre `concept_finalize_success_with_fixture` |
+| 4 | `runtime_certified_not_overwritable` | true | true | Certificado no sobrescribible |
+| 5 | `runtime_finalize_failure_retry` | true | true | Fallo + `retry_count` |
+| 6 | `runtime_reclaim_failed_document` | true | true | Reclaim documento failed |
+| 7 | `runtime_stale_attempt_rejected` | true | true | Stale attempt rechazado |
+| 8 | `runtime_attempt_belongs_to_document` | true | true | Attempt debe pertenecer al documento |
+| 9 | `runtime_order_payment_intact` | true | true | Órdenes y pagos intactos |
+| 10 | `runtime_postgres_concurrency` | **false** | false | **NOT EXECUTED** — runbook two-session |
+
+```json
+{ "executed_passed": 9, "executed_failed": 0, "not_executed": 1, "total": 10 }
+```
+
+### Post-ROLLBACK (read-only, idéntico a preflight)
+
+| Campo | Valor |
+|-------|-------|
+| `environment` | stage |
+| `emission_enabled` | false |
+| `auto_issue_paid_orders` | false |
+| `formal_contingency_enabled` | false |
+| `fel_documents` | 3 |
+| `fel_attempts` | 0 |
+| `processing_documents` | 0 |
+| `test_certification_rows` | 0 |
+| Documentos fixture | Restaurados a `pending_certification`, `retry_count=0`, sin FEL UUID/SAT |
+| Órdenes/pagos fixture | Sin cambios vs snapshot pre-runtime |
+| `db push --dry-run` | Remote database is up to date |
+
+---
+
+## 10. Pruebas locales (evidencia más reciente)
 
 | Prueba | Resultado |
 |--------|-----------|
@@ -242,7 +338,7 @@ Después de la última ejecución estructural válida (reportado por operador):
 
 ---
 
-## 10. Riesgos y pendientes reales
+## 11. Riesgos y pendientes reales
 
 | ID | Pendiente | Severidad |
 |----|-----------|-----------|
@@ -251,7 +347,7 @@ Después de la última ejecución estructural válida (reportado por operador):
 | P3 | Deploy Edge Function `felplex-certify-invoice` | Media |
 | P4 | Secretos Stage para Edge | Media |
 | P5 | Primera llamada HTTP real a FELplex | Alta |
-| P6 | Runtime con fixture FEL (`concept_finalize_success_with_fixture`) | Alta |
+| P6 | Runtime con fixture FEL (`concept_finalize_success_with_fixture`) | ~~Alta~~ **Resuelto** — runtime post-230000 `runtime_finalize_success` |
 | P7 | Recovery operativo documentos `processing` | Alta |
 | P8 | Producción | Alta — no autorizada |
 | P9 | `emission_enabled` permanece **false** | Obligatorio |
@@ -261,10 +357,11 @@ Después de la última ejecución estructural válida (reportado por operador):
 **Resuelto respecto a estado anterior del documento:**
 
 - ~~P6 anterior: aplicación y tests 230000 en Stage~~ → **230000 aplicada; test estructural 36/0/6/42 aprobado en Stage.**
+- ~~Runtime fixture finalize pendiente~~ → **Runtime post-230000 9/0/1/10 con ROLLBACK limpio (2026-08-13).**
 
 ---
 
-## 11. Restricciones de autorización
+## 12. Restricciones de autorización
 
 Este documento **no** autoriza:
 
@@ -278,7 +375,7 @@ PR #21 permanece **OPEN** y **Draft**.
 
 ---
 
-## 12. Evidencia histórica 220000 (preservada)
+## 13. Evidencia histórica 220000 (preservada)
 
 ### Resumen ejecutivo histórico
 
@@ -319,7 +416,7 @@ Según resultados reportados por el operador el 2026-08-10:
 
 ---
 
-## 13. Trazabilidad e integridad (blobs Git @ `e9d639a`)
+## 14. Trazabilidad e integridad (blobs Git @ `e9d639a`)
 
 Los tamaños y SHA-256 se calcularon sobre los **blobs Git raw** de `e9d639a5eec471be4090e185089a1713032e158f` (`git cat-file blob`, bytes sin conversión). Los archivos de texto del working tree de Windows pueden presentar tamaños diferentes debido a CRLF; esos bytes locales **no** se usan como evidencia canónica.
 
@@ -362,9 +459,9 @@ El baseline protegido completo contiene guard (incluye `relkind='c'`) más snaps
 | Stage 25/25 y 9/9 de 220000 | Histórico, reportado por operador |
 | Migración 230000 aplicada Stage | Reportado por operador |
 | Test estructural 230000 36/0/6/42 | Ejecutado Stage, reportado por operador |
+| Runtime post-230000 9/0/1/10 | Ejecutado Stage, reportado por operador (2026-08-13) |
 | Tests Deno / validador / type-check | Local |
 | Concurrencia PostgreSQL real | **NOT EXECUTED** |
-| Runtime fixture finalize 230000 | **NOT EXECUTED** |
 | Edge deploy / FELplex HTTP | **NOT EXECUTED** |
 | Producción | **No involucrada** |
 
@@ -376,7 +473,7 @@ El baseline protegido completo contiene guard (incluye `relkind='c'`) más snaps
 
 ---
 
-## 14. Confirmación — Producción no involucrada
+## 15. Confirmación — Producción no involucrada
 
 - Project ref Stage: `tgrqarxfmpwgrkntvgma` únicamente para operaciones documentadas.
 - Producción no autorizada en ninguna fase de este registro.
@@ -385,4 +482,4 @@ El baseline protegido completo contiene guard (incluye `relkind='c'`) más snaps
 
 ---
 
-*Fin del registro — FELplex Fase 1A.3 — Supabase Stage — actualizado 2026-08-13 (America/Guatemala)*
+*Fin del registro — FELplex Fase 1A.3 — Supabase Stage — actualizado 2026-08-13 (America/Guatemala) — incluye runtime post-230000*
