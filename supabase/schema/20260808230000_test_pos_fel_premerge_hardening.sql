@@ -126,12 +126,11 @@ begin
       select 1
       from pg_catalog.pg_proc p
       cross join lateral pg_catalog.aclexplode(coalesce(p.proacl, acldefault('f', p.proowner)))
-        as a(grantee oid, grantor oid, priv_type text, priv bool, grantable bool)
+        as a
       join pg_catalog.pg_roles r on r.oid = a.grantee
       where p.oid = 'public.fel_payload_key_is_forbidden(text)'::regprocedure
         and r.rolname in ('public', 'anon', 'authenticated', 'service_role')
-        and a.priv_type = 'EXECUTE'
-        and a.priv
+        and a.privilege_type = 'EXECUTE'
     ),
     true,
     'payload helper EXECUTE is not granted to client or service roles'::text;
@@ -261,12 +260,11 @@ begin
       select 1
       from pg_catalog.pg_proc p
       cross join lateral pg_catalog.aclexplode(coalesce(p.proacl, acldefault('f', p.proowner)))
-        as a(grantee oid, grantor oid, priv_type text, priv bool, grantable bool)
+        as a
       join pg_catalog.pg_roles r on r.oid = a.grantee
       where p.oid = 'public.fel_order_payment_reconciliation(uuid)'::regprocedure
         and r.rolname = 'public'
-        and a.priv_type = 'EXECUTE'
-        and a.priv
+        and a.privilege_type = 'EXECUTE'
     ),
     true,
     'PUBLIC has no EXECUTE on fel_order_payment_reconciliation'::text;
@@ -276,12 +274,11 @@ begin
       select 1
       from pg_catalog.pg_proc p
       cross join lateral pg_catalog.aclexplode(coalesce(p.proacl, acldefault('f', p.proowner)))
-        as a(grantee oid, grantor oid, priv_type text, priv bool, grantable bool)
+        as a
       join pg_catalog.pg_roles r on r.oid = a.grantee
       where p.oid = 'public.fel_order_payment_reconciliation(uuid)'::regprocedure
         and r.rolname = 'anon'
-        and a.priv_type = 'EXECUTE'
-        and a.priv
+        and a.privilege_type = 'EXECUTE'
     ),
     true,
     'anon has no EXECUTE on fel_order_payment_reconciliation'::text;
@@ -291,12 +288,11 @@ begin
       select 1
       from pg_catalog.pg_proc p
       cross join lateral pg_catalog.aclexplode(coalesce(p.proacl, acldefault('f', p.proowner)))
-        as a(grantee oid, grantor oid, priv_type text, priv bool, grantable bool)
+        as a
       join pg_catalog.pg_roles r on r.oid = a.grantee
       where p.oid = 'public.fel_order_payment_reconciliation(uuid)'::regprocedure
         and r.rolname = 'authenticated'
-        and a.priv_type = 'EXECUTE'
-        and a.priv
+        and a.privilege_type = 'EXECUTE'
     ),
     true,
     'authenticated has no EXECUTE on fel_order_payment_reconciliation'::text;
