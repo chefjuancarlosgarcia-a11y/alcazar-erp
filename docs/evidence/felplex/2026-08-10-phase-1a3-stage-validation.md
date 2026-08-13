@@ -319,18 +319,22 @@ Según resultados reportados por el operador el 2026-08-10:
 
 ---
 
-## 13. Trazabilidad e integridad (hashes desde HEAD @ `e9d639a`)
+## 13. Trazabilidad e integridad (blobs Git @ `e9d639a`)
 
-Hashes calculados **localmente** sobre blobs en repositorio al momento de esta entrega. Ejecución remota etiquetada como *reportada por el operador*.
+Los tamaños y SHA-256 se calcularon sobre los **blobs Git raw** de `e9d639a5eec471be4090e185089a1713032e158f` (`git cat-file blob`, bytes sin conversión). Los archivos de texto del working tree de Windows pueden presentar tamaños diferentes debido a CRLF; esos bytes locales **no** se usan como evidencia canónica.
+
+**Artefactos verificados:** 8/8 (7 archivos versionados + sufijo aprobado del baseline).
+
+Ejecución remota etiquetada como *reportada por el operador*.
 
 | Artefacto | Bytes | SHA-256 |
 |-----------|------:|---------|
 | `supabase/migrations/20260808230000_pos_fel_premerge_hardening.sql` | 21 413 | `E15B68DB0CB710F36A880269636F5B5ADB5BEAD4C91F22B86587A8E20B4E54F5` |
-| `supabase/schema/20260808230000_test_pos_fel_premerge_hardening.sql` | 16 471 | `DFCAF64B6BED576178D705AF431BEEC5535784978A0CDBFD33AE45EB50862C29` |
-| `supabase/migrations/20260808220000_pos_fel_attempt_lifecycle.sql` | 16 405 | `9BD5C4666EB7A4893E34DB23CEBDA328AD9BE1CAAFFD3BF7A45A6B1E67161C5A` |
-| `supabase/schema/20260808220000_test_pos_fel_attempt_lifecycle.sql` | 12 743 | `823190BADE58AF2A12B6BEE7FCCBF45CAE5339D15C0C0FC252F7C32AF55CB259` |
-| `supabase/stage-tests/20260808220000_pos_fel_attempt_lifecycle.runtime.sql` | 23 620 | `8EF1C2178327E8D1041FCFB90554110C6A197AFE9D142894BDA5A30A478EA759` |
-| `docs/felplex-20260808220000-stage-runtime-runbook.md` | 11 522 | `43627438C7CC3162CB37ECE2C00E9C63818BB828BE7A49EC11420B6F814D9867` |
+| `supabase/schema/20260808230000_test_pos_fel_premerge_hardening.sql` | 16 091 | `5F049D4B796C9682B8F4ED1C2DCCA66AF0B508FDC0A62B1106C68926C108FBAA` |
+| `supabase/migrations/20260808220000_pos_fel_attempt_lifecycle.sql` | 15 908 | `5F23E0147748565E4615224836082008EB780C18250BC651A93237248A88461E` |
+| `supabase/schema/20260808220000_test_pos_fel_attempt_lifecycle.sql` | 12 463 | `52927DB8B763BE3B54606CF0995127689D92F1CF139C29F58BB9FE9D5BCECCF0` |
+| `supabase/stage-tests/20260808220000_pos_fel_attempt_lifecycle.runtime.sql` | 22 844 | `9F16453CB96A955B0B5104C884614784D7408F6BA57BC7EB6E77FF3871FBF437` |
+| `docs/felplex-20260808220000-stage-runtime-runbook.md` | 11 264 | `DB0C74B19E0CCC4DC73E00396997BA20EB1904F8611D640A27597E9DCD00A771` |
 | `supabase/migrations/20260808180000_erp_schema_baseline.sql` (completo) | 2 143 116 | `1FFBB4C022025C617C5FF92D1856E8B11343CDC88E7C5C16B654EEE504E99C55` |
 
 ### Sufijo aprobado del baseline (sin cambio)
@@ -367,7 +371,7 @@ El baseline protegido completo contiene guard (incluye `relkind='c'`) más snaps
 ### Limitaciones de trazabilidad
 
 - Este documento es evidencia documental local.
-- Resultados numéricos de ejecución remota: **reportados por el operador** salvo hashes recalculados desde HEAD.
+- Resultados numéricos de ejecución remota: **reportados por el operador** salvo tamaños y SHA-256 recalculados desde blobs Git raw de `e9d639a`.
 - No sustituye logs exportados del SQL Editor / CLI si se requieren en auditoría externa.
 
 ---
