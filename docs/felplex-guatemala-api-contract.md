@@ -51,10 +51,13 @@ La colección completa **no** se copia al repositorio (ejemplos extensos y datos
 | `FELPLEX_HTTP_ENABLED` | Kill switch HTTP (default **false**) |
 | `FELPLEX_CONTRACT_HTTP_CONFIRMED` | Segunda barrera — default **false** |
 | `FELPLEX_GT_STAGE_API_KEY` | API key Stage (solo Supabase secrets) |
-| `billing_providers.entity_id` | `{empresa}` |
-| `billing_providers.base_url` | Base URL Stage |
+| `billing_provider_configs.entity_id` | `{empresa}` FELplex (ej. `547` en Stage) |
+| `billing_provider_configs.base_url` | Base URL Stage del adaptador |
 
-**Nunca** hardcodear `empresa` ni API key en código, docs operativos ni fixtures commitidos.
+**Esquema:** `billing_providers` es únicamente el catálogo del adaptador `felplex_gt`.
+La configuración operativa por entidad y ambiente vive en **`billing_provider_configs`**.
+
+**Nunca** hardcodear `empresa` ni API key en código, docs operativos ni fixtures commitidos fuera de `supabase/stage-fixtures/`.
 
 ---
 
@@ -167,8 +170,8 @@ HTTP 200 con `valid: false` **no** es certificación. Se preservan `errors` (ani
 
 1. Solo en **Supabase Stage** → Project Settings → Edge Functions → Secrets.
 2. Nombres: `FELPLEX_GT_STAGE_API_KEY` (existente).
-3. Configurar `entity_id` en `billing_providers` vía SQL/service_role autorizado.
-4. **Prohibido:** repo, chat, Cursor rules, Vercel env, frontend, logs.
+3. Configurar `entity_id` y `base_url` en **`billing_provider_configs`** vía fixture Stage (`supabase/stage-fixtures/felplex_gt_billing_bootstrap.sql`) o SQL/service_role autorizado.
+4. **Prohibido:** repo (salvo stage-fixtures), chat, Cursor rules, Vercel env, frontend, logs.
 
 ---
 

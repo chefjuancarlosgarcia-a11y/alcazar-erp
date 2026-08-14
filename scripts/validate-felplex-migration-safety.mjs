@@ -3,6 +3,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs"
 import { dirname, join, relative, resolve } from "node:path"
 import { spawnSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
+import { validateFelplexStageBillingBootstrap } from "./validate-felplex-stage-billing-bootstrap.mjs"
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const migrationsDir = join(root, "supabase", "migrations")
@@ -379,6 +380,14 @@ validateSqlDelimiters(
   "supabase/schema/20260808230000_test_pos_fel_premerge_hardening.sql",
   read("supabase/schema/20260808230000_test_pos_fel_premerge_hardening.sql"),
 )
+validateSqlDelimiters(
+  "supabase/stage-fixtures/felplex_gt_billing_bootstrap.sql",
+  read("supabase/stage-fixtures/felplex_gt_billing_bootstrap.sql"),
+)
+validateSqlDelimiters(
+  "supabase/stage-fixtures/felplex_gt_billing_bootstrap.rollback.sql",
+  read("supabase/stage-fixtures/felplex_gt_billing_bootstrap.rollback.sql"),
+)
 
 function expectNegative(label, fn) {
   try {
@@ -456,6 +465,10 @@ expectNegative("230000 payload alias xauthorization removed", () => {
   if (stripped.includes("'xauthorization'")) return
   throw new Error("NEGATIVE_EXPECTED")
 })
+
+for (const bootstrapFailure of validateFelplexStageBillingBootstrap({ root })) {
+  failures.push(bootstrapFailure)
+}
 
 if (failures.length > 0) {
   console.error(`FELplex migration safety validation failed (${failures.length}):`)

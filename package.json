@@ -6,6 +6,7 @@
   },
   "scripts": {
     "validate:felplex-migration-safety": "node scripts/validate-felplex-migration-safety.mjs",
+    "validate:felplex-stage-billing-bootstrap": "node scripts/validate-felplex-stage-billing-bootstrap.mjs",
     "test:felplex-1a": "npx --yes deno@2.9.5 test --no-lock --allow-env --allow-read=supabase/migrations supabase/functions/_shared/felplex/felplex_phase_1a.test.ts supabase/functions/_shared/felplex/felplex_guatemala_contract.test.ts",
     "check:felplex-1a": "npx --yes deno@2.9.5 check --no-lock supabase/functions/felplex-certify-invoice/index.ts supabase/functions/_shared/felplex/*.ts"
   }
