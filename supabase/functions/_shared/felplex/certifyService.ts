@@ -2,7 +2,9 @@ import {
   FELPLEX_SECRET_ENV_STAGE,
   FELPLEX_STAGE_PROJECT_REF,
 } from "./constants.ts"
+import { isAmbiguousTransportOutcome } from "./ambiguousOutcome.ts"
 import { assertCashOperator } from "./auth.ts"
+import { isFelplexContractHttpConfirmed, felplexContractHttpBlockedFailure } from "./contractHttp.ts"
 import { evaluateCertificationGates, extractProjectRef } from "./gates.ts"
 import { buildFelplexPayload } from "./payloadBuilder.ts"
 import type { FelRepository } from "./repository.ts"
@@ -119,9 +121,22 @@ export async function certifyInvoice(
     return publicError(
       activeDocument.id,
       buildResult.code,
-      "Contrato FELplex pendiente de confirmacion.",
+      buildResult.code === "FELPLEX_PAYLOAD_INVALID"
+        ? "Payload FELplex invalido."
+        : "Contrato FELplex pendiente de confirmacion.",
       422,
       "blocked",
+    )
+  }
+
+  if (!isFelplexContractHttpConfirmed(deps.env)) {
+    const blocked = felplexContractHttpBlockedFailure()
+    return publicError(
+      activeDocument.id,
+      blocked.code,
+      blocked.message,
+      422,
+      blocked.classification,
     )
   }
 
@@ -176,6 +191,10 @@ export async function certifyInvoice(
   const transportResult = await deps.transport.send(transportRequest)
 
   if (!transportResult.ok) {
+    if (isAmbiguousTransportOutcome(transportResult.errorKind)) {
+      return uncertainOutcome(activeDocument.id)
+    }
+
     const classification = classifyTransportFailure(transportResult.errorKind)
     const safePayload = buildSafeProviderResponsePayload({
       httpStatus: transportResult.httpStatus ?? null,

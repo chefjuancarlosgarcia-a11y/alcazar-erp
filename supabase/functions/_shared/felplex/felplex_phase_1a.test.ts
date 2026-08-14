@@ -20,6 +20,7 @@ import {
   envGetter,
   FIXED_DATETIME,
   makeCashActor,
+  makeHttpTestEnv,
   makePaidReconciliation,
   makeQ297Document,
   makeStageEmissionConfig,
@@ -69,19 +70,11 @@ function mockTransport(
 }
 
 function unblockedPayload(): BuildPayloadResult {
-  return {
-    ok: true,
-    payload: {
-      type: "FACT",
-      currency: "GTQ",
-      datetime_issue: FIXED_DATETIME,
-      external_id: "POS-test",
-      items: [],
-      total: 297,
-      total_tax: 31.82,
-      emails: [],
-    },
+  const build = buildFelplexPayload(makeQ297Document(), { datetimeIssue: FIXED_DATETIME })
+  if (!build.ok) {
+    throw new Error("unblockedPayload fixture failed")
   }
+  return build
 }
 
 async function runCertify(
@@ -248,7 +241,7 @@ Deno.test("1A.1-11 Finalize retorna null", async () => {
     },
     sanitizedMessage: "ok",
   }))
-  const result = await runCertify(repo, transport, makeStageEnv({ FELPLEX_HTTP_ENABLED: "true" }), {
+  const result = await runCertify(repo, transport, makeHttpTestEnv(), {
     buildPayloadOverride: () => unblockedPayload(),
   })
   assertEquals(result.body.error_code, "FEL_UNCERTAIN_OUTCOME")
@@ -269,7 +262,7 @@ Deno.test("1A.1-12 Finalize lanza error", async () => {
     },
     sanitizedMessage: "ok",
   }))
-  const result = await runCertify(repo, transport, makeStageEnv({ FELPLEX_HTTP_ENABLED: "true" }), {
+  const result = await runCertify(repo, transport, makeHttpTestEnv(), {
     buildPayloadOverride: () => unblockedPayload(),
   })
   assertEquals(result.body.error_code, "FEL_UNCERTAIN_OUTCOME")
@@ -280,7 +273,7 @@ Deno.test("1A.1-13 Insert/claim falla", async () => {
   const repo = makeRepo()
   repo.claimBehavior = "null"
   const transport = mockTransport(async () => ({ ok: true, sanitizedMessage: "noop" }))
-  const result = await runCertify(repo, transport, makeStageEnv({ FELPLEX_HTTP_ENABLED: "true" }), {
+  const result = await runCertify(repo, transport, makeHttpTestEnv(), {
     buildPayloadOverride: () => unblockedPayload(),
   })
   assertEquals(result.body.error_code, "FEL_CLAIM_FAILED")
@@ -301,7 +294,7 @@ Deno.test("1A.1-14 Servicio nunca responde certified si DB no confirma", async (
     },
     sanitizedMessage: "ok",
   }))
-  const result = await runCertify(repo, transport, makeStageEnv({ FELPLEX_HTTP_ENABLED: "true" }), {
+  const result = await runCertify(repo, transport, makeHttpTestEnv(), {
     buildPayloadOverride: () => unblockedPayload(),
   })
   assertEquals(result.status, 500)
@@ -313,7 +306,11 @@ Deno.test("1A.1-14 Servicio nunca responde certified si DB no confirma", async (
 Deno.test("1A.1-15 Builder bloqueado genera cero claims y cero HTTP", async () => {
   const repo = makeRepo()
   const transport = mockTransport(async () => ({ ok: true, sanitizedMessage: "noop" }))
-  const result = await runCertify(repo, transport, makeStageEnv({ FELPLEX_HTTP_ENABLED: "true" }))
+  const result = await runCertify(
+    repo,
+    transport,
+    makeStageEnv({ FELPLEX_HTTP_ENABLED: "true", FELPLEX_CONTRACT_HTTP_CONFIRMED: "false" }),
+  )
   assertEquals(result.body.error_code, "FELPLEX_CONTRACT_UNCONFIRMED")
   assertEquals(transport.getCalls(), 0)
   assertEquals(repo.claims.length, 0)
@@ -337,7 +334,7 @@ Deno.test("1A.1-16 Camino feliz completo con builder desbloqueado", async () => 
     },
     sanitizedMessage: "ok",
   }))
-  const result = await runCertify(repo, transport, makeStageEnv({ FELPLEX_HTTP_ENABLED: "true" }), {
+  const result = await runCertify(repo, transport, makeHttpTestEnv(), {
     buildPayloadOverride: () => unblockedPayload(),
   })
   assertEquals(result.status, 200)
@@ -372,11 +369,16 @@ Deno.test("1A.1-18 Finalizacion exitosa confirmada", async () => {
     body: {
       valid: true,
       uuid: "71916AF3-73F6-480B-B3B3-6F6E3DABC334",
-      sat: { authorization: "AUTH-123", serie: "A", no: "123" },
+      sat: {
+        authorization: "AUTH-123",
+        serie: "A",
+        no: "123",
+        certification_date: FIXED_DATETIME,
+      },
     },
     sanitizedMessage: "ok",
   }))
-  await runCertify(repo, transport, makeStageEnv({ FELPLEX_HTTP_ENABLED: "true" }), {
+  await runCertify(repo, transport, makeHttpTestEnv(), {
     buildPayloadOverride: () => unblockedPayload(),
   })
   assertEquals(repo.finalizations.length, 1)
@@ -394,7 +396,7 @@ Deno.test("1A.1-19 Body crudo 4xx no persistido", async () => {
     errorKind: "http_4xx",
     sanitizedMessage: "Solicitud rechazada (400).",
   }))
-  await runCertify(repo, transport, makeStageEnv({ FELPLEX_HTTP_ENABLED: "true" }), {
+  await runCertify(repo, transport, makeHttpTestEnv(), {
     buildPayloadOverride: () => unblockedPayload(),
   })
   assertEquals(
@@ -418,7 +420,7 @@ Deno.test("1A.1-20 Body crudo 5xx no persistido", async () => {
     errorKind: "http_5xx",
     sanitizedMessage: "Error temporal del proveedor (503).",
   }))
-  await runCertify(repo, transport, makeStageEnv({ FELPLEX_HTTP_ENABLED: "true" }), {
+  await runCertify(repo, transport, makeHttpTestEnv(), {
     buildPayloadOverride: () => unblockedPayload(),
   })
   assertEquals(
@@ -449,7 +451,7 @@ Deno.test("1A.1-22 Dos certifyInvoice concurrentes con Promise.all", async () =>
     },
     sanitizedMessage: "ok",
   }))
-  const env = makeStageEnv({ FELPLEX_HTTP_ENABLED: "true" })
+  const env = makeHttpTestEnv()
   const [first, second] = await Promise.all([
     runCertify(repo, transport, env, { buildPayloadOverride: () => unblockedPayload() }),
     runCertify(repo, transport, env, { buildPayloadOverride: () => unblockedPayload() }),
@@ -467,7 +469,7 @@ Deno.test("1A.1-23 Solo una obtiene claim", async () => {
     body: { valid: true, uuid: "U", sat: { authorization: "A" } },
     sanitizedMessage: "ok",
   }))
-  const env = makeStageEnv({ FELPLEX_HTTP_ENABLED: "true" })
+  const env = makeHttpTestEnv()
   await Promise.all([
     runCertify(repo, transport, env, { buildPayloadOverride: () => unblockedPayload() }),
     runCertify(repo, transport, env, { buildPayloadOverride: () => unblockedPayload() }),
@@ -484,7 +486,7 @@ Deno.test("1A.1-24 La otra recibe FEL_ALREADY_PROCESSING", async () => {
     body: { valid: true, uuid: "U", sat: { authorization: "A" } },
     sanitizedMessage: "ok",
   }))
-  const env = makeStageEnv({ FELPLEX_HTTP_ENABLED: "true" })
+  const env = makeHttpTestEnv()
   const [first, second] = await Promise.all([
     runCertify(repo, transport, env, { buildPayloadOverride: () => unblockedPayload() }),
     runCertify(repo, transport, env, { buildPayloadOverride: () => unblockedPayload() }),
@@ -558,7 +560,7 @@ Deno.test("1A.1-28 Excepcion inesperada del repositorio produce 500 generico", a
       {
         repository: throwingRepo,
         transport: mockTransport(async () => ({ ok: true, sanitizedMessage: "noop" })),
-        env: envGetter(makeStageEnv({ FELPLEX_HTTP_ENABLED: "true" })),
+        env: envGetter(makeHttpTestEnv()),
         nowIso: FIXED_DATETIME,
         actor: makeCashActor(),
         buildPayloadOverride: () => unblockedPayload(),
@@ -575,7 +577,11 @@ Deno.test("Preservado: CF bloqueado por contrato pendiente", () => {
     datetimeIssue: FIXED_DATETIME,
     includeCandidate: true,
   })
-  assertEquals(build.ok, false)
+  assertEquals(build.ok, true)
+  if (build.ok) {
+    assertEquals(build.payload.to_cf, 1)
+    assertEquals(build.payload.to?.tax_code, "CF")
+  }
   record("Preservado: CF bloqueado por contrato", "PASSED")
 })
 
@@ -663,7 +669,7 @@ Deno.test("1A.2-01 Transporte 4xx + finalize null → FEL_UNCERTAIN_OUTCOME", as
   const result = await runCertify(
     repo,
     mockTransport(async () => transport4xxResult()),
-    makeStageEnv({ FELPLEX_HTTP_ENABLED: "true" }),
+    makeHttpTestEnv(),
     { buildPayloadOverride: () => unblockedPayload() },
   )
   assertEquals(result.body.error_code, "FEL_UNCERTAIN_OUTCOME")
@@ -677,7 +683,7 @@ Deno.test("1A.2-02 Transporte 4xx + finalize throw → FEL_UNCERTAIN_OUTCOME", a
   const result = await runCertify(
     repo,
     mockTransport(async () => transport4xxResult()),
-    makeStageEnv({ FELPLEX_HTTP_ENABLED: "true" }),
+    makeHttpTestEnv(),
     { buildPayloadOverride: () => unblockedPayload() },
   )
   assertEquals(result.body.error_code, "FEL_UNCERTAIN_OUTCOME")
@@ -690,7 +696,7 @@ Deno.test("1A.2-03 Transporte 5xx + finalize null → FEL_UNCERTAIN_OUTCOME", as
   const result = await runCertify(
     repo,
     mockTransport(async () => transport5xxResult()),
-    makeStageEnv({ FELPLEX_HTTP_ENABLED: "true" }),
+    makeHttpTestEnv(),
     { buildPayloadOverride: () => unblockedPayload() },
   )
   assertEquals(result.body.error_code, "FEL_UNCERTAIN_OUTCOME")
@@ -703,7 +709,7 @@ Deno.test("1A.2-04 Provider invalido + finalize falla → FEL_UNCERTAIN_OUTCOME"
   const result = await runCertify(
     repo,
     mockTransport(async () => invalidProviderResult()),
-    makeStageEnv({ FELPLEX_HTTP_ENABLED: "true" }),
+    makeHttpTestEnv(),
     { buildPayloadOverride: () => unblockedPayload() },
   )
   assertEquals(result.body.error_code, "FEL_UNCERTAIN_OUTCOME")
@@ -716,7 +722,7 @@ Deno.test("1A.2-05 Finalize failed incongruente → FEL_UNCERTAIN_OUTCOME", asyn
   const result = await runCertify(
     repo,
     mockTransport(async () => transport4xxResult()),
-    makeStageEnv({ FELPLEX_HTTP_ENABLED: "true" }),
+    makeHttpTestEnv(),
     { buildPayloadOverride: () => unblockedPayload() },
   )
   assertEquals(result.body.error_code, "FEL_UNCERTAIN_OUTCOME")
@@ -730,7 +736,7 @@ Deno.test("1A.2-06 Config ON en gates pero OFF en claim bloqueado", async () => 
   const result = await runCertify(
     repo,
     mockTransport(async () => ({ ok: true, sanitizedMessage: "noop" })),
-    makeStageEnv({ FELPLEX_HTTP_ENABLED: "true" }),
+    makeHttpTestEnv(),
     { buildPayloadOverride: () => unblockedPayload() },
   )
   assertEquals(result.body.error_code, "FEL_EMISSION_DISABLED")
@@ -792,7 +798,7 @@ Deno.test("1A.2-10 Transporte 4xx + finalize OK devuelve error transporte", asyn
   const result = await runCertify(
     repo,
     mockTransport(async () => transport4xxResult()),
-    makeStageEnv({ FELPLEX_HTTP_ENABLED: "true" }),
+    makeHttpTestEnv(),
     { buildPayloadOverride: () => unblockedPayload() },
   )
   assertEquals(result.body.error_code, "http_4xx")

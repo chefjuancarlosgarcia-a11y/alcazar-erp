@@ -11,7 +11,7 @@ export type FelDocumentStatus =
 
 export type FelAttemptOutcome = "pending" | "success" | "failed" | "skipped"
 
-export type FelErrorClassification = "transient" | "permanent" | "blocked"
+export type FelErrorClassification = "transient" | "permanent" | "blocked" | "ambiguous"
 
 export interface FelDocumentRow {
   id: string
@@ -85,14 +85,36 @@ export interface PaymentReconciliation {
 }
 
 export interface FelplexPayloadItem {
-  qty: string
-  type: string
+  qty: number
+  type: "B" | "S"
   price: number
   description: string
-  without_iva: number | null
+  without_iva: number
   discount: number
   is_discount_percentage: number
-  taxes: Record<string, unknown>
+  taxes: {
+    quantity: null
+    tax_code: null
+    full_name: null
+    short_name: null
+    tax_amount: null
+    taxable_amount: null
+  }
+}
+
+export interface FelplexPayloadAddress {
+  street: string
+  city: string
+  state: string
+  zip: string
+  country: string
+}
+
+export interface FelplexPayloadReceiver {
+  tax_code_type: "NIT"
+  tax_code: string
+  tax_name: string
+  address: FelplexPayloadAddress
 }
 
 export interface FelplexPayloadCandidate {
@@ -103,17 +125,19 @@ export interface FelplexPayloadCandidate {
   items: FelplexPayloadItem[]
   total: number
   total_tax: number
-  emails: Array<{ email: string }>
+  emails: string[]
+  emails_cc: string[]
   to_cf?: number
-  to?: Record<string, unknown>
-  exempt_phrase?: null
+  to?: FelplexPayloadReceiver
+  exempt_phrase: null
+  custom_fields: unknown[]
 }
 
 export type BuildPayloadResult =
-  | { ok: true; payload: FelplexPayloadCandidate }
+  | { ok: true; payload: FelplexPayloadCandidate; provisional: true }
   | {
       ok: false
-      code: "FELPLEX_CONTRACT_UNCONFIRMED"
+      code: "FELPLEX_CONTRACT_UNCONFIRMED" | "FELPLEX_PAYLOAD_INVALID"
       blockedFields: string[]
       candidate?: FelplexPayloadCandidate
     }
@@ -192,14 +216,19 @@ export interface FelplexCertifyResponse {
   valid?: boolean
   uuid?: string
   sat?: {
-    serie?: string
-    no?: string
-    authorization?: string
-    certification_date?: string
+    serie?: string | null
+    no?: string | number | null
+    authorization?: string | null
+    certification_date?: string | null
+  }
+  certifier?: {
+    name?: string
+    tax_code?: string
   }
   errors?: unknown
-  invoice_url?: string
-  invoice_xml?: string
+  error_codes?: string[]
+  invoice_url?: string | null
+  invoice_xml?: string | null
 }
 
 export interface AttemptRecord {

@@ -73,6 +73,58 @@ export function makeCashActor(overrides: Partial<ActorProfile> = {}): ActorProfi
   }
 }
 
+export function makeNitDocument(overrides: Partial<FelDocumentRow> = {}): FelDocumentRow {
+  return makeQ297Document({
+    receiver_nit: "9001001-9",
+    receiver_name: "Cliente Ficticio Stage",
+    receiver_address: "1a Avenida Ficticia 10-20",
+    receiver_email: "cliente.ficticio@stage-fel.test",
+    ...overrides,
+  })
+}
+
+export const SANITIZED_CERTIFY_SUCCESS_RESPONSE = {
+  valid: true,
+  uuid: "71916AF3-73F6-480B-B3B3-6F6E3DABC334",
+  sat: {
+    serie: "A",
+    no: 123,
+    authorization: "AUTH-FIXTURE-0001",
+    certification_date: "2026-08-08T20:00:00",
+  },
+  certifier: {
+    name: "Certificador Ficticio",
+    tax_code: "000000-0",
+  },
+  errors: [],
+  error_codes: [],
+  invoice_url: "https://felplex.stage.plex.lat/invoices/fixture.pdf",
+  invoice_xml: "https://felplex.stage.plex.lat/invoices/fixture.xml",
+} as const
+
+export const SANITIZED_CERTIFY_FAILURE_RESPONSE = {
+  valid: false,
+  uuid: "71916AF3-73F6-480B-B3B3-6F6E3DABC334",
+  sat: {
+    serie: null,
+    no: "",
+    authorization: null,
+    certification_date: null,
+  },
+  errors: [["Documento rechazado por validacion ficticia."]],
+  error_codes: ["FEL_CARI_FIXTURE"],
+  invoice_url: null,
+  invoice_xml: null,
+} as const
+
+export function makeHttpTestEnv(overrides: Record<string, string> = {}): Map<string, string> {
+  return makeStageEnv({
+    FELPLEX_HTTP_ENABLED: "true",
+    FELPLEX_CONTRACT_HTTP_CONFIRMED: "true",
+    ...overrides,
+  })
+}
+
 export function makeStageEnv(overrides: Record<string, string> = {}): Map<string, string> {
   return new Map<string, string>([
     ["SUPABASE_URL", "https://tgrqarxfmpwgrkntvgma.supabase.co"],

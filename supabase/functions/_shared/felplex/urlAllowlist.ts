@@ -68,6 +68,48 @@ export function buildFelplexCertifyUrlFromAllowlist(
   return { url }
 }
 
+export function buildFelplexGetInvoiceUrl(
+  baseUrl: string | null | undefined,
+  entityId: string,
+  dteUuid: string,
+): { url: string } | FelplexUrlValidationError {
+  const resolved = resolveFelplexStageBaseUrl(baseUrl)
+  if (!resolved) {
+    return blocked("Base URL FELplex Stage no autorizada.")
+  }
+
+  const entity = entityId.trim()
+  const uuid = dteUuid.trim()
+  if (!entity || !uuid) {
+    return blocked("entity_id y dte_uuid requeridos.")
+  }
+
+  const url = `${resolved}/api/entity/${encodeURIComponent(entity)}/invoices/${encodeURIComponent(uuid)}`
+  const validation = validateFelplexStageUrl(url)
+  if (validation) return validation
+
+  return { url }
+}
+
+export function buildFelplexGetInvoiceTextUrl(
+  baseUrl: string | null | undefined,
+  entityId: string,
+  dteUuid: string,
+): { url: string } | FelplexUrlValidationError {
+  const invoice = buildFelplexGetInvoiceUrl(baseUrl, entityId, dteUuid)
+  if ("code" in invoice) return invoice
+  return { url: `${invoice.url}/text` }
+}
+
+/** Modeled only — DELETE anulacion not enabled in Phase 1A. */
+export function buildFelplexCancelInvoiceUrl(
+  baseUrl: string | null | undefined,
+  entityId: string,
+  dteUuid: string,
+): { url: string } | FelplexUrlValidationError {
+  return buildFelplexGetInvoiceUrl(baseUrl, entityId, dteUuid)
+}
+
 function blocked(message: string): FelplexUrlValidationError {
   return { code: "FELPLEX_URL_BLOCKED", message }
 }
