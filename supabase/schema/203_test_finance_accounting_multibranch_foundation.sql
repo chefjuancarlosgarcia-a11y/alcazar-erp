@@ -35,6 +35,7 @@ declare
   v_import jsonb;
   v_account uuid;
 begin
+  set local session_replication_role = replica;
   insert into public.profiles (id, full_name, username, role, status) values
     (v_admin, 'Admin', 'admin_audit', 'admin', 'active'),
     (v_contador, 'Contador', 'contador_audit', 'contador', 'active'),
@@ -42,6 +43,7 @@ begin
     (v_mesero, 'Mesero', 'mesero_audit', 'mesero', 'active'),
     (v_inactive, 'Inactivo', 'inactive_audit', 'contador', 'inactive')
   on conflict (id) do update set role = excluded.role, status = excluded.status;
+  set local session_replication_role = default;
 
   select count(*) into v_main_count from public.branches where is_main = true and is_active = true;
   return query select 'seed_single_active_main_branch'::text, v_main_count = 1, v_main_count::text;

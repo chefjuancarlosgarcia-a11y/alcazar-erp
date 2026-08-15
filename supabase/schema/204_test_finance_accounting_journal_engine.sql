@@ -37,6 +37,7 @@ declare
   v_num1 text;
   v_num2 text;
 begin
+  set local session_replication_role = replica;
   insert into public.profiles (id, full_name, username, role, status) values
     (v_admin, 'Admin', 'admin_audit', 'admin', 'active'),
     (v_contador, 'Contador', 'contador_audit', 'contador', 'active'),
@@ -44,6 +45,7 @@ begin
     (v_mesero, 'Mesero', 'mesero_audit', 'mesero', 'active'),
     (v_inactive, 'Inactivo', 'inactive_audit', 'contador', 'inactive')
   on conflict (id) do update set role = excluded.role, status = excluded.status;
+  set local session_replication_role = default;
 
   perform set_config('request.jwt.claim.sub', v_admin::text, true);
 

@@ -28,12 +28,14 @@ declare
   v_count int;
   v_err text;
 begin
+  set local session_replication_role = replica;
   insert into public.profiles (id, full_name, username, role, status) values
     (v_admin, 'Admin', 'admin_audit', 'admin', 'active'),
     (v_contador, 'Contador', 'contador_audit', 'contador', 'active'),
     (v_gerente, 'Gerente', 'gerente_audit', 'gerente_general', 'active'),
     (v_mesero, 'Mesero', 'mesero_audit', 'mesero', 'active')
-  on conflict (id) do nothing;
+  on conflict (id) do update set role = excluded.role, status = excluded.status;
+  set local session_replication_role = default;
 
   perform set_config('request.jwt.claim.sub', v_admin::text, true);
   begin
