@@ -39,20 +39,128 @@
 3. Tener acceso de lectura/escritura SQL en Stage (no service role en cliente).
 4. Revisar paquete en repo:
    - `supabase/stage-fixtures/finance_accounting_stage_preflight.sql`
+   - `supabase/stage-fixtures/finance_accounting_stage_identity_bootstrap.sql`
    - `supabase/stage-fixtures/finance_accounting_postcheck_202.sql`
    - `supabase/stage-fixtures/finance_accounting_postcheck_203.sql`
    - `supabase/stage-fixtures/finance_accounting_postcheck_204.sql`
    - `supabase/stage-fixtures/finance_accounting_stage_smoke.sql`
    - `supabase/rollback/202_*.rollback.sql` … `204_*.rollback.sql`
+   - `supabase/rollback/finance_accounting_stage_identity_bootstrap.rollback.sql`
    - `scripts/stage-finance-accounting-snapshot.ps1`
 5. Validar localmente (operador):
 
 ```powershell
 node scripts/run-finance-full-schema-lab.mjs
 node scripts/run-finance-stage-package-local-validation.mjs
+node scripts/run-finance-stage-identity-bootstrap-lab.mjs
 ```
 
 6. Coordinar ventana con equipo; comunicar posible rollback.
+
+---
+
+## B.0 — Stage existente sin identidad contable (primer preflight NOT_READY)
+
+Use this path when Stage already has ERP/FELplex work but `app_settings.deployment_environment`
+is **absent** or incomplete. Real Stage preflight may return `NOT_READY` only on:
+
+- `deployment_project_ref_present`
+- `environment_is_stage`
+- `project_ref_matches`
+
+### Orden de seguridad (obligatorio)
+
+1. **Validación externa URL/ref** (operador, fuera de SQL):
+   - Confirmar Stage project ref y Production project ref son **distintos**.
+   - Confirmar la URL de conexión contiene el Stage ref esperado.
+   - Confirmar la URL **no** contiene el Production ref.
+   - Exportar refs solo en variables de entorno locales (`ALCAZAR_STAGE_PROJECT_REF`, `ALCAZAR_PRODUCTION_PROJECT_REF`).
+2. **Preflight READ ONLY** (baseline documentado; puede ser `NOT_READY` por identidad).
+3. **Snapshot baseline** antes de la primera escritura:
+   - Si `deployment_environment` **no existe**, usar modo `-UninitializedStage`.
+   - Si ya existe con valores correctos, usar snapshot normal.
+4. **Bootstrap identidad** — **solo** vía `scripts/invoke-finance-stage-identity-bootstrap.ps1` (no SQL manual).
+5. **Preflight READ ONLY** nuevamente → debe ser `READY`.
+6. **STOP** — no aplicar 202/203/204 hasta nueva autorización.
+
+### Bootstrap identidad (transaccional)
+
+**Ejecución remota obligatoria:** usar únicamente el wrapper PowerShell. No pegar SQL manualmente en Supabase SQL Editor.
+
+```powershell
+$env:ALCAZAR_STAGE_PROJECT_REF = "<stage-ref-from-vault>"
+$env:ALCAZAR_PRODUCTION_PROJECT_REF = "<production-ref-from-vault>"
+$env:ALCAZAR_STAGE_DATABASE_URL = "<connection-string-from-vault>"
+
+# Tras snapshot UninitializedStage (manifest-*.json):
+powershell -File scripts/invoke-finance-stage-identity-bootstrap.ps1 `
+  -SnapshotManifestPath "<path-to-manifest-*.json>" `
+  -MaxSnapshotAgeHours 24
+```
+
+El wrapper:
+
+1. Valida URI PostgreSQL (host/username deben demostrar Stage ref; rechaza Production ref).
+2. Verifica manifest UninitializedStage (SHA-256, refs, antigüedad ≤ 24 h por defecto).
+3. Exige confirmación humana: escribir **exactamente** el Stage project ref (case-sensitive).
+4. Preflight READ ONLY — continúa solo si `NOT_READY` con blockers **exactamente**:
+   `deployment_project_ref_present`, `environment_is_stage`, `project_ref_matches`.
+5. Ejecuta `finance_accounting_stage_identity_bootstrap.sql` (refs vía `set_config` tras `BEGIN`).
+6. Preflight READ ONLY → exige `READY`.
+7. **STOP** — no snapshot adicional, smoke ni migraciones 202–204.
+
+Antigüedad máxima razonable del snapshot: **24 horas** (`-MaxSnapshotAgeHours`, ajustable). Capturar snapshot fresco si expira.
+
+Notas:
+
+- El wrapper **no imprime** contraseñas ni URI completas; logs redactados en `.local-backup/finance-stage-identity-bootstrap-wrapper/`.
+- **No elimina** `ALCAZAR_STAGE_DATABASE_URL` del proceso padre (solo limpia `PGPASSWORD` auxiliar).
+- Usa `psql` local si está en PATH; si no, `docker run postgres:16-alpine` con repo montado read-only.
+
+Referencia manual (solo depuración local en Docker):
+
+```sql
+-- NO usar en Stage remoto — usar invoke-finance-stage-identity-bootstrap.ps1
+SELECT set_config('alcazar.finance_stage_project_ref', '<stage-ref-from-vault>', true);
+SELECT set_config('alcazar.finance_production_project_ref', '<production-ref-from-vault>', true);
+-- supabase/stage-fixtures/finance_accounting_stage_identity_bootstrap.sql
+```
+
+Reglas fail-closed del SQL bootstrap:
+
+- Aborta si Stage ref = Production ref.
+- Inserta **solo** si `deployment_environment` está ausente.
+- **Nunca** sobrescribe `name`/`project_ref` existentes diferentes.
+- Idempotente si ya existe `name=stage` y `project_ref` correcto.
+- **No toca** otras filas (`felplex`, branding, etc.).
+- Marca filas creadas con `finance_accounting_identity_bootstrap=true` para rollback puntual.
+
+Rollback puntual:
+
+```text
+supabase/rollback/finance_accounting_stage_identity_bootstrap.rollback.sql
+```
+
+Elimina únicamente filas con el marcador bootstrap y valores esperados. Sin CASCADE.
+
+### Snapshot UninitializedStage
+
+Cuando el marcador `deployment_environment` aún no existe:
+
+```powershell
+$env:ALCAZAR_STAGE_PROJECT_REF = "<stage-ref-from-vault>"
+$env:ALCAZAR_PRODUCTION_PROJECT_REF = "<production-ref-from-vault>"
+$env:ALCAZAR_STAGE_DATABASE_URL = "<connection-string-from-vault>"
+powershell -File scripts/stage-finance-accounting-snapshot.ps1 -UninitializedStage
+```
+
+Modo `-UninitializedStage`:
+
+- Permitido **solo** si `deployment_environment` está ausente.
+- URL debe contener Stage ref; no debe contener Production ref.
+- Aborta si el entorno remoto ya indica `production`/`prod`.
+- El manifest incluye `manifest_version`, `stage_project_ref`, `production_project_ref`, `created_at` y SHA-256 de artefactos.
+- El wrapper de bootstrap exige manifest `uninitialized_stage=true` con antigüedad ≤ 24 h (configurable).
 
 ---
 
@@ -61,7 +169,8 @@ node scripts/run-finance-stage-package-local-validation.mjs
 1. En Supabase SQL Editor (**Stage**), establecer el identificador de proyecto para esta sesión (valor del vault, debe coincidir con `app_settings`):
 
 ```sql
-select set_config('alcazar.finance_stage_project_ref', '<stage-project-ref-from-vault>', false);
+SELECT set_config('alcazar.finance_stage_project_ref', '<stage-project-ref-from-vault>', true);
+SELECT set_config('alcazar.finance_production_project_ref', '<production-project-ref-from-vault>', true);
 ```
 
 2. Verificar que `app_settings.deployment_environment` contiene:
@@ -72,10 +181,14 @@ select key, value from public.app_settings where key = 'deployment_environment';
 -- Requerido: value.project_ref = mismo valor que alcazar.finance_stage_project_ref
 ```
 
-3. Ejecutar preflight:
+3. Ejecutar preflight dentro de transacción READ ONLY:
 
-```
-supabase/stage-fixtures/finance_accounting_stage_preflight.sql
+```sql
+SET default_transaction_read_only = on;
+BEGIN READ ONLY;
+SELECT set_config('alcazar.finance_stage_project_ref', '<stage-project-ref-from-vault>', true);
+-- pegar supabase/stage-fixtures/finance_accounting_stage_preflight.sql
+ROLLBACK;
 ```
 
 4. Resultado final **debe ser `READY`**. Si es `NOT_READY`: **STOP**.
@@ -95,9 +208,13 @@ powershell -File scripts/stage-finance-accounting-snapshot.ps1 -DryRun
 2. Exportar conexión Stage **solo** en variable de entorno (no archivos):
 
 ```powershell
+$env:ALCAZAR_STAGE_PROJECT_REF = "<stage-ref-from-vault>"
+$env:ALCAZAR_PRODUCTION_PROJECT_REF = "<production-ref-from-vault>"
 $env:ALCAZAR_STAGE_DATABASE_URL = "<connection-string-from-vault>"
 powershell -File scripts/stage-finance-accounting-snapshot.ps1
 ```
+
+   Si `deployment_environment` aún no existe, usar `-UninitializedStage` (sección B.0).
 
 3. Verificar manifest JSON con hashes SHA-256.
 4. Si falla cualquier dump: **STOP**.

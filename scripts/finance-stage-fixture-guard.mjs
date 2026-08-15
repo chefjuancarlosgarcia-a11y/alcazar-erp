@@ -86,7 +86,13 @@ export function validateFinanceStageFixtures(rootDir) {
     (f) => f.endsWith(".sql") && !FIXTURE_FILES.includes(f) && f.startsWith("finance_accounting_")
   )
   for (const file of extras) {
-    if (file.includes("stage_smoke") || file.includes("identity_guard")) continue
+    if (
+      file.includes("stage_smoke") ||
+      file.includes("identity_guard") ||
+      file.includes("identity_bootstrap")
+    ) {
+      continue
+    }
     const relativePath = join(FIXTURE_DIR, file)
     assertReadOnlyFixtureSql(relativePath, readFileSync(join(dir, file), "utf8"))
   }
