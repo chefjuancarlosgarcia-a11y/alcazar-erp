@@ -43,3 +43,36 @@ export function canReopenAccountingPeriod(userProfile) {
   const role = roleKey(userProfile)
   return ["admin", "contador", "gerente_general"].includes(role)
 }
+
+export function canViewAccountingJournal(userProfile) {
+  if (!userProfile || userProfile.status !== "active") return false
+  return FINANCE_VIEW_ROLES.includes(roleKey(userProfile))
+}
+
+export function canCreateAccountingJournal(userProfile) {
+  return canManageAccountingCatalog(userProfile)
+}
+
+export function canApproveAccountingJournal(userProfile) {
+  return canManageAccountingCatalog(userProfile)
+}
+
+export function canPostAccountingJournal(userProfile) {
+  return canManageAccountingCatalog(userProfile)
+}
+
+export function canReverseAccountingJournal(userProfile) {
+  if (!userProfile || userProfile.status !== "active") return false
+  const role = roleKey(userProfile)
+  return ["admin", "contador", "gerente_general"].includes(role)
+}
+
+export function journalPermissionsForUser(userProfile) {
+  return {
+    canView: canViewAccountingJournal(userProfile),
+    canCreate: canCreateAccountingJournal(userProfile),
+    canApprove: canApproveAccountingJournal(userProfile),
+    canPost: canPostAccountingJournal(userProfile),
+    canReverse: canReverseAccountingJournal(userProfile)
+  }
+}

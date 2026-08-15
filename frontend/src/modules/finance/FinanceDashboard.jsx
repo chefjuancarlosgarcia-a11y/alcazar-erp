@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
 import FinanceOriginLink from "../../components/FinanceOriginLink"
 import { useAuth } from "../../context/AuthContext"
@@ -26,6 +26,7 @@ import FinanceChartAccountsTab from "./FinanceChartAccountsTab"
 import FinanceBranchesTab from "./FinanceBranchesTab"
 import FinanceCostCentersTab from "./FinanceCostCentersTab"
 import FinanceAccountingPeriodsTab from "./FinanceAccountingPeriodsTab"
+import FinanceJournalEntriesTab from "./FinanceJournalEntriesTab"
 import {
   BANK_TX_TYPES,
   buildFinanceOriginUrl,
@@ -111,10 +112,14 @@ export default function FinanceDashboard() {
   })
 
   const notify = useCallback((text, tone = "info") => setMessage({ text, tone }), [])
+  const journalLeaveGuardRef = useRef({ isDirty: false, confirmLeave: () => true })
 
   const setTab = useCallback((nextTab) => {
+    if (tab === "partidas" && nextTab !== "partidas" && journalLeaveGuardRef.current.isDirty) {
+      if (!journalLeaveGuardRef.current.confirmLeave()) return
+    }
     setSearchParams({ tab: nextTab })
-  }, [setSearchParams])
+  }, [setSearchParams, tab])
 
   const loadBankAccounts = useCallback(async () => {
     const result = await listFinanceBankAccounts()
@@ -811,6 +816,9 @@ export default function FinanceDashboard() {
       {tab === "sucursales" && <FinanceBranchesTab user={user} notify={notify} />}
       {tab === "centros" && <FinanceCostCentersTab user={user} notify={notify} />}
       {tab === "periodos" && <FinanceAccountingPeriodsTab user={user} notify={notify} />}
+      {tab === "partidas" && (
+        <FinanceJournalEntriesTab user={user} notify={notify} leaveGuardRef={journalLeaveGuardRef} />
+      )}
     </div>
   )
 }

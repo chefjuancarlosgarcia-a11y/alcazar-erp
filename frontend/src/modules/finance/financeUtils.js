@@ -8,8 +8,40 @@ export const FINANCE_TABS = [
   { key: "catalogo", label: "Catálogo contable" },
   { key: "sucursales", label: "Sucursales" },
   { key: "centros", label: "Centros de costo" },
-  { key: "periodos", label: "Periodos contables" }
+  { key: "periodos", label: "Periodos contables" },
+  { key: "partidas", label: "Partidas contables" }
 ]
+
+export const JOURNAL_STATUS_LABELS = {
+  draft: "Borrador",
+  pending_approval: "Pendiente de aprobación",
+  approved: "Aprobada",
+  posted: "Contabilizada"
+}
+
+export function emptyJournalLine(lineNumber = 1) {
+  return {
+    key: `local-${Date.now()}-${lineNumber}`,
+    account_id: "",
+    account_code: "",
+    account_label: "",
+    branch_id: "",
+    cost_center_id: "",
+    description: "",
+    reference: "",
+    debit: "",
+    credit: ""
+  }
+}
+
+export function emptyJournalDraftForm() {
+  return {
+    entry_date: new Date().toISOString().slice(0, 10),
+    description: "",
+    reference: "",
+    lines: [emptyJournalLine(1), emptyJournalLine(2)]
+  }
+}
 
 export const PAYABLE_STATUS_LABELS = {
   pending: "Pendiente",
