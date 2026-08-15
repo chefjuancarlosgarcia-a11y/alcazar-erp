@@ -1,7 +1,7 @@
 export default function FinanceJournalEntryActions({
   allowedActions,
   pendingAction,
-  difference,
+  canSubmit,
   entry,
   onSaveDraft,
   onSubmit,
@@ -21,7 +21,7 @@ export default function FinanceJournalEntryActions({
         <button
           type="button"
           className="tasks-primary"
-          disabled={!!pendingAction || difference !== 0}
+          disabled={!!pendingAction || !canSubmit}
           onClick={onSubmit}
         >
           {pendingAction === "submit" ? "Enviando…" : "Enviar a aprobación"}

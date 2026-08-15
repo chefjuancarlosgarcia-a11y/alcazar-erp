@@ -7,6 +7,7 @@ import {
 import {
   buildRpcLinesPayload,
   canPerformJournalAction,
+  canSubmitJournalForm,
   filterCostCentersForBranch,
   filterPostableAccounts,
   journalActionsForRole,
@@ -207,4 +208,107 @@ test("unsaved journal dirty detection", () => {
 test("unsaved confirm message constant", () => {
   assert.match(UNSAVED_JOURNAL_CONFIRM, /cambios sin guardar/i)
   assert.equal(typeof confirmDiscardJournalChanges, "function")
+})
+
+const baseSubmitForm = {
+  entry_date: "2026-08-15",
+  description: "Partida smoke LOCAL TEST",
+  reference: "",
+  lines: [
+    {
+      account_id: accountRequiredBranch.id,
+      debit: "100.00",
+      credit: "",
+      branch_id: "b1",
+      cost_center_id: ""
+    },
+    {
+      account_id: "a-cash",
+      debit: "",
+      credit: "100.00",
+      branch_id: "",
+      cost_center_id: ""
+    }
+  ]
+}
+
+const accountsForSubmit = new Map([
+  [accountRequiredBranch.id, accountRequiredBranch],
+  [
+    "a-cash",
+    {
+      id: "a-cash",
+      code: "1.01",
+      branch_dimension_rule: "optional",
+      cost_center_dimension_rule: "optional"
+    }
+  ]
+])
+
+test("canSubmitJournalForm rejects zero lines", () => {
+  assert.equal(
+    canSubmitJournalForm({ ...baseSubmitForm, lines: [] }, accountsForSubmit),
+    false
+  )
+})
+
+test("canSubmitJournalForm rejects one line", () => {
+  assert.equal(
+    canSubmitJournalForm({ ...baseSubmitForm, lines: [baseSubmitForm.lines[0]] }, accountsForSubmit),
+    false
+  )
+})
+
+test("canSubmitJournalForm rejects two empty lines even when balanced at zero", () => {
+  assert.equal(
+    canSubmitJournalForm(
+      {
+        entry_date: "2026-08-15",
+        description: "Vacía",
+        reference: "",
+        lines: [
+          { account_id: "", debit: "", credit: "", branch_id: "", cost_center_id: "" },
+          { account_id: "", debit: "", credit: "", branch_id: "", cost_center_id: "" }
+        ]
+      },
+      accountsForSubmit
+    ),
+    false
+  )
+})
+
+test("canSubmitJournalForm accepts two valid balanced lines", () => {
+  assert.equal(canSubmitJournalForm(baseSubmitForm, accountsForSubmit), true)
+})
+
+test("canSubmitJournalForm rejects balanced lines without account", () => {
+  assert.equal(
+    canSubmitJournalForm(
+      {
+        ...baseSubmitForm,
+        lines: [
+          { account_id: "", debit: "50", credit: "", branch_id: "", cost_center_id: "" },
+          { account_id: "", debit: "", credit: "50", branch_id: "", cost_center_id: "" }
+        ]
+      },
+      accountsForSubmit
+    ),
+    false
+  )
+})
+
+test("canSubmitJournalForm rejects when required dimensions are missing", () => {
+  assert.equal(
+    canSubmitJournalForm(
+      {
+        ...baseSubmitForm,
+        lines: [
+          { ...baseSubmitForm.lines[0], branch_id: "" },
+          baseSubmitForm.lines[1]
+        ]
+      },
+      accountsForSubmit
+    ),
+    false
+  )
 })

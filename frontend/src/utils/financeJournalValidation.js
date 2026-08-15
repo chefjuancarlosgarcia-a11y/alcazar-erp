@@ -124,6 +124,11 @@ export function validateJournalForm(form, accountsById) {
   return { valid: true, message: "" }
 }
 
+/** Indica si el formulario cumple todas las reglas para habilitar «Enviar a aprobación». */
+export function canSubmitJournalForm(form, accountsById) {
+  return validateJournalForm(form, accountsById).valid
+}
+
 export function filterPostableAccounts(accounts) {
   return accounts.filter(
     (row) => row.is_active && row.account_kind === "detail" && row.accepts_entries

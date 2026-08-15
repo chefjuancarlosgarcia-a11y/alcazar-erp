@@ -15,6 +15,7 @@ export default function FinanceJournalEntryEditor({
   allowedActions,
   totals,
   difference,
+  canSubmit,
   branches,
   costCenters,
   postableAccounts,
@@ -127,7 +128,7 @@ export default function FinanceJournalEntryEditor({
           <FinanceJournalEntryActions
             allowedActions={allowedActions}
             pendingAction={pendingAction}
-            difference={difference}
+            canSubmit={canSubmit}
             entry={entry}
             onSaveDraft={onSaveDraft}
             onSubmit={onSubmit}

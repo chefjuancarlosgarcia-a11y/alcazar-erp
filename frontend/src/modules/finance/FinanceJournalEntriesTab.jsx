@@ -19,11 +19,13 @@ import {
 import { journalPermissionsForUser, canViewAccountingJournal } from "../../utils/financePermissions"
 import {
   canPerformJournalAction,
+  canSubmitJournalForm,
   filterPostableAccounts,
   formFromEntry,
   journalActionsForRole,
   lineTotals,
-  serializeFormSnapshot
+  serializeFormSnapshot,
+  validateJournalForm
 } from "../../utils/financeJournalValidation"
 import { persistJournalDraft, submitJournalEntryFlow } from "../../utils/financeJournalPersist"
 import { confirmDiscardJournalChanges, createJournalLeaveGuard, UNSAVED_JOURNAL_CONFIRM } from "../../utils/financeJournalUnsaved"
@@ -93,6 +95,10 @@ export default function FinanceJournalEntriesTab({ user, notify, leaveGuardRef }
 
   const totals = useMemo(() => lineTotals(form.lines), [form.lines])
   const difference = centsToDecimalNumber(totals.debitCents - totals.creditCents)
+  const canSubmit = useMemo(
+    () => canSubmitJournalForm(form, accountsById),
+    [form, accountsById]
+  )
 
   const reloadEntrySilent = useCallback(async (id) => {
     const result = await getFinanceJournalEntry(id)
@@ -339,6 +345,10 @@ export default function FinanceJournalEntriesTab({ user, notify, leaveGuardRef }
     if (!canPerformJournalAction(status, "submit", permissions)) {
       return notify("No tienes permiso para enviar partidas.", "error")
     }
+    const validation = validateJournalForm(form, accountsById)
+    if (!validation.valid) {
+      return notify(validation.message, "error")
+    }
     await runAction("submit", async () => {
       const result = await submitJournalEntryFlow({
         form,
@@ -484,6 +494,7 @@ export default function FinanceJournalEntriesTab({ user, notify, leaveGuardRef }
           allowedActions={allowedActions}
           totals={totals}
           difference={difference}
+          canSubmit={canSubmit}
           branches={branches}
           costCenters={costCenters}
           postableAccounts={postableAccounts}
