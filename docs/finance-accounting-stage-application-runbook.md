@@ -242,6 +242,37 @@ powershell -File scripts/stage-finance-accounting-snapshot.ps1
 
 ## D. Aplicación (orden estricto)
 
+> **Ejecución remota obligatoria:** usar `scripts/invoke-finance-stage-accounting-migration.ps1` — **una fase por invocación** (202, 203 o 204). No pegar SQL manualmente ni encadenar fases.
+
+```powershell
+$env:ALCAZAR_STAGE_PROJECT_REF = "<stage-ref-from-vault>"
+$env:ALCAZAR_PRODUCTION_PROJECT_REF = "<production-ref-from-vault>"
+$env:ALCAZAR_STAGE_DATABASE_URL = "<session-pooler-or-direct-uri-from-vault>"
+
+# Tras snapshot post-bootstrap (manifest con uninitialized_stage=false):
+powershell -File scripts/invoke-finance-stage-accounting-migration.ps1 `
+  -Phase 202 `
+  -SnapshotManifestPath "<path-to-manifest-*.json>" `
+  -MaxSnapshotAgeHours 24
+```
+
+Confirmación humana exacta (interactiva o `-OperatorConfirmation`):
+
+```text
+APPLY 202 TO <stage-ref-from-vault>
+```
+
+El wrapper:
+
+1. Valida URI Session pooler/Direct (5432), snapshot post-bootstrap (SHA-256, refs, antigüedad) y worktree Git limpio (solo `.local-backup/` untracked).
+2. Verifica pre-estado fail-closed por fase (identidad READY para 202; postchecks previos PASS para 203/204).
+3. Ejecuta migración + postcheck en **una sola transacción** (`BEGIN` … `COMMIT`); aborta si la migración contiene `BEGIN`/`COMMIT`/`ROLLBACK`.
+4. Re-ejecuta postcheck en `BEGIN READ ONLY` / `ROLLBACK`.
+5. Escribe evidencia en `.local-backup/finance-stage-accounting-migration-wrapper/<timestamp>/`.
+6. **STOP** — no aplica la siguiente fase automáticamente.
+
+Repetir con `-Phase 203` y luego `-Phase 204` solo tras autorización separada y snapshot fresco si expiró.
+
 > Cada migración es **transaccional**. En `psql`: `-v ON_ERROR_STOP=1`.
 > En SQL Editor: pegar archivo completo; si error antes de COMMIT implícito, revertir sesión.
 
