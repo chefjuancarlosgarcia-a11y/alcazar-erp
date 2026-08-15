@@ -35,6 +35,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "finance-stage-postgres-connection.ps1")
 
 $IdentityOnlyBlockers = @(
   "deployment_project_ref_present",
@@ -44,87 +45,6 @@ $IdentityOnlyBlockers = @(
 
 function Write-BootstrapStep([string]$Message) {
   Write-Host "[identity-bootstrap] $Message"
-}
-
-function Redact-ConnectionTarget([hashtable]$Parts) {
-  $user = $Parts.Username
-  if ($user -match '^postgres\.([a-z0-9]+)$') {
-    $user = "postgres.$($Matches[1].Substring(0, [Math]::Min(4, $Matches[1].Length)))..."
-  }
-  return "host=$($Parts.Host):$($Parts.Port) user=$user db=$($Parts.Database)"
-}
-
-function Parse-PostgresUri([string]$ConnectionString) {
-  if ([string]::IsNullOrWhiteSpace($ConnectionString)) {
-    throw "Connection URI is empty."
-  }
-  $normalized = $ConnectionString.Trim()
-  if ($normalized -notmatch '^(postgres(?:ql)?://)(.+)$') {
-    throw "Invalid PostgreSQL URI scheme."
-  }
-  $remainder = $Matches[2]
-  if ($remainder -notmatch '^([^:@/]+)(?::([^@]*))?@([^/?#]+)(?:/([^?#]*))?(?:\?.*)?$') {
-    throw "Invalid PostgreSQL URI format (expected user[:password]@host[:port]/database)."
-  }
-  $username = [Uri]::UnescapeDataString($Matches[1])
-  $password = if ($null -ne $Matches[2]) { [Uri]::UnescapeDataString($Matches[2]) } else { "" }
-  $database = if ($Matches[4]) { [Uri]::UnescapeDataString($Matches[4]) } else { "postgres" }
-  $hostPort = $Matches[3]
-  $port = 5432
-  $hostName = $hostPort
-  if ($hostPort -match '^(.+):(\d+)$') {
-    $hostName = $Matches[1]
-    $port = [int]$Matches[2]
-  }
-  return @{
-    Username = $username
-    Password = $password
-    Host = $hostName
-    Port = $port
-    Database = $database
-  }
-}
-
-function Test-StageConnectionUri {
-  param(
-    [string]$ConnectionString,
-    [string]$StageRef,
-    [string]$ProductionRef
-  )
-  if ([string]::IsNullOrWhiteSpace($StageRef)) {
-    throw "ALCAZAR_STAGE_PROJECT_REF is required."
-  }
-  if ([string]::IsNullOrWhiteSpace($ProductionRef)) {
-    throw "ALCAZAR_PRODUCTION_PROJECT_REF is required."
-  }
-  if ($StageRef -ceq $ProductionRef) {
-    throw "Refusing bootstrap: Stage and Production project refs must differ."
-  }
-  if ($ConnectionString -match '(?i)(^|[^a-z0-9])(prod|production)([^a-z0-9]|$)') {
-    throw "Refusing bootstrap: connection string appears to target Production."
-  }
-
-  $parts = Parse-PostgresUri $ConnectionString
-  $stageRefNorm = $StageRef.ToLowerInvariant()
-  $prodRefNorm = $ProductionRef.ToLowerInvariant()
-  $usernameNorm = $parts.Username.ToLowerInvariant()
-  $hostNorm = $parts.Host.ToLowerInvariant()
-
-  $expectedPoolerUser = "postgres.$stageRefNorm"
-  $expectedDirectHost = "db.$stageRefNorm.supabase.co"
-  $productionPoolerUser = "postgres.$prodRefNorm"
-  $productionDirectHost = "db.$prodRefNorm.supabase.co"
-
-  if ($usernameNorm -ceq $productionPoolerUser -or $hostNorm -ceq $productionDirectHost) {
-    throw "Refusing bootstrap: connection target matches Production project ref."
-  }
-
-  $refDemonstrated = ($usernameNorm -ceq $expectedPoolerUser) -or ($hostNorm -ceq $expectedDirectHost)
-  if (-not $refDemonstrated) {
-    throw "Refusing bootstrap: Stage project ref must match postgres.<ref> username (Session pooler) or db.<ref>.supabase.co host (direct)."
-  }
-
-  return $parts
 }
 
 function Test-SnapshotManifest {
@@ -206,21 +126,6 @@ function Confirm-OperatorAuthorization {
   Write-BootstrapStep "Operator confirmation accepted."
 }
 
-function Get-PsqlInvocation {
-  param([hashtable]$ConnParts)
-  $psql = Get-Command psql -ErrorAction SilentlyContinue
-  if ($psql) {
-    return @{
-      UseDocker = $false
-      Executable = $psql.Source
-    }
-  }
-  return @{
-    UseDocker = $true
-    Executable = "docker"
-  }
-}
-
 function Invoke-FinancePsql {
   param(
     [hashtable]$ConnParts,
@@ -229,64 +134,23 @@ function Invoke-FinancePsql {
     [switch]$AllowFailure
   )
   $repoRoot = Split-Path $PSScriptRoot -Parent
-  $env:PGPASSWORD = $ConnParts.Password
-  $prevEap = $ErrorActionPreference
-  $ErrorActionPreference = "Continue"
-  try {
-    $inv = Get-PsqlInvocation $ConnParts
-    if ($inv.UseDocker) {
-      $pgHost = $ConnParts.Host
-      # Preserve remote Supabase hostnames. host.docker.internal is only for local lab URLs.
-      if ($pgHost -in @("127.0.0.1", "localhost", "host.docker.internal")) {
-        $pgHost = "host.docker.internal"
-      }
-      $args = @(
-        "run", "--rm", "-i",
-        "-e", "PGPASSWORD",
-        "-v", "${repoRoot}:/repo:ro",
-        "postgres:16-alpine",
-        "psql",
-        "-h", $pgHost,
-        "-p", $ConnParts.Port.ToString(),
-        "-U", $ConnParts.Username,
-        "-d", $ConnParts.Database,
-        "-v", "ON_ERROR_STOP=1",
-        "-f", "-"
-      )
-      $result = $Sql | & docker @args 2>&1
-      $exitCode = $LASTEXITCODE
-    } else {
-      $result = $Sql | & $inv.Executable `
-        "-h", $ConnParts.Host `
-        "-p", $ConnParts.Port.ToString() `
-        "-U", $ConnParts.Username `
-        "-d", $ConnParts.Database `
-        "-v", "ON_ERROR_STOP=1" `
-        "-f", "-" 2>&1
-      $exitCode = $LASTEXITCODE
-    }
-    $text = ($result | Out-String)
-    $redacted = $text -replace [regex]::Escape($ConnParts.Password), "***"
-    if ($ConnParts.Password) {
-      $redacted = $redacted -replace "postgres(?:\.$([regex]::Escape($env:ALCAZAR_STAGE_PROJECT_REF)))?:$([regex]::Escape($ConnParts.Password))@", "postgres:***@"
-    }
-    $logDir = Join-Path (Join-Path $repoRoot ".local-backup") "finance-stage-identity-bootstrap-wrapper"
-    if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
-    $logFile = Join-Path $logDir "$Label-$(Get-Date -Format 'yyyyMMdd-HHmmss-fff').log"
-    if (Test-Path -LiteralPath $logFile) {
-      throw "Refusing to overwrite existing log evidence: $logFile"
-    }
-    Set-Content -Path $logFile -Value $redacted -Encoding UTF8
-
-    $exitCode = $LASTEXITCODE
-    if (-not $AllowFailure -and $exitCode -ne 0) {
-      throw "$Label failed (exit $exitCode). See redacted log: $logFile"
-    }
-    return @{ Output = $text; ExitCode = $exitCode; LogFile = $logFile }
-  } finally {
-    $ErrorActionPreference = $prevEap
-    Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+  $result = Invoke-StagePostgresPsql -ConnParts $ConnParts -Sql $Sql -DockerExtraArgs @("-v", "${repoRoot}:/repo:ro")
+  $text = $result.Output
+  $redacted = $text -replace [regex]::Escape($ConnParts.Password), "***"
+  if ($ConnParts.Password) {
+    $redacted = $redacted -replace "postgres(?:\.$([regex]::Escape($env:ALCAZAR_STAGE_PROJECT_REF)))?:$([regex]::Escape($ConnParts.Password))@", "postgres:***@"
   }
+  $logDir = Join-Path (Join-Path $repoRoot ".local-backup") "finance-stage-identity-bootstrap-wrapper"
+  if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
+  $logFile = Join-Path $logDir "$Label-$(Get-Date -Format 'yyyyMMdd-HHmmss-fff').log"
+  if (Test-Path -LiteralPath $logFile) {
+    throw "Refusing to overwrite existing log evidence: $logFile"
+  }
+  Set-Content -Path $logFile -Value $redacted -Encoding UTF8
+  if (-not $AllowFailure -and $result.ExitCode -ne 0) {
+    throw "$Label failed (exit $($result.ExitCode)). See redacted log: $logFile"
+  }
+  return @{ Output = $text; ExitCode = $result.ExitCode; LogFile = $logFile }
 }
 
 function Get-ReadOnlyPreflightSql {
@@ -383,8 +247,8 @@ if (-not $stageRef) { throw "ALCAZAR_STAGE_PROJECT_REF is required." }
 if (-not $productionRef) { throw "ALCAZAR_PRODUCTION_PROJECT_REF is required." }
 
 Write-BootstrapStep "Validating connection target (URI not logged)."
-$connParts = Test-StageConnectionUri -ConnectionString $env:ALCAZAR_STAGE_DATABASE_URL -StageRef $stageRef -ProductionRef $productionRef
-Write-BootstrapStep "Connection target: $(Redact-ConnectionTarget $connParts)"
+$connParts = Test-StagePostgresConnectionUri -ConnectionString $env:ALCAZAR_STAGE_DATABASE_URL -StageRef $stageRef -ProductionRef $productionRef -AllowLabLocal
+Write-BootstrapStep "Connection target: $(Redact-StageConnectionTarget $connParts)"
 
 $resolvedManifestPath = Test-SnapshotManifest -ManifestPath $SnapshotManifestPath -StageRef $stageRef -ProductionRef $productionRef -MaxAgeHours $MaxSnapshotAgeHours
 Write-BootstrapStep "Snapshot manifest path locked."
@@ -395,6 +259,9 @@ if ($ValidateOnly) {
   Write-BootstrapStep "ValidateOnly - URL, manifest, and operator confirmation passed. No database connection."
   exit 0
 }
+
+$tooling = Initialize-StagePostgresTooling -ConnParts $connParts -RequirePgDump:$false
+Write-BootstrapStep "PostgreSQL tooling: psql=$($tooling.PsqlSource) server=$($tooling.ServerVersion) pg_dump=$($tooling.PgDumpVersion)"
 
 Write-BootstrapStep "Running preflight READ ONLY..."
 $preSql = Get-ReadOnlyPreflightSql -StageRef $stageRef -ProductionRef $productionRef

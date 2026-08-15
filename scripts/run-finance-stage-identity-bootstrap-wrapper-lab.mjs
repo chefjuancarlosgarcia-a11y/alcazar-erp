@@ -65,8 +65,16 @@ function productionLabUrl() {
   return `postgresql://postgres.${PRODUCTION_REF}:lab_pass@127.0.0.1:${hostPort}/postgres`
 }
 
-function noRefLabUrl() {
-  return `postgresql://postgres:lab_pass@127.0.0.1:${hostPort}/postgres`
+function noRefRemoteUrl() {
+  return `postgresql://postgres:lab_pass@aws-0-us-east-1.pooler.supabase.com:5432/postgres`
+}
+
+function transactionPoolerUrl() {
+  return `postgresql://postgres.${STAGE_REF}:lab_pass@aws-0-us-east-1.pooler.supabase.com:6543/postgres`
+}
+
+function fakeSupabaseHostUrl() {
+  return `postgresql://postgres.${STAGE_REF}:lab_pass@evil.pooler.supabase.com.attacker.example:5432/postgres`
 }
 
 function invokeWrapper({
@@ -202,7 +210,9 @@ insert into public.app_settings (key, value) values ('felplex_stage_config', jso
 
   log("url_stage_correct", invokeWrapper({ label: "url_stage", manifestPath: validManifest, validateOnly: true, expectSuccess: true }).ok, "ValidateOnly")
   log("url_production_rejected", invokeWrapper({ label: "url_prod", manifestPath: validManifest, databaseUrl: productionLabUrl(), validateOnly: true }).ok, "rejected")
-  log("url_no_ref_rejected", invokeWrapper({ label: "url_no_ref", manifestPath: validManifest, databaseUrl: noRefLabUrl(), validateOnly: true }).ok, "rejected")
+  log("url_no_ref_rejected", invokeWrapper({ label: "url_no_ref", manifestPath: validManifest, databaseUrl: noRefRemoteUrl(), validateOnly: true }).ok, "rejected")
+  log("url_transaction_pooler_rejected", invokeWrapper({ label: "url_6543", manifestPath: validManifest, databaseUrl: transactionPoolerUrl(), validateOnly: true }).ok, "6543 rejected")
+  log("url_fake_supabase_host_rejected", invokeWrapper({ label: "url_fake_host", manifestPath: validManifest, databaseUrl: fakeSupabaseHostUrl(), validateOnly: true }).ok, "fake host rejected")
   log("refs_equal_rejected", invokeWrapper({ label: "refs_equal", manifestPath: validManifest, productionRef: STAGE_REF, validateOnly: true }).ok, "rejected")
   log("manifest_missing_rejected", invokeWrapper({ label: "manifest_missing", manifestPath: join(evidenceDir, "missing.json"), validateOnly: true }).ok, "rejected")
 

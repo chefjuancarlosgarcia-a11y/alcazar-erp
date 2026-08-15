@@ -91,6 +91,8 @@ is **absent** or incomplete. Real Stage preflight may return `NOT_READY` only on
 $env:ALCAZAR_STAGE_PROJECT_REF = "<stage-ref-from-vault>"
 $env:ALCAZAR_PRODUCTION_PROJECT_REF = "<production-ref-from-vault>"
 $env:ALCAZAR_STAGE_DATABASE_URL = "<connection-string-from-vault>"
+# Session pooler: postgresql://postgres.<stage-ref>:<password>@<pooler-host>:5432/postgres
+# Direct: postgresql://postgres:<password>@db.<stage-ref>.supabase.co:5432/postgres
 
 # Tras snapshot UninitializedStage (manifest-*.json):
 powershell -File scripts/invoke-finance-stage-identity-bootstrap.ps1 `
@@ -115,7 +117,10 @@ Notas:
 
 - El wrapper **no imprime** contraseñas ni URI completas; logs redactados en `.local-backup/finance-stage-identity-bootstrap-wrapper/`.
 - **No elimina** `ALCAZAR_STAGE_DATABASE_URL` del proceso padre (solo limpia `PGPASSWORD` auxiliar).
-- Usa `psql` local si está en PATH; si no, `docker run postgres:16-alpine` con repo montado read-only.
+- Usa `psql` local si está en PATH; si no, `docker run postgres:<server-major>-alpine` con repo montado read-only.
+- URI remota válida (puerto **5432** obligatorio; **no** usar Transaction pooler **6543**):
+  - Session pooler: `postgresql://postgres.<stage-ref>:<password>@<pooler-host>:5432/postgres` (host termina en `.pooler.supabase.com`)
+  - Direct: `postgresql://postgres:<password>@db.<stage-ref>.supabase.co:5432/postgres`
 
 Referencia manual (solo depuración local en Docker):
 
@@ -151,13 +156,25 @@ Cuando el marcador `deployment_environment` aún no existe:
 $env:ALCAZAR_STAGE_PROJECT_REF = "<stage-ref-from-vault>"
 $env:ALCAZAR_PRODUCTION_PROJECT_REF = "<production-ref-from-vault>"
 $env:ALCAZAR_STAGE_DATABASE_URL = "<connection-string-from-vault>"
+# Session pooler (5432):
+# postgresql://postgres.<stage-ref>:<password>@<pooler-host>:5432/postgres
+# Direct (5432):
+# postgresql://postgres:<password>@db.<stage-ref>.supabase.co:5432/postgres
 powershell -File scripts/stage-finance-accounting-snapshot.ps1 -UninitializedStage
 ```
+
+Requisitos en la computadora del operador:
+
+- **Docker Desktop** (si `psql`/`pg_dump` no están en PATH, el script elige imagen `postgres:<server-major>-alpine` compatible con el servidor).
+- Variables de entorno anteriores; **no** instalar PostgreSQL client en Windows.
+- El script preserva hostnames Supabase remotos; `host.docker.internal` solo se usa para lab local (`127.0.0.1`/`localhost`).
+- Rechaza Transaction pooler (puerto **6543**), refs solo como substring, hosts ajenos a Supabase, URI sin puerto explícito y Production ref.
 
 Modo `-UninitializedStage`:
 
 - Permitido **solo** si `deployment_environment` está ausente.
-- URL debe contener Stage ref; no debe contener Production ref.
+- URI debe demostrar Stage ref **exactamente**: username `postgres.<ref>` + host `*.pooler.supabase.com` (Session pooler) o username `postgres` + host `db.<ref>.supabase.co` (Direct). Puerto **5432** obligatorio.
+- Rechaza Production ref en username/host; comparación exacta case-insensitive.
 - Aborta si el entorno remoto ya indica `production`/`prod`.
 - El manifest incluye `manifest_version`, `stage_project_ref`, `production_project_ref`, `created_at` y SHA-256 de artefactos.
 - El wrapper de bootstrap exige manifest `uninitialized_stage=true` con antigüedad ≤ 24 h (configurable).
@@ -211,6 +228,8 @@ powershell -File scripts/stage-finance-accounting-snapshot.ps1 -DryRun
 $env:ALCAZAR_STAGE_PROJECT_REF = "<stage-ref-from-vault>"
 $env:ALCAZAR_PRODUCTION_PROJECT_REF = "<production-ref-from-vault>"
 $env:ALCAZAR_STAGE_DATABASE_URL = "<connection-string-from-vault>"
+# Session pooler: postgresql://postgres.<stage-ref>:<password>@<pooler-host>:5432/postgres
+# Direct: postgresql://postgres:<password>@db.<stage-ref>.supabase.co:5432/postgres
 powershell -File scripts/stage-finance-accounting-snapshot.ps1
 ```
 
