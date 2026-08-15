@@ -4,7 +4,8 @@ export const FINANCE_TABS = [
   { key: "pagos", label: "Cuentas por pagar" },
   { key: "cobros", label: "Cuentas por cobrar" },
   { key: "flujo", label: "Flujo de caja" },
-  { key: "conciliacion", label: "Conciliación" }
+  { key: "conciliacion", label: "Conciliación" },
+  { key: "catalogo", label: "Catálogo contable" }
 ]
 
 export const PAYABLE_STATUS_LABELS = {

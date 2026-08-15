@@ -22,6 +22,7 @@ import {
   updateFinanceReconciliationStatement
 } from "../../services/financeService"
 import { canManageFinance } from "../../utils/financePermissions"
+import FinanceChartAccountsTab from "./FinanceChartAccountsTab"
 import {
   BANK_TX_TYPES,
   buildFinanceOriginUrl,
@@ -803,6 +804,7 @@ export default function FinanceDashboard() {
       {tab === "cobros" && renderReceivables()}
       {tab === "flujo" && renderCashFlow()}
       {tab === "conciliacion" && renderReconciliation()}
+      {tab === "catalogo" && <FinanceChartAccountsTab user={user} notify={notify} />}
     </div>
   )
 }

@@ -69,7 +69,8 @@ const financeSubmenu = [
   { roles: ["admin", "gerente_general", "contador"], to: "/finance?tab=pagos", label: "Cuentas por pagar" },
   { roles: ["admin", "gerente_general", "contador"], to: "/finance?tab=cobros", label: "Cuentas por cobrar" },
   { roles: ["admin", "gerente_general", "contador"], to: "/finance?tab=flujo", label: "Flujo de caja" },
-  { roles: ["admin", "gerente_general", "contador"], to: "/finance?tab=conciliacion", label: "Conciliación" }
+  { roles: ["admin", "gerente_general", "contador"], to: "/finance?tab=conciliacion", label: "Conciliación" },
+  { roles: ["admin", "gerente_general", "contador"], to: "/finance?tab=catalogo", label: "Catálogo contable" }
 ]
 
 const settingsSubmenu = [
