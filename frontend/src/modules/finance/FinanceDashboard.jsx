@@ -23,6 +23,9 @@ import {
 } from "../../services/financeService"
 import { canManageFinance } from "../../utils/financePermissions"
 import FinanceChartAccountsTab from "./FinanceChartAccountsTab"
+import FinanceBranchesTab from "./FinanceBranchesTab"
+import FinanceCostCentersTab from "./FinanceCostCentersTab"
+import FinanceAccountingPeriodsTab from "./FinanceAccountingPeriodsTab"
 import {
   BANK_TX_TYPES,
   buildFinanceOriginUrl,
@@ -805,6 +808,9 @@ export default function FinanceDashboard() {
       {tab === "flujo" && renderCashFlow()}
       {tab === "conciliacion" && renderReconciliation()}
       {tab === "catalogo" && <FinanceChartAccountsTab user={user} notify={notify} />}
+      {tab === "sucursales" && <FinanceBranchesTab user={user} notify={notify} />}
+      {tab === "centros" && <FinanceCostCentersTab user={user} notify={notify} />}
+      {tab === "periodos" && <FinanceAccountingPeriodsTab user={user} notify={notify} />}
     </div>
   )
 }

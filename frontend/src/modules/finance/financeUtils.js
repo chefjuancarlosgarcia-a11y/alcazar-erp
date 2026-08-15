@@ -5,7 +5,10 @@ export const FINANCE_TABS = [
   { key: "cobros", label: "Cuentas por cobrar" },
   { key: "flujo", label: "Flujo de caja" },
   { key: "conciliacion", label: "Conciliación" },
-  { key: "catalogo", label: "Catálogo contable" }
+  { key: "catalogo", label: "Catálogo contable" },
+  { key: "sucursales", label: "Sucursales" },
+  { key: "centros", label: "Centros de costo" },
+  { key: "periodos", label: "Periodos contables" }
 ]
 
 export const PAYABLE_STATUS_LABELS = {

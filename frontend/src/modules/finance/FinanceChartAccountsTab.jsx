@@ -14,7 +14,14 @@ import {
   NATURAL_BALANCE_LABELS,
   NATURAL_BALANCES
 } from "../../utils/financeChartAccountsConstants"
-import FinanceChartAccountsImportModal from "./FinanceChartAccountsImportModal"
+import {
+  DIMENSION_RULE_LABELS,
+  DIMENSION_RULES
+} from "../../utils/financeAccountingFoundationConstants"
+import {
+  defaultBranchDimensionRule,
+  defaultCostCenterDimensionRule
+} from "../../utils/financeAccountingFoundationValidation"
 
 function Field({ label, className = "", children }) {
   return (
@@ -34,7 +41,9 @@ function emptyForm() {
     natural_balance: "debit",
     account_kind: "detail",
     accepts_entries: true,
-    description: ""
+    description: "",
+    branch_dimension_rule: "optional",
+    cost_center_dimension_rule: "optional"
   }
 }
 
@@ -105,7 +114,9 @@ export default function FinanceChartAccountsTab({ user, notify }) {
       natural_balance: account.natural_balance,
       account_kind: account.account_kind,
       accepts_entries: account.accepts_entries,
-      description: account.description || ""
+      description: account.description || "",
+      branch_dimension_rule: account.branch_dimension_rule || defaultBranchDimensionRule(account.financial_type),
+      cost_center_dimension_rule: account.cost_center_dimension_rule || defaultCostCenterDimensionRule(account.financial_type)
     })
     setShowForm(true)
   }
@@ -121,7 +132,9 @@ export default function FinanceChartAccountsTab({ user, notify }) {
       natural_balance: form.natural_balance,
       account_kind: form.account_kind,
       accepts_entries: form.account_kind === "header" ? false : form.accepts_entries,
-      description: form.description
+      description: form.description,
+      branch_dimension_rule: form.branch_dimension_rule,
+      cost_center_dimension_rule: form.cost_center_dimension_rule
     }
 
     const result = editingId
@@ -252,7 +265,18 @@ export default function FinanceChartAccountsTab({ user, notify }) {
               </select>
             </Field>
             <Field label="Tipo financiero">
-              <select value={form.financial_type} onChange={(e) => setForm({ ...form, financial_type: e.target.value })}>
+              <select
+                value={form.financial_type}
+                onChange={(e) => {
+                  const financialType = e.target.value
+                  setForm({
+                    ...form,
+                    financial_type: financialType,
+                    branch_dimension_rule: defaultBranchDimensionRule(financialType),
+                    cost_center_dimension_rule: defaultCostCenterDimensionRule(financialType)
+                  })
+                }}
+              >
                 {FINANCIAL_TYPES.map((value) => (
                   <option key={value} value={value}>{FINANCIAL_TYPE_LABELS[value]}</option>
                 ))}
@@ -292,6 +316,26 @@ export default function FinanceChartAccountsTab({ user, notify }) {
                 <option value="false">No</option>
               </select>
             </Field>
+            <Field label="Dimensión sucursal">
+              <select
+                value={form.branch_dimension_rule}
+                onChange={(e) => setForm({ ...form, branch_dimension_rule: e.target.value })}
+              >
+                {DIMENSION_RULES.map((value) => (
+                  <option key={value} value={value}>{DIMENSION_RULE_LABELS[value]}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Dimensión centro de costo">
+              <select
+                value={form.cost_center_dimension_rule}
+                onChange={(e) => setForm({ ...form, cost_center_dimension_rule: e.target.value })}
+              >
+                {DIMENSION_RULES.map((value) => (
+                  <option key={value} value={value}>{DIMENSION_RULE_LABELS[value]}</option>
+                ))}
+              </select>
+            </Field>
             <Field label="Descripción" className="finance-field--full">
               <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} />
             </Field>
@@ -313,6 +357,8 @@ export default function FinanceChartAccountsTab({ user, notify }) {
                 <th>Tipo</th>
                 <th>Naturaleza</th>
                 <th>Cuenta</th>
+                <th>Sucursal</th>
+                <th>Centro</th>
                 <th>Estado</th>
                 {canManage ? <th>Acciones</th> : null}
               </tr>
@@ -333,6 +379,8 @@ export default function FinanceChartAccountsTab({ user, notify }) {
                   </td>
                   <td>{NATURAL_BALANCE_LABELS[row.natural_balance] || row.natural_balance}</td>
                   <td>{ACCOUNT_KIND_LABELS[row.account_kind] || row.account_kind}</td>
+                  <td>{DIMENSION_RULE_LABELS[row.branch_dimension_rule] || row.branch_dimension_rule || "—"}</td>
+                  <td>{DIMENSION_RULE_LABELS[row.cost_center_dimension_rule] || row.cost_center_dimension_rule || "—"}</td>
                   <td>
                     <span className={`finance-badge ${row.is_active ? "finance-badge--paid" : "finance-badge--cancelled"}`}>
                       {row.is_active ? "Activa" : "Inactiva"}
@@ -352,7 +400,7 @@ export default function FinanceChartAccountsTab({ user, notify }) {
               ))}
               {!accounts.length && !loading ? (
                 <tr>
-                  <td colSpan={canManage ? 7 : 6} className="tasks-muted">
+                  <td colSpan={canManage ? 9 : 8} className="tasks-muted">
                     No hay cuentas en el catálogo. {canManage ? "Crea una cuenta o importa un archivo CSV." : ""}
                   </td>
                 </tr>
