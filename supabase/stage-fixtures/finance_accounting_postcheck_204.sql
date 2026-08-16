@@ -18,14 +18,54 @@ WITH gates AS (
         WHERE tgname = 'finance_journal_entries_block_posted'
           AND tgrelid = 'public.finance_journal_entries'::regclass
       ), 'finance_journal_entries_block_posted'
-    UNION ALL SELECT 'authenticated_no_insert_entries',
-      NOT has_table_privilege('authenticated', 'public.finance_journal_entries', 'INSERT'), 'INSERT denied on entries'
-    UNION ALL SELECT 'authenticated_no_update_entries',
-      NOT has_table_privilege('authenticated', 'public.finance_journal_entries', 'UPDATE'), 'UPDATE denied on entries'
-    UNION ALL SELECT 'authenticated_no_delete_entries',
-      NOT has_table_privilege('authenticated', 'public.finance_journal_entries', 'DELETE'), 'DELETE denied on entries'
-    UNION ALL SELECT 'authenticated_select_entries',
-      has_table_privilege('authenticated', 'public.finance_journal_entries', 'SELECT'), 'SELECT on entries'
+    UNION ALL SELECT 'journal_entries_anon_no_select',
+      NOT has_table_privilege('anon', 'public.finance_journal_entries', 'SELECT'), 'anon SELECT denied'
+    UNION ALL SELECT 'journal_entries_authenticated_select',
+      has_table_privilege('authenticated', 'public.finance_journal_entries', 'SELECT'), 'SELECT granted'
+    UNION ALL SELECT 'journal_entries_authenticated_no_insert',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_entries', 'INSERT'), 'INSERT denied'
+    UNION ALL SELECT 'journal_entries_authenticated_no_update',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_entries', 'UPDATE'), 'UPDATE denied'
+    UNION ALL SELECT 'journal_entries_authenticated_no_delete',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_entries', 'DELETE'), 'DELETE denied'
+    UNION ALL SELECT 'journal_entries_authenticated_no_truncate',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_entries', 'TRUNCATE'), 'TRUNCATE denied'
+    UNION ALL SELECT 'journal_entries_authenticated_no_references',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_entries', 'REFERENCES'), 'REFERENCES denied'
+    UNION ALL SELECT 'journal_entries_authenticated_no_trigger',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_entries', 'TRIGGER'), 'TRIGGER denied'
+    UNION ALL SELECT 'journal_lines_anon_no_select',
+      NOT has_table_privilege('anon', 'public.finance_journal_lines', 'SELECT'), 'anon SELECT denied'
+    UNION ALL SELECT 'journal_lines_authenticated_select',
+      has_table_privilege('authenticated', 'public.finance_journal_lines', 'SELECT'), 'SELECT granted'
+    UNION ALL SELECT 'journal_lines_authenticated_no_insert',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_lines', 'INSERT'), 'INSERT denied'
+    UNION ALL SELECT 'journal_lines_authenticated_no_update',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_lines', 'UPDATE'), 'UPDATE denied'
+    UNION ALL SELECT 'journal_lines_authenticated_no_delete',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_lines', 'DELETE'), 'DELETE denied'
+    UNION ALL SELECT 'journal_lines_authenticated_no_truncate',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_lines', 'TRUNCATE'), 'TRUNCATE denied'
+    UNION ALL SELECT 'journal_lines_authenticated_no_references',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_lines', 'REFERENCES'), 'REFERENCES denied'
+    UNION ALL SELECT 'journal_lines_authenticated_no_trigger',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_lines', 'TRIGGER'), 'TRIGGER denied'
+    UNION ALL SELECT 'journal_counters_anon_no_select',
+      NOT has_table_privilege('anon', 'public.finance_journal_entry_counters', 'SELECT'), 'anon SELECT denied'
+    UNION ALL SELECT 'journal_counters_authenticated_no_select',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_entry_counters', 'SELECT'), 'authenticated SELECT denied'
+    UNION ALL SELECT 'journal_counters_authenticated_no_insert',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_entry_counters', 'INSERT'), 'INSERT denied'
+    UNION ALL SELECT 'journal_counters_authenticated_no_update',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_entry_counters', 'UPDATE'), 'UPDATE denied'
+    UNION ALL SELECT 'journal_counters_authenticated_no_delete',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_entry_counters', 'DELETE'), 'DELETE denied'
+    UNION ALL SELECT 'journal_counters_authenticated_no_truncate',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_entry_counters', 'TRUNCATE'), 'TRUNCATE denied'
+    UNION ALL SELECT 'journal_counters_authenticated_no_references',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_entry_counters', 'REFERENCES'), 'REFERENCES denied'
+    UNION ALL SELECT 'journal_counters_authenticated_no_trigger',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_entry_counters', 'TRIGGER'), 'TRIGGER denied'
     UNION ALL SELECT 'internal_guard_not_public',
       NOT has_function_privilege('public', 'public.finance_journal_entry_guard_transitions()', 'EXECUTE'), 'guard not public'
   ) g
@@ -48,14 +88,54 @@ WITH gates AS (
         WHERE tgname = 'finance_journal_entries_block_posted'
           AND tgrelid = 'public.finance_journal_entries'::regclass
       ), 'finance_journal_entries_block_posted'
-    UNION ALL SELECT 'authenticated_no_insert_entries',
-      NOT has_table_privilege('authenticated', 'public.finance_journal_entries', 'INSERT'), 'INSERT denied on entries'
-    UNION ALL SELECT 'authenticated_no_update_entries',
-      NOT has_table_privilege('authenticated', 'public.finance_journal_entries', 'UPDATE'), 'UPDATE denied on entries'
-    UNION ALL SELECT 'authenticated_no_delete_entries',
-      NOT has_table_privilege('authenticated', 'public.finance_journal_entries', 'DELETE'), 'DELETE denied on entries'
-    UNION ALL SELECT 'authenticated_select_entries',
-      has_table_privilege('authenticated', 'public.finance_journal_entries', 'SELECT'), 'SELECT on entries'
+    UNION ALL SELECT 'journal_entries_anon_no_select',
+      NOT has_table_privilege('anon', 'public.finance_journal_entries', 'SELECT'), 'anon SELECT denied'
+    UNION ALL SELECT 'journal_entries_authenticated_select',
+      has_table_privilege('authenticated', 'public.finance_journal_entries', 'SELECT'), 'SELECT granted'
+    UNION ALL SELECT 'journal_entries_authenticated_no_insert',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_entries', 'INSERT'), 'INSERT denied'
+    UNION ALL SELECT 'journal_entries_authenticated_no_update',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_entries', 'UPDATE'), 'UPDATE denied'
+    UNION ALL SELECT 'journal_entries_authenticated_no_delete',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_entries', 'DELETE'), 'DELETE denied'
+    UNION ALL SELECT 'journal_entries_authenticated_no_truncate',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_entries', 'TRUNCATE'), 'TRUNCATE denied'
+    UNION ALL SELECT 'journal_entries_authenticated_no_references',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_entries', 'REFERENCES'), 'REFERENCES denied'
+    UNION ALL SELECT 'journal_entries_authenticated_no_trigger',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_entries', 'TRIGGER'), 'TRIGGER denied'
+    UNION ALL SELECT 'journal_lines_anon_no_select',
+      NOT has_table_privilege('anon', 'public.finance_journal_lines', 'SELECT'), 'anon SELECT denied'
+    UNION ALL SELECT 'journal_lines_authenticated_select',
+      has_table_privilege('authenticated', 'public.finance_journal_lines', 'SELECT'), 'SELECT granted'
+    UNION ALL SELECT 'journal_lines_authenticated_no_insert',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_lines', 'INSERT'), 'INSERT denied'
+    UNION ALL SELECT 'journal_lines_authenticated_no_update',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_lines', 'UPDATE'), 'UPDATE denied'
+    UNION ALL SELECT 'journal_lines_authenticated_no_delete',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_lines', 'DELETE'), 'DELETE denied'
+    UNION ALL SELECT 'journal_lines_authenticated_no_truncate',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_lines', 'TRUNCATE'), 'TRUNCATE denied'
+    UNION ALL SELECT 'journal_lines_authenticated_no_references',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_lines', 'REFERENCES'), 'REFERENCES denied'
+    UNION ALL SELECT 'journal_lines_authenticated_no_trigger',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_lines', 'TRIGGER'), 'TRIGGER denied'
+    UNION ALL SELECT 'journal_counters_anon_no_select',
+      NOT has_table_privilege('anon', 'public.finance_journal_entry_counters', 'SELECT'), 'anon SELECT denied'
+    UNION ALL SELECT 'journal_counters_authenticated_no_select',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_entry_counters', 'SELECT'), 'authenticated SELECT denied'
+    UNION ALL SELECT 'journal_counters_authenticated_no_insert',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_entry_counters', 'INSERT'), 'INSERT denied'
+    UNION ALL SELECT 'journal_counters_authenticated_no_update',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_entry_counters', 'UPDATE'), 'UPDATE denied'
+    UNION ALL SELECT 'journal_counters_authenticated_no_delete',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_entry_counters', 'DELETE'), 'DELETE denied'
+    UNION ALL SELECT 'journal_counters_authenticated_no_truncate',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_entry_counters', 'TRUNCATE'), 'TRUNCATE denied'
+    UNION ALL SELECT 'journal_counters_authenticated_no_references',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_entry_counters', 'REFERENCES'), 'REFERENCES denied'
+    UNION ALL SELECT 'journal_counters_authenticated_no_trigger',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_entry_counters', 'TRIGGER'), 'TRIGGER denied'
     UNION ALL SELECT 'internal_guard_not_public',
       NOT has_function_privilege('public', 'public.finance_journal_entry_guard_transitions()', 'EXECUTE'), 'guard not public'
   ) g
@@ -83,14 +163,14 @@ WITH gates AS (
         WHERE tgname = 'finance_journal_entries_block_posted'
           AND tgrelid = 'public.finance_journal_entries'::regclass
       )
-    UNION ALL SELECT 'authenticated_no_insert_entries',
-      NOT has_table_privilege('authenticated', 'public.finance_journal_entries', 'INSERT')
-    UNION ALL SELECT 'authenticated_no_update_entries',
-      NOT has_table_privilege('authenticated', 'public.finance_journal_entries', 'UPDATE')
-    UNION ALL SELECT 'authenticated_no_delete_entries',
+    UNION ALL SELECT 'journal_entries_authenticated_no_delete',
       NOT has_table_privilege('authenticated', 'public.finance_journal_entries', 'DELETE')
-    UNION ALL SELECT 'authenticated_select_entries',
+    UNION ALL SELECT 'journal_entries_authenticated_select',
       has_table_privilege('authenticated', 'public.finance_journal_entries', 'SELECT')
+    UNION ALL SELECT 'journal_lines_authenticated_select',
+      has_table_privilege('authenticated', 'public.finance_journal_lines', 'SELECT')
+    UNION ALL SELECT 'journal_counters_authenticated_no_select',
+      NOT has_table_privilege('authenticated', 'public.finance_journal_entry_counters', 'SELECT')
     UNION ALL SELECT 'internal_guard_not_public',
       NOT has_function_privilege('public', 'public.finance_journal_entry_guard_transitions()', 'EXECUTE')
   ) g

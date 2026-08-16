@@ -101,9 +101,11 @@ create trigger finance_chart_accounts_updated_at
 
 alter table public.finance_chart_accounts enable row level security;
 
-grant select on public.finance_chart_accounts to authenticated;
-grant insert, update on public.finance_chart_accounts to authenticated;
-grant all on public.finance_chart_accounts to service_role;
+revoke all on table public.finance_chart_accounts from public;
+revoke all on table public.finance_chart_accounts from anon;
+revoke all on table public.finance_chart_accounts from authenticated;
+grant select, insert, update on table public.finance_chart_accounts to authenticated;
+grant all on table public.finance_chart_accounts to service_role;
 
 drop policy if exists finance_chart_accounts_select on public.finance_chart_accounts;
 create policy finance_chart_accounts_select on public.finance_chart_accounts

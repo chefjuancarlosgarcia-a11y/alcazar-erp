@@ -215,11 +215,22 @@ create trigger finance_journal_lines_updated_at
 alter table public.finance_journal_entries enable row level security;
 alter table public.finance_journal_lines enable row level security;
 
-grant select on public.finance_journal_entries to authenticated;
-grant select on public.finance_journal_lines to authenticated;
-grant all on public.finance_journal_entries to service_role;
-grant all on public.finance_journal_lines to service_role;
-grant all on public.finance_journal_entry_counters to service_role;
+revoke all on table public.finance_journal_entries from public;
+revoke all on table public.finance_journal_entries from anon;
+revoke all on table public.finance_journal_entries from authenticated;
+grant select on table public.finance_journal_entries to authenticated;
+grant all on table public.finance_journal_entries to service_role;
+
+revoke all on table public.finance_journal_lines from public;
+revoke all on table public.finance_journal_lines from anon;
+revoke all on table public.finance_journal_lines from authenticated;
+grant select on table public.finance_journal_lines to authenticated;
+grant all on table public.finance_journal_lines to service_role;
+
+revoke all on table public.finance_journal_entry_counters from public;
+revoke all on table public.finance_journal_entry_counters from anon;
+revoke all on table public.finance_journal_entry_counters from authenticated;
+grant all on table public.finance_journal_entry_counters to service_role;
 
 drop policy if exists finance_journal_entries_select on public.finance_journal_entries;
 create policy finance_journal_entries_select on public.finance_journal_entries

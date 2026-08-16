@@ -115,9 +115,11 @@ create trigger branches_updated_at
 
 alter table public.branches enable row level security;
 
-grant select on public.branches to authenticated;
-grant insert, update on public.branches to authenticated;
-grant all on public.branches to service_role;
+revoke all on table public.branches from public;
+revoke all on table public.branches from anon;
+revoke all on table public.branches from authenticated;
+grant select, insert, update on table public.branches to authenticated;
+grant all on table public.branches to service_role;
 
 drop policy if exists branches_select on public.branches;
 create policy branches_select on public.branches
@@ -175,9 +177,11 @@ create trigger finance_cost_centers_updated_at
 
 alter table public.finance_cost_centers enable row level security;
 
-grant select on public.finance_cost_centers to authenticated;
-grant insert, update on public.finance_cost_centers to authenticated;
-grant all on public.finance_cost_centers to service_role;
+revoke all on table public.finance_cost_centers from public;
+revoke all on table public.finance_cost_centers from anon;
+revoke all on table public.finance_cost_centers from authenticated;
+grant select, insert, update on table public.finance_cost_centers to authenticated;
+grant all on table public.finance_cost_centers to service_role;
 
 drop policy if exists finance_cost_centers_select on public.finance_cost_centers;
 create policy finance_cost_centers_select on public.finance_cost_centers
@@ -230,9 +234,11 @@ create trigger finance_accounting_periods_updated_at
 
 alter table public.finance_accounting_periods enable row level security;
 
-grant select on public.finance_accounting_periods to authenticated;
-grant insert, update on public.finance_accounting_periods to authenticated;
-grant all on public.finance_accounting_periods to service_role;
+revoke all on table public.finance_accounting_periods from public;
+revoke all on table public.finance_accounting_periods from anon;
+revoke all on table public.finance_accounting_periods from authenticated;
+grant select, insert, update on table public.finance_accounting_periods to authenticated;
+grant all on table public.finance_accounting_periods to service_role;
 
 drop policy if exists finance_accounting_periods_select on public.finance_accounting_periods;
 create policy finance_accounting_periods_select on public.finance_accounting_periods

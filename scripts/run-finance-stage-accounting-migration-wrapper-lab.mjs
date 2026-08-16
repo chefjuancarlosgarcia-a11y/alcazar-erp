@@ -192,12 +192,13 @@ on conflict (key) do update set value = excluded.value;
 }
 
 function bootstrapDatabase() {
-  run(`docker run -d --rm --name ${container} -e POSTGRES_PASSWORD=lab_pass -p ${hostPort}:5432 postgres:16-alpine`)
+  run(`docker run -d --rm --name ${container} -e POSTGRES_PASSWORD=lab_pass -p ${hostPort}:5432 postgres:17-alpine`)
   for (let i = 0; i < 30; i++) {
     if (spawnSync("docker", ["exec", container, "pg_isready", "-U", "postgres"], { encoding: "utf8" }).status === 0) break
     execSync("powershell -Command Start-Sleep -Seconds 1")
   }
   psqlFile(join(labDir, "bootstrap-supabase-local.sql"), "bootstrap")
+  psqlFile(join(labDir, "finance_accounting_supabase_contaminated_default_privileges.sql"), "contaminated_default_acl")
   for (const file of listBaselineMigrations()) {
     psqlFile(join(schemaDir, file), file)
   }

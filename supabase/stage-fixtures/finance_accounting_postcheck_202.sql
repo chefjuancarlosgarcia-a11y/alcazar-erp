@@ -19,12 +19,30 @@ WITH gates AS (
     UNION ALL SELECT 'rls_enabled',
       (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.finance_chart_accounts'::regclass),
       'finance_chart_accounts RLS'
-    UNION ALL SELECT 'authenticated_no_delete',
-      NOT has_table_privilege('authenticated', 'public.finance_chart_accounts', 'DELETE'),
-      'DELETE denied'
-    UNION ALL SELECT 'authenticated_select',
+    UNION ALL SELECT 'chart_accounts_anon_no_select',
+      NOT has_table_privilege('anon', 'public.finance_chart_accounts', 'SELECT'),
+      'anon SELECT denied'
+    UNION ALL SELECT 'chart_accounts_authenticated_select',
       has_table_privilege('authenticated', 'public.finance_chart_accounts', 'SELECT'),
       'SELECT granted'
+    UNION ALL SELECT 'chart_accounts_authenticated_insert',
+      has_table_privilege('authenticated', 'public.finance_chart_accounts', 'INSERT'),
+      'INSERT granted'
+    UNION ALL SELECT 'chart_accounts_authenticated_update',
+      has_table_privilege('authenticated', 'public.finance_chart_accounts', 'UPDATE'),
+      'UPDATE granted'
+    UNION ALL SELECT 'chart_accounts_authenticated_no_delete',
+      NOT has_table_privilege('authenticated', 'public.finance_chart_accounts', 'DELETE'),
+      'DELETE denied'
+    UNION ALL SELECT 'chart_accounts_authenticated_no_truncate',
+      NOT has_table_privilege('authenticated', 'public.finance_chart_accounts', 'TRUNCATE'),
+      'TRUNCATE denied'
+    UNION ALL SELECT 'chart_accounts_authenticated_no_references',
+      NOT has_table_privilege('authenticated', 'public.finance_chart_accounts', 'REFERENCES'),
+      'REFERENCES denied'
+    UNION ALL SELECT 'chart_accounts_authenticated_no_trigger',
+      NOT has_table_privilege('authenticated', 'public.finance_chart_accounts', 'TRIGGER'),
+      'TRIGGER denied'
     UNION ALL SELECT 'rpc_execute_authenticated',
       has_function_privilege('authenticated', 'public.create_finance_chart_account(jsonb)', 'EXECUTE'),
       'create execute'
@@ -53,12 +71,30 @@ WITH gates AS (
     UNION ALL SELECT 'rls_enabled',
       (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.finance_chart_accounts'::regclass),
       'finance_chart_accounts RLS'
-    UNION ALL SELECT 'authenticated_no_delete',
-      NOT has_table_privilege('authenticated', 'public.finance_chart_accounts', 'DELETE'),
-      'DELETE denied'
-    UNION ALL SELECT 'authenticated_select',
+    UNION ALL SELECT 'chart_accounts_anon_no_select',
+      NOT has_table_privilege('anon', 'public.finance_chart_accounts', 'SELECT'),
+      'anon SELECT denied'
+    UNION ALL SELECT 'chart_accounts_authenticated_select',
       has_table_privilege('authenticated', 'public.finance_chart_accounts', 'SELECT'),
       'SELECT granted'
+    UNION ALL SELECT 'chart_accounts_authenticated_insert',
+      has_table_privilege('authenticated', 'public.finance_chart_accounts', 'INSERT'),
+      'INSERT granted'
+    UNION ALL SELECT 'chart_accounts_authenticated_update',
+      has_table_privilege('authenticated', 'public.finance_chart_accounts', 'UPDATE'),
+      'UPDATE granted'
+    UNION ALL SELECT 'chart_accounts_authenticated_no_delete',
+      NOT has_table_privilege('authenticated', 'public.finance_chart_accounts', 'DELETE'),
+      'DELETE denied'
+    UNION ALL SELECT 'chart_accounts_authenticated_no_truncate',
+      NOT has_table_privilege('authenticated', 'public.finance_chart_accounts', 'TRUNCATE'),
+      'TRUNCATE denied'
+    UNION ALL SELECT 'chart_accounts_authenticated_no_references',
+      NOT has_table_privilege('authenticated', 'public.finance_chart_accounts', 'REFERENCES'),
+      'REFERENCES denied'
+    UNION ALL SELECT 'chart_accounts_authenticated_no_trigger',
+      NOT has_table_privilege('authenticated', 'public.finance_chart_accounts', 'TRIGGER'),
+      'TRIGGER denied'
     UNION ALL SELECT 'rpc_execute_authenticated',
       has_function_privilege('authenticated', 'public.create_finance_chart_account(jsonb)', 'EXECUTE'),
       'create execute'
@@ -88,9 +124,9 @@ WITH gates AS (
       EXISTS (SELECT 1 FROM public.user_roles WHERE role_key = 'contador' AND is_active)
     UNION ALL SELECT 'rls_enabled',
       (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.finance_chart_accounts'::regclass)
-    UNION ALL SELECT 'authenticated_no_delete',
+    UNION ALL SELECT 'chart_accounts_authenticated_no_delete',
       NOT has_table_privilege('authenticated', 'public.finance_chart_accounts', 'DELETE')
-    UNION ALL SELECT 'authenticated_select',
+    UNION ALL SELECT 'chart_accounts_authenticated_select',
       has_table_privilege('authenticated', 'public.finance_chart_accounts', 'SELECT')
     UNION ALL SELECT 'rpc_execute_authenticated',
       has_function_privilege('authenticated', 'public.create_finance_chart_account(jsonb)', 'EXECUTE')

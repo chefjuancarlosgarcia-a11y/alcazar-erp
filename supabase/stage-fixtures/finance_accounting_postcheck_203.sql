@@ -27,6 +27,54 @@ WITH gates AS (
     UNION ALL SELECT 'branches_no_delete_policy',
       NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'branches' AND cmd = 'DELETE'),
       'no DELETE policy on branches'
+    UNION ALL SELECT 'branches_anon_no_select',
+      NOT has_table_privilege('anon', 'public.branches', 'SELECT'), 'anon SELECT denied'
+    UNION ALL SELECT 'branches_authenticated_select',
+      has_table_privilege('authenticated', 'public.branches', 'SELECT'), 'SELECT granted'
+    UNION ALL SELECT 'branches_authenticated_insert',
+      has_table_privilege('authenticated', 'public.branches', 'INSERT'), 'INSERT granted'
+    UNION ALL SELECT 'branches_authenticated_update',
+      has_table_privilege('authenticated', 'public.branches', 'UPDATE'), 'UPDATE granted'
+    UNION ALL SELECT 'branches_authenticated_no_delete',
+      NOT has_table_privilege('authenticated', 'public.branches', 'DELETE'), 'DELETE denied'
+    UNION ALL SELECT 'branches_authenticated_no_truncate',
+      NOT has_table_privilege('authenticated', 'public.branches', 'TRUNCATE'), 'TRUNCATE denied'
+    UNION ALL SELECT 'branches_authenticated_no_references',
+      NOT has_table_privilege('authenticated', 'public.branches', 'REFERENCES'), 'REFERENCES denied'
+    UNION ALL SELECT 'branches_authenticated_no_trigger',
+      NOT has_table_privilege('authenticated', 'public.branches', 'TRIGGER'), 'TRIGGER denied'
+    UNION ALL SELECT 'cost_centers_anon_no_select',
+      NOT has_table_privilege('anon', 'public.finance_cost_centers', 'SELECT'), 'anon SELECT denied'
+    UNION ALL SELECT 'cost_centers_authenticated_select',
+      has_table_privilege('authenticated', 'public.finance_cost_centers', 'SELECT'), 'SELECT granted'
+    UNION ALL SELECT 'cost_centers_authenticated_insert',
+      has_table_privilege('authenticated', 'public.finance_cost_centers', 'INSERT'), 'INSERT granted'
+    UNION ALL SELECT 'cost_centers_authenticated_update',
+      has_table_privilege('authenticated', 'public.finance_cost_centers', 'UPDATE'), 'UPDATE granted'
+    UNION ALL SELECT 'cost_centers_authenticated_no_delete',
+      NOT has_table_privilege('authenticated', 'public.finance_cost_centers', 'DELETE'), 'DELETE denied'
+    UNION ALL SELECT 'cost_centers_authenticated_no_truncate',
+      NOT has_table_privilege('authenticated', 'public.finance_cost_centers', 'TRUNCATE'), 'TRUNCATE denied'
+    UNION ALL SELECT 'cost_centers_authenticated_no_references',
+      NOT has_table_privilege('authenticated', 'public.finance_cost_centers', 'REFERENCES'), 'REFERENCES denied'
+    UNION ALL SELECT 'cost_centers_authenticated_no_trigger',
+      NOT has_table_privilege('authenticated', 'public.finance_cost_centers', 'TRIGGER'), 'TRIGGER denied'
+    UNION ALL SELECT 'periods_anon_no_select',
+      NOT has_table_privilege('anon', 'public.finance_accounting_periods', 'SELECT'), 'anon SELECT denied'
+    UNION ALL SELECT 'periods_authenticated_select',
+      has_table_privilege('authenticated', 'public.finance_accounting_periods', 'SELECT'), 'SELECT granted'
+    UNION ALL SELECT 'periods_authenticated_insert',
+      has_table_privilege('authenticated', 'public.finance_accounting_periods', 'INSERT'), 'INSERT granted'
+    UNION ALL SELECT 'periods_authenticated_update',
+      has_table_privilege('authenticated', 'public.finance_accounting_periods', 'UPDATE'), 'UPDATE granted'
+    UNION ALL SELECT 'periods_authenticated_no_delete',
+      NOT has_table_privilege('authenticated', 'public.finance_accounting_periods', 'DELETE'), 'DELETE denied'
+    UNION ALL SELECT 'periods_authenticated_no_truncate',
+      NOT has_table_privilege('authenticated', 'public.finance_accounting_periods', 'TRUNCATE'), 'TRUNCATE denied'
+    UNION ALL SELECT 'periods_authenticated_no_references',
+      NOT has_table_privilege('authenticated', 'public.finance_accounting_periods', 'REFERENCES'), 'REFERENCES denied'
+    UNION ALL SELECT 'periods_authenticated_no_trigger',
+      NOT has_table_privilege('authenticated', 'public.finance_accounting_periods', 'TRIGGER'), 'TRIGGER denied'
     UNION ALL SELECT 'finance_204_still_absent',
       to_regclass('public.finance_journal_entries') IS NULL, 'journal not yet applied'
   ) g
@@ -58,6 +106,54 @@ WITH gates AS (
     UNION ALL SELECT 'branches_no_delete_policy',
       NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'branches' AND cmd = 'DELETE'),
       'no DELETE policy on branches'
+    UNION ALL SELECT 'branches_anon_no_select',
+      NOT has_table_privilege('anon', 'public.branches', 'SELECT'), 'anon SELECT denied'
+    UNION ALL SELECT 'branches_authenticated_select',
+      has_table_privilege('authenticated', 'public.branches', 'SELECT'), 'SELECT granted'
+    UNION ALL SELECT 'branches_authenticated_insert',
+      has_table_privilege('authenticated', 'public.branches', 'INSERT'), 'INSERT granted'
+    UNION ALL SELECT 'branches_authenticated_update',
+      has_table_privilege('authenticated', 'public.branches', 'UPDATE'), 'UPDATE granted'
+    UNION ALL SELECT 'branches_authenticated_no_delete',
+      NOT has_table_privilege('authenticated', 'public.branches', 'DELETE'), 'DELETE denied'
+    UNION ALL SELECT 'branches_authenticated_no_truncate',
+      NOT has_table_privilege('authenticated', 'public.branches', 'TRUNCATE'), 'TRUNCATE denied'
+    UNION ALL SELECT 'branches_authenticated_no_references',
+      NOT has_table_privilege('authenticated', 'public.branches', 'REFERENCES'), 'REFERENCES denied'
+    UNION ALL SELECT 'branches_authenticated_no_trigger',
+      NOT has_table_privilege('authenticated', 'public.branches', 'TRIGGER'), 'TRIGGER denied'
+    UNION ALL SELECT 'cost_centers_anon_no_select',
+      NOT has_table_privilege('anon', 'public.finance_cost_centers', 'SELECT'), 'anon SELECT denied'
+    UNION ALL SELECT 'cost_centers_authenticated_select',
+      has_table_privilege('authenticated', 'public.finance_cost_centers', 'SELECT'), 'SELECT granted'
+    UNION ALL SELECT 'cost_centers_authenticated_insert',
+      has_table_privilege('authenticated', 'public.finance_cost_centers', 'INSERT'), 'INSERT granted'
+    UNION ALL SELECT 'cost_centers_authenticated_update',
+      has_table_privilege('authenticated', 'public.finance_cost_centers', 'UPDATE'), 'UPDATE granted'
+    UNION ALL SELECT 'cost_centers_authenticated_no_delete',
+      NOT has_table_privilege('authenticated', 'public.finance_cost_centers', 'DELETE'), 'DELETE denied'
+    UNION ALL SELECT 'cost_centers_authenticated_no_truncate',
+      NOT has_table_privilege('authenticated', 'public.finance_cost_centers', 'TRUNCATE'), 'TRUNCATE denied'
+    UNION ALL SELECT 'cost_centers_authenticated_no_references',
+      NOT has_table_privilege('authenticated', 'public.finance_cost_centers', 'REFERENCES'), 'REFERENCES denied'
+    UNION ALL SELECT 'cost_centers_authenticated_no_trigger',
+      NOT has_table_privilege('authenticated', 'public.finance_cost_centers', 'TRIGGER'), 'TRIGGER denied'
+    UNION ALL SELECT 'periods_anon_no_select',
+      NOT has_table_privilege('anon', 'public.finance_accounting_periods', 'SELECT'), 'anon SELECT denied'
+    UNION ALL SELECT 'periods_authenticated_select',
+      has_table_privilege('authenticated', 'public.finance_accounting_periods', 'SELECT'), 'SELECT granted'
+    UNION ALL SELECT 'periods_authenticated_insert',
+      has_table_privilege('authenticated', 'public.finance_accounting_periods', 'INSERT'), 'INSERT granted'
+    UNION ALL SELECT 'periods_authenticated_update',
+      has_table_privilege('authenticated', 'public.finance_accounting_periods', 'UPDATE'), 'UPDATE granted'
+    UNION ALL SELECT 'periods_authenticated_no_delete',
+      NOT has_table_privilege('authenticated', 'public.finance_accounting_periods', 'DELETE'), 'DELETE denied'
+    UNION ALL SELECT 'periods_authenticated_no_truncate',
+      NOT has_table_privilege('authenticated', 'public.finance_accounting_periods', 'TRUNCATE'), 'TRUNCATE denied'
+    UNION ALL SELECT 'periods_authenticated_no_references',
+      NOT has_table_privilege('authenticated', 'public.finance_accounting_periods', 'REFERENCES'), 'REFERENCES denied'
+    UNION ALL SELECT 'periods_authenticated_no_trigger',
+      NOT has_table_privilege('authenticated', 'public.finance_accounting_periods', 'TRIGGER'), 'TRIGGER denied'
     UNION ALL SELECT 'finance_204_still_absent',
       to_regclass('public.finance_journal_entries') IS NULL, 'journal not yet applied'
   ) g
@@ -90,6 +186,12 @@ WITH gates AS (
     UNION ALL SELECT 'rpc_create_finance_accounting_period', to_regprocedure('public.create_finance_accounting_period(integer, integer)') IS NOT NULL
     UNION ALL SELECT 'branches_no_delete_policy',
       NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'branches' AND cmd = 'DELETE')
+    UNION ALL SELECT 'branches_authenticated_no_delete',
+      NOT has_table_privilege('authenticated', 'public.branches', 'DELETE')
+    UNION ALL SELECT 'cost_centers_authenticated_no_delete',
+      NOT has_table_privilege('authenticated', 'public.finance_cost_centers', 'DELETE')
+    UNION ALL SELECT 'periods_authenticated_no_delete',
+      NOT has_table_privilege('authenticated', 'public.finance_accounting_periods', 'DELETE')
     UNION ALL SELECT 'finance_204_still_absent', to_regclass('public.finance_journal_entries') IS NULL
   ) g
 ),

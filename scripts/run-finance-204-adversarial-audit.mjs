@@ -221,6 +221,14 @@ try {
 
   console.log("Applying bootstrap + migrations 202, 203, 204...")
   psql(bootstrapSql)
+  psql(`
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+    CREATE ROLE anon;
+  END IF;
+END $$;
+`)
   psqlFile(join(root, "supabase/schema/202_finance_accounting_chart_of_accounts.sql"))
   psqlFile(join(root, "supabase/schema/203_finance_accounting_multibranch_foundation.sql"))
   psqlFile(join(root, "supabase/schema/204_finance_accounting_journal_engine.sql"))
