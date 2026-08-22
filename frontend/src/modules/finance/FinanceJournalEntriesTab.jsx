@@ -28,6 +28,7 @@ import {
   validateJournalForm
 } from "../../utils/financeJournalValidation"
 import { persistJournalDraft, submitJournalEntryFlow } from "../../utils/financeJournalPersist"
+import { selectionPatchAfterPersistResult } from "../../utils/financeJournalEditorPersist"
 import { confirmDiscardJournalChanges, createJournalLeaveGuard, UNSAVED_JOURNAL_CONFIRM } from "../../utils/financeJournalUnsaved"
 import { centsToDecimalNumber } from "../../utils/financeJournalAmounts"
 import FinanceJournalEntryList from "./FinanceJournalEntryList"
@@ -302,14 +303,20 @@ export default function FinanceJournalEntriesTab({ user, notify, leaveGuardRef }
     }
   }
 
-  async function handlePartialPersistResult(result) {
-    if (result.entryId) {
-      setSelectedId(result.entryId)
-      setIsLocalDraft(false)
+  function commitPersistedEntryResult(result) {
+    const patch = selectionPatchAfterPersistResult(result)
+    if (patch) {
+      setSelectedId(patch.selectedId)
+      setIsLocalDraft(patch.isLocalDraft)
     }
-    if (result.data) {
+    if (result?.data) {
       applyEntryToEditor(result.data)
-    } else if (result.entryId) {
+    }
+  }
+
+  async function handlePartialPersistResult(result) {
+    commitPersistedEntryResult(result)
+    if (!result.data && result.entryId) {
       const detail = await loadEntryDetail(result.entryId)
       if (detail) applyEntryToEditor(detail)
     }
@@ -335,7 +342,7 @@ export default function FinanceJournalEntriesTab({ user, notify, leaveGuardRef }
         notify(result.message || result.error, "error")
         return
       }
-      applyEntryToEditor(result.data)
+      commitPersistedEntryResult(result)
       await loadEntries()
       notify("Borrador guardado.", "success")
     })
@@ -365,7 +372,7 @@ export default function FinanceJournalEntriesTab({ user, notify, leaveGuardRef }
         notify(result.message || result.error, "error")
         return
       }
-      applyEntryToEditor(result.data)
+      commitPersistedEntryResult(result)
       await loadEntries()
       notify("Partida enviada a aprobación.", "success")
     })

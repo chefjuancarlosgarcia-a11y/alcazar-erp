@@ -467,39 +467,37 @@ async function runBrowserSuite(status, artifactsDir) {
 
     await page.click('button:has-text("Guardar borrador")')
     await page.waitForSelector(".finance-journal-row", { timeout: 20000 })
-    const listRows = await page.locator(".finance-journal-row").count()
-    log("8. Guardar borrador", listRows > 0, `filas=${listRows}`)
+    const listRowsAfterSave = await page.locator(".finance-journal-row").count()
+    log("8. Guardar borrador", listRowsAfterSave > 0, `filas=${listRowsAfterSave}`)
 
-    await page.locator(".finance-journal-editor button.tasks-link", { hasText: "Cerrar" }).click()
-    await page.waitForSelector("text=Seleccione una partida de la lista", { timeout: 10000 })
-    await page.locator(".finance-journal-row").first().click()
-    await page.waitForSelector("#journal-entry-description", { timeout: 15000 })
-    log("9. Cerrar y reabrir", true)
+    const localDraftBanner = await page.locator("text=Borrador local — aún no se guarda en base de datos.").isVisible()
+    log("8b. Panel ya no es borrador local", !localDraftBanner, `visible=${localDraftBanner}`)
 
     await page.fill("#journal-entry-description", "Partida smoke LOCAL TEST editada")
-    log("10. Editar", true)
+    log("9. Editar sin cerrar/reabrir", true)
 
     const submitEnabled = await page.locator('button:has-text("Enviar a aprobación")').isEnabled()
     await page.click('button:has-text("Enviar a aprobación")')
     await page.waitForTimeout(2000)
-    log("11. Enviar", submitEnabled)
+    const listRowsAfterSubmit = await page.locator(".finance-journal-row").count()
+    log("10. Enviar sin recrear partida", submitEnabled && listRowsAfterSubmit === listRowsAfterSave, `filas=${listRowsAfterSubmit}`)
 
     await page.click('button:has-text("Aprobar")')
     await page.waitForTimeout(1500)
-    log("12. Aprobar", true)
+    log("11. Aprobar", true)
 
     await page.click('button:has-text("Contabilizar")')
     await page.click('button:has-text("Confirmar contabilización")')
     await page.waitForTimeout(2000)
-    log("13. Contabilizar", true)
+    log("12. Contabilizar", true)
 
     postedEntryNumber = (await page.locator("#journal-editor-title").textContent())?.trim() || ""
     const hasJeNumber = /^JE-\d{4}-\d{6}$/.test(postedEntryNumber)
-    log("14. Confirmar número JE", hasJeNumber, postedEntryNumber)
+    log("13. Confirmar número JE", hasJeNumber, postedEntryNumber)
 
     const saveDraftVisible = await page.locator('button:has-text("Guardar borrador")').isVisible()
     const descDisabled = await page.locator("#journal-entry-description").isDisabled()
-    log("15. Modo solo lectura", !saveDraftVisible && descDisabled)
+    log("14. Modo solo lectura", !saveDraftVisible && descDisabled)
 
     originalEntryId = psqlAt(`
 SELECT id FROM public.finance_journal_entries
