@@ -29,6 +29,7 @@ import {
 } from "../../utils/financeJournalValidation"
 import { persistJournalDraft, submitJournalEntryFlow } from "../../utils/financeJournalPersist"
 import { selectionPatchAfterPersistResult } from "../../utils/financeJournalEditorPersist"
+import { loadJournalEntriesForList, withJournalListLoading } from "../../utils/financeJournalListLoad"
 import { confirmDiscardJournalChanges, createJournalLeaveGuard, UNSAVED_JOURNAL_CONFIRM } from "../../utils/financeJournalUnsaved"
 import { centsToDecimalNumber } from "../../utils/financeJournalAmounts"
 import FinanceJournalEntryList from "./FinanceJournalEntryList"
@@ -133,32 +134,40 @@ export default function FinanceJournalEntriesTab({ user, notify, leaveGuardRef }
 
   const loadEntries = useCallback(async () => {
     if (!permissions.canView) return
-    setLoadingList(true)
-    const result = await listFinanceJournalEntries({
-      status: filters.status || null,
-      periodId: filters.periodId || null,
-      fromDate: filters.fromDate || null,
-      toDate: filters.toDate || null,
-      search: filters.search || null
+    await withJournalListLoading(setLoadingList, async () => {
+      const outcome = await loadJournalEntriesForList({
+        canView: permissions.canView,
+        fetchEntries: () => listFinanceJournalEntries({
+          status: filters.status || null,
+          periodId: filters.periodId || null,
+          fromDate: filters.fromDate || null,
+          toDate: filters.toDate || null,
+          search: filters.search || null
+        }),
+        onError: (message) => notify(message, "error")
+      })
+      if (outcome.ok) {
+        setEntries(outcome.entries)
+        setPage(1)
+      }
     })
-    setLoadingList(false)
-    if (result.error) {
-      notify(result.error, "error")
-      return
-    }
-    setEntries(result.data)
-    setPage(1)
   }, [filters, notify, permissions.canView])
 
   const loadEntryDetail = useCallback(async (id) => {
     setLoadingDetail(true)
-    const result = await getFinanceJournalEntry(id)
-    setLoadingDetail(false)
-    if (result.error) {
-      notify(result.error, "error")
+    try {
+      const result = await getFinanceJournalEntry(id)
+      if (result.error) {
+        notify(result.error, "error")
+        return null
+      }
+      return result.data
+    } catch (error) {
+      notify(error?.message || "Error al cargar la partida.", "error")
       return null
+    } finally {
+      setLoadingDetail(false)
     }
-    return result.data
   }, [notify])
 
   useEffect(() => {

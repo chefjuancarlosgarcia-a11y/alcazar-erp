@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "test:chart-accounts": "node --test src/utils/financeChartAccountsValidation.test.js",
     "test:accounting-foundation": "node --test src/utils/financeAccountingFoundationValidation.test.js",
-    "test:finance": "node --test src/utils/financeChartAccountsValidation.test.js src/utils/financeAccountingFoundationValidation.test.js src/utils/financeJournalValidation.test.js src/utils/financeJournalPersist.test.js src/utils/financeJournalEditorPersist.test.js src/services/financeJournalService.test.js",
+    "test:finance": "node --test src/utils/financeChartAccountsValidation.test.js src/utils/financeAccountingFoundationValidation.test.js src/utils/financeJournalValidation.test.js src/utils/financeJournalPersist.test.js src/utils/financeJournalEditorPersist.test.js src/utils/financeJournalListLoad.test.js src/services/financeJournalService.test.js src/services/financeJournalService.viteResolver.test.js",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -1,6 +1,7 @@
 import { entryFromRpc, entriesFromRpcList, normalizeBackendError } from "../utils/financeJournalValidation.js"
 
 const MIGRATION_HINT = "Aplica la migración 204_finance_accounting_journal_engine.sql en Supabase."
+export const RPC_UNAVAILABLE_MESSAGE = "Supabase no está configurado para partidas contables."
 
 let rpcClient = null
 
@@ -12,12 +13,34 @@ export function __resetRpcClientForTests() {
   rpcClient = null
 }
 
-async function callRpc(name, params) {
+export function resolveJournalRpcInvoker() {
   if (!rpcClient) {
-    const { supabase } = await import("../lib/supabase.js")
-    rpcClient = supabase.rpc.bind(supabase)
+    throw new Error(RPC_UNAVAILABLE_MESSAGE)
   }
-  return rpcClient(name, params)
+  return rpcClient
+}
+
+async function resolveSupabaseRpcCall() {
+  const mod = await import("../lib/supabase")
+  const client = mod.supabase
+  if (!client || typeof client.rpc !== "function") {
+    throw new Error(RPC_UNAVAILABLE_MESSAGE)
+  }
+  return client.rpc.bind(client)
+}
+
+/** @internal Test-only — delegates to resolveSupabaseRpcCall (same path as callRpc). */
+export async function __resolveSupabaseRpcCallForTests() {
+  return resolveSupabaseRpcCall()
+}
+
+async function callRpc(name, params) {
+  try {
+    const invoke = rpcClient ?? await resolveSupabaseRpcCall()
+    return await invoke(name, params)
+  } catch (err) {
+    return { data: null, error: { message: err.message } }
+  }
 }
 
 function message(error) {
