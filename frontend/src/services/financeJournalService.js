@@ -1,3 +1,4 @@
+import { supabase } from "../lib/supabase"
 import { entryFromRpc, entriesFromRpcList, normalizeBackendError } from "../utils/financeJournalValidation.js"
 
 const MIGRATION_HINT = "Aplica la migración 204_finance_accounting_journal_engine.sql en Supabase."
@@ -20,23 +21,21 @@ export function resolveJournalRpcInvoker() {
   return rpcClient
 }
 
-async function resolveSupabaseRpcCall() {
-  const mod = await import("../lib/supabase")
-  const client = mod.supabase
-  if (!client || typeof client.rpc !== "function") {
+function resolveSupabaseRpcCall() {
+  if (!supabase || typeof supabase.rpc !== "function") {
     throw new Error(RPC_UNAVAILABLE_MESSAGE)
   }
-  return client.rpc.bind(client)
+  return supabase.rpc.bind(supabase)
 }
 
-/** @internal Test-only — delegates to resolveSupabaseRpcCall (same path as callRpc). */
-export async function __resolveSupabaseRpcCallForTests() {
+/** @internal Test-only — delegates to resolveSupabaseRpcCall (same static path as callRpc). */
+export function __resolveSupabaseRpcCallForTests() {
   return resolveSupabaseRpcCall()
 }
 
 async function callRpc(name, params) {
   try {
-    const invoke = rpcClient ?? await resolveSupabaseRpcCall()
+    const invoke = rpcClient ?? resolveSupabaseRpcCall()
     return await invoke(name, params)
   } catch (err) {
     return { data: null, error: { message: err.message } }

@@ -1,60 +1,56 @@
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import test from "node:test"
 import { fileURLToPath } from "node:url"
-import react from "@vitejs/plugin-react"
-import { createServer } from "vite"
+import {
+  closeFinanceJournalServiceTestServer,
+  getFinanceJournalServiceModule,
+  loadFinanceJournalTestModule
+} from "./financeJournalServiceTestHarness.js"
 
-const frontendRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
-const FAKE_SUPABASE_URL = "http://127.0.0.1:54321"
-const FAKE_ANON_KEY = "sb_publishable_test_finance_journal_resolver"
+const serviceSourcePath = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "financeJournalService.js"
+)
 
-async function withViteSsrServer(run) {
-  const server = await createServer({
-    configFile: false,
-    root: frontendRoot,
-    plugins: [react()],
-    server: { middlewareMode: true },
-    appType: "custom",
-    define: {
-      "import.meta.env.VITE_SUPABASE_URL": JSON.stringify(FAKE_SUPABASE_URL),
-      "import.meta.env.VITE_SUPABASE_ANON_KEY": JSON.stringify(FAKE_ANON_KEY),
-      "import.meta.env.DEV": JSON.stringify(false),
-      "import.meta.env.PROD": JSON.stringify(true),
-      "import.meta.env.MODE": JSON.stringify("test"),
-      "import.meta.env.SSR": JSON.stringify(true)
-    }
-  })
-
-  try {
-    await run(server)
-  } finally {
-    await server.close()
-  }
-}
-
-test("supabase module exposes supabase.rpc under Vite SSR resolution", async () => {
-  await withViteSsrServer(async (server) => {
-    const mod = await server.ssrLoadModule("/src/lib/supabase.js")
-    assert.ok(mod.supabase, "module.supabase must exist")
-    assert.equal(typeof mod.supabase.rpc, "function", "module.supabase.rpc must be a function")
-  })
+test.after(async () => {
+  await closeFinanceJournalServiceTestServer()
 })
 
-test("default financeJournalService resolver uses real dynamic import without injected client", async () => {
-  await withViteSsrServer(async (server) => {
-    const service = await server.ssrLoadModule("/src/services/financeJournalService.js")
+test("financeJournalService source uses static supabase import only", () => {
+  const source = readFileSync(serviceSourcePath, "utf8")
 
-    service.__resetRpcClientForTests()
+  assert.match(
+    source,
+    /import\s*\{\s*supabase\s*\}\s*from\s*["']\.\.\/lib\/supabase["']/,
+    "production service must statically import the supabase singleton"
+  )
+  assert.doesNotMatch(
+    source,
+    /import\s*\(\s*["']\.\.\/lib\/supabase(?:\.js)?["']\s*\)/,
+    "production service must not dynamically import supabase"
+  )
+})
 
-    const invoke = await service.__resolveSupabaseRpcCallForTests()
+test("supabase module exposes supabase.rpc under Vite SSR resolution", async () => {
+  const mod = await loadFinanceJournalTestModule("/src/lib/supabase.js")
+  assert.ok(mod.supabase, "module.supabase must exist")
+  assert.equal(typeof mod.supabase.rpc, "function", "module.supabase.rpc must be a function")
+})
 
-    const supabaseMod = await server.ssrLoadModule("/src/lib/supabase.js")
-    assert.ok(supabaseMod.supabase, "real import must resolve module.supabase")
-    assert.equal(typeof supabaseMod.supabase.rpc, "function")
+test("financeJournalService static resolver uses shared supabase singleton under Vite", async () => {
+  const service = await getFinanceJournalServiceModule()
+  const supabaseMod = await loadFinanceJournalTestModule("/src/lib/supabase.js")
 
-    assert.equal(typeof invoke, "function", "resolver must return an invocable bound rpc function")
-    assert.notStrictEqual(invoke, supabaseMod.supabase, "resolver returns rpc binding, not the client")
-    assert.equal(invoke.length, supabaseMod.supabase.rpc.length, "bound rpc preserves callable arity")
-  })
+  service.__resetRpcClientForTests()
+
+  const invoke = service.__resolveSupabaseRpcCallForTests()
+
+  assert.ok(supabaseMod.supabase, "static singleton must expose supabase")
+  assert.equal(typeof supabaseMod.supabase.rpc, "function")
+
+  assert.equal(typeof invoke, "function", "resolver must return invocable bound rpc")
+  assert.notStrictEqual(invoke, supabaseMod.supabase, "resolver returns rpc binding, not the client")
+  assert.equal(invoke.length, supabaseMod.supabase.rpc.length, "bound rpc preserves callable arity")
 })

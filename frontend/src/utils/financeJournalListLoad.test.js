@@ -1,30 +1,37 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import {
-  __resetRpcClientForTests,
-  __setRpcClientForTests,
-  listFinanceJournalEntries,
-  resolveJournalRpcInvoker,
-  RPC_UNAVAILABLE_MESSAGE
-} from "../services/financeJournalService.js"
+  closeFinanceJournalServiceTestServer,
+  getFinanceJournalServiceModule
+} from "../services/financeJournalServiceTestHarness.js"
 import { loadJournalEntriesForList, withJournalListLoading } from "./financeJournalListLoad.js"
 
 function mockRpc(handler) {
   return async (name, params) => handler(name, params)
 }
 
+let service = null
+
+test.before(async () => {
+  service = await getFinanceJournalServiceModule()
+})
+
+test.after(async () => {
+  await closeFinanceJournalServiceTestServer()
+})
+
 test.afterEach(() => {
-  __resetRpcClientForTests()
+  service.__resetRpcClientForTests()
 })
 
 test("resolveJournalRpcInvoker uses injected rpc client with exact signature", async () => {
   const calls = []
-  __setRpcClientForTests(mockRpc(async (name, params) => {
+  service.__setRpcClientForTests(mockRpc(async (name, params) => {
     calls.push({ name, params })
     return { data: [], error: null }
   }))
 
-  const invoke = resolveJournalRpcInvoker()
+  const invoke = service.resolveJournalRpcInvoker()
   await invoke("list_finance_journal_entries", { p_status: null })
 
   assert.equal(calls.length, 1)
@@ -32,18 +39,18 @@ test("resolveJournalRpcInvoker uses injected rpc client with exact signature", a
 })
 
 test("resolveJournalRpcInvoker rejects when no injected client in tests", () => {
-  __resetRpcClientForTests()
+  service.__resetRpcClientForTests()
   assert.throws(
-    () => resolveJournalRpcInvoker(),
-    (err) => err.message === RPC_UNAVAILABLE_MESSAGE
+    () => service.resolveJournalRpcInvoker(),
+    (err) => err.message === service.RPC_UNAVAILABLE_MESSAGE
   )
 })
 
 test("listFinanceJournalEntries returns controlled error when rpc invoke fails", async () => {
-  __setRpcClientForTests(async () => {
-    throw new Error(RPC_UNAVAILABLE_MESSAGE)
+  service.__setRpcClientForTests(async () => {
+    throw new Error(service.RPC_UNAVAILABLE_MESSAGE)
   })
-  const result = await listFinanceJournalEntries({})
+  const result = await service.listFinanceJournalEntries({})
   assert.match(result.error, /no está configurado/i)
   assert.deepEqual(result.data, [])
 })
