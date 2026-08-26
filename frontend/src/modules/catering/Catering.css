@@ -759,13 +759,13 @@
 .catering-quote-toolbar select,
 .catering-quote-modal__body textarea {
   width: 100%;
-  min-height: 42px;
-  padding: 0 12px;
+  min-height: var(--erp-input-height, 48px);
+  padding: 0 var(--erp-space-16);
   border: 1px solid var(--erp-border, #334155);
-  border-radius: 10px;
+  border-radius: var(--erp-radius-badge);
   background: #0b1424;
   color: var(--erp-text-primary, #f8fafc);
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .catering-quote-modal__body textarea {
@@ -1212,26 +1212,6 @@
   white-space: nowrap;
   border-color: rgba(20, 184, 166, 0.45);
   color: #5eead4;
-}
-
-.catering-quote-tabs {
-  display: none;
-  gap: var(--erp-space-8);
-  padding: 0 var(--erp-space-24) var(--erp-space-12);
-}
-
-.catering-quote-tabs button {
-  min-height: 36px;
-  padding: 0 var(--erp-space-16);
-  border: 1px solid var(--erp-border, #334155);
-  border-radius: var(--erp-radius-badge);
-  background: #0b1424;
-  color: var(--erp-text-primary, #f8fafc);
-}
-
-.catering-quote-tabs button.is-active {
-  border-color: #14b8a6;
-  background: rgba(20, 184, 166, 0.12);
 }
 
 .catering-quote-lines-scroll {
@@ -1893,15 +1873,6 @@
     max-height: none;
   }
 
-  .catering-quote-tabs {
-    display: flex;
-    flex-shrink: 0;
-  }
-
-  .is-hidden-mobile {
-    display: none;
-  }
-
   .catering-quote-lines-scroll {
     overflow-x: visible;
   }
@@ -1995,11 +1966,300 @@
     grid-template-columns: 1fr;
   }
 
-  .catering-quote-line-card__grid {
+  .catering-quote-toolbar {
+    grid-template-columns: 1fr;
+  }
+}
+
+.catering-quote-dirty-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 var(--erp-space-8);
+  border-radius: var(--erp-radius-badge);
+  background: rgba(249, 115, 22, 0.16);
+  color: #fdba74;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.catering-quote-field {
+  display: grid;
+  gap: var(--erp-space-8);
+  font-size: 14px;
+  color: var(--erp-text-secondary, #94a3b8);
+}
+
+.catering-quote-field input,
+.catering-quote-field textarea,
+.catering-quote-field select {
+  width: 100%;
+  min-height: var(--erp-input-height, 48px);
+  padding: 0 var(--erp-space-16);
+  border: 1px solid var(--erp-border, #334155);
+  border-radius: var(--erp-radius-badge);
+  background: #0b1424;
+  color: var(--erp-text-primary, #f8fafc);
+  font-size: 16px;
+}
+
+.catering-quote-field textarea {
+  padding: var(--erp-space-16);
+  min-height: var(--erp-textarea-min, 120px);
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.catering-quote-editor__panels {
+  display: grid;
+  gap: var(--erp-space-16);
+  min-width: 0;
+}
+
+.catering-quote-mobile-stepper {
+  display: none;
+  gap: var(--erp-space-8);
+  padding: 0 var(--erp-space-16) var(--erp-space-8);
+  flex-shrink: 0;
+}
+
+.catering-quote-mobile-stepper button {
+  flex: 1 1 0;
+  min-height: var(--erp-btn-height, 48px);
+  padding: 0 var(--erp-space-8);
+  border: 1px solid var(--erp-border, #334155);
+  border-radius: var(--erp-radius-badge);
+  background: #0b1424;
+  color: var(--erp-text-primary, #f8fafc);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.catering-quote-mobile-stepper button.is-active {
+  border-color: #14b8a6;
+  background: rgba(20, 184, 166, 0.12);
+  color: #5eead4;
+}
+
+.catering-quote-summary-card--mobile {
+  display: none;
+}
+
+.catering-quote-line-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--erp-space-8);
+}
+
+.catering-quote-line-card__duplicate,
+.catering-quote-line-card__remove {
+  min-height: var(--erp-btn-height, 48px);
+  padding: 0 var(--erp-space-16);
+}
+
+.catering-quote-line-card__grid--primary {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.catering-quote-line-card__advanced {
+  padding: var(--erp-space-8) var(--erp-space-16);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: var(--erp-radius-badge);
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.catering-quote-line-card__advanced summary {
+  min-height: var(--erp-btn-height, 48px);
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--erp-text-secondary, #94a3b8);
+}
+
+.catering-quote-line-card__advanced > label,
+.catering-quote-line-card__advanced .catering-quote-line-card__option-fields {
+  margin-top: var(--erp-space-8);
+}
+
+.catering-quote-mobile-bar {
+  display: none;
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  align-items: stretch;
+  gap: var(--erp-space-8);
+  padding: var(--erp-space-8) var(--erp-space-16);
+  padding-bottom: calc(var(--erp-space-8) + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--erp-border, #334155);
+  background: rgba(12, 22, 41, 0.96);
+  backdrop-filter: blur(8px);
+}
+
+.catering-quote-mobile-bar__primary,
+.catering-quote-mobile-bar__preview {
+  flex: 1 1 0;
+  min-height: var(--erp-btn-height, 48px);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.catering-quote-mobile-bar__more {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.catering-quote-mobile-bar__more summary {
+  list-style: none;
+  min-height: var(--erp-btn-height, 48px);
+  min-width: var(--erp-btn-height, 48px);
+  display: grid;
+  place-items: center;
+  padding: 0 var(--erp-space-16);
+  border: 1px solid var(--erp-border, #334155);
+  border-radius: var(--erp-radius-badge);
+  background: rgba(15, 23, 42, 0.6);
+  color: var(--erp-text-primary, #f8fafc);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.catering-quote-mobile-bar__more summary::-webkit-details-marker {
+  display: none;
+}
+
+.catering-quote-mobile-bar__menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + var(--erp-space-8));
+  display: grid;
+  gap: var(--erp-space-8);
+  min-width: 220px;
+  padding: var(--erp-space-8);
+  border: 1px solid var(--erp-border, #334155);
+  border-radius: var(--erp-radius-badge);
+  background: #0c1629;
+  box-shadow: 0 16px 32px rgba(2, 6, 23, 0.45);
+}
+
+.catering-quote-mobile-bar__menu .ghost {
+  min-height: var(--erp-btn-height, 48px);
+  justify-content: flex-start;
+  width: 100%;
+}
+
+.catering-quote-mobile-preview {
+  position: fixed;
+  inset: 0;
+  z-index: 140;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  background: #e2e8f0;
+}
+
+.catering-quote-mobile-preview__header {
+  display: flex;
+  align-items: center;
+  gap: var(--erp-space-8);
+  padding: var(--erp-space-8) var(--erp-space-16);
+  padding-top: calc(var(--erp-space-8) + env(safe-area-inset-top, 0px));
+  border-bottom: 1px solid #cbd5e1;
+  background: #fff;
+}
+
+.catering-quote-mobile-preview__back {
+  min-height: var(--erp-btn-height, 48px);
+  padding: 0 var(--erp-space-16);
+  font-weight: 600;
+}
+
+.catering-quote-mobile-preview__body {
+  overflow-x: hidden;
+  overflow-y: auto;
+  min-width: 0;
+}
+
+.catering-quote-modal__close {
+  min-height: var(--erp-btn-height, 48px);
+}
+
+@media (max-width: 768px) {
+  .catering-quote-mobile-stepper {
+    display: flex;
+  }
+
+  .catering-quote-mobile-bar {
+    display: flex;
+  }
+
+  .catering-quote-actions--desktop {
+    display: none;
+  }
+
+  .catering-quote-mobile-panel {
+    display: none;
+    min-width: 0;
+  }
+
+  .catering-quote-mobile-panel.is-active {
+    display: grid;
+    gap: var(--erp-space-16);
+  }
+
+  .catering-quote-summary-card--inline {
+    display: none;
+  }
+
+  .catering-quote-summary-card--mobile {
+    display: block;
+  }
+
+  .catering-quote-modal__preview-wrap--desktop {
+    display: none !important;
+  }
+
+  .catering-quote-modal__body {
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding-bottom: calc(var(--erp-space-64) + env(safe-area-inset-bottom, 0px));
+  }
+
+  .catering-quote-modal__split {
+    grid-template-columns: 1fr;
+    overflow: hidden;
+  }
+
+  .catering-quote-line-card__grid--primary {
     grid-template-columns: 1fr;
   }
 
-  .catering-quote-toolbar {
+  .catering-quote-top-bar {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (min-width: 769px) {
+  .catering-quote-mobile-stepper,
+  .catering-quote-mobile-bar,
+  .catering-quote-mobile-preview {
+    display: none !important;
+  }
+
+  .catering-quote-mobile-panel {
+    display: block;
+  }
+
+  .catering-quote-summary-card--mobile {
+    display: none;
+  }
+
+  .catering-quote-modal__preview-wrap--desktop {
+    display: block;
+  }
+
+  .catering-quote-modal__split {
+    grid-template-columns: minmax(0, 1.75fr) minmax(320px, 0.55fr);
   }
 }
