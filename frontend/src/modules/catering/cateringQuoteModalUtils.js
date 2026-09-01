@@ -12,6 +12,10 @@ export const UNSAVED_CLOSE_MESSAGE =
 export const UNSAVED_STATUS_CHANGE_MESSAGE =
   "Guarda los cambios antes de cambiar el estado de la cotización."
 
+export function getQuoteEditorLineKey(index) {
+  return `quote-line-${index}`
+}
+
 export function getStatusChangeBlockedReason({ isDirty = false, currentQuoteId = null } = {}) {
   if (!currentQuoteId) {
     return "Guarda la cotizacion antes de cambiar el estado."
