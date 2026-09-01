@@ -78,7 +78,17 @@ begin
 
   return query
   select 'manage_search_path_empty'::text,
-    v_manage_def ilike '%search_path%''''''%',
+    exists (
+      select 1
+      from pg_proc p
+      where p.oid = v_manage_oid
+        and p.proconfig is not null
+        and exists (
+          select 1
+          from unnest(p.proconfig) as cfg(setting)
+          where setting = 'search_path=""'
+        )
+    ),
     'can_manage_catering_requests sets search_path to empty'::text;
 
   return query
