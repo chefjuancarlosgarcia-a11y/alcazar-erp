@@ -211,10 +211,6 @@ summary as (
     count(*) filter (where not passed) as failed
   from results
 )
-select r.scenario, r.passed, r.detail
-from results r
-order by r.scenario;
-
 select * from summary;
 
 rollback;
