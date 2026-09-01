@@ -15,6 +15,7 @@ import { downloadCateringQuotePdf } from "./cateringQuotePdf"
 import {
   areQuoteEditorSnapshotsEqual,
   duplicateQuoteItemAtIndex,
+  getQuoteEditorLineKey,
   getQuoteEditorSnapshot,
   getSaveValidationError,
   getStatusChangeBlockedReason,
@@ -395,7 +396,7 @@ function CateringQuoteEditor({
 
     return (
       <article
-        key={`${index}-${item.sort_order}-${item.description}`}
+        key={getQuoteEditorLineKey(index)}
         className={`catering-quote-line-card${isOption ? " catering-quote-line-card--option" : ""}`}
       >
         <div className="catering-quote-line-card__top">

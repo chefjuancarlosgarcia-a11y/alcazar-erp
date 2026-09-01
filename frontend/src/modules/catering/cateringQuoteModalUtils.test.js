@@ -3,11 +3,12 @@ import test from "node:test"
 import {
   areQuoteEditorSnapshotsEqual,
   duplicateQuoteItemAtIndex,
+  getQuoteEditorLineKey,
   getQuoteEditorSnapshot,
   getStatusChangeBlockedReason,
   UNSAVED_STATUS_CHANGE_MESSAGE
 } from "./cateringQuoteModalUtils.js"
-import { createEmptyQuoteItem } from "./cateringQuoteTemplates.js"
+import { createEmptyQuoteItem, groupQuoteItemsForEditor } from "./cateringQuoteTemplates.js"
 
 const CLOSING_FIELDS = {
   discountAmount: "0",
@@ -259,4 +260,58 @@ test("getStatusChangeBlockedReason requires a saved quote id before any transiti
     getStatusChangeBlockedReason({ isDirty: false, currentQuoteId: null }),
     "Guarda la cotizacion antes de cambiar el estado."
   )
+})
+
+test("getQuoteEditorLineKey stays stable when description changes", () => {
+  const index = 0
+  const before = getQuoteEditorLineKey(index)
+  const after = getQuoteEditorLineKey(index)
+
+  assert.equal(before, after)
+  assert.equal(before, "quote-line-0")
+})
+
+test("getQuoteEditorLineKey does not depend on editable field values", () => {
+  const index = 1
+  const itemBefore = {
+    ...createEmptyQuoteItem(2),
+    description: "P",
+    option_label: "Res ",
+    option_group_name: "Plato ",
+    quantity: "1",
+    unit_price: "10"
+  }
+  const itemAfter = {
+    ...itemBefore,
+    description: "Pizza completa",
+    option_label: "Res premium ",
+    option_group_name: "Plato fuerte ",
+    quantity: "12",
+    unit_price: "99.5"
+  }
+
+  assert.equal(getQuoteEditorLineKey(index), "quote-line-1")
+  assert.equal(getQuoteEditorLineKey(index), "quote-line-1")
+  assert.notEqual(itemBefore.description, itemAfter.description)
+  assert.notEqual(itemBefore.quantity, itemAfter.quantity)
+})
+
+test("getQuoteEditorLineKey differs between distinct line indices", () => {
+  assert.notEqual(getQuoteEditorLineKey(0), getQuoteEditorLineKey(1))
+  assert.equal(getQuoteEditorLineKey(2), "quote-line-2")
+})
+
+test("groupQuoteItemsForEditor keeps original index for stable line identity", () => {
+  const items = [
+    { ...createEmptyQuoteItem(1), description: "P" },
+    { ...createEmptyQuoteItem(2), description: "Bebida" }
+  ]
+
+  items[0].description = "Pizza completa"
+
+  const groups = groupQuoteItemsForEditor(items)
+  const indices = groups.flatMap((group) => group.lines.map((line) => line.index))
+
+  assert.deepEqual(indices, [0, 1])
+  assert.equal(getQuoteEditorLineKey(indices[0]), "quote-line-0")
 })
