@@ -221,6 +221,22 @@ export function groupQuoteItemsForDisplay(items = []) {
   return sections.sort((a, b) => (a.sectionOrder ?? 0) - (b.sectionOrder ?? 0))
 }
 
+function toEditorLineItem(normalizedItem, sourceItem = {}) {
+  return {
+    ...normalizedItem,
+    description: String(sourceItem.description ?? ""),
+    option_label: String(sourceItem.option_label ?? sourceItem.optionLabel ?? ""),
+    option_group_name: String(sourceItem.option_group_name ?? sourceItem.optionGroupName ?? "")
+  }
+}
+
+function toEditorLine(normalizedItem, index, items = []) {
+  return {
+    item: toEditorLineItem(normalizedItem, items[index] || {}),
+    index
+  }
+}
+
 export function groupQuoteItemsForEditor(items = []) {
   const normalized = normalizeQuoteItems(items)
   const groups = []
@@ -232,7 +248,7 @@ export function groupQuoteItemsForEditor(items = []) {
       if (seenSectionKeys.has(sectionKey)) return
       seenSectionKeys.add(sectionKey)
       const sectionItems = normalized
-        .map((candidate, candidateIndex) => ({ item: candidate, index: candidateIndex }))
+        .map((candidate, candidateIndex) => toEditorLine(candidate, candidateIndex, items))
         .filter(({ item: candidate }) => getQuoteSectionKey(candidate) === sectionKey)
       groups.push({
         type: "template_section",
@@ -249,7 +265,7 @@ export function groupQuoteItemsForEditor(items = []) {
       sectionKey: null,
       sectionName: null,
       sectionOrder: item.sort_order ?? index,
-      lines: [{ item, index }]
+      lines: [toEditorLine(item, index, items)]
     })
   })
 
