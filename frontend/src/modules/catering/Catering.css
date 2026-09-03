@@ -1801,6 +1801,21 @@
   z-index: 130;
 }
 
+.catering-quote-emit-confirm {
+  width: min(480px, calc(100vw - var(--erp-space-32)));
+}
+
+.catering-quote-emit-confirm__message {
+  margin: 0;
+  color: var(--erp-text-secondary, #cbd5e1);
+  line-height: 1.5;
+}
+
+.catering-quote-emit-confirm .catering-quote-modal__footer {
+  border-top: 1px solid var(--erp-border, #334155);
+  padding-top: var(--erp-space-16);
+}
+
 @media (max-width: 1100px) {
   .catering-quote-editor__layout {
     grid-template-columns: 1fr;
@@ -2088,6 +2103,7 @@
   position: sticky;
   bottom: 0;
   z-index: 4;
+  flex-wrap: wrap;
   align-items: stretch;
   gap: var(--erp-space-8);
   padding: var(--erp-space-8) var(--erp-space-16);
@@ -2097,8 +2113,16 @@
   backdrop-filter: blur(8px);
 }
 
+.catering-quote-mobile-bar__emit {
+  flex: 1 1 100%;
+  min-height: var(--erp-btn-height, 52px);
+  font-size: 15px;
+  font-weight: 600;
+}
+
 .catering-quote-mobile-bar__primary,
-.catering-quote-mobile-bar__preview {
+.catering-quote-mobile-bar__preview,
+.catering-quote-mobile-bar__save {
   flex: 1 1 0;
   min-height: var(--erp-btn-height, 48px);
   font-size: 15px;

@@ -2,10 +2,16 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import {
   areQuoteEditorSnapshotsEqual,
+  buildQuotePdfRow,
   duplicateQuoteItemAtIndex,
+  emitCateringQuoteDraft,
+  getQuoteDownloadActionLabel,
   getQuoteEditorLineKey,
   getQuoteEditorSnapshot,
+  getQuoteEmitActionLabel,
   getStatusChangeBlockedReason,
+  isDraftQuoteStatus,
+  shouldPersistBeforeEmit,
   UNSAVED_STATUS_CHANGE_MESSAGE
 } from "./cateringQuoteModalUtils.js"
 import { createEmptyQuoteItem, groupQuoteItemsForEditor } from "./cateringQuoteTemplates.js"
@@ -314,4 +320,174 @@ test("groupQuoteItemsForEditor keeps original index for stable line identity", (
 
   assert.deepEqual(indices, [0, 1])
   assert.equal(getQuoteEditorLineKey(indices[0]), "quote-line-0")
+})
+
+test("isDraftQuoteStatus treats empty and draft as draft", () => {
+  assert.equal(isDraftQuoteStatus(undefined), true)
+  assert.equal(isDraftQuoteStatus("draft"), true)
+  assert.equal(isDraftQuoteStatus("sent"), false)
+  assert.equal(isDraftQuoteStatus("approved"), false)
+})
+
+test("shouldPersistBeforeEmit requires save for new or dirty quotes", () => {
+  assert.equal(shouldPersistBeforeEmit({ currentQuoteId: null, isDirty: false }), true)
+  assert.equal(shouldPersistBeforeEmit({ currentQuoteId: "q1", isDirty: true }), true)
+  assert.equal(shouldPersistBeforeEmit({ currentQuoteId: "q1", isDirty: false }), false)
+})
+
+test("buildQuotePdfRow keeps draft watermark inputs until status is sent", () => {
+  const draftRow = buildQuotePdfRow({
+    quote: { quote_number: "CAT-2026-0001", status: "draft" },
+    totals: { subtotal: 100, discount_amount: 0, total: 100 }
+  })
+  assert.equal(draftRow.status, "draft")
+  assert.equal(draftRow.quote_number, "CAT-2026-0001")
+
+  const sentRow = buildQuotePdfRow({
+    quote: { quote_number: "CAT-2026-0001", status: "draft" },
+    statusOverride: "sent"
+  })
+  assert.equal(sentRow.status, "sent")
+})
+
+test("buildQuotePdfRow forces draft override for borrador downloads", () => {
+  const draftDownload = buildQuotePdfRow({
+    quote: { quote_number: "CAT-2026-0001", status: "sent" },
+    statusOverride: "draft"
+  })
+  assert.equal(draftDownload.status, "draft")
+})
+
+test("getQuoteDownloadActionLabel switches between draft and final download", () => {
+  assert.equal(getQuoteDownloadActionLabel(true), "Descargar borrador")
+  assert.equal(getQuoteDownloadActionLabel(false), "Descargar PDF")
+})
+
+test("getQuoteEmitActionLabel reflects emitting state", () => {
+  assert.equal(getQuoteEmitActionLabel(false), "Emitir y descargar PDF")
+  assert.equal(getQuoteEmitActionLabel(true), "Emitiendo…")
+})
+
+test("emitCateringQuoteDraft saves, marks sent, and returns persisted detail", async () => {
+  const calls = []
+  const result = await emitCateringQuoteDraft({
+    currentQuoteId: null,
+    requestId: "req-1",
+    isDirty: true,
+    payload: { items: [] },
+    createQuote: async (requestId, payload) => {
+      calls.push(["create", requestId, payload])
+      return { data: { quote: { id: "q-new", status: "draft", quote_number: "CAT-2026-0002" }, items: [] } }
+    },
+    updateQuote: async () => ({ error: "unexpected update" }),
+    updateStatus: async (quoteId, status) => {
+      calls.push(["status", quoteId, status])
+      return {
+        data: {
+          quote: { id: quoteId, status: "sent", quote_number: "CAT-2026-0002" },
+          items: []
+        }
+      }
+    }
+  })
+
+  assert.equal(result.ok, true)
+  assert.equal(result.detail.quote.status, "sent")
+  assert.deepEqual(calls, [
+    ["create", "req-1", { items: [] }],
+    ["status", "q-new", "sent"]
+  ])
+})
+
+test("emitCateringQuoteDraft updates dirty existing draft before marking sent", async () => {
+  const calls = []
+  const result = await emitCateringQuoteDraft({
+    currentQuoteId: "q-dirty",
+    requestId: "req-1",
+    isDirty: true,
+    payload: { items: [{ description: "Menu" }] },
+    createQuote: async () => ({ error: "unexpected create" }),
+    updateQuote: async (quoteId, payload) => {
+      calls.push(["update", quoteId, payload])
+      return {
+        data: {
+          quote: { id: quoteId, status: "draft", quote_number: "CAT-2026-0003" },
+          items: []
+        }
+      }
+    },
+    updateStatus: async (quoteId, status) => {
+      calls.push(["status", quoteId, status])
+      return {
+        data: {
+          quote: { id: quoteId, status: "sent", quote_number: "CAT-2026-0003" },
+          items: []
+        }
+      }
+    }
+  })
+
+  assert.equal(result.ok, true)
+  assert.equal(result.detail.quote.status, "sent")
+  assert.deepEqual(calls, [
+    ["update", "q-dirty", { items: [{ description: "Menu" }] }],
+    ["status", "q-dirty", "sent"]
+  ])
+})
+
+test("emitCateringQuoteDraft skips save when draft is already clean", async () => {
+  const calls = []
+  const result = await emitCateringQuoteDraft({
+    currentQuoteId: "q-clean",
+    requestId: "req-1",
+    isDirty: false,
+    payload: { items: [] },
+    createQuote: async () => ({ error: "unexpected create" }),
+    updateQuote: async () => ({ error: "unexpected update" }),
+    updateStatus: async (quoteId, status) => {
+      calls.push(["status", quoteId, status])
+      return { data: { quote: { id: quoteId, status: "sent" }, items: [] } }
+    }
+  })
+
+  assert.equal(result.ok, true)
+  assert.deepEqual(calls, [["status", "q-clean", "sent"]])
+})
+
+test("emitCateringQuoteDraft stops before sent when save fails", async () => {
+  const calls = []
+  const result = await emitCateringQuoteDraft({
+    currentQuoteId: null,
+    requestId: "req-1",
+    isDirty: true,
+    payload: { items: [] },
+    createQuote: async () => ({ error: "save failed" }),
+    updateQuote: async () => ({ error: "save failed" }),
+    updateStatus: async () => {
+      calls.push(["status"])
+      return { error: "should not run" }
+    }
+  })
+
+  assert.equal(result.ok, false)
+  assert.equal(result.stage, "save")
+  assert.equal(result.error, "save failed")
+  assert.deepEqual(calls, [])
+})
+
+test("emitCateringQuoteDraft keeps draft when status change fails", async () => {
+  const result = await emitCateringQuoteDraft({
+    currentQuoteId: "q-1",
+    requestId: "req-1",
+    isDirty: false,
+    payload: { items: [] },
+    createQuote: async () => ({ error: "unexpected" }),
+    updateQuote: async () => ({ error: "unexpected" }),
+    updateStatus: async () => ({ error: "status failed" })
+  })
+
+  assert.equal(result.ok, false)
+  assert.equal(result.stage, "status")
+  assert.equal(result.error, "status failed")
+  assert.equal(result.quoteId, "q-1")
 })

@@ -26,6 +26,14 @@ export function getStatusChangeBlockedReason({ isDirty = false, currentQuoteId =
   return null
 }
 
+export function getQuoteDownloadActionLabel(isDraft = false) {
+  return isDraft ? "Descargar borrador" : "Descargar PDF"
+}
+
+export function getQuoteEmitActionLabel(emitting = false) {
+  return emitting ? "Emitiendo…" : "Emitir y descargar PDF"
+}
+
 export function getQuoteEditorSnapshot({
   items = [],
   discountAmount = "0",
@@ -98,4 +106,92 @@ export function getSaveValidationError(items = []) {
     }
   }
   return null
+}
+
+export function isDraftQuoteStatus(status) {
+  return !status || status === "draft"
+}
+
+export function shouldPersistBeforeEmit({ currentQuoteId = null, isDirty = false } = {}) {
+  return !currentQuoteId || isDirty
+}
+
+export function buildQuotePdfRow({
+  quote = {},
+  totals = {},
+  validUntil,
+  notes,
+  terms,
+  statusOverride
+} = {}) {
+  const status = statusOverride ?? quote.status ?? "draft"
+  return {
+    ...quote,
+    quote_number: quote.quote_number || "BORRADOR",
+    status,
+    subtotal: totals.subtotal ?? quote.subtotal,
+    discount_amount: totals.discount_amount ?? quote.discount_amount,
+    tax_amount: quote.tax_amount ?? 0,
+    total: totals.total ?? quote.total,
+    valid_until: validUntil ?? quote.valid_until,
+    notes: notes ?? quote.notes,
+    terms: terms ?? quote.terms
+  }
+}
+
+export async function persistCateringQuoteDraft({
+  currentQuoteId = null,
+  requestId,
+  payload,
+  createQuote,
+  updateQuote
+}) {
+  const result = currentQuoteId
+    ? await updateQuote(currentQuoteId, payload)
+    : await createQuote(requestId, payload)
+
+  if (result?.error) {
+    return { ok: false, error: result.error }
+  }
+
+  return { ok: true, data: result.data }
+}
+
+export async function emitCateringQuoteDraft({
+  currentQuoteId = null,
+  requestId,
+  isDirty = false,
+  payload,
+  createQuote,
+  updateQuote,
+  updateStatus
+}) {
+  let quoteId = currentQuoteId
+  let detail = null
+
+  if (shouldPersistBeforeEmit({ currentQuoteId, isDirty })) {
+    const saved = await persistCateringQuoteDraft({
+      currentQuoteId,
+      requestId,
+      payload,
+      createQuote,
+      updateQuote
+    })
+    if (!saved.ok) {
+      return { ok: false, stage: "save", error: saved.error }
+    }
+    detail = saved.data
+    quoteId = detail?.quote?.id || quoteId
+  }
+
+  if (!quoteId) {
+    return { ok: false, stage: "save", error: "No se pudo obtener el identificador de la cotización." }
+  }
+
+  const sent = await updateStatus(quoteId, "sent")
+  if (sent?.error) {
+    return { ok: false, stage: "status", error: sent.error, quoteId, detail }
+  }
+
+  return { ok: true, stage: "ok", detail: sent.data, quoteId }
 }
