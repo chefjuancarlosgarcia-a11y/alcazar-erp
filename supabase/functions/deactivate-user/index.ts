@@ -1,14 +1,14 @@
-import {
+﻿import {
   authenticateActor,
   canManageTarget,
   corsHeaders,
+  createActorClient,
   createAdminClient,
-  invalidateAttendanceAccess,
   json,
   loadTargetProfile,
-  revokeUserSessions,
   safeErrorMessage
 } from "../_shared/userLifecycle.ts"
+import { executeDeactivateUser, lifecycleResultToResponse } from "../_shared/userLifecycleHandlers.ts"
 
 const MIN_REASON_LENGTH = 3
 const MAX_REASON_LENGTH = 500
@@ -24,6 +24,9 @@ Deno.serve(async (req) => {
   const token = req.headers.get("Authorization")?.replace("Bearer ", "")
   const authResult = await authenticateActor(admin, token, DENIED_MESSAGE)
   if (authResult.error) return authResult.error
+
+  const actorClient = createActorClient(authResult.token!)
+  if (!actorClient) return json({ error: "Funcion no configurada." }, 500)
 
   const body = await req.json().catch(() => null)
   const targetId = String(body?.user_id || "").trim()
@@ -47,37 +50,14 @@ Deno.serve(async (req) => {
     return json({ error: DENIED_MESSAGE }, 403)
   }
 
-  const alreadyInactive = target.status === "inactive"
-  if (!alreadyInactive) {
-    const { error: updateError } = await admin
-      .from("profiles")
-      .update({
-        status: "inactive",
-        termination_date: new Date().toISOString(),
-        termination_reason: reason,
-        terminated_by: actor.id,
-        updated_at: new Date().toISOString()
-      })
-      .eq("id", targetId)
-
-    if (updateError) {
-      return json({ error: safeErrorMessage(updateError) }, 400)
-    }
-  }
-
-  const sessionError = await revokeUserSessions(admin, targetId)
-  if (sessionError) {
-    return json({ error: safeErrorMessage(sessionError) }, 400)
-  }
-
-  const attendanceError = await invalidateAttendanceAccess(admin, targetId)
-  if (attendanceError) {
-    return json({ error: safeErrorMessage(attendanceError) }, 400)
-  }
-
-  return json({
-    deactivated: true,
-    already_inactive: alreadyInactive,
-    user_id: targetId
+  const result = await executeDeactivateUser({
+    admin,
+    actorClient,
+    actor,
+    target,
+    targetId,
+    reason
   })
+
+  return lifecycleResultToResponse(result)
 })
