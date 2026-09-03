@@ -248,7 +248,10 @@ export default function CateringQuoteModal({
 
   useEffect(() => {
     if (!open) return undefined
-    const frameId = window.requestAnimationFrame(() => {
+
+    let cancelled = false
+
+    async function initializeEditor() {
       setError("")
       setMessage("")
       setCurrentQuoteId(quoteId)
@@ -257,12 +260,87 @@ export default function CateringQuoteModal({
       setShowEmitConfirm(false)
       setEmitting(false)
       setCleanSnapshot(null)
-      loadBootstrap()
-      if (quoteId) loadQuote(quoteId)
-      else resetForm()
-    })
-    return () => window.cancelAnimationFrame(frameId)
-  }, [open, quoteId])
+
+      const [templatesResult, settingsResult] = await Promise.all([
+        listCateringQuoteTemplates(false),
+        getCateringQuoteSettings()
+      ])
+      if (cancelled) return
+
+      if (!templatesResult.error) {
+        setTemplates(templatesResult.data || [])
+      }
+      if (!settingsResult.error) {
+        setCompanySettings(settingsResult.data)
+      }
+
+      if (quoteId) {
+        setLoading(true)
+        const result = await getCateringQuoteDetail(quoteId)
+        if (cancelled) return
+        setLoading(false)
+
+        if (result.error) {
+          setError(result.error)
+          return
+        }
+
+        const quoteRow = result.data?.quote || null
+        const mappedItems = mapItemsFromApi(result.data?.items)
+        const nextItems = mappedItems.length ? mappedItems : [createEmptyQuoteItem()]
+        const nextDiscount = String(quoteRow?.discount_amount ?? 0)
+        const nextValidUntil = quoteRow?.valid_until
+          ? String(quoteRow.valid_until).slice(0, 10)
+          : defaultValidUntil()
+        const nextNotes = quoteRow?.notes || ""
+        const nextTerms = quoteRow?.terms || settingsResult.data?.defaultTerms || DEFAULT_QUOTE_TERMS
+
+        setQuote(quoteRow)
+        setItems(nextItems)
+        setDiscountAmount(nextDiscount)
+        setValidUntil(nextValidUntil)
+        setNotes(nextNotes)
+        setTerms(nextTerms)
+        setSelectedTemplate("")
+        markClean({
+          items: nextItems,
+          discountAmount: nextDiscount,
+          validUntil: nextValidUntil,
+          notes: nextNotes,
+          terms: nextTerms
+        })
+        return
+      }
+
+      const nextTerms = settingsResult.error
+        ? DEFAULT_QUOTE_TERMS
+        : (settingsResult.data?.defaultTerms || DEFAULT_QUOTE_TERMS)
+      const nextValidUntil = defaultValidUntil()
+
+      setQuote(null)
+      setItems([createEmptyQuoteItem()])
+      setDiscountAmount("0")
+      setValidUntil(nextValidUntil)
+      setNotes("")
+      setSelectedTemplate("")
+      if (!settingsResult.error) {
+        setTerms(nextTerms)
+      }
+      markClean({
+        items: [createEmptyQuoteItem()],
+        discountAmount: "0",
+        validUntil: nextValidUntil,
+        notes: "",
+        terms: settingsResult.error ? DEFAULT_QUOTE_TERMS : nextTerms
+      })
+    }
+
+    initializeEditor()
+
+    return () => {
+      cancelled = true
+    }
+  }, [open, quoteId, markClean])
 
   useEffect(() => {
     if (!open) return undefined
@@ -327,63 +405,6 @@ export default function CateringQuoteModal({
     if (!settingsResult.error) {
       setCompanySettings(settingsResult.data)
     }
-
-    if (!quoteId) {
-      const nextTerms = settingsResult.data?.defaultTerms || DEFAULT_QUOTE_TERMS
-      const nextValidUntil = defaultValidUntil()
-      if (!settingsResult.error) {
-        setTerms(nextTerms)
-      }
-      markClean({
-        items: [createEmptyQuoteItem()],
-        discountAmount: "0",
-        validUntil: nextValidUntil,
-        notes: "",
-        terms: settingsResult.error ? DEFAULT_QUOTE_TERMS : nextTerms
-      })
-    }
-  }
-
-  function resetForm() {
-    setQuote(null)
-    setItems([createEmptyQuoteItem()])
-    setDiscountAmount("0")
-    setValidUntil(defaultValidUntil())
-    setNotes("")
-    setTerms(companySettings?.defaultTerms || DEFAULT_QUOTE_TERMS)
-    setSelectedTemplate("")
-  }
-
-  async function loadQuote(id) {
-    setLoading(true)
-    setError("")
-    const result = await getCateringQuoteDetail(id)
-    setLoading(false)
-    if (result.error) {
-      setError(result.error)
-      return
-    }
-    const quoteRow = result.data?.quote || null
-    const mappedItems = mapItemsFromApi(result.data?.items)
-    const nextItems = mappedItems.length ? mappedItems : [createEmptyQuoteItem()]
-    const nextDiscount = String(quoteRow?.discount_amount ?? 0)
-    const nextValidUntil = quoteRow?.valid_until ? String(quoteRow.valid_until).slice(0, 10) : defaultValidUntil()
-    const nextNotes = quoteRow?.notes || ""
-    const nextTerms = quoteRow?.terms || companySettings?.defaultTerms || DEFAULT_QUOTE_TERMS
-
-    setQuote(quoteRow)
-    setItems(nextItems)
-    setDiscountAmount(nextDiscount)
-    setValidUntil(nextValidUntil)
-    setNotes(nextNotes)
-    setTerms(nextTerms)
-    markClean({
-      items: nextItems,
-      discountAmount: nextDiscount,
-      validUntil: nextValidUntil,
-      notes: nextNotes,
-      terms: nextTerms
-    })
   }
 
   async function handleAddTemplate() {
