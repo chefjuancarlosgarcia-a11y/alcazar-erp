@@ -1,4 +1,4 @@
-import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2"
+﻿import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2"
 
 export const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -62,6 +62,17 @@ export async function createAdminClient() {
   })
 }
 
+/** PostgREST client scoped to the verified actor JWT (sets auth.uid() for triggers/RLS). */
+export function createActorClient(token: string) {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY")
+  if (!supabaseUrl || !anonKey || !token) return null
+  return createClient(supabaseUrl, anonKey, {
+    global: { headers: { Authorization: `Bearer ${token}` } },
+    auth: { persistSession: false, autoRefreshToken: false }
+  })
+}
+
 export async function authenticateActor(
   admin: SupabaseClient,
   token: string | undefined,
@@ -82,7 +93,7 @@ export async function authenticateActor(
     return { error: json({ error: deniedMessage }, 403) }
   }
 
-  return { actor: actor as ProfileRow, authUserId: authData.user.id }
+  return { actor: actor as ProfileRow, authUserId: authData.user.id, token }
 }
 
 export async function loadTargetProfile(admin: SupabaseClient, targetId: string) {
@@ -97,24 +108,15 @@ export async function loadTargetProfile(admin: SupabaseClient, targetId: string)
 }
 
 /**
- * Revokes all refresh tokens and sessions for a user.
- *
- * @supabase/supabase-js admin.signOut(jwt, scope) requires the target user's JWT,
- * which we do not have when an admin deactivates another account. This RPC mirrors
- * GoTrue's models.Logout(user_id) using service_role.
+ * Revokes all refresh tokens and sessions for a user (service_role only).
  */
 export async function revokeUserSessions(admin: SupabaseClient, userId: string) {
   const { error } = await admin.rpc("revoke_user_auth_sessions", { p_user_id: userId })
   return error
 }
 
-export async function invalidateAttendanceAccess(admin: SupabaseClient, userId: string) {
-  await admin.from("attendance_credentials").delete().eq("employee_id", userId)
-  await admin
-    .from("profiles")
-    .update({
-      authorized_attendance_device: null,
-      updated_at: new Date().toISOString()
-    })
-    .eq("id", userId)
+/** Deletes attendance PIN credentials (service_role). Profile device field cleared via actor update. */
+export async function deleteAttendanceCredentials(admin: SupabaseClient, userId: string) {
+  const { error } = await admin.from("attendance_credentials").delete().eq("employee_id", userId)
+  return error
 }
