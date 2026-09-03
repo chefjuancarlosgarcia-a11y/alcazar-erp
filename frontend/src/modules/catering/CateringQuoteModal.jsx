@@ -14,11 +14,14 @@ import { repairCateringRequest } from "./cateringTextEncoding"
 import { downloadCateringQuotePdf } from "./cateringQuotePdf"
 import {
   areQuoteEditorSnapshotsEqual,
+  buildQuotePdfRow,
   duplicateQuoteItemAtIndex,
+  emitCateringQuoteDraft,
   getQuoteEditorLineKey,
   getQuoteEditorSnapshot,
   getSaveValidationError,
   getStatusChangeBlockedReason,
+  isDraftQuoteStatus,
   MOBILE_SECTIONS,
   UNSAVED_CLOSE_MESSAGE
 } from "./cateringQuoteModalUtils"
@@ -51,6 +54,8 @@ import { CateringQuoteStatusBadge } from "./CateringQuoteKpis"
 
 const FORM_ID = "catering-quote-form"
 const REMOVE_LINE_MESSAGE = "¿Eliminar esta linea de la cotizacion?"
+const EMIT_CONFIRM_MESSAGE =
+  "Se guardarán los cambios, la cotización se marcará como Enviada y se descargará el PDF final sin la marca BORRADOR. Después de emitir ya no podrás editarla."
 
 function mapItemsFromApi(items = []) {
   return items.map((item, index) => ({
@@ -94,7 +99,71 @@ function renderTotalsSummary(totals) {
   )
 }
 
-function CateringQuoteEditor({
+function buildPdfItems(items = []) {
+  return normalizeQuoteItems(items).map((item) => ({
+    ...item,
+    total_price: item.quantity * item.unit_price
+  }))
+}
+
+async function downloadPdfFromDetail(detail, { request, company, branding }) {
+  const quoteRow = detail?.quote || {}
+  const pdfItems = mapItemsFromApi(detail?.items || [])
+  const totals = calculateQuoteTotals(pdfItems, quoteRow.discount_amount ?? 0)
+
+  await downloadCateringQuotePdf({
+    quote: buildQuotePdfRow({
+      quote: quoteRow,
+      totals,
+      validUntil: quoteRow.valid_until,
+      notes: quoteRow.notes,
+      terms: quoteRow.terms,
+      statusOverride: quoteRow.status
+    }),
+    items: buildPdfItems(pdfItems),
+    request,
+    company,
+    branding
+  })
+}
+
+function CateringQuoteEmitConfirmDialog({ open, emitting, onCancel, onConfirm }) {
+  if (!open) return null
+
+  return (
+    <div className="catering-quote-backdrop catering-quote-backdrop--nested" onClick={emitting ? undefined : onCancel}>
+      <section
+        className="catering-quote-modal catering-quote-emit-confirm"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="catering-quote-emit-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header className="catering-quote-modal__header">
+          <div>
+            <h2 id="catering-quote-emit-title">Emitir cotización</h2>
+          </div>
+        </header>
+        <div className="catering-quote-modal__body">
+          <p className="catering-quote-emit-confirm__message">{EMIT_CONFIRM_MESSAGE}</p>
+        </div>
+        <footer className="catering-quote-modal__footer catering-quote-actions">
+          <div className="catering-quote-actions__group catering-quote-actions__group--primary">
+            <button type="button" className="ghost" disabled={emitting} onClick={onCancel}>
+              Cancelar
+            </button>
+            <button type="button" className="primary" disabled={emitting} onClick={onConfirm}>
+              {emitting ? "Emitiendo…" : "Emitir y descargar"}
+            </button>
+          </div>
+        </footer>
+      </section>
+    </div>
+  )
+}
+
+export default function CateringQuoteModal({
+  open,
   request,
   quoteId = null,
   profiles = [],
@@ -124,6 +193,8 @@ function CateringQuoteEditor({
   const [mobileSection, setMobileSection] = useState("datos")
   const [mobilePreviewOpen, setMobilePreviewOpen] = useState(false)
   const [cleanSnapshot, setCleanSnapshot] = useState(null)
+  const [showEmitConfirm, setShowEmitConfirm] = useState(false)
+  const [emitting, setEmitting] = useState(false)
 
   const sectionRefs = {
     datos: useRef(null),
@@ -159,93 +230,50 @@ function CateringQuoteEditor({
     onClose()
   }, [editorReady, isDirty, onClose])
 
-  const isDraft = !quote?.status || quote.status === "draft"
+  const isDraft = isDraftQuoteStatus(quote?.status)
   const canEdit = isDraft && editorReady
+  const isBusy = saving || emitting
 
   const markClean = useCallback((snapshotSource) => {
     setCleanSnapshot(getQuoteEditorSnapshot(snapshotSource))
   }, [])
 
   useEffect(() => {
-    let cancelled = false
-
-    async function initializeEditor() {
-      const [templatesResult, settingsResult] = await Promise.all([
-        listCateringQuoteTemplates(false),
-        getCateringQuoteSettings()
-      ])
-      if (cancelled) return
-
-      if (!templatesResult.error) {
-        setTemplates(templatesResult.data || [])
-      }
-      if (!settingsResult.error) {
-        setCompanySettings(settingsResult.data)
-      }
-
-      if (quoteId) {
-        setLoading(true)
-        setError("")
-        const result = await getCateringQuoteDetail(quoteId)
-        if (cancelled) return
-        setLoading(false)
-
-        if (result.error) {
-          setError(result.error)
-          return
-        }
-
-        const quoteRow = result.data?.quote || null
-        const mappedItems = mapItemsFromApi(result.data?.items)
-        const nextItems = mappedItems.length ? mappedItems : [createEmptyQuoteItem()]
-        const nextDiscount = String(quoteRow?.discount_amount ?? 0)
-        const nextValidUntil = quoteRow?.valid_until
-          ? String(quoteRow.valid_until).slice(0, 10)
-          : defaultValidUntil()
-        const nextNotes = quoteRow?.notes || ""
-        const nextTerms = quoteRow?.terms || settingsResult.data?.defaultTerms || DEFAULT_QUOTE_TERMS
-
-        setQuote(quoteRow)
-        setItems(nextItems)
-        setDiscountAmount(nextDiscount)
-        setValidUntil(nextValidUntil)
-        setNotes(nextNotes)
-        setTerms(nextTerms)
-        markClean({
-          items: nextItems,
-          discountAmount: nextDiscount,
-          validUntil: nextValidUntil,
-          notes: nextNotes,
-          terms: nextTerms
-        })
-        return
-      }
-
-      const nextTerms = settingsResult.error
-        ? DEFAULT_QUOTE_TERMS
-        : (settingsResult.data?.defaultTerms || DEFAULT_QUOTE_TERMS)
-      const nextValidUntil = defaultValidUntil()
-      if (!settingsResult.error) {
-        setTerms(nextTerms)
-      }
-      markClean({
-        items: [createEmptyQuoteItem()],
-        discountAmount: "0",
-        validUntil: nextValidUntil,
-        notes: "",
-        terms: nextTerms
-      })
-    }
-
-    initializeEditor()
-    return () => {
-      cancelled = true
-    }
-  }, [quoteId, markClean])
+    if (!open) return undefined
+    const frameId = window.requestAnimationFrame(() => {
+      setDisplayRequest(request || {})
+    })
+    return () => window.cancelAnimationFrame(frameId)
+  }, [open, request])
 
   useEffect(() => {
+    if (!open) return undefined
+    const frameId = window.requestAnimationFrame(() => {
+      setError("")
+      setMessage("")
+      setCurrentQuoteId(quoteId)
+      setMobileSection("datos")
+      setMobilePreviewOpen(false)
+      setShowEmitConfirm(false)
+      setEmitting(false)
+      setCleanSnapshot(null)
+      loadBootstrap()
+      if (quoteId) loadQuote(quoteId)
+      else resetForm()
+    })
+    return () => window.cancelAnimationFrame(frameId)
+  }, [open, quoteId])
+
+  useEffect(() => {
+    if (!open) return undefined
+
     function onKeyDown(event) {
       if (event.key !== "Escape") return
+      if (showEmitConfirm && !emitting) {
+        event.preventDefault()
+        setShowEmitConfirm(false)
+        return
+      }
       if (mobilePreviewOpen) {
         event.preventDefault()
         closeMobilePreview()
@@ -257,7 +285,7 @@ function CateringQuoteEditor({
 
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [mobilePreviewOpen, requestClose])
+  }, [open, mobilePreviewOpen, showEmitConfirm, emitting, requestClose])
 
   useEffect(() => {
     if (mobilePreviewOpen) {
@@ -290,11 +318,72 @@ function CateringQuoteEditor({
     })
   }
 
-  async function reloadTemplates() {
-    const templatesResult = await listCateringQuoteTemplates(false)
-    if (!templatesResult.error) {
-      setTemplates(templatesResult.data || [])
+  async function loadBootstrap() {
+    const [templatesResult, settingsResult] = await Promise.all([
+      listCateringQuoteTemplates(false),
+      getCateringQuoteSettings()
+    ])
+    if (!templatesResult.error) setTemplates(templatesResult.data || [])
+    if (!settingsResult.error) {
+      setCompanySettings(settingsResult.data)
     }
+
+    if (!quoteId) {
+      const nextTerms = settingsResult.data?.defaultTerms || DEFAULT_QUOTE_TERMS
+      const nextValidUntil = defaultValidUntil()
+      if (!settingsResult.error) {
+        setTerms(nextTerms)
+      }
+      markClean({
+        items: [createEmptyQuoteItem()],
+        discountAmount: "0",
+        validUntil: nextValidUntil,
+        notes: "",
+        terms: settingsResult.error ? DEFAULT_QUOTE_TERMS : nextTerms
+      })
+    }
+  }
+
+  function resetForm() {
+    setQuote(null)
+    setItems([createEmptyQuoteItem()])
+    setDiscountAmount("0")
+    setValidUntil(defaultValidUntil())
+    setNotes("")
+    setTerms(companySettings?.defaultTerms || DEFAULT_QUOTE_TERMS)
+    setSelectedTemplate("")
+  }
+
+  async function loadQuote(id) {
+    setLoading(true)
+    setError("")
+    const result = await getCateringQuoteDetail(id)
+    setLoading(false)
+    if (result.error) {
+      setError(result.error)
+      return
+    }
+    const quoteRow = result.data?.quote || null
+    const mappedItems = mapItemsFromApi(result.data?.items)
+    const nextItems = mappedItems.length ? mappedItems : [createEmptyQuoteItem()]
+    const nextDiscount = String(quoteRow?.discount_amount ?? 0)
+    const nextValidUntil = quoteRow?.valid_until ? String(quoteRow.valid_until).slice(0, 10) : defaultValidUntil()
+    const nextNotes = quoteRow?.notes || ""
+    const nextTerms = quoteRow?.terms || companySettings?.defaultTerms || DEFAULT_QUOTE_TERMS
+
+    setQuote(quoteRow)
+    setItems(nextItems)
+    setDiscountAmount(nextDiscount)
+    setValidUntil(nextValidUntil)
+    setNotes(nextNotes)
+    setTerms(nextTerms)
+    markClean({
+      items: nextItems,
+      discountAmount: nextDiscount,
+      validUntil: nextValidUntil,
+      notes: nextNotes,
+      terms: nextTerms
+    })
   }
 
   async function handleAddTemplate() {
@@ -542,6 +631,35 @@ function CateringQuoteEditor({
     onRequestUpdated?.(updatedRequest)
   }
 
+  function applyQuoteDetailFromApi(detail) {
+    const savedQuote = detail?.quote || null
+    const savedItems = mapItemsFromApi(detail?.items)
+    const nextItems = savedItems.length ? savedItems : [createEmptyQuoteItem()]
+    const nextDiscount = String(savedQuote?.discount_amount ?? discountAmount)
+    const nextValidUntil = savedQuote?.valid_until
+      ? String(savedQuote.valid_until).slice(0, 10)
+      : validUntil
+    const nextNotes = savedQuote?.notes ?? notes
+    const nextTerms = savedQuote?.terms ?? terms
+
+    setQuote(savedQuote)
+    setCurrentQuoteId(savedQuote?.id || currentQuoteId)
+    setItems(nextItems)
+    setDiscountAmount(nextDiscount)
+    setValidUntil(nextValidUntil)
+    setNotes(nextNotes)
+    setTerms(nextTerms)
+    markClean({
+      items: nextItems,
+      discountAmount: nextDiscount,
+      validUntil: nextValidUntil,
+      notes: nextNotes,
+      terms: nextTerms
+    })
+
+    return { savedQuote, savedItems: nextItems }
+  }
+
   async function handleSave(event) {
     event?.preventDefault?.()
 
@@ -567,18 +685,7 @@ function CateringQuoteEditor({
       return
     }
 
-    const savedQuote = result.data?.quote
-    const savedItems = mapItemsFromApi(result.data?.items)
-    setQuote(savedQuote)
-    setCurrentQuoteId(savedQuote?.id || currentQuoteId)
-    setItems(savedItems)
-    markClean({
-      items: savedItems,
-      discountAmount: String(savedQuote?.discount_amount ?? discountAmount),
-      validUntil: savedQuote?.valid_until ? String(savedQuote.valid_until).slice(0, 10) : validUntil,
-      notes: savedQuote?.notes ?? notes,
-      terms: savedQuote?.terms ?? terms
-    })
+    applyQuoteDetailFromApi(result.data)
     setMessage(currentQuoteId ? "Cotización actualizada." : "Cotización creada en borrador.")
     onSaved?.(result.data)
   }
@@ -599,18 +706,77 @@ function CateringQuoteEditor({
       setError(result.error)
       return
     }
-    const savedQuote = result.data?.quote || null
-    setQuote(savedQuote)
-    markClean({
-      items,
-      discountAmount,
-      validUntil,
-      notes,
-      terms
-    })
+    applyQuoteDetailFromApi(result.data)
     closeMobileMoreActions()
     setMessage(`Cotización marcada como ${QUOTE_STATUS_LABELS[status] || status}.`)
     onSaved?.(result.data)
+  }
+
+  function handleOpenEmitConfirm() {
+    closeMobileMoreActions()
+    setError("")
+    setMessage("")
+    setShowEmitConfirm(true)
+  }
+
+  function handleCancelEmitConfirm() {
+    if (emitting) return
+    setShowEmitConfirm(false)
+  }
+
+  async function handleConfirmEmit() {
+    const validationError = getSaveValidationError(items)
+    if (validationError) {
+      setShowEmitConfirm(false)
+      setError(validationError.message)
+      focusSection(validationError.section)
+      return
+    }
+
+    setEmitting(true)
+    setError("")
+    setMessage("")
+
+    const payload = buildQuotePayload(items, discountAmount, validUntil, notes, terms)
+    const emitResult = await emitCateringQuoteDraft({
+      currentQuoteId,
+      requestId: displayRequest.id,
+      isDirty,
+      payload,
+      createQuote: createCateringQuote,
+      updateQuote: updateCateringQuote,
+      updateStatus: updateCateringQuoteStatus
+    })
+
+    if (!emitResult.ok) {
+      if (emitResult.detail) {
+        applyQuoteDetailFromApi(emitResult.detail)
+        onSaved?.(emitResult.detail)
+      }
+      setEmitting(false)
+      setError(emitResult.error)
+      return
+    }
+
+    applyQuoteDetailFromApi(emitResult.detail)
+
+    try {
+      await downloadPdfFromDetail(emitResult.detail, {
+        request: safeRequest,
+        company,
+        branding
+      })
+      setShowEmitConfirm(false)
+      setMessage("Cotización emitida y PDF descargado.")
+      onSaved?.(emitResult.detail)
+    } catch {
+      setShowEmitConfirm(false)
+      setMessage("Cotización marcada como Enviada. Puedes descargar el PDF con \"Descargar PDF\".")
+      setError("No se pudo generar el PDF. Intenta descargarlo de nuevo.")
+      onSaved?.(emitResult.detail)
+    } finally {
+      setEmitting(false)
+    }
   }
 
   async function handleSaveAsTemplate() {
@@ -625,34 +791,55 @@ function CateringQuoteEditor({
     else {
       closeMobileMoreActions()
       setMessage("Plantilla guardada.")
-      reloadTemplates()
+      loadBootstrap()
     }
   }
 
-  function handleGeneratePdf() {
+  async function handleDownloadDraftPdf() {
     closeMobileMoreActions()
-    const quoteRow = {
-      ...(quote || {}),
-      quote_number: quote?.quote_number || "BORRADOR",
-      status: quote?.status || "draft",
-      subtotal: totals.subtotal,
-      discount_amount: totals.discount_amount,
-      tax_amount: 0,
-      total: totals.total,
-      valid_until: validUntil,
-      notes,
-      terms
+    try {
+      await downloadCateringQuotePdf({
+        quote: buildQuotePdfRow({
+          quote: quote || {},
+          totals,
+          validUntil,
+          notes,
+          terms,
+          statusOverride: "draft"
+        }),
+        items: buildPdfItems(items),
+        request: safeRequest,
+        company,
+        branding
+      })
+    } catch {
+      setError("No se pudo generar el borrador PDF.")
     }
-    downloadCateringQuotePdf({
-      quote: quoteRow,
-      items: normalizeQuoteItems(items).map((item) => ({
-        ...item,
-        total_price: item.quantity * item.unit_price
-      })),
-      request: safeRequest,
-      company,
-      branding
-    })
+  }
+
+  async function handleDownloadFinalPdf() {
+    closeMobileMoreActions()
+    const quoteId = quote?.id || currentQuoteId
+    if (!quoteId) {
+      setError("Guarda la cotizacion antes de descargar el PDF.")
+      return
+    }
+
+    try {
+      const detailResult = await getCateringQuoteDetail(quoteId)
+      if (detailResult.error) {
+        setError(detailResult.error)
+        return
+      }
+
+      await downloadPdfFromDetail(detailResult.data, {
+        request: safeRequest,
+        company,
+        branding
+      })
+    } catch {
+      setError("No se pudo generar el PDF.")
+    }
   }
 
   function openMobilePreview(event) {
@@ -665,6 +852,8 @@ function CateringQuoteEditor({
   function closeMobilePreview() {
     setMobilePreviewOpen(false)
   }
+
+  if (!open) return null
 
   const previewProps = {
     quoteNumber: quote?.quote_number,
@@ -907,38 +1096,67 @@ function CateringQuoteEditor({
 
                 <footer className="catering-quote-modal__footer catering-quote-actions catering-quote-actions--desktop">
                   <div className="catering-quote-actions__group catering-quote-actions__group--secondary">
-                    <button type="button" className="ghost" onClick={handleGeneratePdf}>Generar PDF</button>
+                    {isDraft ? (
+                      <button type="button" className="ghost" disabled={isBusy} onClick={handleDownloadDraftPdf}>
+                        Descargar borrador
+                      </button>
+                    ) : (
+                      <button type="button" className="ghost" disabled={isBusy} onClick={handleDownloadFinalPdf}>
+                        Descargar PDF
+                      </button>
+                    )}
                     {currentQuoteId ? (
-                      <button type="button" className="ghost" disabled={saving} onClick={handleSaveAsTemplate}>Guardar como plantilla</button>
+                      <button type="button" className="ghost" disabled={isBusy} onClick={handleSaveAsTemplate}>Guardar como plantilla</button>
                     ) : null}
                     {quote?.status === "sent" ? (
                       <>
-                        <button type="button" className="ghost" disabled={saving || isDirty} onClick={() => handleStatusChange("rejected")}>Cliente rechazo</button>
-                        <button type="button" className="ghost" disabled={saving || isDirty} onClick={() => handleStatusChange("expired")}>Marcar vencida</button>
+                        <button type="button" className="ghost" disabled={isBusy} onClick={() => handleStatusChange("rejected")}>Cliente rechazo</button>
+                        <button type="button" className="ghost" disabled={isBusy} onClick={() => handleStatusChange("expired")}>Marcar vencida</button>
                       </>
                     ) : null}
                   </div>
                   <div className="catering-quote-actions__group catering-quote-actions__group--primary">
                     {canEdit ? (
-                      <button type="submit" className="primary" disabled={saving}>
+                      <button type="submit" className="ghost" disabled={isBusy}>
                         {saving ? "Guardando..." : currentQuoteId ? "Guardar borrador" : "Crear cotizacion"}
                       </button>
                     ) : null}
-                    {currentQuoteId && quote?.status === "draft" ? (
-                      <button type="button" className="primary" disabled={saving || isDirty} onClick={() => handleStatusChange("sent")}>Marcar enviada</button>
+                    {isDraft ? (
+                      <button type="button" className="primary" disabled={isBusy} onClick={handleOpenEmitConfirm}>
+                        {emitting ? "Emitiendo…" : "Emitir y descargar PDF"}
+                      </button>
                     ) : null}
                     {quote?.status === "sent" ? (
-                      <button type="button" className="primary" disabled={saving || isDirty} onClick={() => handleStatusChange("approved")}>Cliente aprobo</button>
+                      <button type="button" className="primary" disabled={isBusy} onClick={() => handleStatusChange("approved")}>Cliente aprobo</button>
                     ) : null}
                   </div>
                 </footer>
 
                 <div className="catering-quote-mobile-bar" role="toolbar" aria-label="Acciones principales de cotizacion">
+                  {isDraft ? (
+                    <button
+                      type="button"
+                      className="primary catering-quote-mobile-bar__emit"
+                      disabled={isBusy}
+                      onClick={handleOpenEmitConfirm}
+                    >
+                      {emitting ? "Emitiendo…" : "Emitir y descargar PDF"}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="primary catering-quote-mobile-bar__emit"
+                      disabled={isBusy}
+                      onClick={handleDownloadFinalPdf}
+                    >
+                      Descargar PDF
+                    </button>
+                  )}
                   <button
                     type="submit"
                     form={FORM_ID}
-                    className="primary catering-quote-mobile-bar__primary"
-                    disabled={saving || !canEdit}
+                    className="ghost catering-quote-mobile-bar__save"
+                    disabled={isBusy || !canEdit}
                   >
                     {saving ? "Guardando..." : "Guardar"}
                   </button>
@@ -952,18 +1170,19 @@ function CateringQuoteEditor({
                   <details ref={mobileMoreActionsRef} className="catering-quote-mobile-bar__more">
                     <summary>Más acciones</summary>
                     <div className="catering-quote-mobile-bar__menu">
-                      <button type="button" className="ghost" onClick={handleGeneratePdf}>Generar PDF</button>
-                      {currentQuoteId ? (
-                        <button type="button" className="ghost" disabled={saving} onClick={handleSaveAsTemplate}>Guardar como plantilla</button>
+                      {isDraft ? (
+                        <button type="button" className="ghost" disabled={isBusy} onClick={handleDownloadDraftPdf}>
+                          Descargar borrador
+                        </button>
                       ) : null}
-                      {currentQuoteId && quote?.status === "draft" ? (
-                        <button type="button" className="ghost" disabled={saving || isDirty} onClick={() => handleStatusChange("sent")}>Marcar enviada</button>
+                      {currentQuoteId ? (
+                        <button type="button" className="ghost" disabled={isBusy} onClick={handleSaveAsTemplate}>Guardar como plantilla</button>
                       ) : null}
                       {quote?.status === "sent" ? (
                         <>
-                          <button type="button" className="ghost" disabled={saving || isDirty} onClick={() => handleStatusChange("approved")}>Cliente aprobo</button>
-                          <button type="button" className="ghost" disabled={saving || isDirty} onClick={() => handleStatusChange("rejected")}>Cliente rechazo</button>
-                          <button type="button" className="ghost" disabled={saving || isDirty} onClick={() => handleStatusChange("expired")}>Marcar vencida</button>
+                          <button type="button" className="ghost" disabled={isBusy} onClick={() => handleStatusChange("approved")}>Cliente aprobo</button>
+                          <button type="button" className="ghost" disabled={isBusy} onClick={() => handleStatusChange("rejected")}>Cliente rechazo</button>
+                          <button type="button" className="ghost" disabled={isBusy} onClick={() => handleStatusChange("expired")}>Marcar vencida</button>
                         </>
                       ) : null}
                     </div>
@@ -1003,10 +1222,16 @@ function CateringQuoteEditor({
         </div>
       ) : null}
 
+      <CateringQuoteEmitConfirmDialog
+        open={showEmitConfirm}
+        emitting={emitting}
+        onCancel={handleCancelEmitConfirm}
+        onConfirm={handleConfirmEmit}
+      />
       <CateringQuoteTemplateManager
         open={showTemplateManager}
         onClose={() => setShowTemplateManager(false)}
-        onTemplatesChanged={reloadTemplates}
+        onTemplatesChanged={loadBootstrap}
       />
       <CateringQuoteSettingsPanel
         open={showSettings}
@@ -1025,52 +1250,5 @@ function CateringQuoteEditor({
         onSaved={handleLeadUpdated}
       />
     </>
-  )
-}
-
-export default function CateringQuoteModal({
-  open,
-  request,
-  quoteId = null,
-  profiles = [],
-  onClose,
-  onSaved,
-  onRequestUpdated
-}) {
-  const [sessionKey, setSessionKey] = useState(0)
-  const [prevSession, setPrevSession] = useState({
-    open: false,
-    quoteId: null,
-    requestId: null
-  })
-
-  const requestId = request?.id ?? null
-
-  if (
-    open !== prevSession.open
-    || (open && (quoteId !== prevSession.quoteId || requestId !== prevSession.requestId))
-  ) {
-    setPrevSession({
-      open,
-      quoteId: open ? quoteId : null,
-      requestId: open ? requestId : null
-    })
-    if (open) {
-      setSessionKey((key) => key + 1)
-    }
-  }
-
-  if (!open) return null
-
-  return (
-    <CateringQuoteEditor
-      key={sessionKey}
-      request={request}
-      quoteId={quoteId}
-      profiles={profiles}
-      onClose={onClose}
-      onSaved={onSaved}
-      onRequestUpdated={onRequestUpdated}
-    />
   )
 }

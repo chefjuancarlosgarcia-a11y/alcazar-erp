@@ -1,4 +1,4 @@
-import { formatDate, formatMoney, formatTime } from "./cateringUtils"
+import { formatDate, formatMoney, formatTime } from "./cateringUtils.js"
 import {
   formatOptionDisplayTitle,
   formatQuantityLine,
@@ -6,7 +6,7 @@ import {
   groupQuoteItemsForDisplay,
   itemTypeLabel,
   QUOTE_STATUS_LABELS
-} from "./cateringQuoteTemplates"
+} from "./cateringQuoteTemplates.js"
 
 export const QUOTE_DOC_COLORS = {
   accent: "#0d9488",
