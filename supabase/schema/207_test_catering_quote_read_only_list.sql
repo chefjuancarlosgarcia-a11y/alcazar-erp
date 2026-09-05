@@ -1,5 +1,11 @@
 -- Regression tests for 207_catering_quote_read_only_list.sql
 -- Run AFTER applying 207. Entire file: BEGIN … ROLLBACK (no COMMIT).
+--
+-- Fixture safety:
+--   - No INSERT/UPDATE/DELETE on auth.users
+--   - No INSERT/UPDATE/DELETE on existing profiles (read-only actor lookup)
+--   - Temporary rows use fixed TEST-207-* UUIDs inside this transaction only
+--   - No permanent role/grant/RLS changes; test function rolls back with ROLLBACK
 
 begin;
 
@@ -14,9 +20,8 @@ security definer
 set search_path = '', public
 as $$
 declare
-  v_admin uuid := 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
-  v_ventas uuid := 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
-  v_denied uuid := 'cccccccc-cccc-cccc-cccc-cccccccccccc';
+  v_actor uuid;
+  v_denied_sub text := '00000000-0000-0000-0000-000000000000';
   v_request_a uuid := 'd1111111-1111-1111-1111-111111111111';
   v_request_b uuid := 'd2222222-2222-2222-2222-222222222222';
   v_request_one uuid := 'd3333333-3333-3333-3333-333333333333';
@@ -38,37 +43,43 @@ declare
   v_activity_after int;
   v_db_status text;
 begin
-  insert into public.profiles (id, username, full_name, role, status)
-  values
-    (v_admin, 'test_admin_207', 'Test Admin 207', 'admin', 'active'),
-    (v_ventas, 'test_ventas_207', 'Test Ventas 207', 'ventas', 'active'),
-    (v_denied, 'test_denied_207', 'Test Denied 207', 'mesero', 'active')
-  on conflict (id) do update
-  set role = excluded.role, status = excluded.status;
+  select profile.id
+  into v_actor
+  from public.profiles profile
+  where profile.status = 'active'
+    and public.normalize_profile_role(profile.role) in ('ventas', 'admin')
+  order by case public.normalize_profile_role(profile.role)
+    when 'ventas' then 0
+    when 'admin' then 1
+    else 2
+  end
+  limit 1;
+
+  if v_actor is null then
+    raise exception 'No active ventas/admin profile available for Stage fixture';
+  end if;
 
   insert into public.catering_requests (
     id, customer_name, status, conversion_status, source, lead_source, created_by, updated_by
   )
   values
-    (v_request_a, 'Lead A 207', 'quoted', 'quoted', 'manual', 'other', v_admin, v_admin),
-    (v_request_b, 'Lead B 207', 'new', 'lead', 'manual', 'other', v_admin, v_admin),
-    (v_request_one, 'Lead One 207', 'quoted', 'quoted', 'manual', 'other', v_admin, v_admin)
-  on conflict (id) do nothing;
+    (v_request_a, 'Lead A 207', 'quoted', 'quoted', 'manual', 'other', v_actor, v_actor),
+    (v_request_b, 'Lead B 207', 'new', 'lead', 'manual', 'other', v_actor, v_actor),
+    (v_request_one, 'Lead One 207', 'quoted', 'quoted', 'manual', 'other', v_actor, v_actor);
 
   insert into public.catering_quotes (
     id, request_id, quote_number, status, subtotal, discount_amount, tax_amount, total, valid_until, created_by
   )
   values
-    (v_quote_a1, v_request_a, 'TEST-207-0001', 'draft', 100, 0, 12, 112, null, v_admin),
-    (v_quote_a2, v_request_a, 'TEST-207-0002', 'sent', 200, 0, 24, 224, current_date - 1, v_admin),
-    (v_quote_b1, v_request_b, 'TEST-207-0003', 'sent', 50, 0, 6, 56, current_date + 7, v_admin),
-    (v_quote_one, v_request_one, 'TEST-207-0004', 'sent', 300, 0, 36, 336, current_date + 3, v_admin),
-    (v_quote_draft, v_request_a, 'TEST-207-0005', 'draft', 80, 0, 10, 90, current_date - 5, v_admin),
-    (v_quote_approved, v_request_a, 'TEST-207-0006', 'approved', 400, 0, 48, 448, current_date - 2, v_admin),
-    (v_quote_rejected, v_request_a, 'TEST-207-0007', 'rejected', 120, 0, 14, 134, current_date - 3, v_admin),
-    (v_quote_sent_ok, v_request_a, 'TEST-207-0008', 'sent', 150, 0, 18, 168, current_date + 10, v_admin),
-    (v_quote_null_until, v_request_a, 'TEST-207-0009', 'sent', 90, 0, 11, 101, null, v_admin)
-  on conflict (id) do nothing;
+    (v_quote_a1, v_request_a, 'TEST-207-0001', 'draft', 100, 0, 12, 112, null, v_actor),
+    (v_quote_a2, v_request_a, 'TEST-207-0002', 'sent', 200, 0, 24, 224, current_date - 1, v_actor),
+    (v_quote_b1, v_request_b, 'TEST-207-0003', 'sent', 50, 0, 6, 56, current_date + 7, v_actor),
+    (v_quote_one, v_request_one, 'TEST-207-0004', 'sent', 300, 0, 36, 336, current_date + 3, v_actor),
+    (v_quote_draft, v_request_a, 'TEST-207-0005', 'draft', 80, 0, 10, 90, current_date - 5, v_actor),
+    (v_quote_approved, v_request_a, 'TEST-207-0006', 'approved', 400, 0, 48, 448, current_date - 2, v_actor),
+    (v_quote_rejected, v_request_a, 'TEST-207-0007', 'rejected', 120, 0, 14, 134, current_date - 3, v_actor),
+    (v_quote_sent_ok, v_request_a, 'TEST-207-0008', 'sent', 150, 0, 18, 168, current_date + 10, v_actor),
+    (v_quote_null_until, v_request_a, 'TEST-207-0009', 'sent', 90, 0, 11, 101, null, v_actor);
 
   return query
   select 'effective_status_is_stable'::text,
@@ -157,7 +168,7 @@ begin
   order by p.oid desc
   limit 1;
 
-  perform set_config('request.jwt.claim.sub', v_ventas::text, true);
+  perform set_config('request.jwt.claim.sub', v_actor::text, true);
   perform set_config('request.jwt.claim.role', 'authenticated', true);
 
   v_result := public.get_catering_request_quotes(v_request_a);
@@ -249,12 +260,12 @@ begin
       select 'pipeline_read_only_ok'::text, false, v_err;
   end;
 
-  perform set_config('request.jwt.claim.sub', v_denied::text, true);
+  perform set_config('request.jwt.claim.sub', v_denied_sub, true);
 
   begin
     perform public.get_catering_request_quotes(v_request_a);
     return query
-    select 'denied_role_rejected'::text, false, 'mesero should not read catering quotes'::text;
+    select 'denied_role_rejected'::text, false, 'unauthorized subject should not read catering quotes'::text;
   exception
     when others then
       get stacked diagnostics v_err = message_text;
@@ -264,7 +275,7 @@ begin
         v_err;
   end;
 
-  perform set_config('request.jwt.claim.sub', v_admin::text, true);
+  perform set_config('request.jwt.claim.sub', v_actor::text, true);
 
   return query
   select 'sync_expired_still_exists'::text,
@@ -302,7 +313,7 @@ begin
   from public.catering_activity_log
   where request_id = v_request_a
     and activity_type = 'quote_expired'
-    and payload ->> 'quote_id' = v_quote_a2::text;
+    and metadata ->> 'quote_id' = v_quote_a2::text;
 
   v_sync_first := public.sync_catering_quote_expired();
 
@@ -346,7 +357,7 @@ begin
   from public.catering_activity_log
   where request_id = v_request_a
     and activity_type = 'quote_expired'
-    and payload ->> 'quote_id' = v_quote_a2::text;
+    and metadata ->> 'quote_id' = v_quote_a2::text;
 
   return query
   select 'sync_logs_activity_once'::text,
@@ -365,7 +376,7 @@ begin
   from public.catering_activity_log
   where request_id = v_request_a
     and activity_type = 'quote_expired'
-    and payload ->> 'quote_id' = v_quote_a2::text;
+    and metadata ->> 'quote_id' = v_quote_a2::text;
 
   return query
   select 'sync_no_duplicate_activity'::text,
