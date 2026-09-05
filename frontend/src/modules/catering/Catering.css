@@ -501,6 +501,10 @@
   color: #86efac;
 }
 
+.catering-message.warning {
+  color: #fcd34d;
+}
+
 .catering-empty {
   margin: 0;
   color: var(--erp-text-secondary, #94a3b8);
@@ -561,6 +565,102 @@
   gap: var(--erp-space-12);
   align-items: center;
   justify-content: space-between;
+}
+
+.catering-quote-history__meta {
+  margin: var(--erp-space-4) 0 0;
+  color: var(--erp-text-secondary, #94a3b8);
+  font-size: 13px;
+}
+
+.catering-quote-history__error {
+  display: grid;
+  gap: var(--erp-space-8);
+}
+
+.catering-quote-history__hint {
+  margin: 0;
+  color: var(--erp-text-secondary, #94a3b8);
+  font-size: 13px;
+}
+
+.catering-quote-card-grid {
+  grid-template-columns: 1fr;
+}
+
+.catering-quote-card {
+  display: grid;
+  gap: var(--erp-space-16);
+}
+
+.catering-quote-card__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--erp-space-12);
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.catering-quote-card__head strong {
+  display: block;
+  font-size: 16px;
+}
+
+.catering-quote-card__head span {
+  display: block;
+  margin-top: var(--erp-space-4);
+  color: var(--erp-text-secondary, #94a3b8);
+  font-size: 12px;
+}
+
+.catering-quote-card__meta {
+  display: grid;
+  gap: var(--erp-space-8);
+  margin: 0;
+}
+
+.catering-quote-card__meta div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--erp-space-16);
+  font-size: 14px;
+}
+
+.catering-quote-card__meta dt {
+  margin: 0;
+  color: var(--erp-text-secondary, #94a3b8);
+}
+
+.catering-quote-card__meta dd {
+  margin: 0;
+  text-align: right;
+}
+
+.catering-quote-card__actions {
+  display: grid;
+  gap: var(--erp-space-8);
+}
+
+.catering-quote-card__actions .primary,
+.catering-quote-card__actions .ghost {
+  min-height: var(--erp-btn-height);
+  width: 100%;
+}
+
+@media (min-width: 768px) {
+  .catering-quote-card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .catering-quote-card__actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1440px) {
+  .catering-quote-card-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 .catering-quote-summary {
