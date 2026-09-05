@@ -6,6 +6,8 @@ import BrandingAppearanceSettings from "../components/branding/BrandingAppearanc
 import LoginSecurityAudit from "../components/auth/LoginSecurityAudit"
 import InventoryMigrationModeSettings from "../components/inventory/InventoryMigrationModeSettings"
 import InventoryDeductionModeSettings from "../components/inventory/InventoryDeductionModeSettings"
+import BillingSettingsPanel from "../components/billing/BillingSettingsPanel"
+import { canManageBillingSettings } from "../utils/billingPermissions"
 import {
   PRINT_JOB_TYPES,
   buildTestPrintPayload,
@@ -36,13 +38,16 @@ function Settings() {
   const canManagePrinters = ["admin", "gerente_general"].includes(normalizeRole(user?.role))
   const canManageLoginSecurity = canManagePrinters
   const canManageMigrationMode = normalizeRole(user?.role) === "admin"
+  const canManageBilling = canManageBillingSettings(user)
   const initialTab = searchParams.get("tab") || "branding"
   const [activeTab, setActiveTab] = useState(
     initialTab === "login-security" && canManageLoginSecurity
       ? "login-security"
       : initialTab === "operacion" && canManageMigrationMode
         ? "operacion"
-        : initialTab
+        : initialTab === "billing" && canManageBilling
+          ? "billing"
+          : initialTab
   )
 
   useEffect(() => {
@@ -51,8 +56,10 @@ function Settings() {
       setActiveTab("login-security")
     } else if (tab === "operacion" && canManageMigrationMode) {
       setActiveTab("operacion")
+    } else if (tab === "billing" && canManageBilling) {
+      setActiveTab("billing")
     }
-  }, [searchParams, canManageLoginSecurity, canManageMigrationMode])
+  }, [searchParams, canManageLoginSecurity, canManageMigrationMode, canManageBilling])
 
   return (
     <section className="settings-page">
@@ -88,6 +95,11 @@ function Settings() {
             Operación
           </button>
         )}
+        {canManageBilling && (
+          <button className={`settings-tab ${activeTab === "billing" ? "active" : ""}`} onClick={() => setActiveTab("billing")}>
+            Facturación electrónica
+          </button>
+        )}
       </nav>
 
       <div className="settings-content settings-content-wide">
@@ -100,6 +112,7 @@ function Settings() {
             <InventoryMigrationModeSettings />
           </>
         )}
+        {activeTab === "billing" && canManageBilling && <BillingSettingsPanel />}
       </div>
     </section>
   )
