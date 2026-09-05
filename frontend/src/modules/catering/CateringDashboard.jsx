@@ -17,7 +17,8 @@ import {
   getCateringPendingFollowups,
   getCateringPipelineSummary,
   listCateringRequests,
-  syncCateringFollowupReminders
+  syncCateringFollowupReminders,
+  syncCateringQuoteExpired
 } from "./cateringService"
 import { CONVERSION_STATUS_OPTIONS, LEAD_SOURCE_FILTER_OPTIONS, matchesEventDate, matchesSearch } from "./cateringUtils"
 import "./Catering.css"
@@ -81,9 +82,12 @@ export default function CateringDashboard() {
     [requests, search, eventDate]
   )
 
-  const loadSummary = useCallback(async () => {
+  const loadSummary = useCallback(async ({ syncExpired = false } = {}) => {
     setLoadingSummary(true)
     setLoadingLeadsBySource(true)
+    if (syncExpired) {
+      await syncCateringQuoteExpired()
+    }
     const [summaryResult, leadsResult] = await Promise.all([
       getCateringPipelineSummary(summaryFrom, summaryTo),
       getCateringLeadsBySource(summaryFrom, summaryTo)
@@ -223,7 +227,7 @@ export default function CateringDashboard() {
             type="button"
             className="primary"
             onClick={() => {
-              loadSummary()
+              loadSummary({ syncExpired: true })
               loadRanking()
             }}
             disabled={loadingSummary}
