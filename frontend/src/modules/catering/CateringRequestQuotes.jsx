@@ -5,7 +5,8 @@ import { QUOTE_STATUS_LABELS } from "./cateringQuoteTemplates"
 import { CateringQuoteStatusBadge } from "./CateringQuoteKpis"
 import {
   canDownloadQuotePdf,
-  getQuoteDownloadLabel
+  getQuoteDownloadLabel,
+  runQuotePdfDownload
 } from "./cateringQuoteHistoryUtils"
 import { downloadCateringQuotePdfById } from "./cateringQuoteDownload"
 
@@ -27,15 +28,18 @@ export default function CateringRequestQuotes({
   const count = summary?.count ?? items.length
 
   async function handleDownload(quote) {
-    if (!quote?.id) return
-    setDownloadingId(quote.id)
+    if (!quote?.id || downloadingId) return
     setDownloadError("")
-    const result = await downloadCateringQuotePdfById({
+    const result = await runQuotePdfDownload({
       quoteId: quote.id,
-      request,
-      branding
+      downloadFn: () => downloadCateringQuotePdfById({
+        quoteId: quote.id,
+        request,
+        branding
+      }),
+      onStart: (quoteId) => setDownloadingId(quoteId),
+      onFinish: () => setDownloadingId("")
     })
-    setDownloadingId("")
     if (!result.ok) {
       setDownloadError(result.error || "No fue posible descargar el PDF.")
     }
@@ -46,7 +50,7 @@ export default function CateringRequestQuotes({
       <div className="catering-quote-section-head">
         <div>
           <h4>Cotizaciones</h4>
-          {count > 0 ? (
+          {count > 0 && !error ? (
             <p className="catering-quote-history__meta">
               {count} registrada{count === 1 ? "" : "s"}
               {latest?.quote_number ? ` · última ${latest.quote_number}` : ""}
@@ -117,7 +121,7 @@ export default function CateringRequestQuotes({
                   <button
                     type="button"
                     className="ghost"
-                    disabled={isDownloading}
+                    disabled={isDownloading || Boolean(downloadingId)}
                     onClick={() => handleDownload(quote)}
                   >
                     {isDownloading ? "Descargando..." : getQuoteDownloadLabel(quote.status)}
@@ -130,7 +134,7 @@ export default function CateringRequestQuotes({
       ) : null}
 
       {downloadError ? (
-        <p className="catering-message error">{downloadError}</p>
+        <p className="catering-message error" role="alert">{downloadError}</p>
       ) : null}
 
       {!loading && !error && items.some((quote) => canDownloadQuotePdf(quote.status)) ? (

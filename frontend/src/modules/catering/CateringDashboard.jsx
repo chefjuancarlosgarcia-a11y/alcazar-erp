@@ -20,6 +20,7 @@ import {
   syncCateringFollowupReminders,
   syncCateringQuoteExpired
 } from "./cateringService"
+import { resolveSyncExpiredWarning } from "./cateringQuoteHistoryUtils"
 import { CONVERSION_STATUS_OPTIONS, LEAD_SOURCE_FILTER_OPTIONS, matchesEventDate, matchesSearch } from "./cateringUtils"
 import "./Catering.css"
 
@@ -63,6 +64,7 @@ export default function CateringDashboard() {
   const [loadingFollowups, setLoadingFollowups] = useState(true)
   const [loadingRequests, setLoadingRequests] = useState(true)
   const [error, setError] = useState("")
+  const [syncWarning, setSyncWarning] = useState("")
 
   const [conversionStatus, setConversionStatus] = useState("")
   const [leadSource, setLeadSource] = useState("")
@@ -85,8 +87,11 @@ export default function CateringDashboard() {
   const loadSummary = useCallback(async ({ syncExpired = false } = {}) => {
     setLoadingSummary(true)
     setLoadingLeadsBySource(true)
+    setSyncWarning("")
     if (syncExpired) {
-      await syncCateringQuoteExpired()
+      const syncResult = await syncCateringQuoteExpired()
+      const warning = resolveSyncExpiredWarning(syncResult)
+      if (warning) setSyncWarning(warning)
     }
     const [summaryResult, leadsResult] = await Promise.all([
       getCateringPipelineSummary(summaryFrom, summaryTo),
@@ -235,6 +240,9 @@ export default function CateringDashboard() {
             {loadingSummary ? "Actualizando..." : "Actualizar KPIs"}
           </button>
         </div>
+        {syncWarning ? (
+          <p className="catering-message warning" role="status">{syncWarning}</p>
+        ) : null}
       </section>
 
       <CateringCommercialKpis summary={summary} loading={loadingSummary} />

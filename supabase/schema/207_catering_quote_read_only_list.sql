@@ -15,7 +15,7 @@ create or replace function public.catering_quote_effective_status(
 )
 returns text
 language sql
-immutable
+stable
 set search_path = ''
 as $$
   select case
@@ -276,3 +276,53 @@ grant execute on function public.get_catering_pipeline_summary(date, date) to au
 
 comment on function public.get_catering_request_quotes(uuid) is
   'Read-only quote list for a catering lead. Does not mutate expired quotes; use sync_catering_quote_expired() explicitly.';
+
+-- ---------------------------------------------------------------------------
+-- RPC: sync_catering_quote_expired (idempotent write path)
+-- ---------------------------------------------------------------------------
+
+create or replace function public.sync_catering_quote_expired()
+returns integer
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_quote public.catering_quotes;
+  v_count integer := 0;
+begin
+  if not public.can_manage_catering_requests() then
+    raise exception 'No tienes permiso para sincronizar cotizaciones vencidas.';
+  end if;
+
+  for v_quote in
+    update public.catering_quotes quote
+    set
+      status = 'expired',
+      updated_at = now()
+    where quote.status = 'sent'
+      and quote.valid_until is not null
+      and quote.valid_until < current_date
+    returning quote.*
+  loop
+    perform public.log_catering_activity(
+      v_quote.request_id,
+      'quote_expired',
+      'Cotizacion ' || v_quote.quote_number || ' vencida',
+      jsonb_build_object(
+        'quote_id', v_quote.id,
+        'quote_number', v_quote.quote_number
+      )
+    );
+    v_count := v_count + 1;
+  end loop;
+
+  return v_count;
+end;
+$$;
+
+revoke all on function public.sync_catering_quote_expired() from public;
+grant execute on function public.sync_catering_quote_expired() to authenticated;
+
+comment on function public.sync_catering_quote_expired() is
+  'Explicit write path to persist expired sent quotes. Idempotent: only sent rows transition once.';

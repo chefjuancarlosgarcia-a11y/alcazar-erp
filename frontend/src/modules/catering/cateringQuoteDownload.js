@@ -39,20 +39,27 @@ export async function downloadCateringQuotePdfById({
     detailResult.data?.request || request || {}
   )
 
-  await downloadCateringQuotePdf({
-    quote: buildQuotePdfRow({
-      quote: quoteRow,
-      totals,
-      validUntil: quoteRow.valid_until,
-      notes: quoteRow.notes,
-      terms: quoteRow.terms,
-      statusOverride: isDraftQuoteStatus(quoteRow.status) ? "draft" : quoteRow.status
-    }),
-    items: buildPdfItems(pdfItems),
-    request: safeRequest,
-    company,
-    branding
-  })
+  try {
+    await downloadCateringQuotePdf({
+      quote: buildQuotePdfRow({
+        quote: quoteRow,
+        totals,
+        validUntil: quoteRow.valid_until,
+        notes: quoteRow.notes,
+        terms: quoteRow.terms,
+        statusOverride: isDraftQuoteStatus(quoteRow.status) ? "draft" : quoteRow.status
+      }),
+      items: buildPdfItems(pdfItems),
+      request: safeRequest,
+      company,
+      branding
+    })
+  } catch (error) {
+    return {
+      ok: false,
+      error: error?.message || "No se pudo generar el PDF."
+    }
+  }
 
   return { ok: true }
 }

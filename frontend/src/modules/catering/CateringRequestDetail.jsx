@@ -13,7 +13,7 @@ import CateringManualLeadModal from "./CateringManualLeadModal"
 import CateringQuoteModal from "./CateringQuoteModal"
 import CateringRequestQuotes from "./CateringRequestQuotes"
 import CateringSlaBadge from "./CateringSlaBadge"
-import { normalizeCateringRequestQuotesPayload } from "./cateringQuoteHistoryUtils"
+import { applyQuotesLoadResult, EMPTY_QUOTES_SUMMARY } from "./cateringQuoteHistoryUtils"
 import {
   CONVERSION_STATUS_LABELS,
   CONVERSION_STATUS_OPTIONS,
@@ -62,7 +62,7 @@ export default function CateringRequestDetail({
   const [assigneeId, setAssigneeId] = useState("")
   const [followup, setFollowup] = useState(EMPTY_FOLLOWUP)
   const [showFollowup, setShowFollowup] = useState(false)
-  const [quotesSummary, setQuotesSummary] = useState({ count: 0, latest: null, quotes: [] })
+  const [quotesSummary, setQuotesSummary] = useState({ ...EMPTY_QUOTES_SUMMARY })
   const [quotesError, setQuotesError] = useState("")
   const [loadingQuotes, setLoadingQuotes] = useState(true)
   const [quoteModalOpen, setQuoteModalOpen] = useState(false)
@@ -89,6 +89,7 @@ export default function CateringRequestDetail({
     setLoadingActivity(true)
     setLoadingQuotes(true)
     setQuotesError("")
+    setQuotesSummary({ ...EMPTY_QUOTES_SUMMARY })
     setError("")
     const [detailResult, activityResult, quotesResult] = await Promise.all([
       getCateringRequestDetail(requestId),
@@ -111,12 +112,9 @@ export default function CateringRequestDetail({
       })
     }
     if (!activityResult.error) setActivities(activityResult.data || [])
-    if (quotesResult.error) {
-      setQuotesError(quotesResult.error)
-    } else {
-      setQuotesSummary(normalizeCateringRequestQuotesPayload(quotesResult.data))
-      setQuotesError("")
-    }
+    const quotesState = applyQuotesLoadResult(quotesSummary, quotesResult)
+    setQuotesSummary(quotesState.summary)
+    setQuotesError(quotesState.error)
     setLoading(false)
     setLoadingActivity(false)
     setLoadingQuotes(false)
@@ -129,12 +127,9 @@ export default function CateringRequestDetail({
       getCateringRequestDetail(requestId)
     ])
     if (!activityResult.error) setActivities(activityResult.data || [])
-    if (quotesResult.error) {
-      setQuotesError(quotesResult.error)
-    } else {
-      setQuotesSummary(normalizeCateringRequestQuotesPayload(quotesResult.data))
-      setQuotesError("")
-    }
+    const quotesState = applyQuotesLoadResult(quotesSummary, quotesResult)
+    setQuotesSummary(quotesState.summary)
+    setQuotesError(quotesState.error)
     if (!detailResult.error && detailResult.data) {
       setRequest(detailResult.data)
       onUpdated?.(detailResult.data)

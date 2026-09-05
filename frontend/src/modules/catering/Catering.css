@@ -501,6 +501,10 @@
   color: #86efac;
 }
 
+.catering-message.warning {
+  color: #fcd34d;
+}
+
 .catering-empty {
   margin: 0;
   color: var(--erp-text-secondary, #94a3b8);

@@ -1,6 +1,11 @@
+export const EMPTY_QUOTES_SUMMARY = { count: 0, latest: null, quotes: [] }
+
+export const SYNC_EXPIRED_WARNING_COPY =
+  "No se pudieron registrar algunos vencimientos. Los indicadores se calcularon con el estado efectivo; vuelve a intentarlo."
+
 export function normalizeCateringRequestQuotesPayload(data) {
   if (!data || typeof data !== "object") {
-    return { count: 0, latest: null, quotes: [] }
+    return { ...EMPTY_QUOTES_SUMMARY }
   }
 
   const quotes = Array.isArray(data.quotes) ? data.quotes : []
@@ -9,6 +14,42 @@ export function normalizeCateringRequestQuotesPayload(data) {
     count: Number(data.count ?? quotes.length) || 0,
     latest: data.latest ?? null,
     quotes
+  }
+}
+
+export function applyQuotesLoadResult(_current, quotesResult) {
+  if (quotesResult?.error) {
+    return { summary: { ...EMPTY_QUOTES_SUMMARY }, error: quotesResult.error }
+  }
+
+  return {
+    summary: normalizeCateringRequestQuotesPayload(quotesResult.data),
+    error: ""
+  }
+}
+
+export function resolveSyncExpiredWarning(syncResult) {
+  if (syncResult?.error) return SYNC_EXPIRED_WARNING_COPY
+  return ""
+}
+
+export async function runQuotePdfDownload({ quoteId, downloadFn, onStart, onFinish }) {
+  if (!quoteId) {
+    return { ok: false, error: "Identificador de cotización inválido." }
+  }
+
+  onStart?.(quoteId)
+
+  try {
+    const result = await downloadFn(quoteId)
+    if (!result?.ok) {
+      return { ok: false, error: result.error || "No fue posible descargar el PDF." }
+    }
+    return { ok: true }
+  } catch {
+    return { ok: false, error: "No se pudo generar el PDF." }
+  } finally {
+    onFinish?.()
   }
 }
 
