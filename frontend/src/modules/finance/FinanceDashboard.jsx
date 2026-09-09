@@ -27,6 +27,7 @@ import FinanceBranchesTab from "./FinanceBranchesTab"
 import FinanceCostCentersTab from "./FinanceCostCentersTab"
 import FinanceAccountingPeriodsTab from "./FinanceAccountingPeriodsTab"
 import FinanceJournalEntriesTab from "./FinanceJournalEntriesTab"
+import FinanceAccountingReportsTab from "./FinanceAccountingReportsTab"
 import {
   BANK_TX_TYPES,
   buildFinanceOriginUrl,
@@ -118,8 +119,12 @@ export default function FinanceDashboard() {
     if (tab === "partidas" && nextTab !== "partidas" && journalLeaveGuardRef.current.isDirty) {
       if (!journalLeaveGuardRef.current.confirmLeave()) return
     }
+    if (nextTab === "reportes") {
+      setSearchParams({ tab: nextTab, report: searchParams.get("report") || "libro-diario" })
+      return
+    }
     setSearchParams({ tab: nextTab })
-  }, [setSearchParams, tab])
+  }, [searchParams, setSearchParams, tab])
 
   const loadBankAccounts = useCallback(async () => {
     const result = await listFinanceBankAccounts()
@@ -818,6 +823,9 @@ export default function FinanceDashboard() {
       {tab === "periodos" && <FinanceAccountingPeriodsTab user={user} notify={notify} />}
       {tab === "partidas" && (
         <FinanceJournalEntriesTab user={user} notify={notify} leaveGuardRef={journalLeaveGuardRef} />
+      )}
+      {tab === "reportes" && (
+        <FinanceAccountingReportsTab user={user} notify={notify} />
       )}
     </div>
   )

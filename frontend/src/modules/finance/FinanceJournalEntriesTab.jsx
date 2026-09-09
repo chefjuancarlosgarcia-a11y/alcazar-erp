@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useSearchParams } from "react-router-dom"
+import { removeEntrySearchParam } from "../../utils/financeJournalUrl.js"
 import { listFinanceChartAccounts } from "../../services/financeChartAccountsService"
 import {
   listBranches,
@@ -43,6 +45,8 @@ import {
 import "./Finance.css"
 
 export default function FinanceJournalEntriesTab({ user, notify, leaveGuardRef }) {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const entryFromUrl = searchParams.get("entry")
   const permissions = useMemo(() => journalPermissionsForUser(user), [user])
   const defaultRange = useMemo(() => defaultMonthRange(), [])
 
@@ -180,6 +184,21 @@ export default function FinanceJournalEntriesTab({ user, notify, leaveGuardRef }
   }, [loadEntries])
 
   useEffect(() => {
+    if (!entryFromUrl || !permissions.canView) return undefined
+    let cancelled = false
+    async function openLinkedEntry() {
+      setSelectedId(entryFromUrl)
+      setIsLocalDraft(false)
+      const detail = await loadEntryDetail(entryFromUrl)
+      if (!cancelled && detail) applyEntryToEditor(detail)
+    }
+    openLinkedEntry()
+    return () => {
+      cancelled = true
+    }
+  }, [applyEntryToEditor, entryFromUrl, loadEntryDetail, permissions.canView])
+
+  useEffect(() => {
     if (!leaveGuardRef) return
     leaveGuardRef.current = createJournalLeaveGuard(isDirty)
   }, [isDirty, leaveGuardRef])
@@ -223,6 +242,11 @@ export default function FinanceJournalEntriesTab({ user, notify, leaveGuardRef }
     return () => window.removeEventListener("popstate", onPopState)
   }, [isDirty])
 
+  function clearEntryFromUrl() {
+    const next = removeEntrySearchParam(searchParams)
+    if (next) setSearchParams(next, { replace: true })
+  }
+
   function resetEditor() {
     setSelectedId(null)
     setEntry(null)
@@ -231,6 +255,7 @@ export default function FinanceJournalEntriesTab({ user, notify, leaveGuardRef }
     setForm(empty)
     setSavedSnapshot(serializeFormSnapshot(empty))
     setAccountQueries({})
+    clearEntryFromUrl()
   }
 
   function requestCloseEditor() {
