@@ -139,13 +139,25 @@ Busca de forma literal (case-insensitive) en:
 
 ## Aplicación futura en Stage
 
+Orden obligatorio (209 **no** está aplicada todavía en Stage hasta que el operador ejecute el paso 3):
+
 1. Aplicar foundation 202–204 si aún no está en el entorno
 2. Aplicar `208_finance_general_journal.sql` en Stage
-3. Ejecutar `208_test_finance_general_journal.sql` en transacción de verificación
-4. Validar UI en Preview Stage
+3. Aplicar `209_finance_general_journal_helper_acl.sql` en Stage — **corrección ACL obligatoria** posterior a 208; idempotente
+4. Ejecutar `209_test_finance_general_journal_helper_acl.sql` en transacción de verificación (10 escenarios, BEGIN/ROLLBACK)
+5. Reanudar postcheck del runner 208 (`-ResumeAfterApply`; no re-aplica 208 ni 209)
+6. Ejecutar `208_test_finance_general_journal.sql` y smoke según runner
+7. Validar UI en Preview Stage
+
+### Corrección ACL 209
+
+- **Helper** `finance_general_journal_row_to_json`: exclusivamente interno; sin EXECUTE para `PUBLIC`, `anon`, `authenticated` ni `service_role`
+- **RPC principal** `get_finance_general_journal`: accesible por rol `authenticated` (vía JWT de usuario)
+- Si Stage ya tiene 208 COMMIT pero el postcheck detectó EXECUTE expuesto en el helper, aplicar **solo** la migración 209 (sin re-ejecutar 208)
 
 ## Rollback
 
-Ejecutar `supabase/rollback/208_finance_general_journal.rollback.sql` en Stage con guards de entorno configurados.
+- **209 ACL:** `supabase/rollback/209_finance_general_journal_helper_acl.rollback.sql` — **deliberadamente bloqueado** (fail-closed). No concede EXECUTE al helper ni muta objetos. Restaurar el ACL anterior reintroduciría una exposición de seguridad; requiere autorización humana, auditoría de impacto y una migración correctiva nueva.
+- **208 completo:** `supabase/rollback/208_finance_general_journal.rollback.sql` en Stage con guards de entorno configurados — usar para eliminar Libro Diario por completo.
 
-Elimina `get_finance_general_journal` y el helper JSON. No modifica tablas 202–204.
+El rollback 208 elimina `get_finance_general_journal` y el helper JSON. No modifica tablas 202–204.
