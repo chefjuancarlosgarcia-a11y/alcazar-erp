@@ -20,4 +20,4 @@ export const GENERAL_JOURNAL_COMING_SOON_REPORTS = [
 ]
 
 export const GENERAL_JOURNAL_BRANCH_SCOPE_NOTE =
-  "El alcance por sucursal depende de accounting_journal_branch_scope(); hoy retorna NULL (sin restricción adicional)."
+  "La información mostrada corresponde a las sucursales autorizadas para tu usuario."

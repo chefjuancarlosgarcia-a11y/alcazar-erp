@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link } from "react-router-dom"
 import PaginationControls from "../../components/PaginationControls"
 import { getFinanceGeneralJournal } from "../../services/financeGeneralJournalService"
@@ -9,12 +9,15 @@ import {
 } from "../../services/financeAccountingFoundationService"
 import { listFinanceChartAccounts } from "../../services/financeChartAccountsService"
 import { canViewAccountingJournal } from "../../utils/financePermissions"
-import { withJournalListLoading } from "../../utils/financeJournalListLoad"
 import {
   GENERAL_JOURNAL_BRANCH_SCOPE_NOTE,
   GENERAL_JOURNAL_DEFAULT_PAGE_SIZE,
   GENERAL_JOURNAL_PAGE_SIZES
 } from "../../utils/financeGeneralJournalConstants"
+import {
+  createGeneralJournalLoadController,
+  fetchGeneralJournalReport
+} from "../../utils/financeGeneralJournalLoad"
 import {
   buildGeneralJournalCsv,
   fetchAllGeneralJournalRows,
@@ -38,8 +41,7 @@ function downloadCsv(filename, content) {
 export default function FinanceGeneralJournalTab({ user, notify }) {
   const canView = canViewAccountingJournal(user)
   const defaultRange = useMemo(() => defaultMonthRange(), [])
-
-  const [draftFilters, setDraftFilters] = useState({
+  const createInitialFilters = useCallback(() => ({
     fromDate: defaultRange.from,
     toDate: defaultRange.to,
     periodId: "",
@@ -48,8 +50,10 @@ export default function FinanceGeneralJournalTab({ user, notify }) {
     accountId: "",
     search: "",
     pageSize: GENERAL_JOURNAL_DEFAULT_PAGE_SIZE
-  })
-  const [appliedFilters, setAppliedFilters] = useState(draftFilters)
+  }), [defaultRange.from, defaultRange.to])
+
+  const [draftFilters, setDraftFilters] = useState(createInitialFilters)
+  const [appliedFilters, setAppliedFilters] = useState(createInitialFilters)
   const [page, setPage] = useState(1)
   const [report, setReport] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -59,6 +63,10 @@ export default function FinanceGeneralJournalTab({ user, notify }) {
   const [branches, setBranches] = useState([])
   const [costCenters, setCostCenters] = useState([])
   const [accounts, setAccounts] = useState([])
+  const loadControllerRef = useRef(null)
+  if (!loadControllerRef.current) {
+    loadControllerRef.current = createGeneralJournalLoadController()
+  }
 
   const groupedRows = useMemo(
     () => groupGeneralJournalRows(report?.rows || []),
@@ -83,36 +91,21 @@ export default function FinanceGeneralJournalTab({ user, notify }) {
   }, [notify])
 
   const loadReport = useCallback(async (filters, targetPage = 1, options = {}) => {
-    if (!canView) return
-    const dateCheck = validateGeneralJournalDateRange(filters.fromDate, filters.toDate)
-    if (!dateCheck.ok) {
-      notify(dateCheck.message, "error")
-      return
-    }
-
-    const reuseSnapshot = options.reuseSnapshot && report?.snapshotAt && !options.fresh
-
-    await withJournalListLoading(setLoading, async () => {
-      const result = await getFinanceGeneralJournal({
-        fromDate: filters.fromDate || null,
-        toDate: filters.toDate || null,
-        periodId: filters.periodId || null,
-        branchId: filters.branchId || null,
-        costCenterId: filters.costCenterId || null,
-        accountId: filters.accountId || null,
-        search: filters.search || null,
-        page: targetPage,
-        pageSize: Number(filters.pageSize) || GENERAL_JOURNAL_DEFAULT_PAGE_SIZE,
-        snapshotAt: reuseSnapshot ? report.snapshotAt : null
-      })
-      if (result.error) {
-        notify(result.error, "error")
-        return
+    await fetchGeneralJournalReport({
+      canView,
+      filters,
+      targetPage,
+      options,
+      controller: loadControllerRef.current,
+      fetchReport: getFinanceGeneralJournal,
+      onError: (message) => notify(message, "error"),
+      setLoading,
+      onSuccess: (data, nextPage) => {
+        setReport(data)
+        setPage(nextPage)
       }
-      setReport(result.data)
-      setPage(targetPage)
     })
-  }, [canView, notify, report?.snapshotAt])
+  }, [canView, notify])
 
   useEffect(() => {
     if (!canView) return
@@ -134,7 +127,7 @@ export default function FinanceGeneralJournalTab({ user, notify }) {
       notify(dateCheck.message, "error")
       return
     }
-    setAppliedFilters(draftFilters)
+    setAppliedFilters({ ...draftFilters })
     setPage(1)
   }
 
@@ -155,7 +148,7 @@ export default function FinanceGeneralJournalTab({ user, notify }) {
         getFinanceGeneralJournal,
         exportFilters,
         report.totalRows,
-        report.snapshotAt || null
+        loadControllerRef.current.snapshotAt || report.snapshotAt || null
       )
       if (!outcome.ok) {
         notify(outcome.error, "error")
