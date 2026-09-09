@@ -16,7 +16,31 @@ declare
   v_mesero uuid := 'dddddddd-dddd-dddd-dddd-dddddddddddd';
   v_branch uuid;
   v_period uuid;
-  v_period_jul uuid;
+  v_period_prior uuid;
+  v_min_year constant integer := 2000;
+  v_max_year constant integer := 2100;
+  v_prior_year integer;
+  v_prior_month integer;
+  v_curr_year integer;
+  v_curr_month integer;
+  v_pick_py integer;
+  v_pick_pm integer;
+  v_periods_found boolean := false;
+  v_created_period jsonb;
+  v_prior_start date;
+  v_prior_end date;
+  v_curr_start date;
+  v_curr_end date;
+  v_entry_date_alpha date;
+  v_entry_date_beta date;
+  v_reversal_date date;
+  v_prior_draft_date date;
+  v_prior_pending_date date;
+  v_prior_approved_date date;
+  v_filter_from_date date;
+  v_filter_to_date date;
+  v_empty_from_date date;
+  v_empty_to_date date;
   v_cash uuid;
   v_expense uuid;
   v_equity uuid;
@@ -59,10 +83,109 @@ begin
   perform set_config('request.jwt.claim.sub', v_contador::text, true);
 
   select id into v_branch from public.branches where code = 'PRINCIPAL';
-  perform public.create_finance_accounting_period(2026, 7);
-  perform public.create_finance_accounting_period(2026, 8);
-  select id into v_period_jul from public.finance_accounting_periods where period_year = 2026 and period_month = 7;
-  select id into v_period from public.finance_accounting_periods where period_year = 2026 and period_month = 8;
+
+  perform pg_advisory_xact_lock(hashtext('test_finance_general_journal:period_slots'));
+
+  <<find_period_slots>>
+  for v_curr_year in reverse v_max_year..v_min_year loop
+    for v_curr_month in reverse 12..1 loop
+      if exists (
+        select 1
+        from public.finance_accounting_periods p
+        where p.period_year = v_curr_year
+          and p.period_month = v_curr_month
+      ) then
+        continue;
+      end if;
+
+      if v_curr_month = 1 then
+        v_pick_py := v_curr_year - 1;
+        v_pick_pm := 12;
+      else
+        v_pick_py := v_curr_year;
+        v_pick_pm := v_curr_month - 1;
+      end if;
+
+      if v_pick_py < v_min_year then
+        continue;
+      end if;
+
+      if exists (
+        select 1
+        from public.finance_accounting_periods p
+        where p.period_year = v_pick_py
+          and p.period_month = v_pick_pm
+      ) then
+        continue;
+      end if;
+
+      v_prior_year := v_pick_py;
+      v_prior_month := v_pick_pm;
+      v_periods_found := true;
+      exit find_period_slots;
+    end loop;
+  end loop;
+
+  if not v_periods_found then
+    raise exception
+      'test_finance_general_journal: no two consecutive free accounting period slots in %-%',
+      v_min_year, v_max_year;
+  end if;
+
+  v_created_period := public.create_finance_accounting_period(v_prior_year, v_prior_month);
+  v_period_prior := (v_created_period ->> 'id')::uuid;
+  select p.start_date, p.end_date
+    into v_prior_start, v_prior_end
+  from public.finance_accounting_periods p
+  where p.id = v_period_prior;
+
+  v_created_period := public.create_finance_accounting_period(v_curr_year, v_curr_month);
+  v_period := (v_created_period ->> 'id')::uuid;
+  select p.start_date, p.end_date
+    into v_curr_start, v_curr_end
+  from public.finance_accounting_periods p
+  where p.id = v_period;
+
+  v_entry_date_alpha := least(v_curr_start + 9, v_curr_end);
+  v_entry_date_beta := least(v_curr_start + 11, v_curr_end);
+  if v_entry_date_beta <= v_entry_date_alpha then
+    v_entry_date_alpha := greatest(v_curr_start, v_curr_end - 2);
+    v_entry_date_beta := v_curr_end;
+  end if;
+  v_reversal_date := least(v_entry_date_alpha + 1, v_curr_end);
+
+  v_prior_draft_date := least(v_prior_start + 4, v_prior_end);
+  v_prior_pending_date := least(v_prior_start + 5, v_prior_end);
+  v_prior_approved_date := least(v_prior_start + 6, v_prior_end);
+
+  v_filter_from_date := v_entry_date_alpha;
+  v_filter_to_date := v_entry_date_beta;
+
+  select
+    make_date(c.period_year, c.period_month, 1),
+    (make_date(c.period_year, c.period_month, 1) + interval '1 month' - interval '1 day')::date
+    into v_empty_from_date, v_empty_to_date
+  from (
+    select y as period_year, m as period_month
+    from generate_series(v_min_year, v_max_year) as y
+    cross join generate_series(1, 12) as m
+  ) c
+  where not exists (
+      select 1
+      from public.finance_accounting_periods p
+      where p.period_year = c.period_year
+        and p.period_month = c.period_month
+    )
+    and not (c.period_year = v_prior_year and c.period_month = v_prior_month)
+    and not (c.period_year = v_curr_year and c.period_month = v_curr_month)
+  order by c.period_year, c.period_month
+  limit 1;
+
+  if v_empty_from_date is null then
+    raise exception
+      'test_finance_general_journal: no free month available for empty-result assertion in %-%',
+      v_min_year, v_max_year;
+  end if;
 
   v_cash := (public.create_finance_chart_account(jsonb_build_object(
     'code', '1.01-GJ', 'name', 'Caja GJ', 'financial_type', 'asset',
@@ -85,7 +208,9 @@ begin
   )) ->> 'id')::uuid;
 
   v_entry := public.create_finance_journal_draft(jsonb_build_object(
-    'entry_date', '2026-08-10', 'description', 'Posted GJ alpha', 'reference', 'REF-GJ-1'
+    'entry_date', to_char(v_entry_date_alpha, 'YYYY-MM-DD'),
+    'description', 'Posted GJ alpha',
+    'reference', 'REF-GJ-1'
   ));
   v_entry_id := (v_entry ->> 'id')::uuid;
   perform public.replace_finance_journal_lines(v_entry_id, jsonb_build_array(
@@ -98,7 +223,9 @@ begin
   v_posted_id := (v_posted ->> 'id')::uuid;
 
   v_entry := public.create_finance_journal_draft(jsonb_build_object(
-    'entry_date', '2026-08-12', 'description', 'Posted GJ beta', 'reference', 'REF-GJ-2'
+    'entry_date', to_char(v_entry_date_beta, 'YYYY-MM-DD'),
+    'description', 'Posted GJ beta',
+    'reference', 'REF-GJ-2'
   ));
   v_entry_id := (v_entry ->> 'id')::uuid;
   perform public.replace_finance_journal_lines(v_entry_id, jsonb_build_array(
@@ -113,10 +240,12 @@ begin
   perform public.approve_finance_journal_entry(v_entry_id);
   perform public.post_finance_journal_entry(v_entry_id);
 
-  v_reversal := public.reverse_finance_journal_entry(v_posted_id, 'Reversión GJ', '2026-08-11'::date);
+  v_reversal := public.reverse_finance_journal_entry(v_posted_id, 'Reversión GJ', v_reversal_date);
 
   v_entry := public.create_finance_journal_draft(jsonb_build_object(
-    'entry_date', '2026-07-05', 'description', 'Draft excluded', 'reference', 'DRAFT-GJ'
+    'entry_date', to_char(v_prior_draft_date, 'YYYY-MM-DD'),
+    'description', 'Draft excluded',
+    'reference', 'DRAFT-GJ'
   ));
   v_draft_id := (v_entry ->> 'id')::uuid;
   perform public.replace_finance_journal_lines(v_draft_id, jsonb_build_array(
@@ -125,7 +254,9 @@ begin
   ));
 
   v_entry := public.create_finance_journal_draft(jsonb_build_object(
-    'entry_date', '2026-07-06', 'description', 'Pending excluded', 'reference', 'PEND-GJ'
+    'entry_date', to_char(v_prior_pending_date, 'YYYY-MM-DD'),
+    'description', 'Pending excluded',
+    'reference', 'PEND-GJ'
   ));
   v_pending_id := (v_entry ->> 'id')::uuid;
   perform public.replace_finance_journal_lines(v_pending_id, jsonb_build_array(
@@ -135,7 +266,9 @@ begin
   perform public.submit_finance_journal_entry(v_pending_id);
 
   v_entry := public.create_finance_journal_draft(jsonb_build_object(
-    'entry_date', '2026-07-07', 'description', 'Approved excluded', 'reference', 'APPR-GJ'
+    'entry_date', to_char(v_prior_approved_date, 'YYYY-MM-DD'),
+    'description', 'Approved excluded',
+    'reference', 'APPR-GJ'
   ));
   v_approved_id := (v_entry ->> 'id')::uuid;
   perform public.replace_finance_journal_lines(v_approved_id, jsonb_build_array(
@@ -176,14 +309,14 @@ begin
     'approved absent'::text;
 
   v_report := public.get_finance_general_journal(
-    p_from_date => '2026-08-11'::date,
-    p_to_date => '2026-08-12'::date
+    p_from_date => v_filter_from_date,
+    p_to_date => v_filter_to_date
   );
   return query select 'filters_by_date'::text,
     not exists (
       select 1 from jsonb_array_elements(v_report -> 'rows') r
-      where (r ->> 'entry_date')::date < '2026-08-11'::date
-         or (r ->> 'entry_date')::date > '2026-08-12'::date
+      where (r ->> 'entry_date')::date < v_filter_from_date
+         or (r ->> 'entry_date')::date > v_filter_to_date
     ),
     v_report ->> 'total_rows';
 
@@ -310,8 +443,8 @@ begin
     v_reversal ->> 'entry_number';
 
   v_report := public.get_finance_general_journal(
-    p_from_date => '2099-01-01'::date,
-    p_to_date => '2099-01-31'::date
+    p_from_date => v_empty_from_date,
+    p_to_date => v_empty_to_date
   );
   return query select 'handles_empty_result'::text,
     (v_report ->> 'total_rows')::int = 0 and jsonb_array_length(v_report -> 'rows') = 0,
@@ -330,8 +463,8 @@ begin
 
   begin
     perform public.get_finance_general_journal(
-      p_from_date => '2026-08-15'::date,
-      p_to_date => '2026-08-01'::date
+      p_from_date => v_filter_to_date,
+      p_to_date => v_filter_from_date
     );
     return query select 'invalid_date_range'::text, false, 'should fail'::text;
   exception when others then
