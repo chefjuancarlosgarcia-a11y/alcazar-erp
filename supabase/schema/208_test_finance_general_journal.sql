@@ -19,10 +19,12 @@ declare
   v_period_prior uuid;
   v_min_year constant integer := 2000;
   v_max_year constant integer := 2100;
+  v_scan_year integer;
+  v_scan_month integer;
+  v_slot_year integer;
+  v_slot_month integer;
   v_prior_year integer;
   v_prior_month integer;
-  v_curr_year integer;
-  v_curr_month integer;
   v_pick_py integer;
   v_pick_pm integer;
   v_periods_found boolean := false;
@@ -87,23 +89,23 @@ begin
   perform pg_advisory_xact_lock(hashtext('test_finance_general_journal:period_slots'));
 
   <<find_period_slots>>
-  for v_curr_year in reverse v_max_year..v_min_year loop
-    for v_curr_month in reverse 12..1 loop
+  for v_scan_year in reverse v_max_year..v_min_year loop
+    for v_scan_month in reverse 12..1 loop
       if exists (
         select 1
         from public.finance_accounting_periods p
-        where p.period_year = v_curr_year
-          and p.period_month = v_curr_month
+        where p.period_year = v_scan_year
+          and p.period_month = v_scan_month
       ) then
         continue;
       end if;
 
-      if v_curr_month = 1 then
-        v_pick_py := v_curr_year - 1;
+      if v_scan_month = 1 then
+        v_pick_py := v_scan_year - 1;
         v_pick_pm := 12;
       else
-        v_pick_py := v_curr_year;
-        v_pick_pm := v_curr_month - 1;
+        v_pick_py := v_scan_year;
+        v_pick_pm := v_scan_month - 1;
       end if;
 
       if v_pick_py < v_min_year then
@@ -119,6 +121,8 @@ begin
         continue;
       end if;
 
+      v_slot_year := v_scan_year;
+      v_slot_month := v_scan_month;
       v_prior_year := v_pick_py;
       v_prior_month := v_pick_pm;
       v_periods_found := true;
@@ -132,6 +136,45 @@ begin
       v_min_year, v_max_year;
   end if;
 
+  if v_slot_year is null or v_slot_month is null or v_prior_year is null or v_prior_month is null then
+    raise exception
+      'test_finance_general_journal: selected period slots must not be null (slot %/%, prior %/%)',
+      v_slot_month, v_slot_year, v_prior_month, v_prior_year;
+  end if;
+
+  if v_slot_year < v_min_year or v_slot_year > v_max_year
+     or v_prior_year < v_min_year or v_prior_year > v_max_year then
+    raise exception
+      'test_finance_general_journal: selected period years out of bounds %-% (slot %/%, prior %/%)',
+      v_min_year, v_max_year, v_slot_month, v_slot_year, v_prior_month, v_prior_year;
+  end if;
+
+  if v_slot_month < 1 or v_slot_month > 12 or v_prior_month < 1 or v_prior_month > 12 then
+    raise exception
+      'test_finance_general_journal: selected period months out of bounds 1-12 (slot %/%, prior %/%)',
+      v_slot_month, v_slot_year, v_prior_month, v_prior_year;
+  end if;
+
+  if not (
+    (v_prior_year = v_slot_year and v_prior_month = v_slot_month - 1)
+    or (v_slot_month = 1 and v_prior_year = v_slot_year - 1 and v_prior_month = 12)
+  ) then
+    raise exception
+      'test_finance_general_journal: selected periods must be consecutive (slot %/%, prior %/%)',
+      v_slot_month, v_slot_year, v_prior_month, v_prior_year;
+  end if;
+
+  if exists (
+    select 1
+    from public.finance_accounting_periods p
+    where (p.period_year = v_slot_year and p.period_month = v_slot_month)
+       or (p.period_year = v_prior_year and p.period_month = v_prior_month)
+  ) then
+    raise exception
+      'test_finance_general_journal: selected period slots no longer free (slot %/%, prior %/%)',
+      v_slot_month, v_slot_year, v_prior_month, v_prior_year;
+  end if;
+
   v_created_period := public.create_finance_accounting_period(v_prior_year, v_prior_month);
   v_period_prior := (v_created_period ->> 'id')::uuid;
   select p.start_date, p.end_date
@@ -139,7 +182,7 @@ begin
   from public.finance_accounting_periods p
   where p.id = v_period_prior;
 
-  v_created_period := public.create_finance_accounting_period(v_curr_year, v_curr_month);
+  v_created_period := public.create_finance_accounting_period(v_slot_year, v_slot_month);
   v_period := (v_created_period ->> 'id')::uuid;
   select p.start_date, p.end_date
     into v_curr_start, v_curr_end
@@ -177,7 +220,7 @@ begin
         and p.period_month = c.period_month
     )
     and not (c.period_year = v_prior_year and c.period_month = v_prior_month)
-    and not (c.period_year = v_curr_year and c.period_month = v_curr_month)
+    and not (c.period_year = v_slot_year and c.period_month = v_slot_month)
   order by c.period_year, c.period_month
   limit 1;
 
