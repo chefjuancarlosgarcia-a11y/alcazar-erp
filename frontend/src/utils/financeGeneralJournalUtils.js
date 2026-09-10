@@ -5,6 +5,41 @@ import {
 } from "./financeGeneralJournalConstants.js"
 import { roundMoney } from "./financeJournalValidation.js"
 
+export function safeGeneralJournalCount(value, fallback = 0) {
+  if (value === null || value === undefined || value === "") return fallback
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback
+  return Math.floor(parsed)
+}
+
+export function safeGeneralJournalPage(value, fallback = 1) {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed < 1) return fallback
+  return Math.floor(parsed)
+}
+
+export function safeGeneralJournalPageSize(value, fallback = GENERAL_JOURNAL_DEFAULT_PAGE_SIZE) {
+  return clampPageSize(safeGeneralJournalCount(value, fallback) || fallback)
+}
+
+export function resolveGeneralJournalPageSize(report, appliedFilters = {}) {
+  if (appliedFilters.pageSize != null && appliedFilters.pageSize !== "") {
+    return safeGeneralJournalPageSize(appliedFilters.pageSize)
+  }
+  if (report?.pageSize != null && report.pageSize !== "") {
+    return safeGeneralJournalPageSize(report.pageSize)
+  }
+  return GENERAL_JOURNAL_DEFAULT_PAGE_SIZE
+}
+
+export function formatGeneralJournalSummary(totalRows, totalEntries) {
+  const lines = safeGeneralJournalCount(totalRows, 0)
+  const entries = safeGeneralJournalCount(totalEntries, 0)
+  const lineWord = lines === 1 ? "línea" : "líneas"
+  const entryWord = entries === 1 ? "partida" : "partidas"
+  return `${lines} ${lineWord} · ${entries} ${entryWord}`
+}
+
 export function validateGeneralJournalDateRange(fromDate, toDate) {
   if (!fromDate || !toDate) return { ok: true, message: "" }
   if (fromDate > toDate) {
@@ -87,14 +122,14 @@ export function mapGeneralJournalResponse(data) {
   const difference = roundMoney(payload.difference ?? totalDebit - totalCredit)
   return {
     rows,
-    totalRows: Number(payload.total_rows || 0),
-    totalEntries: Number(payload.total_entries || 0),
+    totalRows: safeGeneralJournalCount(payload.total_rows, 0),
+    totalEntries: safeGeneralJournalCount(payload.total_entries, 0),
     totalDebit,
     totalCredit,
     difference,
-    page: Number(payload.page || 1),
-    pageSize: Number(payload.page_size || GENERAL_JOURNAL_DEFAULT_PAGE_SIZE),
-    totalPages: Number(payload.total_pages || 0),
+    page: safeGeneralJournalPage(payload.page, 1),
+    pageSize: safeGeneralJournalPageSize(payload.page_size),
+    totalPages: safeGeneralJournalCount(payload.total_pages, 0),
     snapshotAt: payload.snapshot_at || null,
     isBalanced: Math.abs(difference) < 0.005
   }

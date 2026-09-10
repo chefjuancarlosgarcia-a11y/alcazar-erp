@@ -21,7 +21,9 @@ import {
 import {
   buildGeneralJournalCsv,
   fetchAllGeneralJournalRows,
+  formatGeneralJournalSummary,
   groupGeneralJournalRows,
+  resolveGeneralJournalPageSize,
   validateGeneralJournalDateRange
 } from "../../utils/financeGeneralJournalUtils"
 import { defaultMonthRange, formatMoney, labelFor } from "./financeUtils"
@@ -392,11 +394,14 @@ export default function FinanceGeneralJournalTab({ user, notify }) {
             </div>
           </div>
 
+          <p className="tasks-muted finance-general-journal-summary">
+            {formatGeneralJournalSummary(report.totalRows, report.totalEntries)}
+          </p>
           <PaginationControls
             page={page}
-            totalPages={Math.max(1, report.totalPages || 1)}
-            onPageChange={setPage}
-            summary={`${report.totalRows} líneas · ${report.totalEntries} partidas`}
+            total={report.totalRows}
+            pageSize={resolveGeneralJournalPageSize(report, appliedFilters)}
+            onChange={setPage}
           />
         </>
       ) : null}

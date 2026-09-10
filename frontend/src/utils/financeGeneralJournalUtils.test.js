@@ -10,6 +10,7 @@ import {
   mapGeneralJournalResponse,
   mapGeneralJournalRow,
   neutralizeCsvFormula,
+  resolveGeneralJournalPageSize,
   validateGeneralJournalDateRange
 } from "./financeGeneralJournalUtils.js"
 import { GENERAL_JOURNAL_MAX_EXPORT_ROWS } from "./financeGeneralJournalConstants.js"
@@ -79,9 +80,18 @@ test("mapGeneralJournalResponse maps totals and rows", () => {
     snapshot_at: "2026-08-01T12:00:00Z"
   })
   assert.equal(mapped.rows.length, 1)
+  assert.equal(mapped.totalRows, 1)
+  assert.equal(mapped.totalPages, 1)
+  assert.equal(mapped.pageSize, 50)
   assert.equal(mapped.totalDebit, 100)
   assert.equal(mapped.isBalanced, true)
   assert.equal(mapped.snapshotAt, "2026-08-01T12:00:00Z")
+})
+
+test("resolveGeneralJournalPageSize prefers applied filters over report", () => {
+  const report = mapGeneralJournalResponse({ rows: [], page_size: 50 })
+  assert.equal(resolveGeneralJournalPageSize(report, { pageSize: 100 }), 100)
+  assert.equal(resolveGeneralJournalPageSize(report, {}), 50)
 })
 
 test("mapGeneralJournalRow identifies reversal metadata", () => {
