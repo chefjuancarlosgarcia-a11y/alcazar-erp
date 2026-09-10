@@ -27,6 +27,6 @@ test("AppRoutes protect requisitions and inventory separately", () => {
   const routes = readFileSync(join(root, "routes/AppRoutes.jsx"), "utf8")
   assert.match(routes, /path="\/requisitions"/)
   assert.match(routes, /module="requisitions"/)
-  assert.match(routes, /path="\/inventory" element=\{<InventoryRoute \/\>/)
+  assert.ok(routes.includes('path="/inventory" element={<InventoryRoute />}'))
   assert.ok(!routes.includes('path="/requisitions" element={<ProtectedRoute module="inventory"'))
 })
