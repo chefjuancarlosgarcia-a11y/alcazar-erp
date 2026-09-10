@@ -1,9 +1,27 @@
 # FELplex — Fase 1A.2: endurecimiento transaccional y de seguridad
 
-**Estado:** implementación y corrección pre-merge locales revisables.
-**No desplegado.** **Sin llamadas FELplex.** **La corrección 230000 no se ejecutó contra Stage/Producción.**
+## Estado consolidado (2026-09-10)
 
-Los resultados SQL históricos de `20260808220000` fueron ejecutados y reportados por el operador; no fueron reejecutados durante esta corrección local.
+| Tema | Estado |
+|------|--------|
+| Edge `felplex-certify-invoice` en Stage | **Desplegada** — versión plataforma **1**, `verify_jwt=true` |
+| Evidencia deploy fail-closed | `docs/evidence/felplex/2026-09-10-stage-edge-fail-closed-deploy.md` |
+| Pruebas gateway A/B (sin auth / JWT inválido) | **PASS** — HTTP **401** |
+| Prueba C (JWT válido + documento) | **Pendiente** |
+| Migración **230000** + concurrencia PostgreSQL | **Validadas en Stage** (2026-08-13) |
+| Bootstrap billing Stage | **Ejecutado** (2026-09-10) |
+| FELplex HTTP / certificación SAT | **Apagado** — sin llamadas |
+| `FELPLEX_CONTRACT_HTTP_CONFIRMED` | **false** / unset |
+| `emission_enabled` y switches FEL | **false** |
+| Producción | **No involucrada** |
+
+---
+
+## Histórico pre-deploy Edge (referencia)
+
+**Estado anterior a 2026-09-10:** implementación local revisable; Edge **no** desplegada; corrección 230000 ya aplicada en Stage (no confundir con este párrafo histórico).
+
+Los resultados SQL históricos de `20260808220000` fueron ejecutados y reportados por el operador; no fueron reejecutados durante la corrección local inicial.
 
 Switches obligatorios permanecen **OFF**:
 

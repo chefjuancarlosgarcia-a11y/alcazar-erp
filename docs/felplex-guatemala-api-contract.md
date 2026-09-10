@@ -1,8 +1,9 @@
 # FELplex Guatemala — contrato público adoptado (provisional)
 
 **Fecha de adopción local:** 2026-08-14  
-**Rama:** `integrate/felplex-phase-1a3`  
-**Estado:** provisional — **HTTP bloqueado** hasta prueba Stage con secretos reales
+**Última auditoría contractual:** 2026-09-10 — `docs/evidence/felplex/2026-09-10-guatemala-contract-audit.md`
+**Rama:** `integrate/felplex-phase-1a3` @ `c3b91ec6376183aeafeb67f55af7fa5c1db2566c`
+**Estado:** provisional — **HTTP bloqueado**; Edge Stage desplegada fail-closed (**no** sustituye confirmación contractual)
 
 ---
 
@@ -13,7 +14,9 @@
 | Colección Postman | `PUBLIC - FELplex - Documentación` |
 | Formato | Postman Collection v2.1 |
 | Tamaño observado | 359 881 bytes |
-| SHA-256 observado | `f9899fbcc3787d96c9967abd3429df7a232f17b3b6fc518c1f5c17b69777b3ce` |
+| SHA-256 observado (2026-08-14) | `f9899fbcc3787d96c9967abd3429df7a232f17b3b6fc518c1f5c17b69777b3ce` |
+| Re-verificación 2026-09-10 | **No** — URL pública sin descarga Postman; hash completo **no** recalculado |
+| Extracto local sanitizado | `docs/felplex-extract.txt` — SHA-256 `2B40511A345790F8D14D914A99C59AD3569B5BEB636484B5BEDC60A6447F5D34` (≠ colección completa) |
 
 La colección completa **no** se copia al repositorio (ejemplos extensos y datos ficticios de terceros).
 
@@ -133,7 +136,7 @@ HTTP 200 con `valid: false` **no** es certificación. Se preservan `errors` (ani
 | 2 | `datetime_issue`: docs `YYYY-MM-dd` vs ejemplos ISO | **Provisional** → adoptamos ISO |
 | 3 | IVA / `total_tax` — redondeo oficial no confirmado | **Provisional** → fórmula 12/112 |
 | 4 | Timeouts — códigos reintentables no documentados | **Bloqueante** — sin auto-retry POST |
-| 5 | `empresa` y API key reales no recibidos | **Bloqueante antes de HTTP** |
+| 5 | `empresa` Stage vía billing bootstrap; API key solo en secretos Edge (nombre `FELPLEX_GT_STAGE_API_KEY`) — contrato HTTP sigue sin confirmar | **Bloqueante antes de HTTP** |
 | 6 | Tipo ítem `B`/`S` — regla fiscal ERP definitiva | **Provisional** — B para consumo alimentos |
 
 ---
@@ -152,8 +155,10 @@ HTTP 200 con `valid: false` **no** es certificación. Se preservan `errors` (ani
 | Parser `valid` true/false | ✓ | | |
 | Timeout → resultado ambiguo (cat. B) | ✓ | | |
 | GET / DELETE operativos | | | ✓ (no habilitados) |
-| Secretos Stage reales | | | ✓ |
+| Secretos Stage (nombre presente; valor no en repo) | ✓ | | |
+| Edge Stage fail-closed desplegada | ✓ | | |
 | `FELPLEX_CONTRACT_HTTP_CONFIRMED=true` | | | ✓ |
+| Auditoría 2026-09-10 — campos IVA/fecha/tipo B/idempotencia | | ✓ | ✓ |
 
 ---
 
@@ -192,13 +197,15 @@ HTTP 200 con `valid: false` **no** es certificación. Se preservan `errors` (ani
 
 ---
 
-## Confirmaciones de alcance
+## Confirmaciones de alcance (2026-09-10)
 
-- **No** HTTP en esta fase
-- **No** deploy Edge
-- **No** Stage / Producción mutados
+- **No** HTTP FELplex operativo (`FELPLEX_HTTP_ENABLED` / contrato confirmado apagados)
+- Edge **desplegada en Stage** fail-closed — evidencia separada; **no** certificación SAT
+- Bootstrap billing Stage ejecutado; switches FEL permanecen **false**
+- **No** Producción
 - **No** secretos en repo
 - **No** FCAM / NCRE / NDEB / SMS / WhatsApp / XML base64 operativos
+- **No** declarar contrato confirmado mientras existan blockers en auditoría 2026-09-10
 
 ---
 
