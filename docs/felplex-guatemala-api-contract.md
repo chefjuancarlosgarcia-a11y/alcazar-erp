@@ -1,9 +1,9 @@
 # FELplex Guatemala — contrato público adoptado (provisional)
 
 **Fecha de adopción local:** 2026-08-14  
-**Última auditoría contractual:** 2026-09-10 — export Postman completo (SHA abajo) + alineación código 2026-09-10
-**Rama:** `integrate/felplex-phase-1a3` (post-fix payload Postman v2.1)
-**Estado:** provisional — **HTTP bloqueado**; Edge Stage desplegada fail-closed (**no** sustituye confirmación contractual)
+**Última auditoría contractual:** 2026-09-10 — export Postman SHA `388d18c3…` + alineación código @ `ac13a365`
+**Rama / runtime Stage:** `integrate/felplex-phase-1a3` @ `ac13a365…` — Edge **v2** ACTIVE fail-closed
+**Estado:** provisional — **HTTP bloqueado**; payload Postman corregido en runtime desplegado (**no** sustituye confirmación contractual operativa)
 
 ---
 
@@ -165,9 +165,10 @@ HTTP 200 con `valid: false` **no** es certificación. Se preservan `errors` (ani
 | Timeout → resultado ambiguo (cat. B) | ✓ | | |
 | GET / DELETE operativos | | | ✓ (no habilitados) |
 | Secretos Stage (nombre presente; valor no en repo) | ✓ | | |
-| Edge Stage fail-closed desplegada | ✓ | | |
+| Edge Stage fail-closed desplegada (v2 @ `ac13a365`) | ✓ | | |
+| `without_iva` 0/1 + `emails` objeto (código + 75/75 tests) | ✓ | | |
 | `FELPLEX_CONTRACT_HTTP_CONFIRMED=true` | | | ✓ |
-| Auditoría 2026-09-10 — campos IVA/fecha/tipo B/idempotencia | | ✓ | ✓ |
+| Auditoría 2026-09-10 — datetime/tipo B/redondeo línea/idempotencia | | ✓ | ✓ |
 
 ---
 
@@ -206,15 +207,18 @@ HTTP 200 con `valid: false` **no** es certificación. Se preservan `errors` (ani
 
 ---
 
-## Confirmaciones de alcance (2026-09-10)
+## Confirmaciones de alcance (2026-09-10, post Edge v2)
 
-- **No** HTTP FELplex operativo (`FELPLEX_HTTP_ENABLED` / contrato confirmado apagados)
-- Edge **desplegada en Stage** fail-closed — evidencia separada; **no** certificación SAT
-- Bootstrap billing Stage ejecutado; switches FEL permanecen **false**
-- **No** Producción
-- **No** secretos en repo
+- **HTTP FELplex NOT EXECUTED** — `FELPLEX_HTTP_ENABLED` / `FELPLEX_CONTRACT_HTTP_CONFIRMED` **OFF/unset**
+- **Primera certificación SAT NOT EXECUTED**
+- **Prueba runtime C NOT EXECUTED** (sin sesión Stage segura)
+- Edge Stage **v2** desplegada fail-closed — `docs/evidence/felplex/2026-09-10-stage-edge-fail-closed-deploy.md`
+- **`emission_enabled=false`** y switches FEL permanecen apagados
+- Bootstrap billing Stage completado; `connection_status=unknown`
+- **Producción NOT TOUCHED**
+- **No** secretos ni colección Postman en repo
 - **No** FCAM / NCRE / NDEB / SMS / WhatsApp / XML base64 operativos
-- **No** declarar contrato confirmado mientras existan blockers en auditoría 2026-09-10
+- **No** declarar contrato completamente confirmado (UNCONFIRMED: datetime, B/S, redondeo línea, `external_id`)
 
 ---
 

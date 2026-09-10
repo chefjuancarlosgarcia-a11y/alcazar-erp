@@ -11,10 +11,11 @@
 | **Fecha runtime post-230000** | 2026-08-13 14:56 (America/Guatemala) |
 | **Fecha concurrencia Stage** | 2026-08-13 17:16 (America/Guatemala) |
 | **Fecha bootstrap billing Stage** | 2026-09-10 |
-| **Fecha deploy Edge fail-closed Stage** | 2026-09-10 |
+| **Fecha deploy Edge fail-closed Stage (v1)** | 2026-09-10 |
+| **Fecha redeploy Edge Stage v2 (payload Postman)** | 2026-09-10 |
 | **Fecha auditoría contractual Guatemala** | 2026-09-10 |
 | **Zona horaria documental** | America/Guatemala |
-| **Rama documentada (consolidado)** | `integrate/felplex-phase-1a3` @ `c3b91ec6376183aeafeb67f55af7fa5c1db2566c` |
+| **Rama documentada (consolidado)** | `integrate/felplex-phase-1a3` @ `ac13a36567e38c4c33fd3e5e6d623a8a4597294a` |
 | **PR** | #21 — OPEN, Draft (no Ready, no merge) |
 | **Producción** | No involucrada |
 | **Documento** | Evidencia local de validación estructural 230000 y runtime post-230000 |
@@ -99,23 +100,27 @@ Ejecución única del fixture `supabase/stage-fixtures/felplex_gt_billing_bootst
 **Limitaciones:** el bootstrap no confirma contrato HTTP ni conectividad FELplex; no autoriza Producción.
 - Recovery categoría B (post-HTTP incierto) permanece manual — `docs/felplex-230000-stage-concurrency-and-recovery-runbook.md`.
 
-### Deploy Edge fail-closed (2026-09-10)
+### Deploy Edge fail-closed (2026-09-10) — v1 → v2
 
-**PASS — EDGE STAGE DESPLEGADA (FAIL-CLOSED)**
+**PASS — EDGE STAGE DESPLEGADA Y REDEPLOYADA (FAIL-CLOSED)**
 
 Evidencia: [2026-09-10-stage-edge-fail-closed-deploy.md](./2026-09-10-stage-edge-fail-closed-deploy.md).
 
-| Métrica | Valor |
-|---------|-------|
-| Función | `felplex-certify-invoice` |
-| Versión plataforma | 1 |
-| `verify_jwt` | true |
-| Pruebas A/B gateway | 401 PASS |
-| Prueba C (JWT válido) | NOT EXECUTED |
-| HTTP FELplex / certificación SAT | No ejecutados |
-| Snapshot pre/post DB | Idéntico (3 `pending_certification`, 0 attempts) |
+| Métrica | v1 (`c3b91ec`) | v2 (`ac13a365`) |
+|---------|----------------|-----------------|
+| Función | `felplex-certify-invoice` | misma (`5be7fb3a-…`) |
+| Versión plataforma | **1** | **2** |
+| Bundle hash | `3271abf9…b725` | `73d79afa…4315` |
+| `verify_jwt` | true | true |
+| Payload Postman | baseline fail-closed | **corregido** (`without_iva`, emails, parser) |
+| Pruebas locales | 71/71 | **75/75 PASS** |
+| Pruebas A/B gateway | 401 | 401 (`NO_AUTH_HEADER` / `INVALID_JWT_FORMAT`) |
+| Prueba C | NOT EXECUTED | **NOT EXECUTED** — NO SAFE STAGE USER SESSION |
+| HTTP FELplex / certificación SAT | No ejecutados | No ejecutados |
+| Snapshot pre/post DB | Idéntico | Idéntico (3 `pending_certification`, 0 attempts, 0 SAT) |
+| Billing `connection_status` | `unknown` | `unknown` |
 
-**Limitaciones:** el deploy **no** autoriza HTTP FELplex, `emission_enabled`, ni Producción.
+**Limitaciones:** redeploy v2 **no** autoriza HTTP FELplex, `emission_enabled`, flags de contrato, ni Producción. Contrato HTTP **no** declarado confirmado.
 
 ### Auditoría contractual Guatemala (2026-09-10)
 
@@ -126,9 +131,10 @@ Evidencia: [2026-09-10-guatemala-contract-audit.md](./2026-09-10-guatemala-contr
 | Resultado | Detalle |
 |-----------|---------|
 | Transporte / parser / gates | Alineados con adopción provisional |
-| Blockers antes de HTTP | IVA/`without_iva`, `datetime_issue`, tipo B/S, idempotencia `external_id`, flags contrato/emisión |
+| Payload Postman (`388d18c3…`) | **Resuelto en código** @ `ac13a365`; **desplegado Edge v2** |
+| Blockers antes de HTTP | `datetime_issue`, tipo B/S, redondeo línea vs doc, idempotencia `external_id`, flags contrato/emisión |
 | Primera certificación HTTP Stage | **NO APTO** hasta confirmación y prueba controlada |
-| Código | Sin cambios en esta auditoría |
+| Pruebas locales | **75/75 PASS** |
 
 ---
 
@@ -153,9 +159,10 @@ Evidencia: [2026-09-10-guatemala-contract-audit.md](./2026-09-10-guatemala-contr
 
 ### Incluido — Edge + auditoría (2026-09-10)
 
-- Deploy Edge `felplex-certify-invoice` en Stage (fail-closed, `verify_jwt=true`)
-- Pruebas gateway A/B documentadas
-- Auditoría contractual vs implementación (documental)
+- Deploy Edge v1 + **redeploy v2** `felplex-certify-invoice` en Stage (fail-closed, `verify_jwt=true`)
+- Payload Guatemala alineado Postman en runtime v2
+- Pruebas gateway A/B documentadas; prueba C pendiente
+- Auditoría contractual vs implementación (documental; UNCONFIRMED residual)
 
 ### Excluido (operación real)
 
@@ -456,7 +463,7 @@ Attempt de prueba eliminado en cleanup; no persistió en Stage.
 |----|-----------|-----------|
 | P1 | Concurrencia PostgreSQL real (dos sesiones) | ~~Media~~ **Resuelto** — PASS 2026-08-13 |
 | P2 | Contrato payload FELplex (`FELPLEX_CONTRACT_UNCONFIRMED`) | Alta |
-| P3 | Deploy Edge Function `felplex-certify-invoice` | ~~Media~~ **Resuelto** — Stage 2026-09-10 fail-closed |
+| P3 | Deploy Edge Function `felplex-certify-invoice` | ~~Media~~ **Resuelto** — Stage v2 @ `ac13a365` fail-closed |
 | P4 | Secretos Stage para Edge | ~~Media~~ **Parcial** — nombre `FELPLEX_GT_STAGE_API_KEY` presente; HTTP apagado |
 | P5 | Primera llamada HTTP real a FELplex | Alta |
 | P6 | Runtime con fixture FEL (`concept_finalize_success_with_fixture`) | ~~Alta~~ **Resuelto** — runtime post-230000 `runtime_finalize_success` |
@@ -576,7 +583,7 @@ El baseline protegido completo contiene guard (incluye `relkind='c'`) más snaps
 | Concurrencia PostgreSQL real | **PASS** (2026-08-13 17:16) |
 | Bootstrap billing Stage | **PASS** (2026-09-10) — status `unknown` |
 | Runbook recovery cat. A/B | Documentado local |
-| Edge deploy Stage fail-closed | **PASS** (2026-09-10) |
+| Edge deploy Stage fail-closed v1 → v2 | **PASS** (2026-09-10) |
 | Auditoría contractual GT | **Documentada** (2026-09-10) — blockers vigentes |
 | FELplex HTTP / certificación SAT | **NOT EXECUTED** |
 | Certificación SAT real | **NOT EXECUTED** |
@@ -594,9 +601,9 @@ El baseline protegido completo contiene guard (incluye `relkind='c'`) más snaps
 
 - Project ref Stage: `tgrqarxfmpwgrkntvgma` únicamente para operaciones documentadas.
 - Producción no autorizada en ninguna fase de este registro.
-- Edge Stage desplegada fail-closed; sin HTTP FELplex; sin activación de emisión.
+- Edge Stage **v2** desplegada fail-closed; sin HTTP FELplex; sin activación de emisión; prueba C y piloto HTTP pendientes.
 - PR #21 permanece Draft.
 
 ---
 
-*Fin del registro — FELplex Fase 1A.3 — Supabase Stage — actualizado 2026-09-10 — incluye runtime post-230000, concurrencia, bootstrap billing, deploy Edge fail-closed y auditoría contractual*
+*Fin del registro — FELplex Fase 1A.3 — Supabase Stage — actualizado 2026-09-10 — incluye runtime post-230000, concurrencia, bootstrap billing, deploy Edge fail-closed v1→v2, payload Postman y auditoría contractual*

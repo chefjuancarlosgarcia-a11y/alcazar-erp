@@ -1,9 +1,10 @@
 # Auditoría contractual FELplex Guatemala — 2026-09-10
 
-**Rama:** `integrate/felplex-phase-1a3` @ `c3b91ec6376183aeafeb67f55af7fa5c1db2566c`  
-**Contrato interno:** `docs/felplex-guatemala-api-contract.md`  
-**Implementación:** `supabase/functions/_shared/felplex/*`  
-**Pruebas:** `felplex_guatemala_contract.test.ts` (24 escenarios GT)
+**Rama:** `integrate/felplex-phase-1a3` @ `ac13a36567e38c4c33fd3e5e6d623a8a4597294a` (runtime Edge Stage **v2**)
+**Contrato interno:** `docs/felplex-guatemala-api-contract.md`
+**Implementación:** `supabase/functions/_shared/felplex/*`
+**Pruebas:** `felplex_guatemala_contract.test.ts` + suite `test:felplex-1a` — **75/75 PASS** (local, post-fix Postman)
+**Postman export SHA-256 (2026-09-10):** `388d18c3c876064743230ba6d6bd3dee52bf527f61b6654e21dc258e6f5aeaa6` — **no versionado en repo**
 
 ---
 
@@ -28,7 +29,7 @@
 
 - `FELPLEX_CONTRACT_HTTP_CONFIRMED` permanezca apagado (barrera de código);
 - `emission_enabled=false`;
-- existan campos **UNCONFIRMED** críticos (IVA/`without_iva`, `datetime_issue`, tipo B/S, idempotencia `external_id`).
+- existan campos **UNCONFIRMED** críticos (`datetime_issue`, tipo B/S alimentos preparados, redondeo IVA por línea vs documento, idempotencia/reconsulta `external_id`).
 
 La implementación es **estáticamente coherente** con la adopción provisional documentada el 2026-08-14, pero **no** constituye confirmación contractual operativa.
 
@@ -65,11 +66,11 @@ Leyenda estado: **MATCH** | **MISMATCH** | **UNCONFIRMED** | **N/A**
 | `items[].qty` | extract | num/string en ejemplos | `1` fijo POS v1 | N/A | INFO |
 | `items[].type` | extract L37,88 | `B` bienes / `S` servicios | `B` provisional alimentos | UNCONFIRMED | **BLOCKER** |
 | `items[].price` | extract | numérico | total factura (IVA incluido) | UNCONFIRMED | HIGH |
-| `items[].without_iva` | extract | often `0` en ejemplos | base calculada 12/112 | UNCONFIRMED | **BLOCKER** |
+| `items[].without_iva` | export 388d18c3… | bandera **0/1** (no base imponible) | POS gravado → `0`; rechazo montos | MATCH (código + tests) | INFO |
 | `items[].taxes` | extract | objeto nulls | EMPTY_TAXES | MATCH | INFO |
 | `total` / `total_tax` | extract | numéricos | Q297 297 / 31.82 tests | UNCONFIRMED | **BLOCKER** |
 | Fórmula IVA | contract; money.ts | 12/112 provisional | `extractVatIncluded` | UNCONFIRMED | **BLOCKER** |
-| `emails` / `emails_cc` | extract | arrays | vacíos POS | MATCH | INFO |
+| `emails` / `emails_cc` | export 388d18c3… | `{ email }[]` | builder emite objetos; vacío POS OK | MATCH (código + tests) | INFO |
 | `to_cf` / `to` CF | extract | CF / NIT | implementado | MATCH | INFO |
 | `exempt_phrase` | extract | null permitido | null | MATCH | INFO |
 | `custom_fields` | extract | opcional | `[]` | MATCH | INFO |
@@ -80,7 +81,7 @@ Leyenda estado: **MATCH** | **MISMATCH** | **UNCONFIRMED** | **N/A**
 
 | Elemento | Fuente | Exigido | Implementación | Estado | Sev. |
 |----------|--------|---------|----------------|--------|------|
-| `valid=true` campos | extract L145-160 | uuid, sat.*, urls | `responseParser.ts` estricto | MATCH | INFO |
+| `valid=true` campos | export 388d18c3… | uuid, serie, no, authorization; `certification_date` opcional | `responseParser.ts` | MATCH (código + tests) | INFO |
 | `valid=false` | extract | errors + codes | parser preserva | MATCH | INFO |
 | URLs PDF/XML Stage | extract | host Stage | allowlist | MATCH | INFO |
 
@@ -93,8 +94,8 @@ Leyenda estado: **MATCH** | **MISMATCH** | **UNCONFIRMED** | **N/A**
 1. **`FELPLEX_CONTRACT_HTTP_CONFIRMED` apagado** — comportamiento correcto; debe permanecer hasta prueba HTTP controlada.
 2. **`emission_enabled=false`** — correcto para fail-closed; requerir runbook separado para piloto.
 3. **`datetime_issue`** — formato/zona no confirmados contractualmente frente a SAT.
-4. **`without_iva` / IVA incluido** — ejemplos Postman con `0` vs ERP envía base calculada; requiere confirmación FELplex/SAT.
-5. **`total_tax` redondeo** — fórmula 12/112 adoptada provisionalmente; no validada en certificación real.
+4. **`total_tax` redondeo** — fórmula 12/112 a nivel documento en código/tests; redondeo **por línea** vs total no confirmado en certificación real.
+5. ~~**`without_iva` / emails / parser date**~~ — **resuelto en código** @ `ac13a365` y **desplegado Stage Edge v2** (evidencia deploy); sigue sin HTTP de validación.
 6. **Tipo ítem `B` para consumo alimentos** — regla fiscal ERP provisional.
 7. **`external_id` idempotencia** — sin GET por external_id documentado; riesgo duplicado en reintentos manuales.
 
@@ -106,24 +107,23 @@ Leyenda estado: **MATCH** | **MISMATCH** | **UNCONFIRMED** | **N/A**
 
 ### MEDIUM
 
-1. `emails` en extract como objetos `{email}` vs ERP envía `[]` (vacío permitido para CF operativo).
+1. `emails` vacíos en POS — permitido; cuando hay correo, formato `{ email }` implementado.
 2. GET/DELETE modelados pero no operativos (decisión consciente).
 
 ### LOW / INFO
 
 1. Transporte, headers, host Stage, parser, timeout cat. B — alineados con adopción provisional.
-2. Edge desplegada fail-closed (evidencia separada).
-3. Deno GT tests 24/24 en suite Guatemala.
+2. Edge Stage **v2** desplegada fail-closed @ `ac13a365` (evidencia separada).
+3. Deno FELplex **75/75 PASS** local (`test:felplex-1a`).
 
 ---
 
-## 5. Decisión sobre código
+## 5. Decisión sobre código (actualización post-`ac13a365`)
 
-**No modificar código** en esta auditoría.
-
-- La implementación refleja la **adopción provisional** acordada localmente (2026-08-14).
+- Corrección payload/parser **mergeada en rama** y **runtime Stage v2** desplegado fail-closed (2026-09-10).
 - Mantener **`FELPLEX_CONTRACT_HTTP_CONFIRMED` apagado** hasta prueba HTTP Stage con empresa `547` y validación de respuesta real.
-- **No** declarar contrato confirmado.
+- Mantener **`FELPLEX_HTTP_ENABLED` apagado**, **`emission_enabled=false`**, **Producción NOT TOUCHED**.
+- **No** declarar contrato confirmado mientras persistan UNCONFIRMED listados abajo.
 
 ---
 
@@ -139,8 +139,30 @@ Leyenda estado: **MATCH** | **MISMATCH** | **UNCONFIRMED** | **N/A**
 
 ---
 
-## Actualización post-auditoría (export Postman SHA `388d18c3…`, 2026-09-10)
+## 7. RESUELTO EN CÓDIGO Y DESPLEGADO STAGE V2 (`ac13a365`, Edge plataforma **2**)
 
-Corrección de código (sin HTTP): `without_iva` como bandera **0/1**; `emails`/`emails_cc` como `{ email }[]`; parser acepta `valid=true` sin `sat.certification_date`. Ambigüedades datetime/B-S/redondeo por línea/idempotencia siguen **UNCONFIRMED**. Colección cruda **no** versionada en repo.
+| Tema | Estado |
+|------|--------|
+| `without_iva` bandera **0/1** (no base imponible) | **Implementado** — POS gravado envía **0** |
+| `taxable_base` / montos en `without_iva` | **No enviados** (rechazo explícito en builder) |
+| `emails` / `emails_cc` | **`{ email }[]`** |
+| `sat.certification_date` en `valid=true` | **Opcional** en parser |
+| `total_tax` IVA incluido 12/112 | **Conservado** en builder + tests |
+| Pruebas locales | **75/75 PASS** (`npm run test:felplex-1a`) |
+| HTTP FELplex | **NOT EXECUTED** |
+| Primera certificación SAT | **NOT EXECUTED** |
+| Prueba runtime **C** | **NOT EXECUTED** — NO SAFE STAGE USER SESSION |
+| `FELPLEX_CONTRACT_HTTP_CONFIRMED` | **OFF/unset** |
+| `FELPLEX_HTTP_ENABLED` | **OFF/unset** |
+| `emission_enabled` | **false** |
 
-*Fin auditoría contractual — 2026-09-10*
+## 8. UNCONFIRMED (sin cambio de autorización HTTP)
+
+- Formato y zona horaria exactos de **`datetime_issue`**
+- Tipo **B/S** específico para alimentos preparados (regla fiscal definitiva)
+- Redondeo IVA **por línea** versus **documento**
+- Idempotencia / reconsulta por **`external_id`**
+
+Colección Postman SHA `388d18c3…` usada para auditoría; **no** versionada en repo. Posible credencial histórica en export — **no** impresa ni commitada.
+
+*Fin auditoría contractual — actualizado post Edge v2 — 2026-09-10*
