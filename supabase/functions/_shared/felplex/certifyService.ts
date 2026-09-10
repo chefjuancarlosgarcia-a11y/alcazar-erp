@@ -258,7 +258,7 @@ export async function certifyInvoice(
       satAuthorization: adapted.satAuthorization,
       satSeries: adapted.satSeries,
       satDocumentNumber: adapted.satDocumentNumber,
-      certifiedAt: adapted.certifiedAt ?? deps.nowIso,
+      certifiedAt: adapted.certifiedAt ?? null,
       httpStatus: transportResult.httpStatus ?? 200,
       safeResponsePayload: buildSafeSuccessPayload({
         httpStatus: transportResult.httpStatus ?? 200,

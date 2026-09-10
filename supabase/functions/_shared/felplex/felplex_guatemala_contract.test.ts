@@ -6,7 +6,10 @@ import { resolveFelplexItemType } from "./itemType.ts"
 import {
   buildFelplexPayload,
   externalIdFromDocument,
+  isFelplexWithoutIvaFlag,
   payloadContainsSecrets,
+  sanitizeEmailList,
+  validateBuiltPayload,
 } from "./payloadBuilder.ts"
 import { extractVatIncluded, roundMoney } from "./money.ts"
 import { parseFelplexCertifyResponse, normalizeSatDocumentNumber } from "./responseParser.ts"
@@ -64,6 +67,8 @@ Deno.test("GT-01 payload FACT consumidor final provisional", () => {
   assertEquals(build.payload.to?.tax_code, "CF")
   assertEquals(build.payload.emails_cc.length, 0)
   assertEquals(build.payload.custom_fields.length, 0)
+  assertEquals(build.payload.items[0].without_iva, 0)
+  assertNotEquals(build.payload.items[0].without_iva, 265.18)
 })
 
 Deno.test("GT-02 payload FACT cliente NIT ficticio", () => {
@@ -73,6 +78,7 @@ Deno.test("GT-02 payload FACT cliente NIT ficticio", () => {
   assertEquals(build.payload.to_cf, 0)
   assertEquals(build.payload.to?.tax_code, "9001001-9")
   assertEquals(build.payload.to?.tax_name, "Cliente Ficticio Stage")
+  assertEquals(build.payload.emails, [{ email: "cliente.ficticio@stage-fel.test" }])
 })
 
 Deno.test("GT-03 external_id estable y obligatorio", () => {
@@ -99,6 +105,39 @@ Deno.test("GT-05 dinero sin floating point ingenuo", () => {
   assertEquals(totals.taxableBase, 265.18)
   assertEquals(totals.vatTotal, 31.82)
   assertEquals(roundMoney(0.1 + 0.2), 0.3)
+  const q297 = buildFelplexPayload(makeQ297Document(), { datetimeIssue: FIXED_DATETIME })
+  assertEquals(q297.ok, true)
+  if (q297.ok) {
+    assertEquals(q297.payload.total, 297)
+    assertEquals(q297.payload.total_tax, 31.82)
+    assertEquals(q297.payload.items[0].without_iva, 0)
+  }
+  const contractual = extractVatIncluded(5592.16)
+  assertEquals(contractual.taxableBase, 4993.0)
+  assertEquals(contractual.vatTotal, 599.16)
+})
+
+Deno.test("GT-05b without_iva bandera y rechazo de montos monetarios", () => {
+  assertEquals(isFelplexWithoutIvaFlag(0), true)
+  assertEquals(isFelplexWithoutIvaFlag(1), true)
+  assertEquals(isFelplexWithoutIvaFlag(265.18), false)
+  const good = buildFelplexPayload(makeQ297Document(), { datetimeIssue: FIXED_DATETIME })
+  assertEquals(good.ok, true)
+  if (!good.ok) return
+  const bad = {
+    ...good.payload,
+    items: [{ ...good.payload.items[0], without_iva: 265.18 as unknown as 0 }],
+  }
+  assertEquals(validateBuiltPayload(bad), "FEL_ITEM_WITHOUT_IVA_INVALID")
+})
+
+Deno.test("GT-05c emails estructura Postman y lista vacia segura", () => {
+  assertEquals(sanitizeEmailList(null), [])
+  assertEquals(sanitizeEmailList("  "), [])
+  assertEquals(sanitizeEmailList("bad"), [])
+  assertEquals(sanitizeEmailList("a@b.co"), [{ email: "a@b.co" }])
+  const cf = buildFelplexPayload(makeQ297Document(), { datetimeIssue: FIXED_DATETIME })
+  assertEquals(cf.ok && cf.payload.emails.length === 0, true)
 })
 
 Deno.test("GT-06 rechaza negativos NaN Infinity", () => {
@@ -201,6 +240,25 @@ Deno.test("GT-16 valid=true parseado estrictamente", () => {
   if (parsed.ok) {
     assertEquals(parsed.data.satDocumentNumber, "123")
     assertEquals(parsed.data.felUuid, SANITIZED_CERTIFY_SUCCESS_RESPONSE.uuid)
+    assertEquals(parsed.data.certifiedAt, "2026-08-08T20:00:00")
+  }
+})
+
+Deno.test("GT-16b valid=true sin certification_date aceptado", () => {
+  const body = {
+    ...SANITIZED_CERTIFY_SUCCESS_RESPONSE,
+    sat: {
+      ...SANITIZED_CERTIFY_SUCCESS_RESPONSE.sat,
+      certification_date: undefined,
+    },
+    invoice_url: undefined,
+    invoice_xml: undefined,
+  }
+  const parsed = parseFelplexCertifyResponse(body, 200)
+  assertEquals(parsed.ok, true)
+  if (parsed.ok) {
+    assertEquals(parsed.data.certifiedAt, undefined)
+    assertEquals(parsed.data.invoiceUrl, undefined)
   }
 })
 
@@ -277,6 +335,12 @@ Deno.test("GT-23 payload sin aliases sensibles prohibidos", () => {
   for (const key of ["service_role", "clientsecret", "x-authorization", "bearer"]) {
     assertEquals(text.includes(key), false)
   }
+})
+
+Deno.test("GT-25 ambiguedades contractuales siguen UNCONFIRMED documentadas", () => {
+  assertEquals(formatFelplexDatetimeIssue("2026-08-08T12:00:00") != null, true)
+  assertEquals(resolveFelplexItemType(makeQ297Document()), "B")
+  assertEquals(externalIdFromDocument(makeQ297Document()), makeQ297Document().external_id)
 })
 
 Deno.test("GT-24 redirect bloqueado en transporte", async () => {

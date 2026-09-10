@@ -84,12 +84,19 @@ export interface PaymentReconciliation {
   balance_due: number
 }
 
+/** Postman GT: 0 = ítem con IVA, 1 = ítem sin IVA (no es base imponible). */
+export type FelplexWithoutIvaFlag = 0 | 1
+
+export interface FelplexEmailEntry {
+  email: string
+}
+
 export interface FelplexPayloadItem {
   qty: number
   type: "B" | "S"
   price: number
   description: string
-  without_iva: number
+  without_iva: FelplexWithoutIvaFlag
   discount: number
   is_discount_percentage: number
   taxes: {
@@ -125,8 +132,8 @@ export interface FelplexPayloadCandidate {
   items: FelplexPayloadItem[]
   total: number
   total_tax: number
-  emails: string[]
-  emails_cc: string[]
+  emails: FelplexEmailEntry[]
+  emails_cc: FelplexEmailEntry[]
   to_cf?: number
   to?: FelplexPayloadReceiver
   exempt_phrase: null

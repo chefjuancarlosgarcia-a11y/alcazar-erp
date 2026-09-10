@@ -137,4 +137,10 @@ Leyenda estado: **MATCH** | **MISMATCH** | **UNCONFIRMED** | **N/A**
 
 ---
 
+---
+
+## Actualización post-auditoría (export Postman SHA `388d18c3…`, 2026-09-10)
+
+Corrección de código (sin HTTP): `without_iva` como bandera **0/1**; `emails`/`emails_cc` como `{ email }[]`; parser acepta `valid=true` sin `sat.certification_date`. Ambigüedades datetime/B-S/redondeo por línea/idempotencia siguen **UNCONFIRMED**. Colección cruda **no** versionada en repo.
+
 *Fin auditoría contractual — 2026-09-10*

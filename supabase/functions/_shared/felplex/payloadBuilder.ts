@@ -6,7 +6,13 @@ import {
 import { formatFelplexDatetimeIssue } from "./datetimeIssue.ts"
 import { resolveFelplexItemType } from "./itemType.ts"
 import { assertDocumentMoney, extractVatIncluded, moneyEquals, roundMoney } from "./money.ts"
-import type { BuildPayloadResult, FelDocumentRow, FelplexPayloadCandidate } from "./types.ts"
+import type {
+  BuildPayloadResult,
+  FelDocumentRow,
+  FelplexEmailEntry,
+  FelplexPayloadCandidate,
+  FelplexWithoutIvaFlag,
+} from "./types.ts"
 
 export const FELPLEX_CONTRACT_UNCONFIRMED = "FELPLEX_CONTRACT_UNCONFIRMED" as const
 export const FELPLEX_PAYLOAD_INVALID = "FELPLEX_PAYLOAD_INVALID" as const
@@ -94,7 +100,27 @@ function validateDocumentForPayload(document: FelDocumentRow, datetimeIssue: str
     if (!document.receiver_nit.trim()) return "FEL_RECEIVER_NIT_REQUIRED"
   }
 
+  const withoutIvaFlag = resolveTaxedItemWithoutIvaFlag(document)
+  if (withoutIvaFlag === null) {
+    return "FEL_EXEMPT_SALE_NOT_SUPPORTED"
+  }
+
   return null
+}
+
+/**
+ * POS v1: solo ventas gravadas (without_iva=0). Exento (flag 1) requiere exempt_phrase — no soportado.
+ */
+export function resolveTaxedItemWithoutIvaFlag(
+  document: Pick<FelDocumentRow, "vat_total" | "invoice_total">,
+): FelplexWithoutIvaFlag | null {
+  if (document.invoice_total <= 0) return null
+  if (document.vat_total === 0) return null
+  return 0
+}
+
+export function isFelplexWithoutIvaFlag(value: unknown): value is FelplexWithoutIvaFlag {
+  return value === 0 || value === 1
 }
 
 function buildValidatedFactPayload(
@@ -105,14 +131,14 @@ function buildValidatedFactPayload(
   const itemType = resolveFelplexItemType(document)!
   const invoiceTotal = roundMoney(document.invoice_total)
   const totalTax = roundMoney(document.vat_total)
-  const withoutIva = roundMoney(document.taxable_base)
+  const withoutIvaFlag = resolveTaxedItemWithoutIvaFlag(document)!
 
   const item = {
     qty: 1,
     type: itemType,
     price: invoiceTotal,
     description: truncateDescription(document.fiscal_description),
-    without_iva: withoutIva,
+    without_iva: withoutIvaFlag,
     discount: 0,
     is_discount_percentage: 0,
     taxes: { ...EMPTY_TAXES },
@@ -153,7 +179,7 @@ function buildValidatedFactPayload(
   return payload
 }
 
-function validateBuiltPayload(payload: FelplexPayloadCandidate): string | null {
+export function validateBuiltPayload(payload: FelplexPayloadCandidate): string | null {
   if (payloadContainsForbiddenKeys(payload)) {
     return "FEL_FORBIDDEN_PAYLOAD_KEY"
   }
@@ -166,10 +192,25 @@ function validateBuiltPayload(payload: FelplexPayloadCandidate): string | null {
     return "FEL_ITEMS_REQUIRED"
   }
 
+  const emailError = validateEmailEntries(payload.emails, "FEL_EMAILS_INVALID")
+  if (emailError) return emailError
+  const emailCcError = validateEmailEntries(payload.emails_cc, "FEL_EMAILS_CC_INVALID")
+  if (emailCcError) return emailCcError
+
   let itemsTotal = 0
   for (const item of payload.items) {
-    if (!isSafeMoney(item.price) || !isSafeMoney(item.without_iva) || !isSafeMoney(item.discount)) {
+    if (!isSafeMoney(item.price) || !isSafeMoney(item.discount)) {
       return "FEL_ITEM_MONEY_INVALID"
+    }
+    if (!isFelplexWithoutIvaFlag(item.without_iva)) {
+      return "FEL_ITEM_WITHOUT_IVA_INVALID"
+    }
+    if (item.without_iva === 1) {
+      if (payload.exempt_phrase == null) {
+        return "FEL_EXEMPT_PHRASE_REQUIRED"
+      }
+    } else if (payload.exempt_phrase != null) {
+      return "FEL_EXEMPT_PHRASE_UNEXPECTED"
     }
     if (!Number.isInteger(item.qty) || item.qty < 1) {
       return "FEL_ITEM_QTY_INVALID"
@@ -218,11 +259,21 @@ function truncateDescription(value: string): string {
   return trimmed.slice(0, FELPLEX_DESCRIPTION_MAX_LENGTH)
 }
 
-function sanitizeEmailList(email: string | null): string[] {
+export function sanitizeEmailList(email: string | null): FelplexEmailEntry[] {
   if (!email) return []
   const trimmed = email.trim()
   if (!trimmed || trimmed.includes("@") === false) return []
-  return [trimmed]
+  return [{ email: trimmed }]
+}
+
+function validateEmailEntries(entries: FelplexEmailEntry[], code: string): string | null {
+  if (!Array.isArray(entries)) return code
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object") return code
+    const email = typeof entry.email === "string" ? entry.email.trim() : ""
+    if (!email || !email.includes("@")) return code
+  }
+  return null
 }
 
 function buildReceiverAddress(raw: string | null) {

@@ -1,8 +1,8 @@
 # FELplex Guatemala — contrato público adoptado (provisional)
 
 **Fecha de adopción local:** 2026-08-14  
-**Última auditoría contractual:** 2026-09-10 — `docs/evidence/felplex/2026-09-10-guatemala-contract-audit.md`
-**Rama:** `integrate/felplex-phase-1a3` @ `c3b91ec6376183aeafeb67f55af7fa5c1db2566c`
+**Última auditoría contractual:** 2026-09-10 — export Postman completo (SHA abajo) + alineación código 2026-09-10
+**Rama:** `integrate/felplex-phase-1a3` (post-fix payload Postman v2.1)
 **Estado:** provisional — **HTTP bloqueado**; Edge Stage desplegada fail-closed (**no** sustituye confirmación contractual)
 
 ---
@@ -15,10 +15,10 @@
 | Formato | Postman Collection v2.1 |
 | Tamaño observado | 359 881 bytes |
 | SHA-256 observado (2026-08-14) | `f9899fbcc3787d96c9967abd3429df7a232f17b3b6fc518c1f5c17b69777b3ce` |
-| Re-verificación 2026-09-10 | **No** — URL pública sin descarga Postman; hash completo **no** recalculado |
+| SHA-256 export completo (2026-09-10) | `388d18c3c876064743230ba6d6bd3dee52bf527f61b6654e21dc258e6f5aeaa6` |
 | Extracto local sanitizado | `docs/felplex-extract.txt` — SHA-256 `2B40511A345790F8D14D914A99C59AD3569B5BEB636484B5BEDC60A6447F5D34` (≠ colección completa) |
 
-La colección completa **no** se copia al repositorio (ejemplos extensos y datos ficticios de terceros).
+La colección completa **no** se versiona en el repo (ejemplos con datos de terceros y posible credencial histórica en respuestas guardadas de Postman). Referencia local read-only fuera del repositorio únicamente para auditoría.
 
 ---
 
@@ -77,7 +77,7 @@ La configuración operativa por entidad y ambiente vive en **`billing_provider_c
     "type": "B",
     "price": 297,
     "description": "Consumo de Alimentos",
-    "without_iva": 265.18,
+    "without_iva": 0,
     "discount": 0,
     "is_discount_percentage": 0,
     "taxes": {
@@ -91,7 +91,7 @@ La configuración operativa por entidad y ambiente vive en **`billing_provider_c
   }],
   "total": 297,
   "total_tax": 31.82,
-  "emails": [],
+  "emails": [{ "email": "cliente@example.com" }],
   "emails_cc": [],
   "to_cf": 1,
   "to": {
@@ -119,8 +119,15 @@ Implementación: `supabase/functions/_shared/felplex/payloadBuilder.ts`
 
 ### Éxito funcional (`valid: true`)
 
-Campos mínimos exigidos por parser: `uuid`, `sat.serie`, `sat.no`, `sat.authorization`, `sat.certification_date`.  
-`invoice_url` / `invoice_xml` deben pertenecer al host Stage.
+Campos mínimos exigidos por parser en `valid: true`: `uuid`, `sat.serie`, `sat.no`, `sat.authorization`.
+`sat.certification_date` es **opcional** (observado ausente en ejemplos GT); no se inventa.
+`invoice_url` / `invoice_xml` opcionales; si vienen, deben pertenecer al host Stage.
+
+**Confirmado (Postman Variables generales, export 2026-09-10):** `without_iva` es bandera **0** (con IVA) / **1** (sin IVA); el IVA monetario va en `total_tax`. Base imponible **no** se envía en `without_iva`.
+**Confirmado:** `emails` / `emails_cc` como arreglos de `{ "email": "…" }`.
+
+**UNCONFIRMED (sin cambio de comportamiento):** formato/zona `datetime_issue`; tipo B/S alimentos preparados; redondeo IVA por línea vs total; idempotencia/reconsulta por `external_id`.
+**HTTP:** NOT EXECUTED. `FELPLEX_CONTRACT_HTTP_CONFIRMED` permanece apagado.
 
 ### Fallo funcional (`valid: false`)
 
@@ -134,7 +141,7 @@ HTTP 200 con `valid: false` **no** es certificación. Se preservan `errors` (ani
 |---|------|--------|
 | 1 | `external_id` recomendado; sin GET por external_id; idempotencia no confirmada | **Pendiente** |
 | 2 | `datetime_issue`: docs `YYYY-MM-dd` vs ejemplos ISO | **Provisional** → adoptamos ISO |
-| 3 | IVA / `total_tax` — redondeo oficial no confirmado | **Provisional** → fórmula 12/112 |
+| 3 | IVA / `total_tax` — redondeo por línea vs total no confirmado | **Provisional** → fórmula 12/112 a nivel documento |
 | 4 | Timeouts — códigos reintentables no documentados | **Bloqueante** — sin auto-retry POST |
 | 5 | `empresa` Stage vía billing bootstrap; API key solo en secretos Edge (nombre `FELPLEX_GT_STAGE_API_KEY`) — contrato HTTP sigue sin confirmar | **Bloqueante antes de HTTP** |
 | 6 | Tipo ítem `B`/`S` — regla fiscal ERP definitiva | **Provisional** — B para consumo alimentos |
@@ -149,8 +156,10 @@ HTTP 200 con `valid: false` **no** es certificación. Se preservan `errors` (ani
 | Header `X-Authorization` | ✓ | | |
 | POST `/invoices/await` | ✓ | | |
 | Payload FACT estructura base | ✓ | | |
+| `without_iva` bandera 0/1 | ✓ | | |
+| `emails` objeto `{ email }` | ✓ | | |
 | `datetime_issue` ISO | | ✓ | ✓ |
-| IVA incluido 12/112 | | ✓ | ✓ |
+| IVA incluido 12/112 (`total_tax`) | ✓ | | |
 | Tipo ítem B consumo alimentos | | ✓ | ✓ |
 | Parser `valid` true/false | ✓ | | |
 | Timeout → resultado ambiguo (cat. B) | ✓ | | |

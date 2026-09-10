@@ -8,7 +8,8 @@ export type FelplexParsedCertification = {
   satSeries: string
   satDocumentNumber: string
   satAuthorization: string
-  certifiedAt: string
+  /** SAT certification_date when present; omitted when provider does not return it. */
+  certifiedAt?: string
   invoiceUrl?: string
   invoiceXml?: string
   certifierName?: string
@@ -131,11 +132,12 @@ export function parseFelplexCertifyResponse(
     : ""
   const satSeries = typeof parsed.sat?.serie === "string" ? parsed.sat.serie.trim() : ""
   const satNo = normalizeSatDocumentNumber(parsed.sat?.no)
-  const certifiedAt = typeof parsed.sat?.certification_date === "string"
-    ? parsed.sat.certification_date.trim()
-    : ""
+  const certifiedAtRaw = parsed.sat?.certification_date
+  const certifiedAt = typeof certifiedAtRaw === "string" && certifiedAtRaw.trim()
+    ? certifiedAtRaw.trim()
+    : undefined
 
-  if (!satAuthorization || !satSeries || !satNo || !certifiedAt) {
+  if (!satAuthorization || !satSeries || !satNo) {
     return {
       ok: false,
       kind: "incomplete",
