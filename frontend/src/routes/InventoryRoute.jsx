@@ -1,6 +1,7 @@
 import { Navigate, useSearchParams } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
 import { buildRequisitionUrlFromInventorySearchParams } from "../utils/requisitionRouteParams"
+import { shouldRedirectInventoryRequisitionSection } from "../utils/requisitionRouteAccess.js"
 import ProtectedRoute from "./ProtectedRoute"
 import Inventory from "../pages/Inventory"
 
@@ -13,7 +14,7 @@ export default function InventoryRoute() {
   const [searchParams] = useSearchParams()
   const section = searchParams.get("section") || "inventario"
 
-  if (section === "requisicion" && canAccess("requisitions")) {
+  if (shouldRedirectInventoryRequisitionSection(section, canAccess("requisitions"))) {
     return <Navigate to={buildRequisitionUrlFromInventorySearchParams(searchParams)} replace />
   }
 

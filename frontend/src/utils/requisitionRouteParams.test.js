@@ -18,8 +18,13 @@ test("legacy inventory search params map to canonical requisitions URL", () => {
   const params = new URLSearchParams("section=requisicion&id=9&tab=draft&approve=&testFlow=all&focus=1&action=open")
   assert.equal(
     buildRequisitionUrlFromInventorySearchParams(params),
-    "/requisitions?id=9&tab=draft&testFlow=all&focus=1&action=open"
+    "/requisitions?id=9&tab=draft&testFlow=all&focus=1"
   )
+})
+
+test("action query param is not consumed by RequisitionsSupabase props", () => {
+  const params = new URLSearchParams("id=1&action=open")
+  assert.equal(Object.hasOwn(parseRequisitionRouteSearchParams(params), "initialAction"), false)
 })
 
 test("parseRequisitionRouteSearchParams matches Inventory requisition props", () => {

@@ -91,7 +91,26 @@ test("protected route modules: barista passes requisitions only", () => {
 test("InventoryRoute redirects legacy requisicion section before inventory guard", () => {
   const routePath = join(__dirname, "../routes/InventoryRoute.jsx")
   const source = readFileSync(routePath, "utf8")
-  assert.match(source, /section === "requisicion"/)
+  assert.match(source, /shouldRedirectInventoryRequisitionSection/)
   assert.match(source, /canAccess\("requisitions"\)/)
   assert.match(source, /buildRequisitionUrlFromInventorySearchParams/)
+})
+
+test("barista UI hides elevated approve and fulfill controls in shared component", () => {
+  const source = readFileSync(join(__dirname, "../pages/RequisitionsSupabase.jsx"), "utf8")
+  assert.match(source, /canApprove && request\.status === "pending"/)
+  assert.match(source, /canComplete && request\.status === "approved"/)
+  assert.match(source, /canApprove = isElevated/)
+})
+
+test("encargado_almacen and gerente_general retain elevated workflow caps", () => {
+  assert.equal(requisitionApprovalCaps("encargado_almacen").canApprove, true)
+  assert.equal(requisitionApprovalCaps("gerente_general").canApprove, true)
+})
+
+test("non-elevated requesters limit destination areas to operational assignments", () => {
+  const source = readFileSync(join(__dirname, "../pages/RequisitionsSupabase.jsx"), "utf8")
+  assert.match(source, /allowedDestinationAreas = isElevated/)
+  assert.match(source, /operationalAreaIds\.includes\(area\.id\)/)
+  assert.match(source, /canCreate = isElevated \|\| \(operationalAreaIds\.length > 0/)
 })

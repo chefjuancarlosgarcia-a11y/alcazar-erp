@@ -1,6 +1,7 @@
 import { TEST_FLOW_FILTER } from "./testFlowMode.js"
 
-export const REQUISITION_DEEP_LINK_KEYS = ["id", "tab", "approve", "testFlow", "focus", "action"]
+/** Consumed by RequisitionsSupabase via parseRequisitionRouteSearchParams. */
+export const REQUISITION_DEEP_LINK_KEYS = ["id", "tab", "approve", "testFlow", "focus"]
 
 /** Build canonical /requisitions URL preserving deep-link query params. */
 export function buildRequisitionUrl(params = {}) {
@@ -20,8 +21,7 @@ export function buildRequisitionUrlFromInventorySearchParams(searchParams) {
     tab: searchParams.get("tab") || "",
     approve: searchParams.get("approve") || "",
     testFlow: testFlowParam,
-    focus: searchParams.get("focus") === "1" ? "1" : "",
-    action: searchParams.get("action") || ""
+    focus: searchParams.get("focus") === "1" ? "1" : ""
   })
 }
 

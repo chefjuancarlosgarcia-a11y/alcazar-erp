@@ -36,7 +36,7 @@ export const ROLE_PERMISSIONS = {
   cajero: ["pos", "cash", "hr"],
   caja: ["pos", "cash", "hr"],
   mesero: ["pos", "hr"],
-  cocinero: withRequisitions(["inventory", "production", "hr"]),
+  cocinero: ["inventory", "production", "hr"],
   cocina: withRequisitions(["inventory", "production", "hr"]),
   encargado_area: withRequisitions(["inventory", "production", "hr", "tasks"]),
   barista: withRequisitions(["production", "hr"]),
@@ -62,4 +62,20 @@ export function permissionsForRole(role) {
 
 export function canAccessModule(role, module) {
   return permissionsForRole(role).includes(module)
+}
+
+/** Roles explicitly granted the logical requisitions module in this change set. */
+export const ROLES_WITH_REQUISITIONS_MODULE = [
+  "admin",
+  "gerente_general",
+  "gerente",
+  "supervisor",
+  "encargado_area",
+  "encargado_almacen",
+  "cocina",
+  "barista"
+]
+
+export function roleHasRequisitionsModule(role) {
+  return ROLES_WITH_REQUISITIONS_MODULE.includes(role)
 }
