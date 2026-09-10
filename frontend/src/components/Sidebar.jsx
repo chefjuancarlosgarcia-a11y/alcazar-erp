@@ -186,35 +186,6 @@ const mobileSidebarStyle = {
   boxShadow: "18px 0 42px rgba(0, 0, 0, .42)"
 }
 
-const brandStyle = {
-  display: "flex",
-  alignItems: "center",
-  gap: "12px",
-  marginBottom: "28px",
-  padding: "12px",
-  border: "1px solid #1f3046",
-  borderRadius: "16px",
-  background: "rgba(15, 23, 42, .72)"
-}
-
-const compactBrandStyle = { marginBottom: "18px", padding: "10px" }
-
-const brandIconStyle = {
-  display: "grid",
-  placeItems: "center",
-  width: "42px",
-  height: "42px",
-  flex: "0 0 42px",
-  border: "1px solid",
-  borderRadius: "14px",
-  background: "rgba(20, 184, 166, .1)",
-  fontWeight: 950,
-  letterSpacing: "-.04em"
-}
-
-const brandLogoImageStyle = { width: "100%", height: "100%", objectFit: "cover", borderRadius: "12px" }
-const brandTextStyle = { minWidth: 0 }
-const brandSubtitleStyle = { display: "block", color: "#94a3b8", fontSize: "0.82rem", marginTop: "2px" }
 const navStyle = { display: "grid", gap: "6px" }
 const navGroupStyle = { display: "grid", gap: "5px" }
 
