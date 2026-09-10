@@ -1,6 +1,7 @@
 export const MODULES = {
   dashboard: "/dashboard",
   inventory: "/inventory",
+  requisitions: "/requisitions",
   pos: "/pos",
   cash: "/cash",
   production: "/production",
@@ -14,24 +15,31 @@ export const MODULES = {
   bakery: "/bakery"
 }
 
+const REQUISITIONS_MODULE = "requisitions"
+
+function withRequisitions(permissions) {
+  if (permissions.includes(REQUISITIONS_MODULE)) return permissions
+  return [...permissions, REQUISITIONS_MODULE]
+}
+
 export const ROLE_PERMISSIONS = {
-  admin: ["dashboard", "inventory", "pos", "cash", "production", "hr", "tasks", "reports", "catering", "finance", "settings", "operations_center", "bakery"],
+  admin: withRequisitions(["dashboard", "inventory", "pos", "cash", "production", "hr", "tasks", "reports", "catering", "finance", "settings", "operations_center", "bakery"]),
   ceo: ["dashboard", "inventory", "pos", "cash", "production", "hr", "tasks", "reports", "catering", "settings"],
-  gerente_general: ["dashboard", "inventory", "pos", "cash", "production", "hr", "tasks", "reports", "catering", "finance", "settings", "operations_center", "bakery"],
-  gerente: ["dashboard", "inventory", "hr", "tasks", "bakery"],
+  gerente_general: withRequisitions(["dashboard", "inventory", "pos", "cash", "production", "hr", "tasks", "reports", "catering", "finance", "settings", "operations_center", "bakery"]),
+  gerente: withRequisitions(["dashboard", "inventory", "hr", "tasks", "bakery"]),
   gerente_operaciones: ["pos", "production", "hr", "catering"],
-  encargado_almacen: ["inventory"],
+  encargado_almacen: withRequisitions(["inventory"]),
   rrhh: ["inventory", "hr", "tasks"],
   recursos_humanos: ["inventory", "hr", "tasks"],
-  supervisor: ["dashboard", "pos", "cash", "production", "hr", "tasks", "inventory", "reports"],
+  supervisor: withRequisitions(["dashboard", "pos", "cash", "production", "hr", "tasks", "inventory", "reports"]),
   ventas: ["tasks", "catering"],
   cajero: ["pos", "cash", "hr"],
   caja: ["pos", "cash", "hr"],
   mesero: ["pos", "hr"],
   cocinero: ["inventory", "production", "hr"],
-  cocina: ["inventory", "production", "hr"],
-  encargado_area: ["inventory", "production", "hr", "tasks"],
-  barista: ["production", "hr"],
+  cocina: withRequisitions(["inventory", "production", "hr"]),
+  encargado_area: withRequisitions(["inventory", "production", "hr", "tasks"]),
+  barista: withRequisitions(["production", "hr"]),
   bartender: ["production", "hr"],
   pizzero: ["production", "hr"],
   pizzeria: ["production", "hr"],
@@ -54,4 +62,20 @@ export function permissionsForRole(role) {
 
 export function canAccessModule(role, module) {
   return permissionsForRole(role).includes(module)
+}
+
+/** Roles explicitly granted the logical requisitions module in this change set. */
+export const ROLES_WITH_REQUISITIONS_MODULE = [
+  "admin",
+  "gerente_general",
+  "gerente",
+  "supervisor",
+  "encargado_area",
+  "encargado_almacen",
+  "cocina",
+  "barista"
+]
+
+export function roleHasRequisitionsModule(role) {
+  return ROLES_WITH_REQUISITIONS_MODULE.includes(role)
 }

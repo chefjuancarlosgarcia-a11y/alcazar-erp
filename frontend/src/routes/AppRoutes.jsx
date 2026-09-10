@@ -45,7 +45,8 @@ function lazyWithPerformanceLogging(moduleName, factory) {
 
 const Dashboard = lazyWithPerformanceLogging("dashboard", () => import("../pages/Dashboard"))
 const HR = lazyWithPerformanceLogging("hr", () => import("../pages/HR"))
-const Inventory = lazyWithPerformanceLogging("inventory", () => import("../pages/Inventory"))
+const InventoryRoute = lazyWithPerformanceLogging("inventory", () => import("./InventoryRoute"))
+const RequisitionsPage = lazyWithPerformanceLogging("requisitions", () => import("../pages/RequisitionsPage"))
 const POS = lazyWithPerformanceLogging("pos", () => import("../pages/POS"))
 const Cashier = lazyWithPerformanceLogging("cash", () => import("../pages/Cashier"))
 const CashManagement = lazyWithPerformanceLogging("cash_control", () => import("../pages/CashManagement"))
@@ -110,7 +111,8 @@ function AppRoutes() {
           <Route element={<MainLayout />}>
             <Route index element={<DefaultRedirect />} />
             <Route path="/dashboard" element={<ProtectedRoute module="dashboard"><Dashboard /></ProtectedRoute>} />
-            <Route path="/inventory" element={<ProtectedRoute module="inventory"><Inventory /></ProtectedRoute>} />
+            <Route path="/inventory" element={<InventoryRoute />} />
+            <Route path="/requisitions" element={<ProtectedRoute module="requisitions"><RequisitionsPage /></ProtectedRoute>} />
             <Route path="/pos" element={<ProtectedRoute module="pos"><POS /></ProtectedRoute>} />
             <Route path="/cash" element={<ProtectedRoute module="cash"><Cashier /></ProtectedRoute>} />
             <Route path="/cashier" element={<ProtectedRoute module="cash"><Cashier /></ProtectedRoute>} />
