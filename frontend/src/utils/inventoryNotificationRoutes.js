@@ -1,3 +1,5 @@
+import { buildRequisitionUrl } from "./requisitionRouteParams.js"
+
 export const PO_WORKFLOW_VIEWS = {
   AUTOMATIC: "automatic",
   MANUAL: "manual",
@@ -85,14 +87,18 @@ export function buildRequisitionNotificationUrl(requisitionOrMeta = {}) {
     : status === "approved"
       ? "approved"
       : status || "all"
-  return buildInventoryUrl({
-    section: "requisicion",
+  return buildRequisitionUrl({
     tab,
     id,
     approve: status === "pending" ? id : "",
     testFlow: isTest ? "test" : "",
     focus: "1"
   })
+}
+
+/** Legacy inventory deep link; redirects to canonical /requisitions via Inventory.jsx */
+export function buildLegacyInventoryRequisitionUrl(params = {}) {
+  return buildInventoryUrl({ section: "requisicion", ...params })
 }
 
 export function resolveNotificationTarget(notification) {

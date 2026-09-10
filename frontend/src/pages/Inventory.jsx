@@ -1,4 +1,5 @@
-import { useSearchParams } from "react-router-dom"
+import { Navigate, useSearchParams } from "react-router-dom"
+import { buildRequisitionUrlFromInventorySearchParams } from "../utils/requisitionRouteParams"
 import InventoryBase from "./InventoryBase"
 import InventoryItemConversions from "./InventoryItemConversions"
 import YieldProfilesCatalog from "./YieldProfilesCatalog"
@@ -6,7 +7,6 @@ import YieldAuditCampaigns from "./YieldAuditCampaigns"
 import InternalProduction from "./InternalProduction"
 import InventoryCategoriesManagement from "./InventoryCategoriesManagement"
 import InventoryDuplicatesManagement from "./InventoryDuplicatesManagement"
-import RequisitionsSupabase from "./RequisitionsSupabase"
 import RecipesSupabase from "./RecipesSupabase"
 import PosImplementationDashboard from "../components/inventory/PosImplementationDashboard"
 import { lazy, Suspense } from "react"
@@ -41,9 +41,6 @@ function Inventory() {
   const focus = searchParams.get("focus") === "1"
   const notificationAction = searchParams.get("action") || ""
   const testFlowParam = searchParams.get("testFlow") || ""
-  const requisitionId = searchParams.get("id") || ""
-  const requisitionTab = searchParams.get("tab") || ""
-  const requisitionApprove = searchParams.get("approve") || ""
   const initialSeccion = allowedSections.has(section) ? section : "inventario"
   const initialTestFlowFilter = testFlowParam === "test"
     ? TEST_FLOW_FILTER.TEST
@@ -56,15 +53,7 @@ function Inventory() {
   }
 
   if (initialSeccion === "requisicion") {
-    return (
-      <RequisitionsSupabase
-        initialRequisitionId={requisitionId}
-        initialTab={requisitionTab}
-        initialApproveId={requisitionApprove}
-        initialTestFlowFilter={initialTestFlowFilter || TEST_FLOW_FILTER.REAL}
-        initialFocus={focus}
-      />
-    )
+    return <Navigate to={buildRequisitionUrlFromInventorySearchParams(searchParams)} replace />
   }
 
   if (initialSeccion === "recetas") {

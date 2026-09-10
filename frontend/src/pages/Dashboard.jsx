@@ -126,7 +126,7 @@ function ExecutiveCommandCenter({ recentTasks = [] }) {
         ? `${kpis.partialRequisitions} parcialmente surtida${kpis.partialRequisitions === 1 ? "" : "s"}`
         : "Por aprobar, completar o surtir",
       tone: kpis?.pendingRequisitions ? "warn" : "good",
-      to: "/inventory?section=requisicion",
+      to: "/requisitions",
       icon: "📋"
     }
   ]), [kpis, curr, prev, cc.productionLate, cc.inventoryOut])
