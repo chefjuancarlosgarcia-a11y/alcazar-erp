@@ -10,6 +10,7 @@
 | **Fecha actualización 230000** | 2026-08-13 |
 | **Fecha runtime post-230000** | 2026-08-13 14:56 (America/Guatemala) |
 | **Fecha concurrencia Stage** | 2026-08-13 17:16 (America/Guatemala) |
+| **Fecha bootstrap billing Stage** | 2026-09-10 |
 | **Zona horaria documental** | America/Guatemala |
 | **Rama documentada** | `integrate/felplex-phase-1a3` @ `d0131954e94227d1018f4338bbb8a5ec8c906edc` |
 | **PR** | #21 — OPEN, Draft (no Ready, no merge) |
@@ -22,7 +23,7 @@
 
 ### Histórico 220000 (2026-08-10)
 
-**PASS histórico reportado por el operador** — 25/25 estructurales y 9/9 runtime ejecutados para `20260808220000`. Concurrencia PostgreSQL real: **NOT EXECUTED / PENDIENTE**.
+**PASS histórico reportado por el operador** — 25/25 estructurales y 9/9 runtime ejecutados para `20260808220000`. *Al redactar este párrafo (2026-08-10), la concurrencia PostgreSQL real figuraba como pendiente; en el **estado consolidado actual** (2026-09-10) esa concurrencia está **PASS** — ver §1 “Concurrencia PostgreSQL real”.*
 
 ### Migración 230000 (2026-08-13)
 
@@ -43,7 +44,7 @@ Resultado final del test estructural `20260808230000_test_pos_fel_premerge_harde
 - **No** autoriza FELplex HTTP.
 - **No** autoriza activar `emission_enabled` ni `auto_issue_paid_orders`.
 - **No** autoriza Producción.
-- Concurrencia PostgreSQL real con dos sesiones **continúa pendiente** (histórico 220000).
+- Concurrencia PostgreSQL real: *pendiente en el corte histórico 220000*; **ejecutada y PASS** el 2026-08-13 (§1).
 
 ### Runtime post-230000 (2026-08-13)
 
@@ -78,6 +79,22 @@ El escenario `runtime_finalize_success` satisface en Stage la validación runtim
 - **No** autoriza activar `emission_enabled` ni `auto_issue_paid_orders` de forma persistente.
 - **No** autoriza Producción.
 - Concurrencia **no** demuestra exactly-once frente a FELplex HTTP.
+
+### Bootstrap billing Stage (2026-09-10)
+
+**PASS — CONFIGURACIÓN BILLING STAGE APLICADA**
+
+Ejecución única del fixture `supabase/stage-fixtures/felplex_gt_billing_bootstrap.sql` en `tgrqarxfmpwgrkntvgma`. Evidencia: [2026-09-10-stage-billing-bootstrap.md](./2026-09-10-stage-billing-bootstrap.md).
+
+| Métrica | Valor |
+|---------|-------|
+| Filas creadas | 4 (legal entity, provider catalog, stage config, provider status) |
+| `connection_status` inicial | `unknown` |
+| Interruptores FEL | Sin cambio (todos `false`) |
+| HTTP / Edge / certificación SAT | No ejecutados |
+| Producción | No involucrada |
+
+**Limitaciones:** el bootstrap no confirma contrato HTTP ni conectividad FELplex; no autoriza Producción.
 - Recovery categoría B (post-HTTP incierto) permanece manual — `docs/felplex-230000-stage-concurrency-and-recovery-runbook.md`.
 
 ---
@@ -519,8 +536,10 @@ El baseline protegido completo contiene guard (incluye `relkind='c'`) más snaps
 | Test estructural 230000 36/0/6/42 | Ejecutado Stage, reportado por operador |
 | Runtime post-230000 10/0/0/10 (incl. concurrencia) | Ejecutado Stage (2026-08-13) |
 | Concurrencia PostgreSQL real | **PASS** (2026-08-13 17:16) |
+| Bootstrap billing Stage | **PASS** (2026-09-10) — status `unknown` |
 | Runbook recovery cat. A/B | Documentado local |
 | Edge deploy / FELplex HTTP | **NOT EXECUTED** |
+| Certificación SAT real | **NOT EXECUTED** |
 | Producción | **No involucrada** |
 
 ### Limitaciones de trazabilidad
@@ -540,4 +559,4 @@ El baseline protegido completo contiene guard (incluye `relkind='c'`) más snaps
 
 ---
 
-*Fin del registro — FELplex Fase 1A.3 — Supabase Stage — actualizado 2026-08-13 (America/Guatemala) — incluye runtime post-230000 y concurrencia PostgreSQL real*
+*Fin del registro — FELplex Fase 1A.3 — Supabase Stage — actualizado 2026-09-10 — incluye runtime post-230000, concurrencia PostgreSQL real y bootstrap billing Stage*

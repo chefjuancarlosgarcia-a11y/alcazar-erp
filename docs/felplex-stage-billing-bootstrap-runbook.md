@@ -1,10 +1,29 @@
 # FELplex Stage — billing bootstrap runbook
 
-**Proyecto Stage autorizado:** `tgrqarxfmpwgrkntvgma`  
-**Proyecto prohibido:** `lwpfrdnsiwtmyonwcduh` (Producción)  
-**Estado de ejecución:** **NOT EXECUTED IN STAGE**  
-**Artefactos:** `supabase/stage-fixtures/felplex_gt_billing_bootstrap.sql`  
+**Proyecto Stage autorizado:** `tgrqarxfmpwgrkntvgma`
+**Proyecto prohibido:** `lwpfrdnsiwtmyonwcduh` (Producción)
+**Estado de ejecución:** **EXECUTED SUCCESSFULLY IN STAGE — 2026-09-10**
+**Evidencia oficial:** [2026-09-10-stage-billing-bootstrap.md](evidence/felplex/2026-09-10-stage-billing-bootstrap.md)
+**Artefactos:** `supabase/stage-fixtures/felplex_gt_billing_bootstrap.sql`
 **Rollback:** `supabase/stage-fixtures/felplex_gt_billing_bootstrap.rollback.sql`
+
+---
+
+## 0. Registro de ejecución (2026-09-10)
+
+| Campo | Valor |
+|-------|-------|
+| Commit repo de referencia | `143b744c9252ed2eb0c984c211a32399d790a1a1` |
+| SHA256 fixture ejecutado | `02C6C657523D9AE6006D02DC63B01162F5EAFCBD0AC19DB2273CD54F23F48780` |
+| Filas creadas | 4 (`billing_legal_entities`, `billing_providers`, `billing_provider_configs`, `billing_provider_status`) |
+| `connection_status` inicial | `unknown` |
+| Interruptores FEL | Permanecieron apagados (`emission_enabled`, `auto_issue_paid_orders`, `formal_contingency_enabled` = false) |
+| HTTP FELplex | No |
+| Edge deploy | No |
+| Certificación | No |
+| Producción | No involucrada |
+
+Antes del 2026-09-10 este runbook declaraba **NOT EXECUTED IN STAGE**; la ejecución única autorizada cerró ese estado.
 
 ---
 
@@ -26,7 +45,7 @@ Preparar en Supabase Stage la configuración billing mínima para que el runtime
 
 ## 2. Por qué no es una migración
 
-Los valores (`547`, NIT Stage, URL Stage, entidad legal Stage) **no deben** viajar en `supabase/migrations/` hacia Producción.  
+Los valores (`547`, NIT Stage, URL Stage, entidad legal Stage) **no deben** viajar en `supabase/migrations/` hacia Producción.
 Este bootstrap es un **fixture Stage-only** versionado en `supabase/stage-fixtures/`.
 
 ---
@@ -54,7 +73,9 @@ npm run test:felplex-1a
 
 ---
 
-## 5. Aplicación manual en Stage (cuando se autorice)
+## 5. Aplicación manual en Stage (referencia histórica / re-ejecución idempotente)
+
+**Estado actual:** ya aplicado el 2026-09-10 (ver §0). Re-ejecutar solo bajo runbook de recuperación y con snapshot previo.
 
 1. Confirmar enlace CLI a `tgrqarxfmpwgrkntvgma` (solo operador autorizado).
 2. Abrir SQL Editor Stage con rol privilegiado.
@@ -93,6 +114,8 @@ Ejecutar `supabase/stage-fixtures/felplex_gt_billing_bootstrap.rollback.sql` sol
 - No hay documentos FEL `certified`/`processing`;
 - No hay `billing_documents` ni `billing_certification_attempts` dependientes.
 
+**No ejecutado** tras el bootstrap del 2026-09-10.
+
 ---
 
 ## 7. NIT Stage `326070`
@@ -115,8 +138,8 @@ Ejecutar `supabase/stage-fixtures/felplex_gt_billing_bootstrap.rollback.sql` sol
 
 ## 9. Confirmaciones de alcance
 
-- **NOT EXECUTED IN STAGE** al momento de versionar este runbook
+- **EXECUTED SUCCESSFULLY IN STAGE — 2026-09-10** (evidencia enlazada arriba)
 - Sin SQL automático en migraciones
-- Sin lectura de secretos Edge
-- Sin HTTP FELplex
+- Sin lectura de secretos Edge en documentación
+- Sin HTTP FELplex asociado al bootstrap
 - Sin Producción

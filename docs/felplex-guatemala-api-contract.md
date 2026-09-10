@@ -170,8 +170,9 @@ HTTP 200 con `valid: false` **no** es certificación. Se preservan `errors` (ani
 
 1. Solo en **Supabase Stage** → Project Settings → Edge Functions → Secrets.
 2. Nombres: `FELPLEX_GT_STAGE_API_KEY` (existente).
-3. Configurar `entity_id` y `base_url` en **`billing_provider_configs`** vía fixture Stage (`supabase/stage-fixtures/felplex_gt_billing_bootstrap.sql`) o SQL/service_role autorizado.
-4. **Prohibido:** repo (salvo stage-fixtures), chat, Cursor rules, Vercel env, frontend, logs.
+3. **`billing_provider_configs` en Stage:** el fixture `supabase/stage-fixtures/felplex_gt_billing_bootstrap.sql` fue **ejecutado exitosamente el 2026-09-10** en project ref `tgrqarxfmpwgrkntvgma` (evidencia: `docs/evidence/felplex/2026-09-10-stage-billing-bootstrap.md`). La configuración operativa (`entity_id`, `base_url`, `secret_env_var` lógico) vive en **`billing_provider_configs`**; `billing_provider_status.connection_status` permanece **`unknown`**.
+4. El bootstrap **no** confirma el contrato HTTP; el bloqueo **`FELPLEX_CONTRACT_UNCONFIRMED`** (y la barrera `FELPLEX_CONTRACT_HTTP_CONFIRMED`) sigue aplicando en runtime. **No** autoriza Producción.
+5. **Prohibido:** repo (salvo stage-fixtures), chat, Cursor rules, Vercel env, frontend, logs.
 
 ---
 
