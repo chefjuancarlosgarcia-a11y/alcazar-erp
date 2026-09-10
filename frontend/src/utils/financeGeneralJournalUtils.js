@@ -161,7 +161,7 @@ export function groupGeneralJournalRows(rows) {
 
 export function neutralizeCsvFormula(value) {
   const text = String(value ?? "")
-  if (/^[=+\-@]/.test(text)) {
+  if (/^[=+\-@\t\r]/.test(text)) {
     return `'${text}`
   }
   return text
@@ -180,7 +180,7 @@ export function formatGeneralJournalMoney(value) {
   return roundMoney(value).toFixed(2)
 }
 
-const CSV_HEADERS = [
+export const GENERAL_JOURNAL_CSV_HEADERS = [
   "Fecha",
   "Número de partida",
   "Referencia partida",
@@ -193,45 +193,61 @@ const CSV_HEADERS = [
   "Debe (Q.)",
   "Haber (Q.)",
   "Reversión",
-  "Partida original"
+  "Partida original",
+  "Estado del balance",
+  "Diferencia (Q.)"
 ]
 
+export const GENERAL_JOURNAL_CSV_COLUMN_COUNT = GENERAL_JOURNAL_CSV_HEADERS.length
+
+function buildGeneralJournalMovementRow(row) {
+  return [
+    row.entryDate,
+    row.entryNumber,
+    row.entryReference,
+    row.entryDescription,
+    row.accountCode,
+    row.accountName,
+    row.lineDescription || row.lineReference,
+    row.branchName || row.branchCode,
+    row.costCenterName || row.costCenterCode,
+    formatGeneralJournalMoney(row.debit),
+    formatGeneralJournalMoney(row.credit),
+    row.isReversal ? "Sí" : "No",
+    row.reversalOfEntryNumber,
+    "",
+    ""
+  ]
+}
+
+function buildGeneralJournalTotalsRow(totals) {
+  return [
+    "Totales",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    formatGeneralJournalMoney(totals.totalDebit),
+    formatGeneralJournalMoney(totals.totalCredit),
+    "",
+    "",
+    totals.isBalanced ? "Cuadrado" : "Diferencia",
+    formatGeneralJournalMoney(totals.difference)
+  ]
+}
+
 export function buildGeneralJournalCsv(rows, totals = null) {
-  const lines = [CSV_HEADERS.map(escapeCsvCell).join(",")]
+  const lines = [GENERAL_JOURNAL_CSV_HEADERS.map(escapeCsvCell).join(",")]
   for (const row of rows) {
-    lines.push([
-      row.entryDate,
-      row.entryNumber,
-      row.entryReference,
-      row.entryDescription,
-      row.accountCode,
-      row.accountName,
-      row.lineDescription || row.lineReference,
-      row.branchName || row.branchCode,
-      row.costCenterName || row.costCenterCode,
-      formatGeneralJournalMoney(row.debit),
-      formatGeneralJournalMoney(row.credit),
-      row.isReversal ? "Sí" : "No",
-      row.reversalOfEntryNumber
-    ].map(escapeCsvCell).join(","))
+    lines.push(buildGeneralJournalMovementRow(row).map(escapeCsvCell).join(","))
   }
   if (totals) {
     lines.push("")
-    lines.push([
-      "Totales",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      formatGeneralJournalMoney(totals.totalDebit),
-      formatGeneralJournalMoney(totals.totalCredit),
-      totals.isBalanced ? "Cuadrado" : "Diferencia",
-      formatGeneralJournalMoney(totals.difference)
-    ].map(escapeCsvCell).join(","))
+    lines.push(buildGeneralJournalTotalsRow(totals).map(escapeCsvCell).join(","))
   }
   return `\uFEFF${lines.join("\r\n")}`
 }

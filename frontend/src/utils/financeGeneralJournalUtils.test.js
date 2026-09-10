@@ -5,6 +5,8 @@ import {
   canExportGeneralJournal,
   escapeCsvCell,
   fetchAllGeneralJournalRows,
+  GENERAL_JOURNAL_CSV_COLUMN_COUNT,
+  GENERAL_JOURNAL_CSV_HEADERS,
   generalJournalRpcParams,
   groupGeneralJournalRows,
   mapGeneralJournalResponse,
@@ -119,19 +121,147 @@ test("escapeCsvCell escapes commas and quotes", () => {
 test("neutralizeCsvFormula prefixes dangerous values", () => {
   assert.equal(neutralizeCsvFormula("=1+1"), "'=1+1")
   assert.equal(neutralizeCsvFormula("-100"), "'-100")
+  assert.equal(neutralizeCsvFormula("\tSUM(A1)"), "'\tSUM(A1)")
+  assert.equal(neutralizeCsvFormula("@inject"), "'@inject")
+  assert.equal(neutralizeCsvFormula("100.00"), "100.00")
+  assert.equal(neutralizeCsvFormula("JE-2026-0001"), "JE-2026-0001")
 })
 
-test("buildGeneralJournalCsv includes BOM and totals", () => {
-  const row = mapGeneralJournalRow(sampleRow)
-  const csv = buildGeneralJournalCsv([row], {
+function stripCsvBom(text) {
+  return text.replace(/^\uFEFF/, "")
+}
+
+function parseCsvLine(line) {
+  const cells = []
+  let current = ""
+  let inQuotes = false
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i]
+    if (inQuotes) {
+      if (char === '"') {
+        if (line[i + 1] === '"') {
+          current += '"'
+          i += 1
+        } else {
+          inQuotes = false
+        }
+      } else {
+        current += char
+      }
+    } else if (char === '"') {
+      inQuotes = true
+    } else if (char === ",") {
+      cells.push(current)
+      current = ""
+    } else {
+      current += char
+    }
+  }
+  cells.push(current)
+  return cells
+}
+
+function parseCsvDocument(csv) {
+  return stripCsvBom(csv).split("\r\n")
+}
+
+test("buildGeneralJournalCsv uses 15-column header and aligned totals row", () => {
+  const rowA = mapGeneralJournalRow({ ...sampleRow, line_id: "l1", debit: "100.00", credit: "0.00" })
+  const rowB = mapGeneralJournalRow({
+    ...sampleRow,
+    line_id: "l2",
+    line_number: 2,
+    account_code: "2.01",
+    account_name: "Banco",
+    debit: "0.00",
+    credit: "100.00"
+  })
+  const csv = buildGeneralJournalCsv([rowA, rowB], {
     totalDebit: 100,
     totalCredit: 100,
     difference: 0,
     isBalanced: true
   })
+  const lines = parseCsvDocument(csv)
+
   assert.ok(csv.startsWith("\uFEFF"))
-  assert.match(csv, /Totales/)
-  assert.match(csv, /Cuadrado/)
+  assert.equal(GENERAL_JOURNAL_CSV_COLUMN_COUNT, 15)
+  assert.deepEqual(parseCsvLine(lines[0]), GENERAL_JOURNAL_CSV_HEADERS)
+  assert.equal(parseCsvLine(lines[1]).length, 15)
+  assert.equal(parseCsvLine(lines[2]).length, 15)
+  assert.equal(parseCsvLine(lines[1]).slice(-2).join("|"), "|")
+  assert.equal(lines[3], "")
+
+  const totals = parseCsvLine(lines[4])
+  assert.equal(totals.length, 15)
+  assert.equal(totals[0], "Totales")
+  assert.equal(totals[9], "100.00")
+  assert.equal(totals[10], "100.00")
+  assert.equal(totals[11], "")
+  assert.equal(totals[12], "")
+  assert.equal(totals[13], "Cuadrado")
+  assert.equal(totals[14], "0.00")
+})
+
+test("buildGeneralJournalCsv preserves accents and escapes commas, quotes and newlines", () => {
+  const row = mapGeneralJournalRow({
+    ...sampleRow,
+    entry_description: "Descripción con acentos, comillas \" y más",
+    line_description: "Línea\nmultilínea"
+  })
+  const csv = buildGeneralJournalCsv([row])
+  const cells = parseCsvLine(parseCsvDocument(csv)[1])
+
+  assert.match(csv, /Descripción con acentos/)
+  assert.equal(cells[3], 'Descripción con acentos, comillas " y más')
+  assert.equal(cells[6], "Línea\nmultilínea")
+})
+
+test("buildGeneralJournalCsv neutralizes formula injection in text fields", () => {
+  const row = mapGeneralJournalRow({
+    ...sampleRow,
+    entry_reference: "=HYPERLINK(\"evil\")",
+    entry_description: "+cmd",
+    line_description: "@sum"
+  })
+  const cells = parseCsvLine(parseCsvDocument(buildGeneralJournalCsv([row]))[1])
+
+  assert.equal(cells[2], "'=HYPERLINK(\"evil\")")
+  assert.equal(cells[3], "'+cmd")
+  assert.equal(cells[6], "'@sum")
+})
+
+test("fetchAllGeneralJournalRows exports all filtered rows beyond visible page", async () => {
+  const calls = []
+  const fetchPage = async (filters) => {
+    calls.push(filters)
+    const page = filters.page
+    return {
+      data: {
+        rows: page === 1
+          ? [mapGeneralJournalRow({ ...sampleRow, line_id: "l1" })]
+          : [mapGeneralJournalRow({ ...sampleRow, line_id: "l2", line_number: 2 })],
+        totalRows: 501,
+        totalDebit: 200,
+        totalCredit: 200,
+        difference: 0,
+        isBalanced: true,
+        snapshotAt: "2026-08-01T12:00:00Z"
+      },
+      error: ""
+    }
+  }
+  const outcome = await fetchAllGeneralJournalRows(fetchPage, { search: "JE" }, 501)
+  const csv = buildGeneralJournalCsv(outcome.rows, outcome.totals)
+  const lines = parseCsvDocument(csv).filter((line) => line.length > 0)
+
+  assert.equal(outcome.ok, true)
+  assert.equal(outcome.rows.length, 2)
+  assert.equal(calls.length, 2)
+  assert.equal(calls[1].page, 2)
+  assert.equal(calls[1].snapshotAt, "2026-08-01T12:00:00Z")
+  assert.equal(lines.length, 4)
+  assert.equal(parseCsvLine(lines[0]).length, 15)
 })
 
 test("canExportGeneralJournal blocks above limit", () => {
