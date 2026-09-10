@@ -5,7 +5,7 @@ export const ALERT_ROUTES = {
   "Stock agotado": "/reports?tab=inventory",
   "Stock bajo": "/reports?tab=inventory",
   "KDS atrasado": "/production",
-  Requisiciones: "/inventory?section=requisicion",
+  Requisiciones: "/requisitions",
   "Producto POS incompleto": "/pos?section=agregar-item",
   "Receta sin costo": "/inventory?section=recetas",
   "Rendimiento bajo mínimo": "/reports?tab=yields"

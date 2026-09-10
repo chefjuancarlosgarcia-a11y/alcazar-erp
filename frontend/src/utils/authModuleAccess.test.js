@@ -22,3 +22,8 @@ test("colaborador remains blocked from catering", () => {
 test("admin retains catering access", () => {
   assert.equal(canAccessModule("admin", "catering"), true)
 })
+
+test("gerente retains inventory and gains logical requisitions module", () => {
+  assert.equal(canAccessModule("gerente", "inventory"), true)
+  assert.equal(canAccessModule("gerente", "requisitions"), true)
+})
