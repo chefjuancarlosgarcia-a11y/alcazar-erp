@@ -13,6 +13,7 @@ import CateringManualLeadModal from "./CateringManualLeadModal"
 import CateringQuoteModal from "./CateringQuoteModal"
 import CateringRequestQuotes from "./CateringRequestQuotes"
 import CateringSlaBadge from "./CateringSlaBadge"
+import { applyQuotesLoadResult, EMPTY_QUOTES_SUMMARY } from "./cateringQuoteHistoryUtils"
 import {
   CONVERSION_STATUS_LABELS,
   CONVERSION_STATUS_OPTIONS,
@@ -61,7 +62,8 @@ export default function CateringRequestDetail({
   const [assigneeId, setAssigneeId] = useState("")
   const [followup, setFollowup] = useState(EMPTY_FOLLOWUP)
   const [showFollowup, setShowFollowup] = useState(false)
-  const [quotesSummary, setQuotesSummary] = useState({ count: 0, latest: null, quotes: [] })
+  const [quotesSummary, setQuotesSummary] = useState({ ...EMPTY_QUOTES_SUMMARY })
+  const [quotesError, setQuotesError] = useState("")
   const [loadingQuotes, setLoadingQuotes] = useState(true)
   const [quoteModalOpen, setQuoteModalOpen] = useState(false)
   const [activeQuoteId, setActiveQuoteId] = useState(null)
@@ -86,6 +88,8 @@ export default function CateringRequestDetail({
     setLoading(true)
     setLoadingActivity(true)
     setLoadingQuotes(true)
+    setQuotesError("")
+    setQuotesSummary({ ...EMPTY_QUOTES_SUMMARY })
     setError("")
     const [detailResult, activityResult, quotesResult] = await Promise.all([
       getCateringRequestDetail(requestId),
@@ -108,13 +112,9 @@ export default function CateringRequestDetail({
       })
     }
     if (!activityResult.error) setActivities(activityResult.data || [])
-    if (!quotesResult.error) {
-      setQuotesSummary({
-        count: quotesResult.data?.count ?? 0,
-        latest: quotesResult.data?.latest ?? null,
-        quotes: quotesResult.data?.quotes ?? []
-      })
-    }
+    const quotesState = applyQuotesLoadResult(quotesSummary, quotesResult)
+    setQuotesSummary(quotesState.summary)
+    setQuotesError(quotesState.error)
     setLoading(false)
     setLoadingActivity(false)
     setLoadingQuotes(false)
@@ -127,13 +127,9 @@ export default function CateringRequestDetail({
       getCateringRequestDetail(requestId)
     ])
     if (!activityResult.error) setActivities(activityResult.data || [])
-    if (!quotesResult.error) {
-      setQuotesSummary({
-        count: quotesResult.data?.count ?? 0,
-        latest: quotesResult.data?.latest ?? null,
-        quotes: quotesResult.data?.quotes ?? []
-      })
-    }
+    const quotesState = applyQuotesLoadResult(quotesSummary, quotesResult)
+    setQuotesSummary(quotesState.summary)
+    setQuotesError(quotesState.error)
     if (!detailResult.error && detailResult.data) {
       setRequest(detailResult.data)
       onUpdated?.(detailResult.data)
@@ -347,8 +343,11 @@ export default function CateringRequestDetail({
         summary={quotesSummary}
         quotes={quotesSummary.quotes}
         loading={loadingQuotes}
+        error={quotesError}
+        request={request}
         onCreateQuote={handleOpenCreateQuote}
         onOpenQuote={handleOpenQuote}
+        onRetry={loadDetail}
       />
 
       {message ? <p className="catering-message success">{message}</p> : null}
