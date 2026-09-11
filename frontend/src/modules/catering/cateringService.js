@@ -194,6 +194,11 @@ export async function getCateringRequestQuotes(requestId) {
   return result(data, error)
 }
 
+export async function syncCateringQuoteExpired() {
+  const { data, error } = await supabase.rpc("sync_catering_quote_expired")
+  return result(data ?? 0, error)
+}
+
 export async function getCateringQuoteDetail(quoteId) {
   const { data, error } = await supabase.rpc("get_catering_quote_detail", {
     p_quote_id: quoteId

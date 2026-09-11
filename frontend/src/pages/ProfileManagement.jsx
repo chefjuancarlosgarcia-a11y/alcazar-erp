@@ -36,6 +36,13 @@ import {
   getRoleDisplayName
 } from "../utils/profilePermissions"
 import * as userRolesService from "../services/userRolesService"
+import {
+  applyDeactivateAttemptFinish,
+  applyDeactivateAttemptStart,
+  applyReactivateAttemptFinish,
+  applyReactivateAttemptStart,
+  validateDeactivateReason
+} from "../utils/profileLifecycleFlow.js"
 import "./ProfileManagement.css"
 
 const ROLE_CATALOG_DENIED_MESSAGE = "Solo Administración puede crear roles personalizados."
@@ -133,6 +140,9 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
   const [reactivatingId, setReactivatingId] = useState("")
   const [deactivateTarget, setDeactivateTarget] = useState(null)
   const [deactivateReason, setDeactivateReason] = useState("")
+  const [deactivateModalError, setDeactivateModalError] = useState("")
+  const [reactivateTarget, setReactivateTarget] = useState(null)
+  const [reactivateModalError, setReactivateModalError] = useState("")
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [deleteConfirmText, setDeleteConfirmText] = useState("")
   const [pinConfigured, setPinConfigured] = useState({})
@@ -830,50 +840,68 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
     if (!canDeactivateUser(user, profile) || deactivatingId) return
     setDeactivateTarget(profile)
     setDeactivateReason("")
+    setDeactivateModalError("")
     setError("")
   }
 
   async function confirmDeactivate() {
     if (!deactivateTarget || deactivatingId) return
     const reason = deactivateReason.trim()
-    if (reason.length < 3 || reason.length > 500) {
-      setError("El motivo de baja es obligatorio (3 a 500 caracteres).")
+    const validationError = validateDeactivateReason(reason)
+    if (validationError) {
+      setDeactivateModalError(validationError)
       return
     }
-    setDeactivatingId(deactivateTarget.id)
-    setError("")
+    const started = applyDeactivateAttemptStart({ deactivateTarget })
+    setDeactivatingId(started.deactivatingId)
+    setDeactivateModalError("")
     const result = await invokeUserLifecycleFunction("deactivate-user", {
       user_id: deactivateTarget.id,
       reason
     })
-    setDeactivatingId("")
+    const finished = applyDeactivateAttemptFinish(
+      { deactivateTarget, deactivateReason, deactivatingId: started.deactivatingId, deactivateModalError: "" },
+      result
+    )
+    setDeactivatingId(finished.deactivatingId)
     if (!result.ok) {
-      setError(result.message)
+      setDeactivateModalError(finished.deactivateModalError)
       return
     }
-    setDeactivateTarget(null)
-    setDeactivateReason("")
-    setMessage(result.data?.already_inactive ? "El usuario ya estaba dado de baja. Sesiones revocadas." : "Usuario dado de baja. Acceso y sesiones bloqueados.")
+    setDeactivateTarget(finished.deactivateTarget)
+    setDeactivateReason(finished.deactivateReason)
+    setDeactivateModalError(finished.deactivateModalError)
+    setMessage(finished.pageMessage)
     await loadProfiles({ silent: true })
   }
 
-  async function reactivateUser(profile) {
+  function openReactivateDialog(profile) {
     if (!canReactivateUser(user, profile) || reactivatingId) return
-    const confirmed = window.confirm(
-      `Reactivar a ${profile.full_name || profile.username || "este usuario"}?\n\nDeberas regenerar o habilitar el PIN de asistencia manualmente.`
-    )
-    if (!confirmed) return
-    setReactivatingId(profile.id)
+    setReactivateTarget(profile)
+    setReactivateModalError("")
     setError("")
+  }
+
+  async function confirmReactivate() {
+    if (!reactivateTarget || reactivatingId) return
+    const started = applyReactivateAttemptStart({ reactivateTarget })
+    setReactivatingId(started.reactivatingId)
+    setReactivateModalError("")
     const result = await invokeUserLifecycleFunction("reactivate-user", {
-      user_id: profile.id
+      user_id: reactivateTarget.id
     })
-    setReactivatingId("")
+    const finished = applyReactivateAttemptFinish(
+      { reactivateTarget, reactivatingId: started.reactivatingId, reactivateModalError: "" },
+      result
+    )
+    setReactivatingId(finished.reactivatingId)
     if (!result.ok) {
-      setError(result.message)
+      setReactivateModalError(finished.reactivateModalError)
       return
     }
-    setMessage(result.message || "Usuario reactivado.")
+    setReactivateTarget(finished.reactivateTarget)
+    setReactivateModalError(finished.reactivateModalError)
+    setMessage(finished.pageMessage)
     await loadProfiles({ silent: true })
   }
 
@@ -1032,7 +1060,7 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
                     <button
                       type="button"
                       className="profiles-secondary"
-                      onClick={() => reactivateUser(profile)}
+                      onClick={() => openReactivateDialog(profile)}
                       disabled={reactivatingId === profile.id}
                     >
                       {reactivatingId === profile.id ? "Reactivando..." : "Reactivar"}
@@ -1535,11 +1563,39 @@ function ProfileManagement({ requestedProfileId = "", editRequested = false }) {
                   disabled={Boolean(deactivatingId)}
                 />
               </Field>
+              {deactivateModalError && <div className="profiles-error compact" role="alert">{deactivateModalError}</div>}
             </div>
             <div className="profiles-modal-actions">
               <button type="button" className="profiles-secondary" onClick={() => setDeactivateTarget(null)} disabled={Boolean(deactivatingId)}>Cancelar</button>
               <button type="button" className="profiles-primary danger" onClick={confirmDeactivate} disabled={Boolean(deactivatingId)}>
                 {deactivatingId ? "Procesando..." : "Confirmar baja"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      {reactivateTarget && (
+        <div className="profiles-modal-overlay">
+          <div className="profiles-modal">
+            <header className="profiles-modal-header">
+              <div>
+                <p className="profiles-eyebrow">Reactivar usuario</p>
+                <h2>{reactivateTarget.full_name || reactivateTarget.username || "Usuario"}</h2>
+              </div>
+              <button type="button" onClick={() => setReactivateTarget(null)} disabled={Boolean(reactivatingId)}>Cerrar</button>
+            </header>
+            <div className="profiles-modal-body">
+              <p className="profiles-warning">
+                El acceso quedara habilitado, pero deberas regenerar o habilitar el PIN de asistencia manualmente.
+              </p>
+              {reactivateModalError && <div className="profiles-error compact" role="alert">{reactivateModalError}</div>}
+            </div>
+            <div className="profiles-modal-actions">
+              <button type="button" className="profiles-secondary" onClick={() => setReactivateTarget(null)} disabled={Boolean(reactivatingId)}>Cancelar</button>
+              <button type="button" className="profiles-primary" onClick={confirmReactivate} disabled={Boolean(reactivatingId)}>
+                {reactivatingId ? "Procesando..." : "Confirmar reactivacion"}
               </button>
             </div>
           </div>

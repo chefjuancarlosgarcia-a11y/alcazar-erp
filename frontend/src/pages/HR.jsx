@@ -25,7 +25,7 @@ const LegacyInventoryApp = lazy(() => import("../modules/LegacyInventoryApp"))
 const DEPRECATED_INVENTORY_SECTIONS = {
   inventario: "/inventory?section=inventario",
   recetas: "/inventory?section=recetas",
-  requisicion: "/inventory?section=requisicion"
+  requisicion: "/requisitions"
 }
 
 function HR() {

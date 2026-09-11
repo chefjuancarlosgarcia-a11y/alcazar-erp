@@ -3,65 +3,21 @@ import {
   buildCompanyFooterLines,
   mergeQuoteSettings
 } from "./cateringQuoteSettings"
-import QuoteLogoImage from "./QuoteLogoImage"
 import {
-  calculateQuoteTotals,
-  formatOptionDisplayTitle,
-  formatQuantityLine,
-  getLineTotal,
-  groupQuoteItemsForDisplay,
-  itemTypeLabel,
-  QUOTE_STATUS_LABELS
-} from "./cateringQuoteTemplates"
+  buildQuoteClientPanel,
+  buildQuoteDocumentMeta,
+  buildQuoteEventPanel,
+  buildQuoteTableRows,
+  buildQuoteTotalsRows
+} from "./cateringQuoteDocumentLayout"
+import QuoteLogoImage from "./QuoteLogoImage"
+import { calculateQuoteTotals } from "./cateringQuoteTemplates"
 import {
   repairCateringCompanySettings,
   repairCateringQuoteItems,
   repairCateringRequest,
   repairSpanishText
 } from "./cateringTextEncoding"
-import { formatDate, formatMoney, formatTime } from "./cateringUtils"
-
-function renderQuoteBlock(block, keyPrefix) {
-  if (block.type === "normal") {
-    const item = block.item
-    return (
-      <article key={`${keyPrefix}-normal-${item.description}`} className="catering-quote-preview__line">
-        <div>
-          <strong>{item.description}</strong>
-          <small>{itemTypeLabel(item.item_type)}</small>
-        </div>
-        <div className="catering-quote-preview__line-values">
-          <span>{formatQuantityLine(item)}</span>
-          <strong>{formatMoney(getLineTotal(item))}</strong>
-        </div>
-      </article>
-    )
-  }
-
-  return (
-    <section key={`${keyPrefix}-group-${block.groupName}`} className="catering-quote-preview__option-group">
-      <h5>{block.groupName.toUpperCase()}</h5>
-      {block.options.map((item, optionIndex) => (
-        <article
-          key={`${keyPrefix}-option-${optionIndex}-${item.description}`}
-          className={`catering-quote-preview__line catering-quote-preview__line--option${item.is_selected_option ? " is-selected" : ""}`}
-        >
-          <div>
-            <strong>{formatOptionDisplayTitle(item)}</strong>
-            <small>
-              {itemTypeLabel(item.item_type)}
-              {item.is_selected_option ? " · Seleccionada" : ""}
-            </small>
-          </div>
-          <div className="catering-quote-preview__line-values">
-            <span>{formatQuantityLine(item)}</span>
-            <strong>{formatMoney(getLineTotal(item))}</strong>
-          </div>
-        </article>
-      ))}
-    </section>
-  )
-}
 
 export default function CateringQuotePreview({
   quoteNumber,
@@ -79,81 +35,140 @@ export default function CateringQuotePreview({
   const safeItems = repairCateringQuoteItems(items)
   const safeNotes = repairSpanishText(notes)
   const safeTerms = repairSpanishText(terms)
-  const safeQuoteNumber = repairSpanishText(quoteNumber)
-  const safeQuoteStatus = repairSpanishText(quoteStatus)
 
   const totals = calculateQuoteTotals(safeItems, discountAmount)
-  const sections = groupQuoteItemsForDisplay(safeItems)
   const brand = repairCateringCompanySettings(mergeQuoteSettings(company || {}, branding))
-  const logoUrl = brand.logoUrl || ""
-  const commercialName = brand.commercialName || "Empresa"
-  const headerText = brand.headerText || "Cotización de Catering"
+  const meta = buildQuoteDocumentMeta({
+    quoteNumber: repairSpanishText(quoteNumber),
+    quoteStatus: repairSpanishText(quoteStatus),
+    validUntil
+  })
+  const tableRows = buildQuoteTableRows(safeItems)
+  const totalsRows = buildQuoteTotalsRows(totals)
+  const clientPanel = buildQuoteClientPanel(safeRequest)
+  const eventPanel = buildQuoteEventPanel(safeRequest)
   const footerLines = buildCompanyFooterLines(brand).map(repairSpanishText)
 
   return (
     <aside className="catering-quote-preview" aria-label="Vista previa de cotización" lang="es">
-      <div className="catering-quote-preview__paper">
-        <header className="catering-quote-preview__header catering-quote-preview__header--brand">
+      <div className={`catering-quote-preview__paper${meta.isDraft ? " is-draft" : ""}`}>
+        {meta.isDraft ? (
+          <div className="catering-quote-preview__watermark" aria-hidden="true">BORRADOR</div>
+        ) : null}
+
+        <div className="catering-quote-preview__accent-bar" aria-hidden="true" />
+
+        <header className="catering-quote-preview__letterhead">
           <div className="catering-quote-preview__brand">
             <QuoteLogoImage
-              logoUrl={logoUrl}
+              logoUrl={brand.logoUrl || ""}
               className="catering-quote-preview__logo"
               placeholder={brand.commercialName?.slice(0, 2)?.toUpperCase() || "GA"}
             />
-            <div>
-              <strong>{commercialName}</strong>
-              <p>{headerText}</p>
+            <div className="catering-quote-preview__brand-text">
+              <strong>{brand.commercialName || "Empresa"}</strong>
+              <p>{brand.headerText || "Cotización de Catering"}</p>
               {brand.nit ? <small>NIT: {brand.nit}</small> : null}
+              {brand.address ? <small>{brand.address}</small> : null}
             </div>
           </div>
-          <div className="catering-quote-preview__meta">
-            <span>{safeQuoteNumber || "BORRADOR"}</span>
-            {safeQuoteStatus ? <small>{QUOTE_STATUS_LABELS[safeQuoteStatus] || safeQuoteStatus}</small> : null}
+
+          <div className="catering-quote-preview__meta-box">
+            <span className="catering-quote-preview__meta-label">Cotización</span>
+            <strong className="catering-quote-preview__meta-number">{meta.quoteNumber}</strong>
+            <dl>
+              <div>
+                <dt>Fecha</dt>
+                <dd>{meta.issuedLabel}</dd>
+              </div>
+              <div>
+                <dt>Vigencia</dt>
+                <dd>{meta.validUntilLabel}</dd>
+              </div>
+              <div>
+                <dt>Estado</dt>
+                <dd>{meta.statusLabel}</dd>
+              </div>
+            </dl>
           </div>
         </header>
 
-        <section className="catering-quote-preview__block">
-          <h4>Cliente</h4>
-          <p>{safeRequest.customer_name || "—"}</p>
-          <small>{[safeRequest.customer_phone, safeRequest.customer_email].filter(Boolean).join(" · ") || "—"}</small>
+        <div className="catering-quote-preview__panels">
+          <section className="catering-quote-preview__panel">
+            <h4>Cliente</h4>
+            <dl>
+              {clientPanel.map(({ label, value }) => (
+                <div key={label}>
+                  <dt>{label}</dt>
+                  <dd>{value || "—"}</dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+
+          <section className="catering-quote-preview__panel">
+            <h4>Evento</h4>
+            <dl>
+              {eventPanel.map(({ label, value }) => (
+                <div key={label}>
+                  <dt>{label}</dt>
+                  <dd>{value || "—"}</dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+        </div>
+
+        <section className="catering-quote-preview__table-wrap">
+          <h4>Detalle de servicios</h4>
+          <table className="catering-quote-preview__table">
+            <thead>
+              <tr>
+                <th>Descripción</th>
+                <th>Cantidad</th>
+                <th>P. unit.</th>
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tableRows.map((row, index) => {
+                if (row.kind === "section") {
+                  return (
+                    <tr key={`section-${index}-${row.title}`} className={`is-section is-section--${row.tone}`}>
+                      <td colSpan={4}>{row.title}</td>
+                    </tr>
+                  )
+                }
+
+                return (
+                  <tr
+                    key={`line-${index}-${row.description}`}
+                    className={[
+                      row.isOption ? "is-option" : "",
+                      row.isSelected ? "is-selected" : ""
+                    ].filter(Boolean).join(" ")}
+                  >
+                    <td>
+                      <strong>{row.description || "—"}</strong>
+                      {row.subtitle ? <small>{row.subtitle}</small> : null}
+                    </td>
+                    <td>{row.quantity}</td>
+                    <td>{row.unitPrice}</td>
+                    <td className="is-amount">{row.total}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </section>
 
-        <section className="catering-quote-preview__block">
-          <h4>Evento</h4>
-          <p>{safeRequest.event_type || "—"}</p>
-          <small>
-            {formatDate(safeRequest.event_date)}
-            {safeRequest.event_time ? ` ${formatTime(safeRequest.event_time)}` : ""}
-            {safeRequest.event_location ? ` · ${safeRequest.event_location}` : ""}
-          </small>
-        </section>
-
-        <section className="catering-quote-preview__lines">
-          <h4>Detalle</h4>
-          {sections.map((section, sectionIndex) => (
-            <section
-              key={section.sectionKey || `manual-${sectionIndex}`}
-              className={section.type === "template_section" ? "catering-quote-preview__template-section" : undefined}
-            >
-              {section.type === "template_section" ? (
-                <h5 className="catering-quote-preview__template-title">{section.sectionName.toUpperCase()}</h5>
-              ) : null}
-              {section.blocks.map((block, blockIndex) => renderQuoteBlock(block, `${sectionIndex}-${blockIndex}`))}
-            </section>
+        <section className="catering-quote-preview__totals-box">
+          {totalsRows.map((row) => (
+            <div key={row.label} className={row.tone ? `is-${row.tone}` : undefined}>
+              <span>{row.label}</span>
+              <strong>{row.value}</strong>
+            </div>
           ))}
-        </section>
-
-        <section className="catering-quote-preview__totals">
-          <div><span>Subtotal</span><strong>{formatMoney(totals.subtotal)}</strong></div>
-          {totals.discount_amount > 0 ? (
-            <div><span>Descuento</span><strong>-{formatMoney(totals.discount_amount)}</strong></div>
-          ) : null}
-          <div className="is-total">
-            <span>Total</span>
-            <strong>
-              {totals.has_unresolved_option_groups ? "Según opción elegida" : formatMoney(totals.total)}
-            </strong>
-          </div>
           {totals.has_unresolved_option_groups ? (
             <small className="catering-quote-preview__option-note">
               El total final depende de la opción de menú seleccionada.
@@ -162,24 +177,30 @@ export default function CateringQuotePreview({
           <small className="catering-quote-preview__vat">Precios incluyen IVA</small>
         </section>
 
-        <section className="catering-quote-preview__block">
-          <h4>Vigencia</h4>
-          <p>{formatDate(validUntil)}</p>
-        </section>
-
         {safeNotes ? (
-          <section className="catering-quote-preview__block">
+          <section className="catering-quote-preview__notes">
             <h4>Notas comerciales</h4>
-            <p className="catering-quote-preview__text">{safeNotes}</p>
+            <p>{safeNotes}</p>
           </section>
         ) : null}
 
         {safeTerms ? (
-          <section className="catering-quote-preview__block">
+          <section className="catering-quote-preview__terms-block">
             <h4>Términos y condiciones</h4>
-            <pre className="catering-quote-preview__terms">{safeTerms}</pre>
+            <div className="catering-quote-preview__terms">{safeTerms}</div>
           </section>
         ) : null}
+
+        <section className="catering-quote-preview__signatures">
+          <div>
+            <span className="catering-quote-preview__sign-line" />
+            <small>Firma del cliente</small>
+          </div>
+          <div>
+            <span className="catering-quote-preview__sign-line" />
+            <small>Autorizado — {brand.commercialName || "Empresa"}</small>
+          </div>
+        </section>
 
         {footerLines.length ? (
           <footer className="catering-quote-preview__footer">
