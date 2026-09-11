@@ -1,7 +1,13 @@
 {
+  "name": "alcazar-inventario",
+  "private": true,
   "dependencies": {
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",
     "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "playwright": "1.61.1",
+    "supabase": "2.107.0"
   }
 }
