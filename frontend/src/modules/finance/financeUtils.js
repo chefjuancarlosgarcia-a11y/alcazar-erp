@@ -9,7 +9,8 @@ export const FINANCE_TABS = [
   { key: "sucursales", label: "Sucursales" },
   { key: "centros", label: "Centros de costo" },
   { key: "periodos", label: "Periodos contables" },
-  { key: "partidas", label: "Partidas contables" }
+  { key: "partidas", label: "Partidas contables" },
+  { key: "reportes", label: "Reportes contables" }
 ]
 
 export const JOURNAL_STATUS_LABELS = {

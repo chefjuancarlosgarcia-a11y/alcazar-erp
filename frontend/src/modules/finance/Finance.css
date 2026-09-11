@@ -576,3 +576,137 @@
     overflow-x: auto;
   }
 }
+
+.finance-reports-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--erp-space-8);
+  margin-bottom: var(--erp-space-16);
+}
+
+.finance-reports-nav button {
+  min-height: var(--erp-btn-height);
+  padding: var(--erp-space-8) var(--erp-space-16);
+  border-radius: var(--erp-radius-card);
+  border: 1px solid #334155;
+  background: #0f172a;
+  color: #e2e8f0;
+  cursor: pointer;
+}
+
+.finance-reports-nav button.active {
+  border-color: #14b8a6;
+  background: #134e4a;
+}
+
+.finance-reports-nav button.is-soon {
+  opacity: 0.72;
+  cursor: not-allowed;
+}
+
+.finance-reports-soon {
+  display: block;
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.finance-general-journal-table-wrap {
+  overflow-x: auto;
+  margin-top: var(--erp-space-16);
+}
+
+.finance-general-journal-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.finance-general-journal-table th,
+.finance-general-journal-table td {
+  padding: var(--erp-space-8) var(--erp-space-16);
+  border-bottom: 1px solid #334155;
+  vertical-align: top;
+  text-align: left;
+}
+
+.finance-general-journal-table thead th {
+  position: sticky;
+  top: 0;
+  background: #0f172a;
+  z-index: 1;
+}
+
+.finance-general-journal-num {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.finance-general-journal-entry-head {
+  margin-bottom: var(--erp-space-8);
+}
+
+.finance-general-journal-entry-desc {
+  margin-top: var(--erp-space-4);
+}
+
+.finance-general-journal-line-detail {
+  padding-top: var(--erp-space-4);
+}
+
+.finance-general-journal-row--reversal td {
+  background: rgba(120, 53, 15, 0.18);
+}
+
+.finance-general-journal-badge--reversal {
+  margin-left: var(--erp-space-8);
+  background: #854d0e;
+  color: #fef3c7;
+}
+
+.finance-general-journal-badge--reversed {
+  margin-left: var(--erp-space-8);
+  background: #334155;
+  color: #e2e8f0;
+}
+
+.finance-general-journal-status {
+  margin-top: var(--erp-space-16);
+}
+
+.finance-field--wide {
+  grid-column: span 2;
+}
+
+.finance-field--actions {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+@media (max-width: 767px) {
+  .finance-general-journal-table thead {
+    display: none;
+  }
+
+  .finance-general-journal-table tr {
+    display: block;
+    margin-bottom: var(--erp-space-16);
+    border: 1px solid #334155;
+    border-radius: var(--erp-radius-card);
+    padding: var(--erp-space-8);
+  }
+
+  .finance-general-journal-table td {
+    display: block;
+    border: 0;
+    padding: var(--erp-space-8);
+  }
+
+  .finance-general-journal-num {
+    text-align: left;
+  }
+
+  .finance-field--wide {
+    grid-column: span 1;
+  }
+}
