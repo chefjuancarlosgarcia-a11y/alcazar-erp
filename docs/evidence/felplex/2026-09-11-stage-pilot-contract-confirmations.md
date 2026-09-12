@@ -79,4 +79,15 @@ Persistencia: `order_snapshot.sales_channel` al solicitar documento FEL (`reques
 
 ---
 
-*Fin — confirmaciones piloto v1 — 2026-09-11*
+## 6. Runtime Stage (2026-09-12)
+
+| Campo | Valor |
+|-------|-------|
+| Edge `felplex-certify-invoice` | **ACTIVE** plataforma **v3**, bundle `51c51f71…da3c0`, `verify_jwt=true` |
+| Repo / deploy | `e061e11` (`cd0310f` + `e061e11`) — evidencia `2026-09-10-stage-edge-fail-closed-deploy.md` § v3 |
+| HTTP FELplex / SAT | **NOT EXECUTED** post-v3 |
+| Gates | **OFF/unset** (sin cambio post-redeploy) |
+
+---
+
+*Fin — confirmaciones piloto v1 — actualizado 2026-09-12*

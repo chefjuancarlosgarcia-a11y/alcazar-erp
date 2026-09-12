@@ -1,15 +1,15 @@
 # FELplex — Fase 1A.2: endurecimiento transaccional y de seguridad
 
-## Estado consolidado (2026-09-10, post redeploy v2)
+## Estado consolidado (2026-09-12, post redeploy v3)
 
 | Tema | Estado |
 |------|--------|
-| Runtime repo / PR head | `ac13a36567e38c4c33fd3e5e6d623a8a4597294a` |
-| Edge `felplex-certify-invoice` en Stage | **ACTIVE** — versión plataforma **2**, bundle `73d79afa…4315`, `verify_jwt=true` |
-| Evidencia deploy fail-closed (v1 → v2) | `docs/evidence/felplex/2026-09-10-stage-edge-fail-closed-deploy.md` |
-| Payload Postman (SHA `388d18c3…`) | **Corregido en código** y desplegado v2 |
-| Deno / checks locales | **75/75 PASS** (`test:felplex-1a`), `check:felplex-1a` OK |
-| CI PR #21 @ `ac13a365` | **PASS** (FELplex safety, Vercel preview) |
+| Runtime repo / PR head | `e061e11efc1cd0d3e7170b95517df6900beac25a` |
+| Edge `felplex-certify-invoice` en Stage | **ACTIVE** — versión plataforma **3**, bundle `51c51f71…da3c0`, `verify_jwt=true` |
+| Evidencia deploy fail-closed (v1 → v3) | `docs/evidence/felplex/2026-09-10-stage-edge-fail-closed-deploy.md` |
+| Payload Postman (SHA `388d18c3…`) | **Corregido en código** (v2); guard canal + datetime GT en **v3** |
+| Deno / checks locales | **102/102 PASS** (`test:felplex-1a`), `check:felplex-1a` OK |
+| CI PR #21 @ `e061e11` | **PASS** (FELplex safety, Vercel preview) |
 | Pruebas gateway A/B | **401** — `UNAUTHORIZED_NO_AUTH_HEADER` / `UNAUTHORIZED_INVALID_JWT_FORMAT` |
 | Prueba C (JWT válido + documento) | **PASS fail-closed** — `FEL_EMISSION_DISABLED` (PR #21) |
 | Guard piloto `sales_channel` | **`dine_in` / `takeout` OK**; `delivery`/`online`/null → `FEL_SALES_CHANNEL_NOT_SUPPORTED` |

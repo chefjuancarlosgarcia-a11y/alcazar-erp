@@ -1,8 +1,8 @@
 # FELplex Guatemala — contrato público adoptado (provisional)
 
 **Fecha de adopción local:** 2026-08-14  
-**Última auditoría contractual:** 2026-09-10 — export Postman SHA `388d18c3…` + alineación código @ `ac13a365`
-**Rama / runtime Stage:** `integrate/felplex-phase-1a3` @ `ac13a365…` — Edge **v2** ACTIVE fail-closed
+**Última auditoría contractual:** 2026-09-10 — export Postman SHA `388d18c3…`; runtime Stage **v3** @ `e061e11`
+**Rama / runtime Stage:** `integrate/felplex-phase-1a3` @ `e061e11…` — Edge **v3** ACTIVE fail-closed (guard canal + datetime GT)
 **Estado:** provisional — **HTTP bloqueado**; payload Postman corregido en runtime desplegado (**no** sustituye confirmación contractual operativa)
 
 ---
@@ -169,8 +169,8 @@ HTTP 200 con `valid: false` **no** es certificación. Se preservan `errors` (ani
 | Timeout → resultado ambiguo (cat. B) | ✓ | | |
 | GET / DELETE operativos | | | ✓ (no habilitados) |
 | Secretos Stage (nombre presente; valor no en repo) | ✓ | | |
-| Edge Stage fail-closed desplegada (v2 @ `ac13a365`) | ✓ | | |
-| `without_iva` 0/1 + `emails` objeto (código + 75/75 tests) | ✓ | | |
+| Edge Stage fail-closed desplegada (v3 @ `e061e11`) | ✓ | | |
+| `without_iva` 0/1 + `emails` objeto (código + 102/102 tests) | ✓ | | |
 | `FELPLEX_CONTRACT_HTTP_CONFIRMED=true` | | | ✓ |
 | Auditoría 2026-09-10 — datetime/tipo B/redondeo línea/idempotencia | | ✓ | ✓ |
 
@@ -211,12 +211,12 @@ HTTP 200 con `valid: false` **no** es certificación. Se preservan `errors` (ani
 
 ---
 
-## Confirmaciones de alcance (2026-09-10, post Edge v2)
+## Confirmaciones de alcance (2026-09-12, post Edge v3)
 
 - **HTTP FELplex NOT EXECUTED** — `FELPLEX_HTTP_ENABLED` / `FELPLEX_CONTRACT_HTTP_CONFIRMED` **OFF/unset**
 - **Primera certificación SAT NOT EXECUTED**
 - **Prueba runtime C NOT EXECUTED** (sin sesión Stage segura)
-- Edge Stage **v2** desplegada fail-closed — `docs/evidence/felplex/2026-09-10-stage-edge-fail-closed-deploy.md`
+- Edge Stage **v3** desplegada fail-closed — `docs/evidence/felplex/2026-09-10-stage-edge-fail-closed-deploy.md`
 - **`emission_enabled=false`** y switches FEL permanecen apagados
 - Bootstrap billing Stage completado; `connection_status=unknown`
 - **Producción NOT TOUCHED**

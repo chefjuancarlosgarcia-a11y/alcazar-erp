@@ -16,8 +16,9 @@
 |--------|-------|------------------------|--------------------|----------------------|
 | **Deploy inicial v1** | 2026-09-10 | `c3b91ec6376183aeafeb67f55af7fa5c1db2566c` | **1** | `3271abf95ea48080b9595da0ceda20dba346f54c3180b5e86acdac749ab9b725` |
 | **Redeploy payload v2** | 2026-09-10 | `ac13a36567e38c4c33fd3e5e6d623a8a4597294a` | **2** | `73d79afab19b605460b8aafb31031b30ea534ec75f7d95ed4e0459a2e4034315` |
+| **Redeploy piloto gates + datetime v3** | 2026-09-12 | `e061e11efc1cd0d3e7170b95517df6900beac25a` | **3** | `51c51f7145d32d85c8972b8dfe771e804ef838417f20405a3c9b980b51cda3c0` |
 
-Estado actual en Stage: **`ACTIVE`**, **`verify_jwt=true`**. Solo `felplex-certify-invoice` fue redeployada en v2; `deactivate-user` y `reactivate-user` permanecen en versión **1** sin cambio de bundle.
+Estado actual en Stage: **`ACTIVE`**, **`verify_jwt=true`**, plataforma **v3**. Solo `felplex-certify-invoice` fue redeployada en v2 y v3; `deactivate-user` y `reactivate-user` permanecen en versión **1** sin cambio de bundle.
 
 Alineación contractual Postman (export SHA-256 `388d18c3c876064743230ba6d6bd3dee52bf527f61b6654e21dc258e6f5aeaa6`) incorporada en el runtime **v2**; la colección cruda **no** se versiona en el repo.
 
@@ -123,7 +124,58 @@ Sin cuerpos con secretos ni JWT en esta evidencia.
 
 ---
 
-## Bloqueos operativos vigentes (cinco capas — v1 y v2)
+## Redeploy v3 — guard `sales_channel` + `datetime_issue` Guatemala (2026-09-12, `e061e11`)
+
+| Campo | Valor |
+|-------|-------|
+| **Rama / PR head** | `integrate/felplex-phase-1a3` @ `e061e11efc1cd0d3e7170b95517df6900beac25a` |
+| **Commits runtime** | `cd0310f` (allowlist `dine_in`/`takeout`, bloqueo delivery/online) + `e061e11` (`America/Guatemala` en `datetimeIssue.ts`) |
+| Versión plataforma | **2 → 3** |
+| Bundle anterior | `73d79afab19b605460b8aafb31031b30ea534ec75f7d95ed4e0459a2e4034315` |
+| Bundle nuevo | `51c51f7145d32d85c8972b8dfe771e804ef838417f20405a3c9b980b51cda3c0` |
+| Function ID | `5be7fb3a-c010-4824-8fad-3fab146a4d1b` (sin cambio) |
+| `verify_jwt` | **true** |
+
+**Comando sanitizado (único redeploy v3):**
+
+```bash
+npx supabase functions deploy felplex-certify-invoice --project-ref tgrqarxfmpwgrkntvgma
+```
+
+Exit code **0**. Sin `--no-verify-jwt`, sin flags HTTP/contrato, sin SQL mutativo.
+
+### Pruebas locales asociadas (repo @ `e061e11`)
+
+| Comando | Resultado |
+|---------|-----------|
+| `npm run test:felplex-1a` | **102/102 PASS** (incl. SC-* canales, DT-* datetime) |
+| `npm run check:felplex-1a` | PASS |
+| CI @ `e061e11` | **PASS** (FELplex safety, Vercel preview) |
+
+### Secretos Edge (solo nombres — sin cambio en v3)
+
+| Nombre | Estado |
+|--------|--------|
+| `FELPLEX_GT_STAGE_API_KEY` | presente (valor **no** registrado) |
+| `FELPLEX_HTTP_ENABLED` | **ausente** |
+| `FELPLEX_CONTRACT_HTTP_CONFIRMED` | **ausente** |
+
+### Snapshot Stage v3 (read-only, pre/post redeploy idéntico)
+
+| Control | Valor |
+|---------|-------|
+| `fel_emission_config` | id=1, `environment=stage`, tres interruptores **false** |
+| Billing `felplex_gt/stage` | `entity_id=547`, host `felplex.stage.plex.lat`, `connection_status=unknown` |
+| `pos_fel_documents` | **3** × `pending_certification` |
+| `pos_fel_attempts` | **0** |
+| SAT poblado | **0** |
+| `billing_documents` / `billing_certification_attempts` | **0** |
+
+Sin pruebas A/B/C adicionales en esta entrega. Sin invocación HTTP FELplex. Sin certificación SAT.
+
+---
+
+## Bloqueos operativos vigentes (cinco capas — v1, v2 y v3)
 
 1. **JWT** — gateway + handler (401 sin identidad válida).
 2. **Stage-only** — project ref y allowlist host.
@@ -131,7 +183,7 @@ Sin cuerpos con secretos ni JWT en esta evidencia.
 4. **`FELPLEX_HTTP_ENABLED` ausente** — transporte bloqueado.
 5. **`FELPLEX_CONTRACT_HTTP_CONFIRMED` ausente** — builder/contrato bloqueado antes de claim.
 
-El redeploy **v2** corrige payload/parser en código desplegado; **no** habilita HTTP ni confirma contrato operativo frente a FELplex/SAT.
+Los redeploys **v2** y **v3** corrigen runtime desplegado (payload, guard de canal, datetime Guatemala); **no** habilitan HTTP ni confirman contrato operativo frente a FELplex/SAT.
 
 ---
 
@@ -144,4 +196,4 @@ El redeploy **v2** corrige payload/parser en código desplegado; **no** habilita
 
 ---
 
-*Fin del registro — Edge fail-closed Stage — cronología v1 → v2 — 2026-09-10*
+*Fin del registro — Edge fail-closed Stage — cronología v1 → v2 → v3 — actualizado 2026-09-12*

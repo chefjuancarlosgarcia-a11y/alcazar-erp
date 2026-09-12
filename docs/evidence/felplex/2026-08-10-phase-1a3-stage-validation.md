@@ -13,9 +13,10 @@
 | **Fecha bootstrap billing Stage** | 2026-09-10 |
 | **Fecha deploy Edge fail-closed Stage (v1)** | 2026-09-10 |
 | **Fecha redeploy Edge Stage v2 (payload Postman)** | 2026-09-10 |
+| **Fecha redeploy Edge Stage v3 (canal + datetime GT)** | 2026-09-12 |
 | **Fecha auditoría contractual Guatemala** | 2026-09-10 |
 | **Zona horaria documental** | America/Guatemala |
-| **Rama documentada (consolidado)** | `integrate/felplex-phase-1a3` @ `ac13a36567e38c4c33fd3e5e6d623a8a4597294a` |
+| **Rama documentada (consolidado)** | `integrate/felplex-phase-1a3` @ `e061e11efc1cd0d3e7170b95517df6900beac25a` |
 | **PR** | #21 — OPEN, Draft (no Ready, no merge) |
 | **Producción** | No involucrada |
 | **Documento** | Evidencia local de validación estructural 230000 y runtime post-230000 |
@@ -601,9 +602,9 @@ El baseline protegido completo contiene guard (incluye `relkind='c'`) más snaps
 
 - Project ref Stage: `tgrqarxfmpwgrkntvgma` únicamente para operaciones documentadas.
 - Producción no autorizada en ninguna fase de este registro.
-- Edge Stage **v2** desplegada fail-closed; sin HTTP FELplex; sin activación de emisión; prueba C y piloto HTTP pendientes.
+- Edge Stage **v3** desplegada fail-closed (`e061e11`); guard `sales_channel` + datetime Guatemala; sin HTTP FELplex; sin activación de emisión; piloto HTTP pendiente.
 - PR #21 permanece Draft.
 
 ---
 
-*Fin del registro — FELplex Fase 1A.3 — Supabase Stage — actualizado 2026-09-10 — incluye runtime post-230000, concurrencia, bootstrap billing, deploy Edge fail-closed v1→v2, payload Postman y auditoría contractual*
+*Fin del registro — FELplex Fase 1A.3 — Supabase Stage — actualizado 2026-09-12 — incluye runtime post-230000, concurrencia, bootstrap billing, deploy Edge fail-closed v1→v3, payload Postman, guard canal, datetime GT y auditoría contractual*
