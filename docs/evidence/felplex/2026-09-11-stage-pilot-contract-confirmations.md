@@ -14,7 +14,7 @@
 
 | Tema | Decisión adoptada en código v1 |
 |------|--------------------------------|
-| `datetime_issue` | Hora Guatemala, formato `YYYY-MM-DDTHH:mm:ss` (sin `Z`) |
+| `datetime_issue` | Zona IANA **America/Guatemala**; formato `YYYY-MM-DDTHH:mm:ss` (sin `Z`/offset/ms); conversión explícita desde instante UTC en `datetimeIssue.ts` (confirmación FELplex 2026-09-11) |
 | IVA gravado | `without_iva=0`; IVA calculado/redondeado por **ítem transmitido** |
 | Idempotencia emisión | `external_id` estable; **sin** segundo POST automático en timeout/incertidumbre |
 | Consulta DTE | Solo por **UUID** (no consulta por `external_id` en v1) |

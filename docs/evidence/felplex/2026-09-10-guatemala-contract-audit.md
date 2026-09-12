@@ -172,4 +172,10 @@ Evidencia: `docs/evidence/felplex/2026-09-11-stage-pilot-contract-confirmations.
 
 Colección Postman SHA `388d18c3…` usada para auditoría; **no** versionada en repo. Posible credencial histórica en export — **no** impresa ni commitada.
 
+## 10. Addendum datetime (2026-09-12, código local sin push)
+
+- **`datetime_issue`:** implementación en `datetimeIssue.ts` convierte instantes ISO UTC/offset a hora civil **`America/Guatemala`** (`YYYY-MM-DDTHH:mm:ss`, sin `Z`/offset/ms) vía `Intl.DateTimeFormat` + `formatToParts`.
+- Fuente operativa: confirmación FELplex documentada **2026-09-11** (`2026-09-11-stage-pilot-contract-confirmations.md`).
+- HTTP FELplex, certificación SAT, gates y Producción: **sin cambio** (NOT EXECUTED / OFF / no tocada).
+
 *Fin auditoría contractual — actualizado post Edge v2 — 2026-09-10*

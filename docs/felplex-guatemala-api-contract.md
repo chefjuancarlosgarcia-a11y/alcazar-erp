@@ -126,7 +126,7 @@ Campos mínimos exigidos por parser en `valid: true`: `uuid`, `sat.serie`, `sat.
 **Confirmado (Postman Variables generales, export 2026-09-10):** `without_iva` es bandera **0** (con IVA) / **1** (sin IVA); el IVA monetario va en `total_tax`. Base imponible **no** se envía en `without_iva`.
 **Confirmado:** `emails` / `emails_cc` como arreglos de `{ "email": "…" }`.
 
-**Confirmado (FELplex + contadoría, esta entidad, 2026-09-11):** `datetime_issue` hora Guatemala `YYYY-MM-DDTHH:mm:ss` (sin `Z`); comida **B**, cargo envío **S**; IVA por ítem transmitido con `without_iva=0`; consulta DTE solo por UUID; sin retry POST en timeout.
+**Confirmado (FELplex + contadoría, esta entidad, 2026-09-11):** `datetime_issue` hora civil **America/Guatemala** como `YYYY-MM-DDTHH:mm:ss` (sin `Z`/offset/ms); el Edge convierte un instante UTC (`toISOString()`) vía `Intl` + `formatToParts` antes del payload; comida **B**, cargo envío **S**; IVA por ítem transmitido con `without_iva=0`; consulta DTE solo por UUID; sin retry POST en timeout.
 
 **Piloto POS v1 (Edge):** una línea agregada **B** solo en canales `dine_in` y `takeout`. **`delivery` / `online` / canal ausente → `FEL_SALES_CHANNEL_NOT_SUPPORTED`**. Multi-ítem B+S **no** implementado.
 
@@ -143,7 +143,7 @@ HTTP 200 con `valid: false` **no** es certificación. Se preservan `errors` (ani
 | # | Tema | Estado |
 |---|------|--------|
 | 1 | `external_id` recomendado; sin GET por external_id; idempotencia no confirmada | **Pendiente** |
-| 2 | `datetime_issue`: docs `YYYY-MM-dd` vs ejemplos ISO | **Provisional** → adoptamos ISO |
+| 2 | `datetime_issue`: docs `YYYY-MM-dd` vs ejemplos ISO | **Confirmado** — zona `America/Guatemala`, formato `YYYY-MM-DDTHH:mm:ss` |
 | 3 | IVA / `total_tax` — redondeo por línea vs total no confirmado | **Provisional** → fórmula 12/112 a nivel documento |
 | 4 | Timeouts — códigos reintentables no documentados | **Bloqueante** — sin auto-retry POST |
 | 5 | `empresa` Stage vía billing bootstrap; API key solo en secretos Edge (nombre `FELPLEX_GT_STAGE_API_KEY`) — contrato HTTP sigue sin confirmar | **Bloqueante antes de HTTP** |
@@ -200,7 +200,7 @@ HTTP 200 con `valid: false` **no** es certificación. Se preservan `errors` (ani
 | Módulo | Responsabilidad |
 |--------|-----------------|
 | `payloadBuilder.ts` | FACT provisional validado |
-| `datetimeIssue.ts` | Formatter fecha ISO provisional |
+| `datetimeIssue.ts` | Instant → hora civil Guatemala (`America/Guatemala`) |
 | `itemType.ts` | Regla B/S explícita |
 | `responseParser.ts` | Parser estricto |
 | `contractHttp.ts` | Barrera HTTP confirmado |

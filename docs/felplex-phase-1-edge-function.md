@@ -13,6 +13,7 @@
 | Pruebas gateway A/B | **401** — `UNAUTHORIZED_NO_AUTH_HEADER` / `UNAUTHORIZED_INVALID_JWT_FORMAT` |
 | Prueba C (JWT válido + documento) | **PASS fail-closed** — `FEL_EMISSION_DISABLED` (PR #21) |
 | Guard piloto `sales_channel` | **`dine_in` / `takeout` OK**; `delivery`/`online`/null → `FEL_SALES_CHANNEL_NOT_SUPPORTED` |
+| `datetime_issue` | Instant UTC (`toISOString`) → hora civil **`America/Guatemala`** en `datetimeIssue.ts` (`YYYY-MM-DDTHH:mm:ss`, sin `Z`) |
 | Evidencia confirmaciones piloto | `docs/evidence/felplex/2026-09-11-stage-pilot-contract-confirmations.md` |
 | Piloto HTTP FELplex / certificación SAT | **Pendiente** — gates apagados; **no autorizado** por este cambio |
 | Migración **230000** + concurrencia PostgreSQL | **Validadas en Stage** (2026-08-13) |
