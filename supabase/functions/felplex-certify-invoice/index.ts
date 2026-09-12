@@ -15,6 +15,7 @@ import type {
 import type { FelRepository } from "../_shared/felplex/repository.ts"
 import { ClaimError, FinalizeError } from "../_shared/felplex/repository.ts"
 import { parseFelRpcErrorCode } from "../_shared/felplex/rpcErrors.ts"
+import { parseSalesChannelFromOrderSnapshot } from "../_shared/felplex/salesChannel.ts"
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders })
@@ -163,5 +164,6 @@ function mapDocument(row: Record<string, unknown>): FelDocumentRow {
     certified_at: row.certified_at ? String(row.certified_at) : null,
     retry_count: Number(row.retry_count ?? 0),
     last_error: row.last_error ? String(row.last_error) : null,
+    sales_channel: parseSalesChannelFromOrderSnapshot(row.order_snapshot),
   }
 }

@@ -34,6 +34,7 @@ export function makeQ297Document(overrides: Partial<FelDocumentRow> = {}): FelDo
     certified_at: null,
     retry_count: 0,
     last_error: null,
+    sales_channel: "dine_in",
     ...overrides,
   }
 }

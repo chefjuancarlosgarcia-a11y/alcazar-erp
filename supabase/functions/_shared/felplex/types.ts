@@ -41,6 +41,8 @@ export interface FelDocumentRow {
   certified_at: string | null
   retry_count: number
   last_error: string | null
+  /** From order_snapshot.sales_channel only; null if snapshot missing or invalid. */
+  sales_channel: string | null
 }
 
 export interface FelEmissionConfigRow {

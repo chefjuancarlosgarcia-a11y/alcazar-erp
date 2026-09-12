@@ -44,7 +44,7 @@ jobs:
         run: node scripts/validate-felplex-migration-safety.mjs
 
       - name: Run FELplex Deno tests
-        run: deno test --no-lock --allow-env --allow-read=supabase/migrations supabase/functions/_shared/felplex/felplex_phase_1a.test.ts
+        run: deno test --no-lock --allow-env --allow-read=supabase/migrations supabase/functions/_shared/felplex/felplex_phase_1a.test.ts supabase/functions/_shared/felplex/felplex_guatemala_contract.test.ts supabase/functions/_shared/felplex/felplex_pilot_sales_channel.test.ts
 
       - name: Type-check FELplex Edge code
         run: deno check --no-lock supabase/functions/felplex-certify-invoice/index.ts supabase/functions/_shared/felplex/*.ts

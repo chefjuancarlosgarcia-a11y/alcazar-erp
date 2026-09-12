@@ -32,6 +32,7 @@ const KNOWN_FEL_RPC_CODES = new Set([
   "FEL_FINALIZE_RACE",
   "FEL_SAFE_PAYLOAD_INVALID",
   "FEL_UNCERTAIN_OUTCOME",
+  "FEL_SALES_CHANNEL_NOT_SUPPORTED",
 ])
 
 const PUBLIC_RPC_MESSAGES: Record<string, { message: string; httpStatus: number; classification: FelErrorClassification }> = {
@@ -58,6 +59,11 @@ const PUBLIC_RPC_MESSAGES: Record<string, { message: string; httpStatus: number;
   FEL_UNCERTAIN_OUTCOME: {
     message: "Certificacion incierta. Requiere reconciliacion manual con FELplex antes de reintentar.",
     httpStatus: 500,
+    classification: "blocked",
+  },
+  FEL_SALES_CHANNEL_NOT_SUPPORTED: {
+    message: "Canal de venta no soportado para certificacion FEL en esta version.",
+    httpStatus: 409,
     classification: "blocked",
   },
 }

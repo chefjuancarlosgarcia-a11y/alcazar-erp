@@ -156,12 +156,19 @@ Leyenda estado: **MATCH** | **MISMATCH** | **UNCONFIRMED** | **N/A**
 | `FELPLEX_HTTP_ENABLED` | **OFF/unset** |
 | `emission_enabled` | **false** |
 
-## 8. UNCONFIRMED (sin cambio de autorización HTTP)
+## 8. Confirmaciones piloto v1 (2026-09-11, esta entidad)
 
-- Formato y zona horaria exactos de **`datetime_issue`**
-- Tipo **B/S** específico para alimentos preparados (regla fiscal definitiva)
-- Redondeo IVA **por línea** versus **documento**
-- Idempotencia / reconsulta por **`external_id`**
+- **FELplex:** `datetime_issue` GT; IVA por ítem; `external_id`; consulta UUID; sin retry POST en timeout.
+- **Contadoría:** comida **B**, envío **S**; delivery no es todo B ni todo S.
+- **Código:** guard `FEL_SALES_CHANNEL_NOT_SUPPORTED`; allowlist `dine_in`, `takeout`; delivery/online bloqueados; línea única B (sin `S` en v1).
+
+Evidencia: `docs/evidence/felplex/2026-09-11-stage-pilot-contract-confirmations.md`.
+
+## 9. UNCONFIRMED / fase posterior
+
+- Multi-ítem B+S en payload (delivery con envío separado).
+- Generalización fiscal a otras entidades.
+- Consulta por `external_id` en runtime.
 
 Colección Postman SHA `388d18c3…` usada para auditoría; **no** versionada en repo. Posible credencial histórica en export — **no** impresa ni commitada.
 

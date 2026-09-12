@@ -126,7 +126,10 @@ Campos mínimos exigidos por parser en `valid: true`: `uuid`, `sat.serie`, `sat.
 **Confirmado (Postman Variables generales, export 2026-09-10):** `without_iva` es bandera **0** (con IVA) / **1** (sin IVA); el IVA monetario va en `total_tax`. Base imponible **no** se envía en `without_iva`.
 **Confirmado:** `emails` / `emails_cc` como arreglos de `{ "email": "…" }`.
 
-**UNCONFIRMED (sin cambio de comportamiento):** formato/zona `datetime_issue`; tipo B/S alimentos preparados; redondeo IVA por línea vs total; idempotencia/reconsulta por `external_id`.
+**Confirmado (FELplex + contadoría, esta entidad, 2026-09-11):** `datetime_issue` hora Guatemala `YYYY-MM-DDTHH:mm:ss` (sin `Z`); comida **B**, cargo envío **S**; IVA por ítem transmitido con `without_iva=0`; consulta DTE solo por UUID; sin retry POST en timeout.
+
+**Piloto POS v1 (Edge):** una línea agregada **B** solo en canales `dine_in` y `takeout`. **`delivery` / `online` / canal ausente → `FEL_SALES_CHANNEL_NOT_SUPPORTED`**. Multi-ítem B+S **no** implementado.
+
 **HTTP:** NOT EXECUTED. `FELPLEX_CONTRACT_HTTP_CONFIRMED` permanece apagado.
 
 ### Fallo funcional (`valid: false`)
@@ -144,7 +147,7 @@ HTTP 200 con `valid: false` **no** es certificación. Se preservan `errors` (ani
 | 3 | IVA / `total_tax` — redondeo por línea vs total no confirmado | **Provisional** → fórmula 12/112 a nivel documento |
 | 4 | Timeouts — códigos reintentables no documentados | **Bloqueante** — sin auto-retry POST |
 | 5 | `empresa` Stage vía billing bootstrap; API key solo en secretos Edge (nombre `FELPLEX_GT_STAGE_API_KEY`) — contrato HTTP sigue sin confirmar | **Bloqueante antes de HTTP** |
-| 6 | Tipo ítem `B`/`S` — regla fiscal ERP definitiva | **Provisional** — B para consumo alimentos |
+| 6 | Tipo ítem `B`/`S` — comida B / envío S (esta entidad) | **Confirmado fiscalmente** — v1 solo línea B en dine_in/takeout; delivery bloqueado |
 
 ---
 
@@ -158,9 +161,10 @@ HTTP 200 con `valid: false` **no** es certificación. Se preservan `errors` (ani
 | Payload FACT estructura base | ✓ | | |
 | `without_iva` bandera 0/1 | ✓ | | |
 | `emails` objeto `{ email }` | ✓ | | |
-| `datetime_issue` ISO | | ✓ | ✓ |
-| IVA incluido 12/112 (`total_tax`) | ✓ | | |
-| Tipo ítem B consumo alimentos | | ✓ | ✓ |
+| `datetime_issue` GT `YYYY-MM-DDTHH:mm:ss` | ✓ | | |
+| IVA incluido 12/112 (`total_tax`) por ítem v1 | ✓ | | |
+| Piloto v1 canales `dine_in`/`takeout` | ✓ | | |
+| Delivery / online en piloto v1 | | | ✓ (bloqueado en gates) |
 | Parser `valid` true/false | ✓ | | |
 | Timeout → resultado ambiguo (cat. B) | ✓ | | |
 | GET / DELETE operativos | | | ✓ (no habilitados) |

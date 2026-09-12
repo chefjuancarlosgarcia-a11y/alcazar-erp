@@ -8,6 +8,7 @@ import {
 } from "./constants.ts"
 import { roundMoney } from "./money.ts"
 import { resolveFelplexStageBaseUrl, validateFelplexStageUrl } from "./urlAllowlist.ts"
+import { evaluatePilotSalesChannelGate } from "./salesChannel.ts"
 import type { GateContext, GateFailure } from "./types.ts"
 
 export function parseHttpEnabled(raw: string | undefined): boolean {
@@ -91,6 +92,9 @@ export function evaluateCertificationGates(ctx: GateContext): GateFailure | null
 
   const reconciliationFailure = validateReconciliation(ctx.reconciliation)
   if (reconciliationFailure) return reconciliationFailure
+
+  const salesChannelFailure = evaluatePilotSalesChannelGate(doc.sales_channel)
+  if (salesChannelFailure) return salesChannelFailure
 
   return null
 }

@@ -132,7 +132,7 @@ Evidencia: [2026-09-10-guatemala-contract-audit.md](./2026-09-10-guatemala-contr
 |-----------|---------|
 | Transporte / parser / gates | Alineados con adopción provisional |
 | Payload Postman (`388d18c3…`) | **Resuelto en código** @ `ac13a365`; **desplegado Edge v2** |
-| Blockers antes de HTTP | `datetime_issue`, tipo B/S, redondeo línea vs doc, idempotencia `external_id`, flags contrato/emisión |
+| Blockers antes de HTTP | Piloto v1 acotado a `dine_in`/`takeout`; multi-ítem B/S delivery; flags contrato/emisión |
 | Primera certificación HTTP Stage | **NO APTO** hasta confirmación y prueba controlada |
 | Pruebas locales | **75/75 PASS** |
 

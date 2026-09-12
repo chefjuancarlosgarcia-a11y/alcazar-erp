@@ -133,6 +133,7 @@ function buildValidatedFactPayload(
   const totalTax = roundMoney(document.vat_total)
   const withoutIvaFlag = resolveTaxedItemWithoutIvaFlag(document)!
 
+  // POS v1: one aggregated B line (allowed channels only; delivery blocked in gates).
   const item = {
     qty: 1,
     type: itemType,

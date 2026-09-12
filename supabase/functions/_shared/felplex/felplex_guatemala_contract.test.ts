@@ -154,10 +154,13 @@ Deno.test("GT-07 fecha provisional ISO", () => {
   assertEquals(formatFelplexDatetimeIssue("invalid"), null)
 })
 
-Deno.test("GT-08 tipo item B explicito para consumo alimentos", () => {
-  assertEquals(resolveFelplexItemType(makeQ297Document()), "B")
-  const build = buildFelplexPayload(makeQ297Document(), { datetimeIssue: FIXED_DATETIME })
+Deno.test("GT-08 tipo item B en linea agregada dine_in/takeout (no delivery)", () => {
+  assertEquals(resolveFelplexItemType(makeQ297Document({ sales_channel: "dine_in" })), "B")
+  const build = buildFelplexPayload(makeQ297Document({ sales_channel: "takeout" }), {
+    datetimeIssue: FIXED_DATETIME,
+  })
   assertEquals(build.ok ? build.payload.items[0].type : null, "B")
+  assertEquals(build.ok ? build.payload.items.length : 0, 1)
 })
 
 Deno.test("GT-09 transporte usa X-Authorization sin Bearer", async () => {
@@ -339,7 +342,7 @@ Deno.test("GT-23 payload sin aliases sensibles prohibidos", () => {
 
 Deno.test("GT-25 ambiguedades contractuales siguen UNCONFIRMED documentadas", () => {
   assertEquals(formatFelplexDatetimeIssue("2026-08-08T12:00:00") != null, true)
-  assertEquals(resolveFelplexItemType(makeQ297Document()), "B")
+  assertEquals(resolveFelplexItemType(makeQ297Document({ sales_channel: "dine_in" })), "B")
   assertEquals(externalIdFromDocument(makeQ297Document()), makeQ297Document().external_id)
 })
 
