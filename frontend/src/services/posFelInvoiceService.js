@@ -10,13 +10,16 @@ import {
 } from "./posFelInvoiceRequestPure.js"
 
 export {
+  assertFelInvoiceCandidateRowSanitized,
   buildConsumerFinalFelRpcParams,
   buildFelInvoiceEligibilityInput,
   felDocumentPendingUiLabel,
   felDocumentStatusLabel,
+  FEL_PILOT_ORDER_ID,
   isFelInvoiceRequestEligible,
   isSupabasePosOrderId,
   mapFelInvoiceRequestError,
+  partitionPosFelInvoiceCandidates,
   resolveFelInvoiceSalesChannel,
   shouldAutoOpenFelInvoiceModalAfterPayment,
 } from "./posFelInvoiceRequestPure.js"
@@ -31,6 +34,35 @@ export async function fetchPosFelDocumentStatus(orderId) {
     return { data: null, error, message: mapFelInvoiceRequestError(error) }
   }
   return { data: data || null, error: null, message: "" }
+}
+
+export async function fetchPosFelInvoiceCandidates({
+  limit = 15,
+  paidWithinDays = 30,
+  orderId = null,
+} = {}) {
+  const params = {
+    p_limit: limit,
+    p_paid_within_days: paidWithinDays,
+    p_order_id: orderId,
+  }
+  const { data, error } = await withTimeout(
+    supabase.rpc("list_pos_fel_invoice_candidates", params),
+    15000,
+    "listar candidatos FEL"
+  )
+  if (error) {
+    return { data: null, error, message: mapFelInvoiceRequestError(error) }
+  }
+  const payload = data && typeof data === "object" ? data : { items: [], meta: {} }
+  return {
+    data: {
+      items: Array.isArray(payload.items) ? payload.items : [],
+      meta: payload.meta || {},
+    },
+    error: null,
+    message: "",
+  }
 }
 
 export async function requestPosFelCertificationConsumerFinal(orderId) {

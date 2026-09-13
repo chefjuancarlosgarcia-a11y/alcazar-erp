@@ -17,6 +17,9 @@ const paths = {
   lifecycle: "supabase/migrations/20260808220000_pos_fel_attempt_lifecycle.sql",
   hardening: "supabase/migrations/20260808230000_pos_fel_premerge_hardening.sql",
   hardeningRollback: "supabase/rollback/20260808230000_pos_fel_premerge_hardening.rollback.sql",
+  invoiceCandidates: "supabase/migrations/20260809153000_pos_fel_invoice_candidates_and_channel_guard.sql",
+  invoiceCandidatesRollback:
+    "supabase/rollback/20260809153000_pos_fel_invoice_candidates_and_channel_guard.rollback.sql",
   fixtureEnv: "supabase/functions/_shared/felplex/fixtures.ts",
   payloadBuilder: "supabase/functions/_shared/felplex/payloadBuilder.ts",
   workflow: ".github/workflows/felplex-ci.yml",
@@ -202,6 +205,7 @@ const rollbackAlternatives = [
   ["20260808190000", ["supabase/rollback/201_pos_fel_documents.rollback.sql"]],
   ["20260808220000", ["supabase/rollback/20260808220000_pos_fel_attempt_lifecycle.rollback.sql"]],
   ["20260808230000", [paths.hardeningRollback]],
+  ["20260809153000", [paths.invoiceCandidatesRollback]],
 ]
 for (const [timestamp, alternatives] of rollbackAlternatives) {
   requireCheck(
@@ -210,7 +214,7 @@ for (const [timestamp, alternatives] of rollbackAlternatives) {
   )
 }
 
-for (const path of [paths.felBase, paths.lifecycle, paths.hardening]) {
+for (const path of [paths.felBase, paths.lifecycle, paths.hardening, paths.invoiceCandidates]) {
   const code = stripSqlComments(read(path))
   requireCheck(
     !/\bpg_net\b|\bnet\.http_[a-z_]+\s*\(|\bhttp_(?:get|post|put|delete)\s*\(/i.test(code),
@@ -218,6 +222,67 @@ for (const path of [paths.felBase, paths.lifecycle, paths.hardening]) {
   )
   validateSqlDelimiters(path, read(path))
 }
+
+const invoiceCandidates = read(paths.invoiceCandidates)
+const invoiceCandidatesCode = stripSqlComments(invoiceCandidates)
+requireCheck(
+  invoiceCandidatesCode.includes("fel_can_request_fel_certification()"),
+  "153000 list RPC must require fel_can_request_fel_certification()",
+)
+requireCheck(
+  /revoke\s+all\s+on\s+function\s+public\.list_pos_fel_invoice_candidates[\s\S]*from\s+public,\s*anon/i.test(
+    invoiceCandidates,
+  ),
+  "153000 must revoke list_pos_fel_invoice_candidates from public and anon",
+)
+requireCheck(
+  /grant\s+execute\s+on\s+function\s+public\.list_pos_fel_invoice_candidates[\s\S]*to\s+authenticated/i.test(
+    invoiceCandidates,
+  ),
+  "153000 must grant list_pos_fel_invoice_candidates EXECUTE to authenticated",
+)
+requireCheck(
+  invoiceCandidatesCode.includes("FEL_SALES_CHANNEL_NOT_SUPPORTED"),
+  "153000 must define stable FEL_SALES_CHANNEL_NOT_SUPPORTED guard",
+)
+requireCheck(
+  invoiceCandidatesCode.includes("fel_assert_pos_fel_pilot_sales_channel"),
+  "153000 must call fel_assert_pos_fel_pilot_sales_channel in request RPC",
+)
+requireCheck(
+  invoiceCandidatesCode.includes("pos_order_payments")
+    && !invoiceCandidatesCode.includes("pos_orders.updated_at"),
+  "153000 list must derive paid_at from pos_order_payments, not pos_orders.updated_at",
+)
+requireCheck(
+  invoiceCandidatesCode.includes("FEL_LIST_PARAM_LIMIT_OUT_OF_RANGE")
+    && invoiceCandidatesCode.includes("FEL_LIST_PARAM_DAYS_OUT_OF_RANGE"),
+  "153000 list must reject explicit out-of-range limit/days parameters",
+)
+requireCheck(
+  !invoiceCandidatesCode.includes("'fel_document_id'")
+    && !invoiceCandidatesCode.includes("table_name"),
+  "153000 list payload must not include fel_document_id or table_name",
+)
+requireCheck(
+  invoiceCandidatesCode.includes("when 'dine_in' then 'En mesa'"),
+  "153000 list display_label must use fixed En mesa for dine_in",
+)
+
+const rollback153 = read(paths.invoiceCandidatesRollback)
+requireCheck(
+  rollback153.includes("list_pos_fel_invoice_candidates"),
+  "153000 rollback must drop list_pos_fel_invoice_candidates",
+)
+requireCheck(
+  rollback153.includes("fel_assert_pos_fel_pilot_sales_channel"),
+  "153000 rollback must drop fel_assert_pos_fel_pilot_sales_channel",
+)
+requireCheck(
+  rollback153.includes("request_pos_fel_certification"),
+  "153000 rollback must restore request_pos_fel_certification",
+)
+requireCheck(!/\bcascade\b/i.test(stripSqlComments(rollback153)), "153000 rollback must not use CASCADE")
 
 const hardening = read(paths.hardening)
 const hardeningCode = stripSqlComments(hardening)
@@ -379,6 +444,10 @@ validateSqlDelimiters(paths.hardeningRollback, rollback230)
 validateSqlDelimiters(
   "supabase/schema/20260808230000_test_pos_fel_premerge_hardening.sql",
   read("supabase/schema/20260808230000_test_pos_fel_premerge_hardening.sql"),
+)
+validateSqlDelimiters(
+  "supabase/schema/20260809153000_test_pos_fel_invoice_candidates.sql",
+  read("supabase/schema/20260809153000_test_pos_fel_invoice_candidates.sql"),
 )
 validateSqlDelimiters(
   "supabase/stage-fixtures/felplex_gt_billing_bootstrap.sql",

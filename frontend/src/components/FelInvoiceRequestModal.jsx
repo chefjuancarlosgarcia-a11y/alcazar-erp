@@ -172,7 +172,7 @@ export default function FelInvoiceRequestModal({ context, onClose, onSuccess }) 
   }
 
   const existingStatus = felDoc?.status
-  const showRequestForm = !success && (!existingStatus || existingStatus === "failed")
+  const showRequestForm = !success && !existingStatus
 
   return (
     <div className="fel-invoice-overlay" role="dialog" aria-modal="true" aria-labelledby="fel-invoice-title">
@@ -200,11 +200,14 @@ export default function FelInvoiceRequestModal({ context, onClose, onSuccess }) 
           </div>
         )}
 
-        {!loading && !success && existingStatus && existingStatus !== "failed" && (
+        {!loading && !success && existingStatus && (
           <div className="fel-invoice-status">
             <strong>{felDocumentStatusLabel(existingStatus)}</strong>
             {existingStatus === "pending_certification" && (
               <p className="cashier-muted">Pendiente de certificación</p>
+            )}
+            {existingStatus === "failed" && (
+              <p className="cashier-muted">Reintento no disponible hasta revisión operativa.</p>
             )}
           </div>
         )}
@@ -255,7 +258,7 @@ export default function FelInvoiceRequestModal({ context, onClose, onSuccess }) 
               disabled={submitting || nitChoice !== "cf"}
               onClick={submitConsumerFinal}
             >
-              {submitting ? "Registrando..." : "Confirmar solicitud CF"}
+              {submitting ? "Registrando..." : "Solicitar factura"}
             </button>
           )}
         </footer>

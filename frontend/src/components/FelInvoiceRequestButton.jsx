@@ -73,7 +73,7 @@ export default function FelInvoiceRequestButton({ orderId, salesChannel, onOpen,
   if (!isSupabasePosOrderId(orderId)) return null
   if (loading) return compact ? null : <small className="cashier-muted">FEL...</small>
 
-  if (felStatus && felStatus !== "failed") {
+  if (felStatus) {
     return <span className="fel-invoice-badge">{statusLabel}</span>
   }
 

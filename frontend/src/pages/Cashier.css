@@ -1602,3 +1602,20 @@
   gap: var(--erp-space-8);
   align-items: center;
 }
+
+.cashier-fel-panels {
+  grid-column: 1 / -1;
+}
+
+.cashier-fel-section {
+  display: grid;
+  gap: var(--erp-space-16);
+  padding-top: var(--erp-space-8);
+  border-top: 1px solid #24344a;
+}
+
+.cashier-fel-section h3 {
+  margin: 0;
+  color: #e2e8f0;
+  font-size: 16px;
+}

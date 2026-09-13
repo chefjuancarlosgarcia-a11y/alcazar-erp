@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useAuth } from "../context/AuthContext"
 import {
   PAYMENT_METHODS,
@@ -36,7 +36,12 @@ import { queueReceiptPrintJob } from "../services/printingService"
 import SplitPaymentModal from "../components/SplitPaymentModal"
 import FelInvoiceRequestModal from "../components/FelInvoiceRequestModal"
 import FelInvoiceRequestButton from "../components/FelInvoiceRequestButton"
-import { shouldAutoOpenFelInvoiceModalAfterPayment } from "../services/posFelInvoiceService"
+import {
+  fetchPosFelInvoiceCandidates,
+  felDocumentStatusLabel,
+  partitionPosFelInvoiceCandidates,
+  shouldAutoOpenFelInvoiceModalAfterPayment,
+} from "../services/posFelInvoiceService"
 import CashierBillingCustomer from "../components/CashierBillingCustomer"
 import useOperationalAlerts from "../hooks/useOperationalAlerts"
 import OperationalAlertToast from "../components/OperationalAlertToast"
@@ -207,6 +212,14 @@ function Cashier() {
   const [selectedBillId, setSelectedBillId] = useState("")
   const [feedback, setFeedback] = useState("")
   const [felInvoiceContext, setFelInvoiceContext] = useState(null)
+  const [felInvoiceListTick, setFelInvoiceListTick] = useState(0)
+  const openFelInvoiceRequest = useCallback((context) => {
+    if (!context?.orderId) return
+    setFelInvoiceContext((prev) => {
+      if (prev?.orderId === context.orderId) return prev
+      return context
+    })
+  }, [])
   const canSeeAllFinance = canAuthorizeFinance(user)
   const currentCashierId = user?.id || user?.username
   const visibleSessionIds = new Set(store.sessions.filter((entry) => canSeeAllFinance || String(entry.cashierId) === String(currentCashierId)).map((entry) => String(entry.id)))
@@ -243,6 +256,7 @@ function Cashier() {
 
   function refresh(message = "") {
     setStore(loadStore())
+    setFelInvoiceListTick((tick) => tick + 1)
     setFeedback(message)
   }
 
@@ -352,7 +366,9 @@ function Cashier() {
           onRefresh={refresh}
           user={user}
           highlightedIds={cashierAlerts.highlightedIds}
-          onRequestFelInvoice={setFelInvoiceContext}
+          onRequestFelInvoice={openFelInvoiceRequest}
+          felInvoiceListTick={felInvoiceListTick}
+          cashierUserId={user?.id || user?.username || ""}
         />
       )}
       {tab === "requests" && <PaymentRequests bills={requests} onOpenCharge={openCharge} onRefresh={refresh} user={user} highlightedIds={cashierAlerts.highlightedIds} />}
@@ -372,7 +388,91 @@ function Cashier() {
   )
 }
 
-function CashierDashboard({ session, summary, requests, payments, onOpenCharge, onRefresh, user, highlightedIds, onRequestFelInvoice }) {
+function CashierFelInvoicePanels({ session, onRequestFelInvoice, felInvoiceListTick, cashierUserId }) {
+  const listFetchGenerationRef = useRef(0)
+  const [state, setState] = useState({
+    loading: false,
+    available: [],
+    existing: [],
+    error: "",
+  })
+
+  useEffect(() => {
+    if (!session) {
+      setState({ loading: false, available: [], existing: [], error: "" })
+      return undefined
+    }
+    const generation = ++listFetchGenerationRef.current
+    let cancelled = false
+    ;(async () => {
+      setState((prev) => ({ ...prev, loading: true, error: "" }))
+      const result = await fetchPosFelInvoiceCandidates()
+      if (cancelled || generation !== listFetchGenerationRef.current) return
+      if (result.error) {
+        setState({ loading: false, available: [], existing: [], error: result.message })
+        return
+      }
+      const { available, existing } = partitionPosFelInvoiceCandidates(result.data?.items || [])
+      setState({ loading: false, available, existing, error: "" })
+    })()
+    return () => { cancelled = true }
+  }, [session, felInvoiceListTick, cashierUserId])
+
+  if (!session) return null
+
+  return (
+    <article className="cashier-panel cashier-fel-panels">
+      <div className="cashier-panel-title">
+        <h2>Facturación FEL (caja)</h2>
+        <span>{state.loading ? "Actualizando..." : `${state.available.length} disponibles`}</span>
+      </div>
+      {state.error && <p className="cashier-alert">{state.error}</p>}
+      <section className="cashier-fel-section">
+        <h3>Disponibles para solicitar</h3>
+        {state.loading && <Empty text="Cargando órdenes elegibles..." />}
+        {!state.loading && state.available.map((row) => (
+          <div className="cashier-row cashier-row-actions" key={row.order_id}>
+            <div>
+              <strong>{row.display_label}</strong>
+              <span>
+                Q{Number(row.order_total).toFixed(2)} · {row.sales_channel} · {formatDate(row.paid_at)}
+              </span>
+            </div>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => onRequestFelInvoice?.({
+                orderId: row.order_id,
+                salesChannel: row.sales_channel,
+                tableName: row.display_label,
+                total: row.order_total,
+                orderStatus: "paid",
+              })}
+            >
+              Solicitar factura FEL
+            </button>
+          </div>
+        ))}
+        {!state.loading && !state.available.length && <Empty text="No hay órdenes pagadas listas para solicitar FEL." />}
+      </section>
+      <section className="cashier-fel-section">
+        <h3>Solicitudes FEL existentes</h3>
+        {!state.loading && state.existing.map((row) => (
+          <div className="cashier-row" key={`${row.order_id}-${row.fel_status}`}>
+            <div>
+              <strong>{row.display_label}</strong>
+              <span>Q{Number(row.order_total).toFixed(2)} · {formatDate(row.paid_at)}</span>
+            </div>
+            <span className="fel-invoice-badge">{felDocumentStatusLabel(row.fel_status)}</span>
+          </div>
+        ))}
+        {!state.loading && !state.existing.length && <Empty text="Sin solicitudes FEL registradas en el periodo." />}
+      </section>
+    </article>
+  )
+}
+
+function CashierDashboard({ session, summary, requests, payments, onOpenCharge, onRefresh, user, highlightedIds, onRequestFelInvoice, felInvoiceListTick, cashierUserId }) {
   const [openingAmount, setOpeningAmount] = useState("500")
   const completed = payments.filter((payment) => payment.status === "completed")
   if (!session) {
@@ -423,6 +523,12 @@ function CashierDashboard({ session, summary, requests, payments, onOpenCharge, 
         ))}
         {!completed.length && <Empty text="Aún no hay cobros registrados." />}
       </article>
+      <CashierFelInvoicePanels
+        session={session}
+        onRequestFelInvoice={onRequestFelInvoice}
+        felInvoiceListTick={felInvoiceListTick}
+        cashierUserId={cashierUserId}
+      />
     </div>
   )
 }

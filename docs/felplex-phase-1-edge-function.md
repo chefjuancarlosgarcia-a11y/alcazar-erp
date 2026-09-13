@@ -212,19 +212,43 @@ El hardening aditivo usa `20260808230000_pos_fel_premerge_hardening.sql`. Su rol
 
 | Tema | Estado |
 |------|--------|
-| Pantalla | **Caja (`Cashier.jsx`)** — acción «Solicitar factura FEL» tras cobro y en «Últimos cobros» |
-| RPC | **`request_pos_fel_certification`** (CF: `p_receiver_nit = 'CF'`, receptor sin PII) |
+| Pantalla | **Caja (`Cashier.jsx`)** — panel «Disponibles / Solicitudes FEL existentes», acción tras cobro y en «Últimos cobros» |
+| RPC listado | **`list_pos_fel_invoice_candidates`** — permiso `fel_can_request_fel_certification()`; sin PII/SAT/`fel_document_id` |
+| RPC solicitud | **`request_pos_fel_certification`** (CF; doble confirmación en modal) |
 | Consulta estado | **`get_pos_fel_document_status`** |
 | Consumidor Final | **Soportado** en modal |
-| Factura con NIT | **Visible — Próximamente** (sin captura parcial) |
-| Certificación / HTTP FELplex | **NOT EXECUTED** — no hay botón ni `functions.invoke` hacia `felplex-certify-invoice` |
-| Separación solicitud vs certificación | **Sí** — éxito UI = «Solicitud FEL registrada» / «Pendiente de certificación» |
+| Factura con NIT | **Visible — Próximamente** |
+| Certificación / HTTP FELplex | **NOT EXECUTED** en UI |
+| Migración | **`20260809153000`** — listado + guard H1 (local; **no aplicada en Stage** al cierre de este doc) |
 
-Prueba estática: `npm run test:pos-fel-invoice-request`.
+Prueba estática frontend: `npm run test:pos-fel-invoice-request`.
 
-### Deuda técnica (fuera de alcance UI)
+### H1 — canal piloto e idempotencia (intencional)
+
+| Caso | Comportamiento |
+|------|----------------|
+| Canal bloqueado (`delivery`/`online`/null/vacío/desconocido), **sin** FACT | `FEL_SALES_CHANNEL_NOT_SUPPORTED` **antes del INSERT** |
+| Canal bloqueado **con** FACT existente | **Retorno idempotente** del documento (misma forma JSON que otros estados); **cero INSERT**, **cero mutación** |
+| Interpretación | Idempotencia **no** autoriza certificación Edge; gates Edge siguen bloqueando canales no piloto |
+
+Orden en `request_pos_fel_certification`: conciliación → SELECT FACT → idempotencia → `fel_assert_pos_fel_pilot_sales_channel` → INSERT.
+
+### `list_pos_fel_invoice_candidates`
+
+- `p_limit` / `p_paid_within_days`: **NULL** → defaults 15 / 30; valor explícito fuera de 1–50 o 1–90 → `FEL_LIST_PARAM_*` (sin clamp).
+- `p_order_id`: búsqueda **exacta** de una orden histórica (ignora ventana temporal); máx. 1 fila; **nunca** fallback al listado general.
+- `display_label`: fijo por canal (`dine_in` → «En mesa», `takeout` → «Para llevar»); no `table_name`.
+
+### Pruebas SQL (`supabase/schema/20260809153000_test_pos_fel_invoice_candidates.sql`)
+
+| Tipo | Qué cubre |
+|------|-----------|
+| **TEXTUAL / estructural** | Definiciones, grants, patrones en `pg_get_functiondef`, orden idempotencia vs assert |
+| **RUNTIME PRIV** | `has_function_privilege` (requiere migración aplicada) |
+| **NOT EXECUTED** | Params inválidos, canal bloqueado con/sin FACT, conciliación numérica — Stage o Postgres local |
+
+### Deuda técnica
 
 | ID | Tema | Notas |
 |----|------|--------|
-| **H1** | Guard `sales_channel` en RPC solicitud | `request_pos_fel_certification` puede registrar `pending_certification` para `delivery`/`online` vía llamada RPC autenticada directa; la **certificación Edge** sí bloquea esos canales. Agregar guard en **migración posterior** antes de habilitar delivery ampliado o producción. |
-| **H2** | Lecturas en «Últimos cobros» | Hasta ~15 RPC (3 × 5 filas) al cargar dashboard; optimizar en mejora de rendimiento posterior (cache/batch), no bloqueante para push frontend. |
+| **H2** | Lecturas en «Últimos cobros» | Hasta ~15 RPC (3 × 5 filas) al cargar dashboard; optimizar en mejora posterior. |

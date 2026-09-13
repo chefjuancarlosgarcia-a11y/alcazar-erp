@@ -1,5 +1,22 @@
 export const FEL_INVOICE_PILOT_SALES_CHANNELS = new Set(["dine_in", "takeout"])
 
+export const FEL_INVOICE_CANDIDATE_PUBLIC_KEYS = new Set([
+  "order_id",
+  "sales_channel",
+  "order_total",
+  "paid_at",
+  "display_label",
+  "fel_status",
+  "can_request",
+])
+
+export const FEL_INVOICE_CHANNEL_DISPLAY_LABELS = {
+  dine_in: "En mesa",
+  takeout: "Para llevar",
+}
+
+export const FEL_PILOT_ORDER_ID = "ecd90058-9fc7-4c7b-8f1b-a98c6f8bff45"
+
 const FEL_RPC_ERROR_PATTERN = /FEL_[A-Z0-9_]+/g
 
 export function extractFelRpcErrorCode(message = "") {
@@ -20,6 +37,9 @@ export function mapFelInvoiceRequestError(error) {
     FEL_CONTINGENCY_NOT_SUPPORTED: "Contingencia FEL no habilitada.",
     FEL_RECEIVER_NAME_REQUIRED: "Indica el nombre del receptor para factura con NIT.",
     FEL_RECEIVER_NIT_TOO_LONG: "El NIT excede la longitud permitida.",
+    FEL_SALES_CHANNEL_NOT_SUPPORTED: "Este canal de venta no admite solicitud FEL en caja.",
+    FEL_LIST_PARAM_LIMIT_OUT_OF_RANGE: "Parámetro de listado inválido. Intenta de nuevo.",
+    FEL_LIST_PARAM_DAYS_OUT_OF_RANGE: "Parámetro de listado inválido. Intenta de nuevo.",
   }
   if (code && messages[code]) return messages[code]
   if (/permiso/i.test(raw)) return "No tienes permiso para solicitar factura FEL."
@@ -101,6 +121,30 @@ export function resolveFelInvoiceSalesChannel(contextChannel, order) {
   const fromContext = String(contextChannel || "").trim()
   if (fromContext) return fromContext
   return String(order?.sales_channel || order?.salesChannel || "").trim()
+}
+
+export function assertFelInvoiceCandidateRowSanitized(row) {
+  if (!row || typeof row !== "object") return false
+  const keys = Object.keys(row)
+  if (!keys.every((key) => FEL_INVOICE_CANDIDATE_PUBLIC_KEYS.has(key))) return false
+  const forbidden = /receiver|customer|snapshot|external_id|fel_uuid|email|phone|nit|notes/i
+  if (forbidden.test(JSON.stringify(row))) return false
+  return true
+}
+
+export function partitionPosFelInvoiceCandidates(items = []) {
+  const available = []
+  const existing = []
+  for (const row of items) {
+    if (!assertFelInvoiceCandidateRowSanitized(row)) continue
+    const status = row.fel_status ?? null
+    if (status == null && row.can_request === true) {
+      available.push(row)
+    } else if (status != null && status !== "") {
+      existing.push(row)
+    }
+  }
+  return { available, existing }
 }
 
 export function buildFelInvoiceEligibilityInput({ orderId, orderStatus, salesChannel, payment = {} }) {
