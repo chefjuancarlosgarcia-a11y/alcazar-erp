@@ -36,7 +36,7 @@ Preparar en Supabase Stage la configuración billing mínima para que el runtime
 | Entidad legal ERP | `code=default`, NIT `326070`, nombre **Pruebas Gran Alcazar** |
 | Catálogo proveedor | `felplex_gt` |
 | ID empresa FELplex | `547` |
-| Base API | `https://felplex.stage.plex.lat` |
+| Base API | `https://felplex-gt.stage.plex.lat` (post-corrección; Stage existente requiere migración `20260813140000` antes de otro HTTP) |
 | Nombre lógico secreto Edge | `FELPLEX_GT_STAGE_API_KEY` (valor **no** en SQL) |
 
 **No** habilita emisión FEL, HTTP FELplex, Edge deploy ni certificación.

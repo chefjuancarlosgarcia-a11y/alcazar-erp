@@ -20,6 +20,8 @@ const paths = {
   invoiceCandidates: "supabase/migrations/20260809153000_pos_fel_invoice_candidates_and_channel_guard.sql",
   invoiceCandidatesRollback:
     "supabase/rollback/20260809153000_pos_fel_invoice_candidates_and_channel_guard.rollback.sql",
+  gtStageHostUrl: "supabase/migrations/20260813140000_felplex_gt_stage_host_url.sql",
+  gtStageHostUrlRollback: "supabase/rollback/20260813140000_felplex_gt_stage_host_url.rollback.sql",
   fixtureEnv: "supabase/functions/_shared/felplex/fixtures.ts",
   payloadBuilder: "supabase/functions/_shared/felplex/payloadBuilder.ts",
   workflow: ".github/workflows/felplex-ci.yml",
@@ -206,6 +208,7 @@ const rollbackAlternatives = [
   ["20260808220000", ["supabase/rollback/20260808220000_pos_fel_attempt_lifecycle.rollback.sql"]],
   ["20260808230000", [paths.hardeningRollback]],
   ["20260809153000", [paths.invoiceCandidatesRollback]],
+  ["20260813140000", [paths.gtStageHostUrlRollback]],
 ]
 for (const [timestamp, alternatives] of rollbackAlternatives) {
   requireCheck(
@@ -214,7 +217,77 @@ for (const [timestamp, alternatives] of rollbackAlternatives) {
   )
 }
 
-for (const path of [paths.felBase, paths.lifecycle, paths.hardening, paths.invoiceCandidates]) {
+const gtHostMigration = read(paths.gtStageHostUrl)
+const gtHostMigrationCode = stripSqlComments(gtHostMigration)
+requireCheck(
+  gtHostMigration.includes("https://felplex-gt.stage.plex.lat"),
+  "140000 migration must set Guatemala Stage host felplex-gt.stage.plex.lat",
+)
+requireCheck(
+  gtHostMigration.includes("https://felplex.stage.plex.lat"),
+  "140000 migration must only replace legacy host felplex.stage.plex.lat",
+)
+requireCheck(
+  /update\s+public\.billing_provider_configs/i.test(gtHostMigrationCode),
+  "140000 migration must UPDATE billing_provider_configs only",
+)
+requireCheck(
+  !/\bentity_id\b/i.test(gtHostMigrationCode.replace(/where[\s\S]*/i, "")),
+  "140000 migration must not change entity_id",
+)
+requireCheck(!/\bcascade\b/i.test(gtHostMigrationCode), "140000 migration must not use CASCADE")
+requireCheck(
+  /get\s+diagnostics\s+v_row_count\s*=\s*row_count/i.test(gtHostMigrationCode),
+  "140000 migration must use GET DIAGNOSTICS ROW_COUNT",
+)
+requireCheck(
+  /v_row_count\s*<>\s*1/i.test(gtHostMigrationCode),
+  "140000 migration must fail when row_count is not exactly 1",
+)
+requireCheck(
+  /raise\s+exception[\s\S]*felplex_gt_stage_host_url_row_count/i.test(gtHostMigrationCode),
+  "140000 migration must RAISE EXCEPTION FELPLEX_GT_STAGE_HOST_URL_ROW_COUNT",
+)
+requireCheck(
+  gtHostMigration.includes("provider_code = 'felplex_gt'") &&
+    gtHostMigration.includes("environment = 'stage'") &&
+    gtHostMigration.includes("base_url = 'https://felplex.stage.plex.lat'"),
+  "140000 migration must filter exact provider, environment, and legacy host",
+)
+
+const gtHostRollback = read(paths.gtStageHostUrlRollback)
+const gtHostRollbackCode = stripSqlComments(gtHostRollback)
+requireCheck(
+  /get\s+diagnostics\s+v_row_count\s*=\s*row_count/i.test(gtHostRollbackCode),
+  "140000 rollback must use GET DIAGNOSTICS ROW_COUNT",
+)
+requireCheck(
+  /v_row_count\s*<>\s*1/i.test(gtHostRollbackCode),
+  "140000 rollback must fail when row_count is not exactly 1",
+)
+requireCheck(
+  /raise\s+exception[\s\S]*felplex_gt_stage_host_url_rollback_row_count/i.test(gtHostRollbackCode),
+  "140000 rollback must RAISE EXCEPTION FELPLEX_GT_STAGE_HOST_URL_ROLLBACK_ROW_COUNT",
+)
+requireCheck(
+  gtHostRollback.includes("provider_code = 'felplex_gt'") &&
+    gtHostRollback.includes("environment = 'stage'") &&
+    gtHostRollback.includes("base_url = 'https://felplex-gt.stage.plex.lat'"),
+  "140000 rollback must filter exact provider, environment, and GT host",
+)
+requireCheck(!/\bcascade\b/i.test(gtHostRollbackCode), "140000 rollback must not use CASCADE")
+
+const felplexConstants = read("supabase/functions/_shared/felplex/constants.ts")
+requireCheck(
+  felplexConstants.includes('felplex-gt.stage.plex.lat'),
+  "FELPLEX_STAGE_HOST must be felplex-gt.stage.plex.lat",
+)
+requireCheck(
+  !felplexConstants.includes('"felplex.stage.plex.lat"'),
+  "constants.ts must not retain legacy Stage host",
+)
+
+for (const path of [paths.felBase, paths.lifecycle, paths.hardening, paths.invoiceCandidates, paths.gtStageHostUrl]) {
   const code = stripSqlComments(read(path))
   requireCheck(
     !/\bpg_net\b|\bnet\.http_[a-z_]+\s*\(|\bhttp_(?:get|post|put|delete)\s*\(/i.test(code),
@@ -448,6 +521,12 @@ validateSqlDelimiters(
 validateSqlDelimiters(
   "supabase/schema/20260809153000_test_pos_fel_invoice_candidates.sql",
   read("supabase/schema/20260809153000_test_pos_fel_invoice_candidates.sql"),
+)
+validateSqlDelimiters(paths.gtStageHostUrl, gtHostMigration)
+validateSqlDelimiters(paths.gtStageHostUrlRollback, gtHostRollback)
+validateSqlDelimiters(
+  "supabase/schema/20260813140000_test_felplex_gt_stage_host_url.sql",
+  read("supabase/schema/20260813140000_test_felplex_gt_stage_host_url.sql"),
 )
 validateSqlDelimiters(
   "supabase/stage-fixtures/felplex_gt_billing_bootstrap.sql",

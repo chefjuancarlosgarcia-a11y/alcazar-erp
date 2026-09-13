@@ -12,9 +12,14 @@ export interface FelplexUrlValidationError {
 }
 
 export function validateFelplexStageUrl(rawUrl: string): FelplexUrlValidationError | null {
+  const trimmed = String(rawUrl ?? "").trim()
+  if (urlRawContainsTraversal(trimmed)) {
+    return blocked("Ruta en URL FELplex no permitida.")
+  }
+
   let parsed: URL
   try {
-    parsed = new URL(rawUrl)
+    parsed = new URL(trimmed)
   } catch {
     return blocked("URL FELplex invalida.")
   }
@@ -25,6 +30,11 @@ export function validateFelplexStageUrl(rawUrl: string): FelplexUrlValidationErr
 
   if (parsed.hostname !== ALLOWED_HOSTNAME) {
     return blocked("Host FELplex no autorizado.")
+  }
+
+  const path = parsed.pathname ?? ""
+  if (path.includes("..") || !isAllowedFelplexStagePath(path)) {
+    return blocked("Ruta en URL FELplex no permitida.")
   }
 
   if (parsed.username || parsed.password) {
@@ -112,4 +122,22 @@ export function buildFelplexCancelInvoiceUrl(
 
 function blocked(message: string): FelplexUrlValidationError {
   return { code: "FELPLEX_URL_BLOCKED", message }
+}
+
+/** Reject dot-segment traversal before URL normalization can collapse paths to "/". */
+export function urlRawContainsTraversal(raw: string): boolean {
+  const lower = raw.toLowerCase()
+  if (lower.includes("..")) return true
+  return /(?:%2e%2e|%252e%252e|%2f%2e%2e|%2e%2e%2f)/.test(lower)
+}
+
+/** Stage host paths: base, certify await, modeled GET/text, PDF/XML resources. */
+export function isAllowedFelplexStagePath(pathname: string): boolean {
+  const path = pathname || "/"
+  if (path === "/") return true
+  if (/^\/api\/entity\/[^/]+\/invoices\/await$/.test(path)) return true
+  if (/^\/api\/entity\/[^/]+\/invoices\/[^/]+(\/text)?$/.test(path)) return true
+  if (/^\/pdf\/[^/]+$/.test(path)) return true
+  if (/^\/xml\/[^/]+$/.test(path)) return true
+  return false
 }

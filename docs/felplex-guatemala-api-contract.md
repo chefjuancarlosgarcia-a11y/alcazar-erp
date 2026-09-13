@@ -31,7 +31,10 @@ La colección completa **no** se versiona en el repo (ejemplos con datos de terc
 | Texto del DTE | `GET` | `/api/entity/{empresa}/invoices/{dte_uuid}/text` |
 | Anulación | `DELETE` | `/api/entity/{empresa}/invoices/{dte_uuid}` body `{ "reason": "..." }` |
 
-**Base URL Stage autorizada:** `https://felplex.stage.plex.lat`
+**Base URL Stage Guatemala autorizada:** `https://felplex-gt.stage.plex.lat`
+**Fuente host GT:** confirmación escrita representante FELplex 2026-09-12/13 — ver `docs/evidence/felplex/2026-09-13-guatemala-stage-host-correction.md`.
+**Legacy (rechazado en allowlist):** `https://felplex.stage.plex.lat` — causó HTTP **404** en el piloto único 2026-09-13.
+**`entity_id` (`billing_provider_configs`):** Guatemala Stage **`547`** — **CONFIRMED** (confirmación directa representante FELplex 2026-09-12/13; ver evidencia host GT). No implica certificación SAT exitosa ni autoriza segundo piloto HTTP.
 
 ---
 
@@ -155,7 +158,7 @@ HTTP 200 con `valid: false` **no** es certificación. Se preservan `errors` (ani
 
 | Elemento | Confirmado | Provisional | Bloqueante antes de HTTP |
 |----------|:----------:|:-----------:|:------------------------:|
-| Host Stage `felplex.stage.plex.lat` | ✓ | | |
+| Host Stage GT `felplex-gt.stage.plex.lat` | ✓ | | |
 | Header `X-Authorization` | ✓ | | |
 | POST `/invoices/await` | ✓ | | |
 | Payload FACT estructura base | ✓ | | |

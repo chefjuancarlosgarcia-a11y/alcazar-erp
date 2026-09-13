@@ -112,7 +112,7 @@ begin
       and ent.code = 'default'
       and (
         cfg.entity_id is distinct from '547'
-        or cfg.base_url is distinct from 'https://felplex.stage.plex.lat'
+        or cfg.base_url is distinct from 'https://felplex-gt.stage.plex.lat'
         or cfg.secret_env_var is distinct from 'FELPLEX_GT_STAGE_API_KEY'
         or cfg.is_default is distinct from true
         or cfg.is_active is distinct from true
@@ -133,7 +133,7 @@ begin
       and cfg.environment = 'stage'
       and ent.code = 'default'
       and cfg.entity_id = '547'
-      and cfg.base_url = 'https://felplex.stage.plex.lat'
+      and cfg.base_url = 'https://felplex-gt.stage.plex.lat'
       and cfg.secret_env_var = 'FELPLEX_GT_STAGE_API_KEY'
       and cfg.is_default = true
       and cfg.is_active = true
@@ -278,7 +278,7 @@ begin
     'stage',
     '547',
     'FELPLEX_GT_STAGE_API_KEY',
-    'https://felplex.stage.plex.lat',
+    'https://felplex-gt.stage.plex.lat',
     null,
     true,
     true,
@@ -297,7 +297,7 @@ begin
       and cfg.provider_code = 'felplex_gt'
       and cfg.environment = 'stage'
       and cfg.entity_id = '547'
-      and cfg.base_url = 'https://felplex.stage.plex.lat'
+      and cfg.base_url = 'https://felplex-gt.stage.plex.lat'
       and cfg.secret_env_var = 'FELPLEX_GT_STAGE_API_KEY'
       and cfg.adapter_version is null
       and cfg.is_default = true

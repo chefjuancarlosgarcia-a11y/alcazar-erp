@@ -162,7 +162,7 @@ En `outcome='success'`, finalize vuelve a comprobar que la orden siga `paid`, co
 
 ## 7. Allowlist estricta
 
-Único host: **`https://felplex.stage.plex.lat`**. Fetch con `redirect: "error"`.
+Único host Guatemala Stage: **`https://felplex-gt.stage.plex.lat`** (confirmación FELplex 2026-09-12/13). Legacy **`felplex.stage.plex.lat`** bloqueado. Fetch con `redirect: "error"`. Path certify: `/api/entity/{entity_id}/invoices/await`.
 
 ---
 

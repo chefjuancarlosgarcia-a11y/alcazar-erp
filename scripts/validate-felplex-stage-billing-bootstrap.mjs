@@ -116,7 +116,11 @@ export function validateFelplexStageBillingBootstrap(options = {}) {
   check(fixture.includes("'326070'"), "Fixture must treat tax_id as text literal")
   check(!fixture.includes("'326-070'"), "Fixture tax_id must not contain hyphens")
   check(fixture.includes("Pruebas Gran Alcazar"), "Fixture must include exact legal_name/trade_name")
-  check(fixture.includes("https://felplex.stage.plex.lat"), "Fixture must include exact Stage base URL")
+  check(fixture.includes("https://felplex-gt.stage.plex.lat"), "Fixture must include exact Guatemala Stage base URL")
+  check(
+    !fixture.includes("https://felplex.stage.plex.lat"),
+    "Fixture must not use legacy regional Stage host felplex.stage.plex.lat",
+  )
   check(
     fixture.includes("adapter_key") && fixture.match(/'felplex_gt'/g)?.length >= 2,
     "Fixture must include adapter_key and provider_code felplex_gt",

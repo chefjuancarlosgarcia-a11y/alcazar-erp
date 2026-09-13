@@ -1,7 +1,8 @@
 /** Stage Supabase project ref — hard block for non-Stage deployments in Phase 1A. */
 export const FELPLEX_STAGE_PROJECT_REF = "tgrqarxfmpwgrkntvgma"
 
-export const FELPLEX_STAGE_HOST = "felplex.stage.plex.lat"
+/** Guatemala Stage API host — FELplex written confirmation 2026-09-12/13. */
+export const FELPLEX_STAGE_HOST = "felplex-gt.stage.plex.lat"
 export const FELPLEX_PRODUCTION_HOST = "app.felplex.com"
 
 export const FELPLEX_STAGE_BASE_URL = `https://${FELPLEX_STAGE_HOST}`

@@ -189,6 +189,8 @@ Deno.test("GT-10 API key no aparece en errores sanitizados", () => {
 
 Deno.test("GT-11 allowlist Stage estricta", () => {
   assertEquals(validateFelplexStageUrl(FELPLEX_STAGE_BASE_URL), null)
+  assertExists(validateFelplexStageUrl("https://felplex.stage.plex.lat"))
+  assertExists(validateFelplexStageUrl("https://felplex.stage.plex.lat.evil.com"))
   assertExists(validateFelplexStageUrl(FELPLEX_PRODUCTION_BASE_URL))
   assertExists(validateFelplexStageUrl("https://evil.example.com"))
 })

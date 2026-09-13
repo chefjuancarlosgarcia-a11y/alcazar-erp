@@ -142,18 +142,53 @@ Deno.test("1A.1-02 Host arbitrario rechazado", () => {
 })
 
 Deno.test("1A.1-03 HTTP rechazado", () => {
-  assertExists(validateFelplexStageUrl("http://felplex.stage.plex.lat"))
+  assertExists(validateFelplexStageUrl("http://felplex-gt.stage.plex.lat"))
   record("1A.1-03 HTTP rechazado", "PASSED")
 })
 
 Deno.test("1A.1-04 Subdominio engañoso rechazado", () => {
-  assertExists(validateFelplexStageUrl("https://felplex.stage.plex.lat.evil.com"))
+  assertExists(validateFelplexStageUrl("https://felplex-gt.stage.plex.lat.evil.com"))
+  assertExists(validateFelplexStageUrl("https://felplex.stage.plex.lat"))
   record("1A.1-04 Subdominio engañoso rechazado", "PASSED")
 })
 
 Deno.test("1A.1-05 URL con credenciales rechazada", () => {
-  assertExists(validateFelplexStageUrl("https://user:pass@felplex.stage.plex.lat"))
+  assertExists(validateFelplexStageUrl("https://user:pass@felplex-gt.stage.plex.lat"))
   record("1A.1-05 URL con credenciales rechazada", "PASSED")
+})
+
+Deno.test("1A.1-05b Puerto y ruta inesperados rechazados", () => {
+  assertExists(validateFelplexStageUrl("https://felplex-gt.stage.plex.lat:8443"))
+  assertExists(validateFelplexStageUrl("https://felplex-gt.stage.plex.lat/evil/path"))
+  record("1A.1-05b Puerto y ruta inesperados rechazados", "PASSED")
+})
+
+Deno.test("1A.1-05c Path traversal codificado rechazado antes de transporte", async () => {
+  const traversalUrls = [
+    "https://felplex-gt.stage.plex.lat/%2e%2e/",
+    "https://felplex-gt.stage.plex.lat/%2e%2e/%2e%2e/",
+    "https://felplex-gt.stage.plex.lat/api/entity/547/invoices/await/%2e%2e",
+    "https://felplex-gt.stage.plex.lat/%252e%252e/",
+    "https://felplex-gt.stage.plex.lat/api/entity/547/invoices/await%2f..%2f..",
+  ]
+  for (const url of traversalUrls) {
+    assertExists(validateFelplexStageUrl(url), url)
+  }
+
+  let fetchCalled = false
+  const transport = createFetchFelplexTransport(async () => {
+    fetchCalled = true
+    throw new Error("fetch must not run")
+  })
+  const blocked = await transport.send({
+    url: traversalUrls[0]!,
+    apiKey: "fake",
+    body: {},
+    timeoutMs: 1000,
+  })
+  assertEquals(fetchCalled, false)
+  assertEquals(blocked.errorKind, "blocked")
+  record("1A.1-05c Path traversal codificado rechazado antes de transporte", "PASSED")
 })
 
 Deno.test("1A.1-06 Redirect rechazado", async () => {

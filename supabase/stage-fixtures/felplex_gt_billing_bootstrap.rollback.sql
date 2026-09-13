@@ -105,7 +105,7 @@ begin
     where cfg.id = v_config_id
       and (
         cfg.entity_id is distinct from '547'
-        or cfg.base_url is distinct from 'https://felplex.stage.plex.lat'
+        or cfg.base_url is distinct from 'https://felplex-gt.stage.plex.lat'
         or cfg.secret_env_var is distinct from 'FELPLEX_GT_STAGE_API_KEY'
         or cfg.environment is distinct from 'stage'
         or cfg.is_default is distinct from true
@@ -193,7 +193,7 @@ where st.provider_config_id = cfg.id
   and cfg.provider_code = 'felplex_gt'
   and cfg.environment = 'stage'
   and cfg.entity_id = '547'
-  and cfg.base_url = 'https://felplex.stage.plex.lat'
+  and cfg.base_url = 'https://felplex-gt.stage.plex.lat'
   and cfg.secret_env_var = 'FELPLEX_GT_STAGE_API_KEY';
 
 delete from public.billing_provider_configs cfg
@@ -203,7 +203,7 @@ where cfg.legal_entity_id = ent.id
   and cfg.provider_code = 'felplex_gt'
   and cfg.environment = 'stage'
   and cfg.entity_id = '547'
-  and cfg.base_url = 'https://felplex.stage.plex.lat'
+  and cfg.base_url = 'https://felplex-gt.stage.plex.lat'
   and cfg.secret_env_var = 'FELPLEX_GT_STAGE_API_KEY';
 
 delete from public.billing_providers
