@@ -78,6 +78,17 @@ Tras `pg_advisory_xact_lock`, **antes** de insertar el intento, `fel_claim_pos_f
 
 Además mantiene validación de documento `environment='stage'`, conciliación de pagos y estados certificables. **No depende solo de gates TypeScript.**
 
+### Gate Edge `request_payload` (fail-closed por estado)
+
+| `status` | `request_payload` en fila | Comportamiento |
+|----------|---------------------------|----------------|
+| `pending_certification` | no vacío | **`FEL_UNEXPECTED_REQUEST_PAYLOAD`** — bloquea claim y HTTP |
+| `failed` | histórico del intento anterior | **Permitido** — evidencia audit; el POST saliente se **reconstruye** desde snapshot/montos (`buildFelplexPayload`), nunca se reenvía el JSON histórico |
+| `certified` | cualquiera | **Permitido** — tras gates, retorno **idempotente** (200, cero claim, cero transport) |
+| `processing` | cualquiera | **`FEL_ALREADY_PROCESSING`** |
+
+Reintento de documento `failed`: `fel_claim_pos_fel_certification_attempt` inserta el **siguiente** `attempt_number`; intentos previos permanecen inmutables en `pos_fel_attempts`.
+
 ---
 
 ## 3. RPC claim / finalize (service_role only)

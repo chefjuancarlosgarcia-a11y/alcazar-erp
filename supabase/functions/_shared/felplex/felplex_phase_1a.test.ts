@@ -1,7 +1,8 @@
 import { assertEquals, assertExists } from "https://deno.land/std@0.224.0/assert/mod.ts"
 import { buildFelplexPayload, payloadContainsSecrets } from "./payloadBuilder.ts"
 import { extractVatIncluded } from "./money.ts"
-import { evaluateCertificationGates } from "./gates.ts"
+import { documentHasPersistedRequestPayload, evaluateCertificationGates } from "./gates.ts"
+import { formatFelplexDatetimeIssue } from "./datetimeIssue.ts"
 import { certifyInvoice } from "./certifyService.ts"
 import { GENERIC_INTERNAL_ERROR } from "./rpcErrors.ts"
 import { handleFelplexCertifyInvoiceHttpSafe } from "./edgeHandler.ts"
@@ -58,15 +59,36 @@ function makeRepo() {
 
 function mockTransport(
   handler: () => Promise<FelplexTransportResult>,
+  onSend?: (request: { body: unknown }) => void,
 ): FelplexTransport & { getCalls: () => number } {
   let calls = 0
   return {
     getCalls: () => calls,
-    async send() {
+    async send(request) {
       calls += 1
+      onSend?.(request)
       return handler()
     },
   }
+}
+
+const HISTORICAL_REQUEST_PAYLOAD = {
+  type: "FACT",
+  external_id: "POS-22222222-2222-4222-8222-222222222222",
+  datetime_issue: "2026-09-12T20:26:43",
+  total: 297,
+  total_tax: 31.82,
+  __historical_evidence_only: true,
+} as const
+
+function makeFailedDocumentWithHistoricalPayload() {
+  return makeQ297Document({
+    status: "failed",
+    retry_count: 1,
+    request_payload: { ...HISTORICAL_REQUEST_PAYLOAD },
+    response_payload: { http_status: 404, error_kind: "http_4xx" },
+    last_error: "Solicitud rechazada (404).",
+  })
 }
 
 function unblockedPayload(): BuildPayloadResult {
@@ -656,11 +678,17 @@ Deno.test("Preservado: Endpoint produccion bloqueado en gates", () => {
 
 Deno.test("Preservado: Idempotencia certificado tras gates Stage", async () => {
   const repo = makeRepo()
-  repo.documents.set(Q297_DOCUMENT_ID, makeQ297Document({ status: "certified", fel_uuid: "X" }))
+  repo.documents.set(Q297_DOCUMENT_ID, makeQ297Document({
+    status: "certified",
+    fel_uuid: "X",
+    request_payload: { ...HISTORICAL_REQUEST_PAYLOAD },
+  }))
   const transport = mockTransport(async () => ({ ok: true, sanitizedMessage: "noop" }))
-  const result = await runCertify(repo, transport, makeStageEnv({ FELPLEX_HTTP_ENABLED: "true" }))
+  const result = await runCertify(repo, transport, makeHttpTestEnv())
   assertEquals(result.body.idempotent, true)
+  assertEquals(result.status, 200)
   assertEquals(transport.getCalls(), 0)
+  assertEquals(repo.claims.length, 0)
   record("Preservado: Idempotencia certificado tras gates Stage", "PASSED")
 })
 
@@ -839,6 +867,237 @@ Deno.test("1A.2-10 Transporte 4xx + finalize OK devuelve error transporte", asyn
   assertEquals(result.body.error_code, "http_4xx")
   assertEquals(result.status, 422)
   record("1A.2-10 Transporte 4xx + finalize OK", "PASSED")
+})
+
+Deno.test("1A.3-01 pending + request_payload bloqueado sin claim ni transport", async () => {
+  const repo = makeRepo()
+  repo.documents.set(Q297_DOCUMENT_ID, makeQ297Document({
+    request_payload: { type: "FACT", external_id: "stale" },
+  }))
+  const transport = mockTransport(async () => ({ ok: true, sanitizedMessage: "noop" }))
+  const result = await runCertify(repo, transport, makeHttpTestEnv())
+  assertEquals(result.body.error_code, "FEL_UNEXPECTED_REQUEST_PAYLOAD")
+  assertEquals(transport.getCalls(), 0)
+  assertEquals(repo.claims.length, 0)
+  record("1A.3-01 pending + request_payload bloqueado", "PASSED")
+})
+
+Deno.test("1A.3-02 failed + payload historico reclama attempt 2 y un transport", async () => {
+  const repo = makeRepo()
+  repo.documents.set(Q297_DOCUMENT_ID, makeFailedDocumentWithHistoricalPayload())
+  repo.claims.push({
+    document_id: Q297_DOCUMENT_ID,
+    attempt_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    attempt_number: 1,
+    status: "processing",
+  })
+  const transport = mockTransport(async () => ({
+    ok: true,
+    httpStatus: 200,
+    body: {
+      valid: true,
+      uuid: "71916AF3-73F6-480B-B3B3-6F6E3DABC334",
+      sat: { authorization: "AUTH-RETRY", serie: "A", no: "1" },
+    },
+    sanitizedMessage: "ok",
+  }))
+  const result = await runCertify(
+    repo,
+    transport,
+    makeHttpTestEnv(),
+    { buildPayloadOverride: undefined, nowIso: "2026-09-13T18:30:00.000Z" },
+  )
+  assertEquals(result.status, 200)
+  assertEquals(transport.getCalls(), 1)
+  assertEquals(repo.claims.length, 2)
+  assertEquals(repo.claims[1]?.attempt_number, 2)
+  record("1A.3-02 failed + payload historico claim attempt 2", "PASSED")
+})
+
+Deno.test("1A.3-03 retry reconstruye payload sin usar JSON historico", async () => {
+  const repo = makeRepo()
+  repo.documents.set(Q297_DOCUMENT_ID, makeFailedDocumentWithHistoricalPayload())
+  repo.claims.push({
+    document_id: Q297_DOCUMENT_ID,
+    attempt_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    attempt_number: 1,
+    status: "processing",
+  })
+  const retryNowIso = "2026-09-13T18:30:00.000Z"
+  let outboundBody: unknown = null
+  const transport = mockTransport(async () => ({
+    ok: false,
+    httpStatus: 404,
+    body: null,
+    errorKind: "http_4xx",
+    sanitizedMessage: "Solicitud rechazada (404).",
+  }), (request) => {
+    outboundBody = request.body
+  })
+  await runCertify(repo, transport, makeHttpTestEnv(), { nowIso: retryNowIso })
+  assertEquals(transport.getCalls(), 1)
+  const payload = outboundBody as Record<string, unknown>
+  assertEquals(payload.external_id, makeQ297Document().external_id)
+  assertEquals(payload.__historical_evidence_only, undefined)
+  assertEquals(payload.datetime_issue, formatFelplexDatetimeIssue(retryNowIso))
+  assertEquals(payload.datetime_issue, "2026-09-13T12:30:00")
+  assertEquals(payload.total, 297)
+  assertEquals(payload.total_tax, 31.82)
+  record("1A.3-03 retry reconstruye payload", "PASSED")
+})
+
+Deno.test("1A.3-04 pending sin request_payload pasa gate payload (solo evaluacion)", () => {
+  const gateNull = evaluateCertificationGates({
+    projectRef: "tgrqarxfmpwgrkntvgma",
+    supabaseUrl: "https://tgrqarxfmpwgrkntvgma.supabase.co",
+    emissionConfig: makeStageEmissionConfig({ emission_enabled: true }),
+    providerConfig: makeRepo().providerConfig!,
+    document: makeQ297Document({ status: "pending_certification", request_payload: null }),
+    reconciliation: makePaidReconciliation(),
+    httpEnabled: true,
+    apiKeyPresent: true,
+    discountTotal: 0,
+  })
+  assertEquals(gateNull, null)
+  const gateEmpty = evaluateCertificationGates({
+    projectRef: "tgrqarxfmpwgrkntvgma",
+    supabaseUrl: "https://tgrqarxfmpwgrkntvgma.supabase.co",
+    emissionConfig: makeStageEmissionConfig({ emission_enabled: true }),
+    providerConfig: makeRepo().providerConfig!,
+    document: makeQ297Document({ status: "pending_certification", request_payload: {} }),
+    reconciliation: makePaidReconciliation(),
+    httpEnabled: true,
+    apiKeyPresent: true,
+    discountTotal: 0,
+  })
+  assertEquals(gateEmpty, null)
+  record("1A.3-04 pending sin request_payload pasa gate payload", "PASSED")
+})
+
+Deno.test("1A.3-05 certified + payload historico pasa gates (solo evaluacion)", async () => {
+  const gate = evaluateCertificationGates({
+    projectRef: "tgrqarxfmpwgrkntvgma",
+    supabaseUrl: "https://tgrqarxfmpwgrkntvgma.supabase.co",
+    emissionConfig: makeStageEmissionConfig({ emission_enabled: true }),
+    providerConfig: makeRepo().providerConfig!,
+    document: makeQ297Document({
+      status: "certified",
+      fel_uuid: "71916AF3-73F6-480B-B3B3-6F6E3DABC334",
+      request_payload: { ...HISTORICAL_REQUEST_PAYLOAD },
+    }),
+    reconciliation: makePaidReconciliation(),
+    httpEnabled: true,
+    apiKeyPresent: true,
+    discountTotal: 0,
+  })
+  assertEquals(gate, null)
+  record("1A.3-05 certified + payload pasa gates (solo evaluacion)", "PASSED")
+})
+
+Deno.test("1A.3-06 processing + payload bloqueado sin transport", async () => {
+  const repo = makeRepo()
+  repo.documents.set(Q297_DOCUMENT_ID, makeQ297Document({
+    status: "processing",
+    request_payload: { ...HISTORICAL_REQUEST_PAYLOAD },
+  }))
+  const transport = mockTransport(async () => ({ ok: true, sanitizedMessage: "noop" }))
+  const result = await runCertify(repo, transport, makeHttpTestEnv())
+  assertEquals(result.body.error_code, "FEL_ALREADY_PROCESSING")
+  assertEquals(transport.getCalls(), 0)
+  assertEquals(repo.claims.length, 0)
+  record("1A.3-06 processing bloqueado", "PASSED")
+})
+
+Deno.test("1A.3-07 dos certify concurrentes sobre failed un claim maximo", async () => {
+  const repo = makeRepo()
+  repo.documents.set(Q297_DOCUMENT_ID, makeFailedDocumentWithHistoricalPayload())
+  const transport = mockTransport(async () => ({
+    ok: true,
+    httpStatus: 200,
+    body: { valid: true, uuid: "U", sat: { authorization: "A" } },
+    sanitizedMessage: "ok",
+  }))
+  const env = makeHttpTestEnv()
+  const [first, second] = await Promise.all([
+    runCertify(repo, transport, env, { buildPayloadOverride: () => unblockedPayload() }),
+    runCertify(repo, transport, env, { buildPayloadOverride: () => unblockedPayload() }),
+  ])
+  const blocked = [first, second].find((entry) => entry.body.error_code === "FEL_ALREADY_PROCESSING")
+  assertExists(blocked)
+  assertEquals(transport.getCalls(), 1)
+  assertEquals(repo.claims.length, 1)
+  record("1A.3-07 concurrencia failed acotada", "PASSED")
+})
+
+Deno.test("1A.3-08 timeout en retry sin segundo POST", async () => {
+  const repo = makeRepo()
+  repo.documents.set(Q297_DOCUMENT_ID, makeFailedDocumentWithHistoricalPayload())
+  repo.claims.push({
+    document_id: Q297_DOCUMENT_ID,
+    attempt_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    attempt_number: 1,
+    status: "processing",
+  })
+  const transport = mockTransport(async () => ({
+    ok: false,
+    errorKind: "timeout",
+    sanitizedMessage: "Tiempo de espera agotado.",
+  }))
+  const result = await runCertify(repo, transport, makeHttpTestEnv(), {
+    buildPayloadOverride: () => unblockedPayload(),
+  })
+  assertEquals(result.body.error_code, "FEL_UNCERTAIN_OUTCOME")
+  assertEquals(transport.getCalls(), 1)
+  record("1A.3-08 timeout retry un solo POST", "PASSED")
+})
+
+Deno.test("1A.3-09 failed retry 4xx un POST sin retry automatico", async () => {
+  const repo = makeRepo()
+  repo.documents.set(Q297_DOCUMENT_ID, makeFailedDocumentWithHistoricalPayload())
+  repo.claims.push({
+    document_id: Q297_DOCUMENT_ID,
+    attempt_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    attempt_number: 1,
+    status: "processing",
+  })
+  const transport = mockTransport(async () => transport4xxResult())
+  const result = await runCertify(repo, transport, makeHttpTestEnv(), {
+    buildPayloadOverride: () => unblockedPayload(),
+  })
+  assertEquals(result.body.error_code, "http_4xx")
+  assertEquals(transport.getCalls(), 1)
+  assertEquals(repo.finalizations.length, 1)
+  assertEquals(repo.finalizations[0]?.outcome, "failed")
+  record("1A.3-09 failed retry 4xx un POST", "PASSED")
+})
+
+Deno.test("1A.3-10 documentHasPersistedRequestPayload acotado a pending en gates", () => {
+  assertEquals(documentHasPersistedRequestPayload({ a: 1 }), true)
+  const pendingBlocked = evaluateCertificationGates({
+    projectRef: "tgrqarxfmpwgrkntvgma",
+    supabaseUrl: "https://tgrqarxfmpwgrkntvgma.supabase.co",
+    emissionConfig: makeStageEmissionConfig({ emission_enabled: true }),
+    providerConfig: makeRepo().providerConfig!,
+    document: makeQ297Document({ request_payload: { stale: true } }),
+    reconciliation: makePaidReconciliation(),
+    httpEnabled: true,
+    apiKeyPresent: true,
+    discountTotal: 0,
+  })
+  assertEquals(pendingBlocked?.code, "FEL_UNEXPECTED_REQUEST_PAYLOAD")
+  const failedAllowed = evaluateCertificationGates({
+    projectRef: "tgrqarxfmpwgrkntvgma",
+    supabaseUrl: "https://tgrqarxfmpwgrkntvgma.supabase.co",
+    emissionConfig: makeStageEmissionConfig({ emission_enabled: true }),
+    providerConfig: makeRepo().providerConfig!,
+    document: makeFailedDocumentWithHistoricalPayload(),
+    reconciliation: makePaidReconciliation(),
+    httpEnabled: true,
+    apiKeyPresent: true,
+    discountTotal: 0,
+  })
+  assertEquals(failedAllowed, null)
+  record("1A.3-10 gate payload acotado por status", "PASSED")
 })
 
 Deno.test("Resumen escenarios Fase 1A.2", () => {

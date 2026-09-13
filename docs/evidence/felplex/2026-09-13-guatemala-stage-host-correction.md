@@ -44,3 +44,13 @@ Confirmación de host/`entity_id` **no** revierte el `failed` del documento ni a
 ## Operaciones **no** realizadas con este commit
 
 - Sin `db push` Stage, sin deploy Edge, sin reintento del documento fallido, sin activar gates, sin HTTP adicional, sin segundo piloto.
+
+## Alineación gate `request_payload` (código local, post-auditoría)
+
+| Tema | Registro |
+|------|----------|
+| Primer intento HTTP 404 (`b8a0b098-…`) | **Inmutable** — evidencia histórica; no se borra ni resetea por este cambio |
+| `request_payload` en fila `failed` | **Evidencia**, no input del retry; Edge reconstruye payload desde documento |
+| Retry `failed` | Soportado por **claim SQL** (`attempt_number = max+1`); tests **1A.3-xx** |
+| `certified` + payload | Pasa el gate de payload; **idempotencia** (200, cero claim/transport) solo **después** de superar **todos** los gates Edge (emisión, HTTP, provider, pagos, contrato). Con gates apagados, la invocación sigue **bloqueada antes** de la rama idempotente |
+| Segundo piloto HTTP Stage | **NOT EXECUTED** — requiere autorización operativa aparte |

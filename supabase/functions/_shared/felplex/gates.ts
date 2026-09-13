@@ -82,7 +82,13 @@ export function evaluateCertificationGates(ctx: GateContext): GateFailure | null
     return gate("FEL_DOCUMENT_NOT_CERTIFIABLE", "Estado de documento no certificable.", "blocked")
   }
 
-  if (hasUnexpectedRequestPayload(doc.request_payload)) {
+  // Solo pending_certification: request_payload previo indica corrupción o doble camino.
+  // failed: payload histórico es evidencia del intento anterior, no input del retry.
+  // certified: idempotencia tras gates; cero claim/transport.
+  if (
+    doc.status === "pending_certification" &&
+    documentHasPersistedRequestPayload(doc.request_payload)
+  ) {
     return gate("FEL_UNEXPECTED_REQUEST_PAYLOAD", "request_payload contiene datos inesperados.", "blocked")
   }
 
@@ -176,7 +182,8 @@ export function readHttpEnabledFromEnv(env: Pick<typeof Deno.env, "get"> = Deno.
   return parseHttpEnabled(env.get(FELPLEX_HTTP_ENABLED_ENV))
 }
 
-function hasUnexpectedRequestPayload(value: unknown): boolean {
+/** Non-null/non-empty JSON on the document row (audit trail), not an outbound payload by itself. */
+export function documentHasPersistedRequestPayload(value: unknown): boolean {
   if (value == null) return false
   if (typeof value === "object" && value !== null && Object.keys(value as object).length === 0) {
     return false
