@@ -205,3 +205,26 @@ Un documento `processing` atascado permanece fail-closed y requiere reconciliaci
 `supabase/rollback/20260808220000_pos_fel_attempt_lifecycle.rollback.sql`
 
 El hardening aditivo usa `20260808230000_pos_fel_premerge_hardening.sql`. Su rollback aborta deliberadamente porque restaurar las definiciones previas degradaría los controles de Stage, payload y privilegios.
+
+---
+
+## 11. UI Caja — solicitud FEL (local, sin certificación)
+
+| Tema | Estado |
+|------|--------|
+| Pantalla | **Caja (`Cashier.jsx`)** — acción «Solicitar factura FEL» tras cobro y en «Últimos cobros» |
+| RPC | **`request_pos_fel_certification`** (CF: `p_receiver_nit = 'CF'`, receptor sin PII) |
+| Consulta estado | **`get_pos_fel_document_status`** |
+| Consumidor Final | **Soportado** en modal |
+| Factura con NIT | **Visible — Próximamente** (sin captura parcial) |
+| Certificación / HTTP FELplex | **NOT EXECUTED** — no hay botón ni `functions.invoke` hacia `felplex-certify-invoice` |
+| Separación solicitud vs certificación | **Sí** — éxito UI = «Solicitud FEL registrada» / «Pendiente de certificación» |
+
+Prueba estática: `npm run test:pos-fel-invoice-request`.
+
+### Deuda técnica (fuera de alcance UI)
+
+| ID | Tema | Notas |
+|----|------|--------|
+| **H1** | Guard `sales_channel` en RPC solicitud | `request_pos_fel_certification` puede registrar `pending_certification` para `delivery`/`online` vía llamada RPC autenticada directa; la **certificación Edge** sí bloquea esos canales. Agregar guard en **migración posterior** antes de habilitar delivery ampliado o producción. |
+| **H2** | Lecturas en «Últimos cobros» | Hasta ~15 RPC (3 × 5 filas) al cargar dashboard; optimizar en mejora de rendimiento posterior (cache/batch), no bloqueante para push frontend. |

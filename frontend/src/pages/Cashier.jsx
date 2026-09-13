@@ -34,6 +34,9 @@ import { getPosOrderPaymentStatus, getOrderWithItems, linkOrderBillingCustomer }
 import { printFinalCheck } from "../services/posPrintService"
 import { queueReceiptPrintJob } from "../services/printingService"
 import SplitPaymentModal from "../components/SplitPaymentModal"
+import FelInvoiceRequestModal from "../components/FelInvoiceRequestModal"
+import FelInvoiceRequestButton from "../components/FelInvoiceRequestButton"
+import { shouldAutoOpenFelInvoiceModalAfterPayment } from "../services/posFelInvoiceService"
 import CashierBillingCustomer from "../components/CashierBillingCustomer"
 import useOperationalAlerts from "../hooks/useOperationalAlerts"
 import OperationalAlertToast from "../components/OperationalAlertToast"
@@ -203,6 +206,7 @@ function Cashier() {
   const [store, setStore] = useState(loadStore)
   const [selectedBillId, setSelectedBillId] = useState("")
   const [feedback, setFeedback] = useState("")
+  const [felInvoiceContext, setFelInvoiceContext] = useState(null)
   const canSeeAllFinance = canAuthorizeFinance(user)
   const currentCashierId = user?.id || user?.username
   const visibleSessionIds = new Set(store.sessions.filter((entry) => canSeeAllFinance || String(entry.cashierId) === String(currentCashierId)).map((entry) => String(entry.id)))
@@ -280,7 +284,10 @@ function Cashier() {
     setTab(nextTab)
   }
 
-  function completeCharge(message = "Pago completado correctamente.") {
+  function completeCharge(message = "Pago completado correctamente.", felContext = null) {
+    if (shouldAutoOpenFelInvoiceModalAfterPayment(felContext)) {
+      setFelInvoiceContext(felContext)
+    }
     setSelectedBillId("")
     setTab("dashboard")
     refresh(message)
@@ -335,18 +342,37 @@ function Cashier() {
         onDismiss={cashierAlerts.dismissToast}
       />
 
-      {tab === "dashboard" && <CashierDashboard session={session} summary={summary} requests={requests} payments={visibleStore.payments} onOpenCharge={openCharge} onRefresh={refresh} user={user} highlightedIds={cashierAlerts.highlightedIds} />}
+      {tab === "dashboard" && (
+        <CashierDashboard
+          session={session}
+          summary={summary}
+          requests={requests}
+          payments={visibleStore.payments}
+          onOpenCharge={openCharge}
+          onRefresh={refresh}
+          user={user}
+          highlightedIds={cashierAlerts.highlightedIds}
+          onRequestFelInvoice={setFelInvoiceContext}
+        />
+      )}
       {tab === "requests" && <PaymentRequests bills={requests} onOpenCharge={openCharge} onRefresh={refresh} user={user} highlightedIds={cashierAlerts.highlightedIds} />}
       {tab === "charge" && <ChargePanel key={selectedBill?.id || "empty"} bill={selectedBill} splitBills={store.splitBills} session={session} requests={visibleStore.authorizations} user={user} onRefresh={refresh} onPaymentComplete={completeCharge} />}
       {tab === "register" && <CashRegister session={session} summary={summary} user={user} onRefresh={refresh} />}
       {tab === "movements" && <MovementsPanel session={session} movements={visibleStore.movements} authorizations={visibleStore.authorizations} user={user} onRefresh={refresh} />}
       {tab === "closures" && <Closures sessions={visibleStore.sessions} />}
       {tab === "reports" && <CashReports payments={visibleStore.payments} tips={visibleStore.tips} movements={visibleStore.movements} sessions={visibleStore.sessions} audit={visibleStore.audit} />}
+      {felInvoiceContext?.orderId && (
+        <FelInvoiceRequestModal
+          context={felInvoiceContext}
+          onClose={() => setFelInvoiceContext(null)}
+          onSuccess={() => refresh("Solicitud FEL registrada.")}
+        />
+      )}
     </section>
   )
 }
 
-function CashierDashboard({ session, summary, requests, payments, onOpenCharge, onRefresh, user, highlightedIds }) {
+function CashierDashboard({ session, summary, requests, payments, onOpenCharge, onRefresh, user, highlightedIds, onRequestFelInvoice }) {
   const [openingAmount, setOpeningAmount] = useState("500")
   const completed = payments.filter((payment) => payment.status === "completed")
   if (!session) {
@@ -379,7 +405,22 @@ function CashierDashboard({ session, summary, requests, payments, onOpenCharge, 
       </article>
       <article className="cashier-panel">
         <div className="cashier-panel-title"><h2>Últimos cobros</h2><span>{completed.length} pagos</span></div>
-        {completed.slice(0, 5).map((payment) => <div className="cashier-row" key={payment.id}><strong>{payment.cashierName}</strong><span>Q{payment.totalAmount.toFixed(2)} · {formatDate(payment.createdAt)}</span><button type="button" className="secondary" onClick={() => showReceipt(payment)}>Recibo</button></div>)}
+        {completed.slice(0, 5).map((payment) => (
+          <div className="cashier-row cashier-row-actions" key={payment.id}>
+            <div>
+              <strong>{payment.cashierName}</strong>
+              <span>Q{payment.totalAmount.toFixed(2)} · {formatDate(payment.createdAt)}</span>
+            </div>
+            <div className="cashier-row-buttons">
+              <button type="button" className="secondary" onClick={() => showReceipt(payment)}>Recibo</button>
+              <FelInvoiceRequestButton
+                compact
+                orderId={payment.orderId}
+                onOpen={onRequestFelInvoice}
+              />
+            </div>
+          </div>
+        ))}
         {!completed.length && <Empty text="Aún no hay cobros registrados." />}
       </article>
     </div>
@@ -664,7 +705,14 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
       }
 
       cashierDebug("[Cashier] payment complete flow", { source: "submit" })
-      onPaymentComplete("Pago completado correctamente. Orden liberada.")
+      const felContext = isSupabaseBill && bill.orderId ? {
+        orderId: bill.orderId,
+        salesChannel: bill.salesChannel,
+        tableName: bill.tableName,
+        total,
+        orderStatus: "paid",
+      } : null
+      onPaymentComplete("Pago completado correctamente. Orden liberada.", felContext)
       schedulePostPaymentPrints({
         orderForPrint: orderWithBillingCustomer(bill, normalizedBilling),
         payment: result.payment,

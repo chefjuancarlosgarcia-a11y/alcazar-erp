@@ -1471,3 +1471,134 @@
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
+/* FEL invoice request modal (RPC request only — no certification) */
+.fel-invoice-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  padding: var(--erp-space-16);
+  background: rgba(2, 6, 23, 0.72);
+}
+
+.fel-invoice-modal {
+  width: min(520px, 100%);
+  max-height: 92vh;
+  overflow: auto;
+  display: grid;
+  gap: var(--erp-space-16);
+  padding: var(--erp-space-24);
+  border: 1px solid #24344a;
+  border-radius: var(--erp-radius-card);
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
+.fel-invoice-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--erp-space-16);
+}
+
+.fel-invoice-header h2 {
+  margin: var(--erp-space-8) 0 0;
+  font-size: 22px;
+}
+
+.fel-invoice-close {
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+  min-width: var(--erp-space-48);
+  min-height: var(--erp-space-48);
+}
+
+.fel-invoice-explainer {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 14px;
+}
+
+.fel-invoice-options {
+  display: grid;
+  gap: var(--erp-space-8);
+}
+
+.fel-invoice-option {
+  display: flex;
+  gap: var(--erp-space-16);
+  align-items: flex-start;
+  padding: var(--erp-space-16);
+  border: 1px solid #24344a;
+  border-radius: var(--erp-radius-card);
+  cursor: pointer;
+}
+
+.fel-invoice-option.active {
+  border-color: #14b8a6;
+  background: rgba(20, 184, 166, 0.08);
+}
+
+.fel-invoice-option.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.fel-invoice-option strong {
+  display: block;
+  color: #f8fafc;
+}
+
+.fel-invoice-option small {
+  color: #94a3b8;
+}
+
+.fel-invoice-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--erp-space-8);
+}
+
+.fel-invoice-footer .primary,
+.fel-invoice-footer .secondary {
+  min-height: var(--erp-btn-height);
+  padding: 0 var(--erp-space-24);
+}
+
+.fel-invoice-error {
+  color: #f87171;
+  margin: 0;
+}
+
+.fel-invoice-success strong {
+  color: #5eead4;
+}
+
+.fel-invoice-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--erp-space-4) var(--erp-space-8);
+  border-radius: var(--erp-radius-card);
+  background: #1e293b;
+  color: #cbd5e1;
+  font-size: 12px;
+}
+
+.cashier-row-actions {
+  flex-wrap: wrap;
+  gap: var(--erp-space-8);
+}
+
+.cashier-row-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--erp-space-8);
+  align-items: center;
+}
