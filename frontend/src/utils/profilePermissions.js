@@ -23,6 +23,7 @@ export const PROFILE_ROLES = [
   "repostero",
   "panadero",
   "supervisor_panaderia",
+  "contador",
   "cafeteria",
   "limpieza",
   "repartidor",
