@@ -1,4 +1,6 @@
+import { applyAccountQueryChange } from "../../utils/financeJournalAccountMenu"
 import { filterCostCentersForBranch } from "../../utils/financeJournalValidation"
+import FinanceJournalAccountInput from "./FinanceJournalAccountInput"
 
 export default function FinanceJournalLinesEditor({
   lines,
@@ -15,12 +17,6 @@ export default function FinanceJournalLinesEditor({
   onRemoveLine,
   onSelectAccount
 }) {
-  function accountMatchesQuery(account, query) {
-    const q = String(query || "").trim().toLowerCase()
-    if (!q) return true
-    return account.code.toLowerCase().includes(q) || account.name.toLowerCase().includes(q)
-  }
-
   return (
     <>
       <div className="finance-journal-lines-wrap">
@@ -43,7 +39,6 @@ export default function FinanceJournalLinesEditor({
               const ccRule = account?.cost_center_dimension_rule || "optional"
               const ccOptions = filterCostCentersForBranch(costCenters, line.branch_id)
               const query = accountQueries[index] ?? line.account_label ?? ""
-              const suggestions = postableAccounts.filter((row) => accountMatchesQuery(row, query)).slice(0, 8)
               const debitId = `journal-line-${index}-debit`
               const creditId = `journal-line-${index}-credit`
 
@@ -51,34 +46,19 @@ export default function FinanceJournalLinesEditor({
                 <tr key={line.key || index}>
                   <td className="finance-journal-account-cell">
                     <label className="sr-only" htmlFor={`journal-line-${index}-account`}>Cuenta línea {index + 1}</label>
-                    <input
-                      id={`journal-line-${index}-account`}
-                      type="search"
-                      value={query}
-                      disabled={!isEditable}
-                      placeholder="Código o nombre"
-                      onChange={(e) => {
-                        onAccountQueriesChange(index, e.target.value)
-                        if (!e.target.value) {
-                          onUpdateLine(index, { account_id: "", account_code: "", account_label: "" })
-                        }
+                    <FinanceJournalAccountInput
+                      index={index}
+                      line={line}
+                      query={query}
+                      isEditable={isEditable}
+                      postableAccounts={postableAccounts}
+                      onQueryChange={(nextQuery) => {
+                        const { query: keptQuery, linePatch } = applyAccountQueryChange(line, nextQuery)
+                        onAccountQueriesChange(index, keptQuery)
+                        if (linePatch) onUpdateLine(index, linePatch)
                       }}
+                      onSelectAccount={(account) => onSelectAccount(index, account)}
                     />
-                    {isEditable && query && suggestions.length ? (
-                      <div className="finance-journal-account-suggestions" role="listbox" aria-label={`Sugerencias cuenta línea ${index + 1}`}>
-                        {suggestions.map((row) => (
-                          <button
-                            key={row.id}
-                            type="button"
-                            className="finance-journal-account-option"
-                            role="option"
-                            onClick={() => onSelectAccount(index, row)}
-                          >
-                            {row.code} — {row.name}
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
                   </td>
                   <td>
                     <label className="sr-only" htmlFor={`journal-line-${index}-branch`}>Sucursal línea {index + 1}</label>
