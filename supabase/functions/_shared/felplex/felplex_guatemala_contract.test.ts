@@ -12,7 +12,7 @@ import {
   validateBuiltPayload,
 } from "./payloadBuilder.ts"
 import { extractVatIncluded, roundMoney } from "./money.ts"
-import { parseFelplexCertifyResponse, normalizeSatDocumentNumber } from "./responseParser.ts"
+import { parseFelplexCertifyResponse, normalizeSatDocumentNumber, parseSatCertificationDate } from "./responseParser.ts"
 import { classifyTransportFailure } from "./responseAdapter.ts"
 import { createFetchFelplexTransport, defaultTransportRequest, buildFelplexCertifyUrl } from "./transport.ts"
 import {
@@ -38,6 +38,28 @@ import {
 import { FELPLEX_PRODUCTION_BASE_URL, FELPLEX_STAGE_BASE_URL } from "./constants.ts"
 import { InMemoryFelRepository } from "./repository.ts"
 import { certifyInvoice } from "./certifyService.ts"
+
+/** Instant comparison without Date.parse, so a zoneless string is not read as local time. */
+function certificationInstantUtcMillis(value: string): number {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:\d{2})$/.exec(value)
+  if (!match) return Number.NaN
+  const fraction = (match[7] ?? "").padEnd(3, "0").slice(0, 3)
+  const zone = match[8]
+  let offsetMinutes = 0
+  if (zone !== "Z") {
+    const sign = zone.startsWith("-") ? -1 : 1
+    offsetMinutes = sign * (Number(zone.slice(1, 3)) * 60 + Number(zone.slice(4, 6)))
+  }
+  return Date.UTC(
+    Number(match[1]),
+    Number(match[2]) - 1,
+    Number(match[3]),
+    Number(match[4]),
+    Number(match[5]),
+    Number(match[6]),
+    fraction ? Number(fraction) : 0,
+  ) - offsetMinutes * 60_000
+}
 
 function makeRepo() {
   const repo = new InMemoryFelRepository()
@@ -245,26 +267,214 @@ Deno.test("GT-16 valid=true parseado estrictamente", () => {
   if (parsed.ok) {
     assertEquals(parsed.data.satDocumentNumber, "123")
     assertEquals(parsed.data.felUuid, SANITIZED_CERTIFY_SUCCESS_RESPONSE.uuid)
-    assertEquals(parsed.data.certifiedAt, "2026-08-08T20:00:00")
+    assertEquals(parsed.data.certifiedAt, "2026-08-08T20:00:00-06:00")
   }
 })
 
-Deno.test("GT-16b valid=true sin certification_date aceptado", () => {
-  const body = {
-    ...SANITIZED_CERTIFY_SUCCESS_RESPONSE,
-    sat: {
-      ...SANITIZED_CERTIFY_SUCCESS_RESPONSE.sat,
-      certification_date: undefined,
-    },
-    invoice_url: undefined,
-    invoice_xml: undefined,
+Deno.test("GT-16b certification_date obligatoria en valid=true", () => {
+  const present = parseFelplexCertifyResponse(FELPLEX_GT_STAGE_SUCCESS_CONTRACT, 200)
+  assertEquals(present.ok, true)
+  if (present.ok) {
+    assertEquals(present.data.certifiedAt, "2024-06-20T15:15:39-06:00")
   }
-  const parsed = parseFelplexCertifyResponse(body, 200)
+  assertEquals(parseSatCertificationDate("2024-06-20T15:15:39"), "2024-06-20T15:15:39-06:00")
+  assertEquals(parseSatCertificationDate("2024-06-20T15:15:39Z"), "2024-06-20T15:15:39Z")
+  assertEquals(parseSatCertificationDate("2024-06-20T21:15:39+02:00"), "2024-06-20T21:15:39+02:00")
+  assertEquals(parseSatCertificationDate("2024-06-20T22:00:00"), "2024-06-20T22:00:00-06:00")
+  assertEquals(
+    certificationInstantUtcMillis("2024-06-20T22:00:00-06:00"),
+    certificationInstantUtcMillis("2024-06-21T04:00:00Z"),
+  )
+  assertEquals(
+    certificationInstantUtcMillis(parseSatCertificationDate("2024-06-21T04:00:00Z") ?? ""),
+    certificationInstantUtcMillis("2024-06-21T04:00:00Z"),
+  )
+  assertNotEquals(
+    certificationInstantUtcMillis(parseSatCertificationDate("2024-06-21T04:00:00Z") ?? ""),
+    certificationInstantUtcMillis("2024-06-21T04:00:00-06:00"),
+  )
+  assertEquals(parseSatCertificationDate("2024-02-31T15:15:39"), null)
+
+  const rejected = [
+    ["ausente", { ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT.sat, certification_date: undefined }],
+    ["null", { ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT.sat, certification_date: null }],
+    ["vacia", { ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT.sat, certification_date: "" }],
+    ["blanco", { ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT.sat, certification_date: "   " }],
+    ["invalida", { ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT.sat, certification_date: "no-es-fecha" }],
+    ["calendario", { ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT.sat, certification_date: "2024-02-31T15:15:39" }],
+  ] as const
+
+  for (const [label, sat] of rejected) {
+    const parsed = parseFelplexCertifyResponse({
+      ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT,
+      sat,
+    }, 200)
+    assertEquals(parsed.ok, false, label)
+    if (!parsed.ok) assertEquals(parsed.kind, "incomplete", label)
+  }
+})
+
+const OFFICIAL_GT_STAGE_UUID = "71916AF3-73F6-480B-B3B3-6F6E3DABC334"
+
+/** Contrato de éxito FELplex GT Stage, sin comentarios. Host oficial, no el del extracto legacy. */
+const FELPLEX_GT_STAGE_SUCCESS_CONTRACT = {
+  valid: true,
+  uuid: OFFICIAL_GT_STAGE_UUID,
+  sat: {
+    serie: "DD34F4A1",
+    no: 1971864803,
+    authorization: "DD34F4A1-7588-44E3-B609-1DDDA27AD3E0",
+    certification_date: "2024-06-20T15:15:39",
+  },
+  certifier: {
+    name: "Certificador de ejemplo",
+    tax_code: "00000000",
+  },
+  errors: [],
+  invoice_url: `https://felplex-gt.stage.plex.lat/pdf/${OFFICIAL_GT_STAGE_UUID}`,
+  invoice_xml: `https://felplex-gt.stage.plex.lat/xml/${OFFICIAL_GT_STAGE_UUID}`,
+}
+
+Deno.test("GT-26 contrato oficial GT Stage pasa", () => {
+  const parsed = parseFelplexCertifyResponse(FELPLEX_GT_STAGE_SUCCESS_CONTRACT, 200)
   assertEquals(parsed.ok, true)
   if (parsed.ok) {
-    assertEquals(parsed.data.certifiedAt, undefined)
-    assertEquals(parsed.data.invoiceUrl, undefined)
+    assertEquals(parsed.data.felUuid, OFFICIAL_GT_STAGE_UUID)
+    assertEquals(parsed.data.satSeries, "DD34F4A1")
+    assertEquals(parsed.data.satDocumentNumber, "1971864803")
+    assertEquals(parsed.data.satAuthorization, "DD34F4A1-7588-44E3-B609-1DDDA27AD3E0")
+    assertEquals(parsed.data.certifiedAt, "2024-06-20T15:15:39-06:00")
+    assertEquals(parsed.data.invoiceUrl, FELPLEX_GT_STAGE_SUCCESS_CONTRACT.invoice_url)
+    assertEquals(parsed.data.invoiceXml, FELPLEX_GT_STAGE_SUCCESS_CONTRACT.invoice_xml)
   }
+})
+
+Deno.test("GT-26b fecha ausente no finaliza certificacion ni usa now()", async () => {
+  const repo = makeRepo()
+  const result = await certifyInvoice(
+    { document_id: Q297_DOCUMENT_ID },
+    {
+      repository: repo,
+      transport: {
+        async send() {
+          return {
+            ok: true,
+            httpStatus: 200,
+            body: {
+              ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT,
+              sat: {
+                ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT.sat,
+                certification_date: undefined,
+              },
+            },
+            sanitizedMessage: "ok",
+          }
+        },
+      },
+      env: envGetter(makeHttpTestEnv()),
+      nowIso: FIXED_DATETIME,
+      actor: makeCashActor(),
+      buildPayloadOverride: () =>
+        buildFelplexPayload(makeQ297Document(), { datetimeIssue: FIXED_DATETIME }),
+    },
+  )
+  assertEquals(result.body.error_code, "FELPLEX_INVALID_RESPONSE")
+  assertEquals(repo.finalizations.some((entry) => entry.outcome === "success"), false)
+  assertEquals(repo.documents.get(Q297_DOCUMENT_ID)?.status, "failed")
+  assertEquals(repo.documents.get(Q297_DOCUMENT_ID)?.certified_at, null)
+})
+
+Deno.test("GT-27 host legacy y parecidos fallan en invoice_url e invoice_xml", () => {
+  const badHosts = [
+    "felplex.stage.plex.lat",
+    "felplex-gt.stage.plex.lat.evil.com",
+    "evil.felplex-gt.stage.plex.lat",
+    "felplex-gtx.stage.plex.lat",
+    "felplexgt.stage.plex.lat",
+    "api.felplex-gt.stage.plex.lat",
+    "felplex-gt.stage.plex.lat.gt",
+  ]
+  for (const host of badHosts) {
+    for (const field of ["invoice_url", "invoice_xml"] as const) {
+      const resource = field === "invoice_url" ? "pdf" : "xml"
+      const parsed = parseFelplexCertifyResponse({
+        ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT,
+        [field]: `https://${host}/${resource}/${OFFICIAL_GT_STAGE_UUID}`,
+      }, 200)
+      assertEquals(parsed.ok, false, `${field} ${host}`)
+      if (!parsed.ok) assertEquals(parsed.kind, "unsafe_url")
+    }
+  }
+})
+
+Deno.test("GT-28 HTTP sin TLS y rutas incorrectas fallan", () => {
+  const uuid = OFFICIAL_GT_STAGE_UUID
+  const badUrls = [
+    `http://felplex-gt.stage.plex.lat/pdf/${uuid}`,
+    `http://felplex-gt.stage.plex.lat/xml/${uuid}`,
+    `https://felplex-gt.stage.plex.lat/pdf/${uuid}/extra`,
+    `https://felplex-gt.stage.plex.lat/xml/${uuid}?download=1`,
+    `https://felplex-gt.stage.plex.lat/invoices/${uuid}`,
+    `https://felplex-gt.stage.plex.lat/api/entity/547/invoices/await`,
+    `https://felplex-gt.stage.plex.lat/PDF/${uuid}`,
+  ]
+  for (const invoiceUrl of badUrls) {
+    const parsed = parseFelplexCertifyResponse({
+      ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT,
+      invoice_url: invoiceUrl,
+    }, 200)
+    assertEquals(parsed.ok, false, invoiceUrl)
+    if (!parsed.ok) assertEquals(parsed.kind, "unsafe_url")
+  }
+})
+
+Deno.test("GT-29 UUID de invoice_url e invoice_xml debe coincidir", () => {
+  const other = "6558823E-E710-40B5-A227-658784945C08"
+  const urlMismatch = parseFelplexCertifyResponse({
+    ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT,
+    invoice_url: `https://felplex-gt.stage.plex.lat/pdf/${other}`,
+  }, 200)
+  assertEquals(urlMismatch.ok, false)
+  if (!urlMismatch.ok) assertEquals(urlMismatch.kind, "incomplete")
+
+  const xmlMismatch = parseFelplexCertifyResponse({
+    ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT,
+    invoice_xml: `https://felplex-gt.stage.plex.lat/xml/${other}`,
+  }, 200)
+  assertEquals(xmlMismatch.ok, false)
+  if (!xmlMismatch.ok) assertEquals(xmlMismatch.kind, "incomplete")
+
+  const swapped = parseFelplexCertifyResponse({
+    ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT,
+    invoice_url: `https://felplex-gt.stage.plex.lat/xml/${OFFICIAL_GT_STAGE_UUID}`,
+    invoice_xml: `https://felplex-gt.stage.plex.lat/pdf/${OFFICIAL_GT_STAGE_UUID}`,
+  }, 200)
+  assertEquals(swapped.ok, false)
+})
+
+Deno.test("GT-30 datos SAT necesarios exigidos", () => {
+  const cases = [
+    { serie: "", no: 1971864803, authorization: "DD34F4A1-7588-44E3-B609-1DDDA27AD3E0" },
+    { serie: "DD34F4A1", no: "", authorization: "DD34F4A1-7588-44E3-B609-1DDDA27AD3E0" },
+    { serie: "DD34F4A1", no: 1971864803, authorization: "" },
+    { serie: "DD34F4A1", no: null, authorization: "DD34F4A1-7588-44E3-B609-1DDDA27AD3E0" },
+  ]
+  for (const sat of cases) {
+    const parsed = parseFelplexCertifyResponse({
+      ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT,
+      sat: { ...sat, certification_date: "2024-06-20T15:15:39" },
+    }, 200)
+    assertEquals(parsed.ok, false)
+    if (!parsed.ok) assertEquals(parsed.kind, "incomplete")
+  }
+
+  const missingUrls = parseFelplexCertifyResponse({
+    ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT,
+    invoice_url: null,
+    invoice_xml: null,
+  }, 200)
+  assertEquals(missingUrls.ok, false)
+  if (!missingUrls.ok) assertEquals(missingUrls.kind, "incomplete")
 })
 
 Deno.test("GT-17 valid=false con errors y error_codes", () => {

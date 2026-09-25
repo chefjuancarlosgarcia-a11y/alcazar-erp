@@ -30,6 +30,7 @@ import {
 } from "./fixtures.ts"
 import type { BuildPayloadResult, FelplexTransport, FelplexTransportResult } from "./types.ts"
 import { FELPLEX_PRODUCTION_BASE_URL, FELPLEX_STAGE_BASE_URL } from "./constants.ts"
+import { SANITIZED_CERTIFY_SUCCESS_RESPONSE } from "./fixtures.ts"
 
 type ScenarioResult = "PASSED" | "FAILED" | "NOT_EXECUTED"
 
@@ -291,11 +292,7 @@ Deno.test("1A.1-11 Finalize retorna null", async () => {
   const transport = mockTransport(async () => ({
     ok: true,
     httpStatus: 200,
-    body: {
-      valid: true,
-      uuid: "71916AF3-73F6-480B-B3B3-6F6E3DABC334",
-      sat: { authorization: "AUTH-123", serie: "A", no: "123" },
-    },
+    body: SANITIZED_CERTIFY_SUCCESS_RESPONSE,
     sanitizedMessage: "ok",
   }))
   const result = await runCertify(repo, transport, makeHttpTestEnv(), {
@@ -312,11 +309,7 @@ Deno.test("1A.1-12 Finalize lanza error", async () => {
   const transport = mockTransport(async () => ({
     ok: true,
     httpStatus: 200,
-    body: {
-      valid: true,
-      uuid: "71916AF3-73F6-480B-B3B3-6F6E3DABC334",
-      sat: { authorization: "AUTH-123", serie: "A", no: "123" },
-    },
+    body: SANITIZED_CERTIFY_SUCCESS_RESPONSE,
     sanitizedMessage: "ok",
   }))
   const result = await runCertify(repo, transport, makeHttpTestEnv(), {
@@ -344,11 +337,7 @@ Deno.test("1A.1-14 Servicio nunca responde certified si DB no confirma", async (
   const transport = mockTransport(async () => ({
     ok: true,
     httpStatus: 200,
-    body: {
-      valid: true,
-      uuid: "71916AF3-73F6-480B-B3B3-6F6E3DABC334",
-      sat: { authorization: "AUTH-123" },
-    },
+    body: SANITIZED_CERTIFY_SUCCESS_RESPONSE,
     sanitizedMessage: "ok",
   }))
   const result = await runCertify(repo, transport, makeHttpTestEnv(), {
@@ -379,16 +368,7 @@ Deno.test("1A.1-16 Camino feliz completo con builder desbloqueado", async () => 
   const transport = mockTransport(async () => ({
     ok: true,
     httpStatus: 200,
-    body: {
-      valid: true,
-      uuid: "71916AF3-73F6-480B-B3B3-6F6E3DABC334",
-      sat: {
-        serie: "A",
-        no: "123",
-        authorization: "AUTH-123",
-        certification_date: FIXED_DATETIME,
-      },
-    },
+    body: SANITIZED_CERTIFY_SUCCESS_RESPONSE,
     sanitizedMessage: "ok",
   }))
   const result = await runCertify(repo, transport, makeHttpTestEnv(), {
@@ -423,16 +403,7 @@ Deno.test("1A.1-18 Finalizacion exitosa confirmada", async () => {
   const transport = mockTransport(async () => ({
     ok: true,
     httpStatus: 200,
-    body: {
-      valid: true,
-      uuid: "71916AF3-73F6-480B-B3B3-6F6E3DABC334",
-      sat: {
-        authorization: "AUTH-123",
-        serie: "A",
-        no: "123",
-        certification_date: FIXED_DATETIME,
-      },
-    },
+    body: SANITIZED_CERTIFY_SUCCESS_RESPONSE,
     sanitizedMessage: "ok",
   }))
   await runCertify(repo, transport, makeHttpTestEnv(), {
@@ -897,7 +868,15 @@ Deno.test("1A.3-02 failed + payload historico reclama attempt 2 y un transport",
     body: {
       valid: true,
       uuid: "71916AF3-73F6-480B-B3B3-6F6E3DABC334",
-      sat: { authorization: "AUTH-RETRY", serie: "A", no: "1" },
+      sat: {
+        authorization: "AUTH-RETRY",
+        serie: "A",
+        no: "1",
+        certification_date: "2024-06-20T15:15:39",
+      },
+      errors: [],
+      invoice_url: "https://felplex-gt.stage.plex.lat/pdf/71916AF3-73F6-480B-B3B3-6F6E3DABC334",
+      invoice_xml: "https://felplex-gt.stage.plex.lat/xml/71916AF3-73F6-480B-B3B3-6F6E3DABC334",
     },
     sanitizedMessage: "ok",
   }))

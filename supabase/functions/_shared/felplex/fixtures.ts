@@ -99,8 +99,8 @@ export const SANITIZED_CERTIFY_SUCCESS_RESPONSE = {
   },
   errors: [],
   error_codes: [],
-  invoice_url: "https://felplex-gt.stage.plex.lat/pdf/fixture-uuid",
-  invoice_xml: "https://felplex-gt.stage.plex.lat/xml/fixture-uuid",
+  invoice_url: "https://felplex-gt.stage.plex.lat/pdf/71916AF3-73F6-480B-B3B3-6F6E3DABC334",
+  invoice_xml: "https://felplex-gt.stage.plex.lat/xml/71916AF3-73F6-480B-B3B3-6F6E3DABC334",
 } as const
 
 export const SANITIZED_CERTIFY_FAILURE_RESPONSE = {

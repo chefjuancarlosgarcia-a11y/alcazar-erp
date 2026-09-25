@@ -122,9 +122,10 @@ Implementación: `supabase/functions/_shared/felplex/payloadBuilder.ts`
 
 ### Éxito funcional (`valid: true`)
 
-Campos mínimos exigidos por parser en `valid: true`: `uuid`, `sat.serie`, `sat.no`, `sat.authorization`.
-`sat.certification_date` es **opcional** (observado ausente en ejemplos GT); no se inventa.
-`invoice_url` / `invoice_xml` opcionales; si vienen, deben pertenecer al host Stage.
+Campos mínimos exigidos por parser en `valid: true`: `uuid`, `sat.serie`, `sat.no`, `sat.authorization`, `sat.certification_date`, `invoice_url`, `invoice_xml`.
+`sat.certification_date` es **obligatoria**. Texto no vacío `YYYY-MM-DDTHH:mm:ss`, con fracción de segundo opcional. Fecha inexistente o formato inválido se rechaza antes del RPC de éxito; no se sustituye con `now()`.
+Zona: sin `Z` ni offset es hora civil de Guatemala y se normaliza al mismo reloj con `-06:00` fijo (sin horario de verano; no usa la zona de PostgreSQL, Deno ni la sesión). Ejemplo FELplex: `2024-06-20T15:15:39` → `2024-06-20T15:15:39-06:00`. Con `Z` u offset ISO se conserva ese instante.
+`invoice_url` e `invoice_xml` son obligatorias en el host `felplex-gt.stage.plex.lat`, rutas `/pdf/{uuid}` y `/xml/{uuid}`, con el mismo UUID.
 
 **Confirmado (Postman Variables generales, export 2026-09-10):** `without_iva` es bandera **0** (con IVA) / **1** (sin IVA); el IVA monetario va en `total_tax`. Base imponible **no** se envía en `without_iva`.
 **Confirmado:** `emails` / `emails_cc` como arreglos de `{ "email": "…" }`.
@@ -165,6 +166,7 @@ HTTP 200 con `valid: false` **no** es certificación. Se preservan `errors` (ani
 | `without_iva` bandera 0/1 | ✓ | | |
 | `emails` objeto `{ email }` | ✓ | | |
 | `datetime_issue` GT `YYYY-MM-DDTHH:mm:ss` | ✓ | | |
+| `sat.certification_date` obligatoria; sin zona = `-06:00` | ✓ | | |
 | IVA incluido 12/112 (`total_tax`) por ítem v1 | ✓ | | |
 | Piloto v1 canales `dine_in`/`takeout` | ✓ | | |
 | Delivery / online en piloto v1 | | | ✓ (bloqueado en gates) |

@@ -8,8 +8,8 @@ export type FelplexParsedCertification = {
   satSeries: string
   satDocumentNumber: string
   satAuthorization: string
-  /** SAT certification_date when present; omitted when provider does not return it. */
-  certifiedAt?: string
+  /** SAT certification_date. Required on valid=true; never invented. */
+  certifiedAt: string
   invoiceUrl?: string
   invoiceXml?: string
   certifierName?: string
@@ -65,16 +65,77 @@ export function flattenFelplexErrors(errors: unknown): string {
   return sanitizeFelplexErrors(errors)
 }
 
-function validateStageResourceUrl(raw: unknown, label: string): string | null {
-  if (raw == null) return null
-  if (typeof raw !== "string" || !raw.trim()) return null
+/** Guatemala has no DST. Fixed offset; not derived from process or database timezone. */
+const GUATEMALA_ISO_OFFSET = "-06:00"
+
+const SAT_CERTIFICATION_DATE_PATTERN =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d{1,9})?(Z|[+-](\d{2}):(\d{2}))?$/
+
+/**
+ * FELplex success contract.
+ * No zone: civil America/Guatemala, emitted as the same clock with -06:00.
+ * Z or numeric offset: same instant, original suffix kept.
+ */
+export function parseSatCertificationDate(value: unknown): string | null {
+  if (typeof value !== "string") return null
+  const trimmed = value.trim()
+  const match = SAT_CERTIFICATION_DATE_PATTERN.exec(trimmed)
+  if (!match) return null
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  const hour = Number(match[4])
+  const minute = Number(match[5])
+  const second = Number(match[6])
+  const fraction = match[7] ?? ""
+  const zone = match[8]
+  if (month < 1 || month > 12 || hour > 23 || minute > 59 || second > 59) return null
+  if (zone && zone !== "Z") {
+    const offsetHour = Number(match[9])
+    const offsetMinute = Number(match[10])
+    if (offsetHour > 23 || offsetMinute > 59) return null
+  }
+  const probed = new Date(Date.UTC(year, month - 1, day))
+  if (
+    probed.getUTCFullYear() !== year
+    || probed.getUTCMonth() !== month - 1
+    || probed.getUTCDate() !== day
+  ) {
+    return null
+  }
+  const clock = `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}${fraction}`
+  return zone ? `${clock}${zone}` : `${clock}${GUATEMALA_ISO_OFFSET}`
+}
+
+function stageResourceUuid(raw: string, resource: "pdf" | "xml"): string | null {
   const trimmed = raw.trim()
-  const validation = validateFelplexStageUrl(trimmed)
-  if (validation) {
+  if (validateFelplexStageUrl(trimmed)) return null
+  let parsed: URL
+  try {
+    parsed = new URL(trimmed)
+  } catch {
+    return null
+  }
+  if (parsed.hostname !== FELPLEX_STAGE_HOST) return null
+  const match = new RegExp(`^/${resource}/([^/]+)$`).exec(parsed.pathname)
+  return match?.[1] ?? null
+}
+
+function validateStageResourceUrl(
+  raw: unknown,
+  resource: "pdf" | "xml",
+  felUuid: string,
+  label: string,
+): string | null {
+  if (typeof raw !== "string" || !raw.trim()) {
+    return `${label} requerido.`
+  }
+  const resourceUuid = stageResourceUuid(raw, resource)
+  if (!resourceUuid) {
     return `${label} con host no autorizado.`
   }
-  if (!trimmed.includes(FELPLEX_STAGE_HOST)) {
-    return `${label} con host no autorizado.`
+  if (resourceUuid.toLowerCase() !== felUuid.toLowerCase()) {
+    return `${label} no coincide con uuid.`
   }
   return null
 }
@@ -132,12 +193,9 @@ export function parseFelplexCertifyResponse(
     : ""
   const satSeries = typeof parsed.sat?.serie === "string" ? parsed.sat.serie.trim() : ""
   const satNo = normalizeSatDocumentNumber(parsed.sat?.no)
-  const certifiedAtRaw = parsed.sat?.certification_date
-  const certifiedAt = typeof certifiedAtRaw === "string" && certifiedAtRaw.trim()
-    ? certifiedAtRaw.trim()
-    : undefined
+  const certifiedAt = parseSatCertificationDate(parsed.sat?.certification_date)
 
-  if (!satAuthorization || !satSeries || !satNo) {
+  if (!satAuthorization || !satSeries || !satNo || !certifiedAt) {
     return {
       ok: false,
       kind: "incomplete",
@@ -146,18 +204,28 @@ export function parseFelplexCertifyResponse(
     }
   }
 
-  const invoiceUrlError = parsed.invoice_url != null
-    ? validateStageResourceUrl(parsed.invoice_url, "invoice_url")
-    : null
+  const invoiceUrlError = validateStageResourceUrl(parsed.invoice_url, "pdf", felUuid, "invoice_url")
   if (invoiceUrlError) {
-    return { ok: false, kind: "unsafe_url", message: invoiceUrlError, raw: parsed }
+    return {
+      ok: false,
+      kind: invoiceUrlError.endsWith("requerido.") || invoiceUrlError.includes("no coincide")
+        ? "incomplete"
+        : "unsafe_url",
+      message: invoiceUrlError,
+      raw: parsed,
+    }
   }
 
-  const invoiceXmlError = parsed.invoice_xml != null
-    ? validateStageResourceUrl(parsed.invoice_xml, "invoice_xml")
-    : null
+  const invoiceXmlError = validateStageResourceUrl(parsed.invoice_xml, "xml", felUuid, "invoice_xml")
   if (invoiceXmlError) {
-    return { ok: false, kind: "unsafe_url", message: invoiceXmlError, raw: parsed }
+    return {
+      ok: false,
+      kind: invoiceXmlError.endsWith("requerido.") || invoiceXmlError.includes("no coincide")
+        ? "incomplete"
+        : "unsafe_url",
+      message: invoiceXmlError,
+      raw: parsed,
+    }
   }
 
   if (httpStatus < 200 || httpStatus >= 300) {
