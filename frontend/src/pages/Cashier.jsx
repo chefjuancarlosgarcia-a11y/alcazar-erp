@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useAuth } from "../context/AuthContext"
 import {
   PAYMENT_METHODS,
@@ -34,6 +34,14 @@ import { getPosOrderPaymentStatus, getOrderWithItems, linkOrderBillingCustomer }
 import { printFinalCheck } from "../services/posPrintService"
 import { queueReceiptPrintJob } from "../services/printingService"
 import SplitPaymentModal from "../components/SplitPaymentModal"
+import FelInvoiceRequestModal from "../components/FelInvoiceRequestModal"
+import FelInvoiceRequestButton from "../components/FelInvoiceRequestButton"
+import {
+  fetchPosFelInvoiceCandidates,
+  felDocumentStatusLabel,
+  partitionPosFelInvoiceCandidates,
+  shouldAutoOpenFelInvoiceModalAfterPayment,
+} from "../services/posFelInvoiceService"
 import CashierBillingCustomer from "../components/CashierBillingCustomer"
 import useOperationalAlerts from "../hooks/useOperationalAlerts"
 import OperationalAlertToast from "../components/OperationalAlertToast"
@@ -203,6 +211,15 @@ function Cashier() {
   const [store, setStore] = useState(loadStore)
   const [selectedBillId, setSelectedBillId] = useState("")
   const [feedback, setFeedback] = useState("")
+  const [felInvoiceContext, setFelInvoiceContext] = useState(null)
+  const [felInvoiceListTick, setFelInvoiceListTick] = useState(0)
+  const openFelInvoiceRequest = useCallback((context) => {
+    if (!context?.orderId) return
+    setFelInvoiceContext((prev) => {
+      if (prev?.orderId === context.orderId) return prev
+      return context
+    })
+  }, [])
   const canSeeAllFinance = canAuthorizeFinance(user)
   const currentCashierId = user?.id || user?.username
   const visibleSessionIds = new Set(store.sessions.filter((entry) => canSeeAllFinance || String(entry.cashierId) === String(currentCashierId)).map((entry) => String(entry.id)))
@@ -239,6 +256,7 @@ function Cashier() {
 
   function refresh(message = "") {
     setStore(loadStore())
+    setFelInvoiceListTick((tick) => tick + 1)
     setFeedback(message)
   }
 
@@ -280,7 +298,10 @@ function Cashier() {
     setTab(nextTab)
   }
 
-  function completeCharge(message = "Pago completado correctamente.") {
+  function completeCharge(message = "Pago completado correctamente.", felContext = null) {
+    if (shouldAutoOpenFelInvoiceModalAfterPayment(felContext)) {
+      setFelInvoiceContext(felContext)
+    }
     setSelectedBillId("")
     setTab("dashboard")
     refresh(message)
@@ -335,18 +356,123 @@ function Cashier() {
         onDismiss={cashierAlerts.dismissToast}
       />
 
-      {tab === "dashboard" && <CashierDashboard session={session} summary={summary} requests={requests} payments={visibleStore.payments} onOpenCharge={openCharge} onRefresh={refresh} user={user} highlightedIds={cashierAlerts.highlightedIds} />}
+      {tab === "dashboard" && (
+        <CashierDashboard
+          session={session}
+          summary={summary}
+          requests={requests}
+          payments={visibleStore.payments}
+          onOpenCharge={openCharge}
+          onRefresh={refresh}
+          user={user}
+          highlightedIds={cashierAlerts.highlightedIds}
+          onRequestFelInvoice={openFelInvoiceRequest}
+          felInvoiceListTick={felInvoiceListTick}
+          cashierUserId={user?.id || user?.username || ""}
+        />
+      )}
       {tab === "requests" && <PaymentRequests bills={requests} onOpenCharge={openCharge} onRefresh={refresh} user={user} highlightedIds={cashierAlerts.highlightedIds} />}
       {tab === "charge" && <ChargePanel key={selectedBill?.id || "empty"} bill={selectedBill} splitBills={store.splitBills} session={session} requests={visibleStore.authorizations} user={user} onRefresh={refresh} onPaymentComplete={completeCharge} />}
       {tab === "register" && <CashRegister session={session} summary={summary} user={user} onRefresh={refresh} />}
       {tab === "movements" && <MovementsPanel session={session} movements={visibleStore.movements} authorizations={visibleStore.authorizations} user={user} onRefresh={refresh} />}
       {tab === "closures" && <Closures sessions={visibleStore.sessions} />}
       {tab === "reports" && <CashReports payments={visibleStore.payments} tips={visibleStore.tips} movements={visibleStore.movements} sessions={visibleStore.sessions} audit={visibleStore.audit} />}
+      {felInvoiceContext?.orderId && (
+        <FelInvoiceRequestModal
+          context={felInvoiceContext}
+          onClose={() => setFelInvoiceContext(null)}
+          onSuccess={() => refresh("Solicitud FEL registrada.")}
+        />
+      )}
     </section>
   )
 }
 
-function CashierDashboard({ session, summary, requests, payments, onOpenCharge, onRefresh, user, highlightedIds }) {
+function CashierFelInvoicePanels({ session, onRequestFelInvoice, felInvoiceListTick, cashierUserId }) {
+  const listFetchGenerationRef = useRef(0)
+  const [state, setState] = useState({
+    loading: false,
+    available: [],
+    existing: [],
+    error: "",
+  })
+
+  useEffect(() => {
+    if (!session) {
+      setState({ loading: false, available: [], existing: [], error: "" })
+      return undefined
+    }
+    const generation = ++listFetchGenerationRef.current
+    let cancelled = false
+    ;(async () => {
+      setState((prev) => ({ ...prev, loading: true, error: "" }))
+      const result = await fetchPosFelInvoiceCandidates()
+      if (cancelled || generation !== listFetchGenerationRef.current) return
+      if (result.error) {
+        setState({ loading: false, available: [], existing: [], error: result.message })
+        return
+      }
+      const { available, existing } = partitionPosFelInvoiceCandidates(result.data?.items || [])
+      setState({ loading: false, available, existing, error: "" })
+    })()
+    return () => { cancelled = true }
+  }, [session, felInvoiceListTick, cashierUserId])
+
+  if (!session) return null
+
+  return (
+    <article className="cashier-panel cashier-fel-panels">
+      <div className="cashier-panel-title">
+        <h2>Facturación FEL (caja)</h2>
+        <span>{state.loading ? "Actualizando..." : `${state.available.length} disponibles`}</span>
+      </div>
+      {state.error && <p className="cashier-alert">{state.error}</p>}
+      <section className="cashier-fel-section">
+        <h3>Disponibles para solicitar</h3>
+        {state.loading && <Empty text="Cargando órdenes elegibles..." />}
+        {!state.loading && state.available.map((row) => (
+          <div className="cashier-row cashier-row-actions" key={row.order_id}>
+            <div>
+              <strong>{row.display_label}</strong>
+              <span>
+                Q{Number(row.order_total).toFixed(2)} · {row.sales_channel} · {formatDate(row.paid_at)}
+              </span>
+            </div>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => onRequestFelInvoice?.({
+                orderId: row.order_id,
+                salesChannel: row.sales_channel,
+                tableName: row.display_label,
+                total: row.order_total,
+                orderStatus: "paid",
+              })}
+            >
+              Solicitar factura FEL
+            </button>
+          </div>
+        ))}
+        {!state.loading && !state.available.length && <Empty text="No hay órdenes pagadas listas para solicitar FEL." />}
+      </section>
+      <section className="cashier-fel-section">
+        <h3>Solicitudes FEL existentes</h3>
+        {!state.loading && state.existing.map((row) => (
+          <div className="cashier-row" key={`${row.order_id}-${row.fel_status}`}>
+            <div>
+              <strong>{row.display_label}</strong>
+              <span>Q{Number(row.order_total).toFixed(2)} · {formatDate(row.paid_at)}</span>
+            </div>
+            <span className="fel-invoice-badge">{felDocumentStatusLabel(row.fel_status)}</span>
+          </div>
+        ))}
+        {!state.loading && !state.existing.length && <Empty text="Sin solicitudes FEL registradas en el periodo." />}
+      </section>
+    </article>
+  )
+}
+
+function CashierDashboard({ session, summary, requests, payments, onOpenCharge, onRefresh, user, highlightedIds, onRequestFelInvoice, felInvoiceListTick, cashierUserId }) {
   const [openingAmount, setOpeningAmount] = useState("500")
   const completed = payments.filter((payment) => payment.status === "completed")
   if (!session) {
@@ -379,9 +505,30 @@ function CashierDashboard({ session, summary, requests, payments, onOpenCharge, 
       </article>
       <article className="cashier-panel">
         <div className="cashier-panel-title"><h2>Últimos cobros</h2><span>{completed.length} pagos</span></div>
-        {completed.slice(0, 5).map((payment) => <div className="cashier-row" key={payment.id}><strong>{payment.cashierName}</strong><span>Q{payment.totalAmount.toFixed(2)} · {formatDate(payment.createdAt)}</span><button type="button" className="secondary" onClick={() => showReceipt(payment)}>Recibo</button></div>)}
+        {completed.slice(0, 5).map((payment) => (
+          <div className="cashier-row cashier-row-actions" key={payment.id}>
+            <div>
+              <strong>{payment.cashierName}</strong>
+              <span>Q{payment.totalAmount.toFixed(2)} · {formatDate(payment.createdAt)}</span>
+            </div>
+            <div className="cashier-row-buttons">
+              <button type="button" className="secondary" onClick={() => showReceipt(payment)}>Recibo</button>
+              <FelInvoiceRequestButton
+                compact
+                orderId={payment.orderId}
+                onOpen={onRequestFelInvoice}
+              />
+            </div>
+          </div>
+        ))}
         {!completed.length && <Empty text="Aún no hay cobros registrados." />}
       </article>
+      <CashierFelInvoicePanels
+        session={session}
+        onRequestFelInvoice={onRequestFelInvoice}
+        felInvoiceListTick={felInvoiceListTick}
+        cashierUserId={cashierUserId}
+      />
     </div>
   )
 }
@@ -664,7 +811,14 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
       }
 
       cashierDebug("[Cashier] payment complete flow", { source: "submit" })
-      onPaymentComplete("Pago completado correctamente. Orden liberada.")
+      const felContext = isSupabaseBill && bill.orderId ? {
+        orderId: bill.orderId,
+        salesChannel: bill.salesChannel,
+        tableName: bill.tableName,
+        total,
+        orderStatus: "paid",
+      } : null
+      onPaymentComplete("Pago completado correctamente. Orden liberada.", felContext)
       schedulePostPaymentPrints({
         orderForPrint: orderWithBillingCustomer(bill, normalizedBilling),
         payment: result.payment,
