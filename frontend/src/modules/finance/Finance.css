@@ -437,25 +437,46 @@
   min-width: 180px;
 }
 
-.finance-journal-account-suggestions {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: calc(100% + 4px);
-  z-index: 3;
+.finance-journal-account-field {
   display: grid;
-  gap: 4px;
-  max-height: 200px;
+  gap: var(--erp-space-8, 8px);
+}
+
+.finance-journal-account-field input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.finance-journal-account-field input[aria-invalid="true"] {
+  border-color: #eab308;
+}
+
+.finance-journal-account-hint,
+.finance-journal-account-menu__empty {
+  margin: 0;
+  color: #fde68a;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 16px;
+}
+
+.finance-journal-account-menu {
+  position: fixed;
+  z-index: 1100;
+  display: grid;
+  gap: var(--erp-space-8, 8px);
+  max-height: 192px;
   overflow: auto;
-  padding: 8px;
+  padding: var(--erp-space-8, 8px);
   border: 1px solid #334155;
   border-radius: 8px;
   background: #0f172a;
 }
 
 .finance-journal-account-option {
+  min-height: var(--erp-btn-height);
   text-align: left;
-  padding: 8px;
+  padding: var(--erp-space-8, 8px);
   border: 0;
   border-radius: 8px;
   background: transparent;

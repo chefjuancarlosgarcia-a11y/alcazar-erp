@@ -32,6 +32,7 @@ import { selectionPatchAfterPersistResult } from "../../utils/financeJournalEdit
 import { loadJournalEntriesForList, withJournalListLoading } from "../../utils/financeJournalListLoad"
 import { confirmDiscardJournalChanges, createJournalLeaveGuard, UNSAVED_JOURNAL_CONFIRM } from "../../utils/financeJournalUnsaved"
 import { centsToDecimalNumber } from "../../utils/financeJournalAmounts"
+import { selectedAccountLinePatch } from "../../utils/financeJournalAccountMenu"
 import FinanceJournalEntryList from "./FinanceJournalEntryList"
 import FinanceJournalEntryEditor from "./FinanceJournalEntryEditor"
 import { Field } from "./FinanceJournalField"
@@ -290,14 +291,9 @@ export default function FinanceJournalEntriesTab({ user, notify, leaveGuardRef }
   }
 
   function selectAccount(index, account) {
-    updateLine(index, {
-      account_id: account.id,
-      account_code: account.code,
-      account_label: `${account.code} — ${account.name}`,
-      branch_id: account.branch_dimension_rule === "prohibited" ? "" : form.lines[index]?.branch_id || "",
-      cost_center_id: account.cost_center_dimension_rule === "prohibited" ? "" : form.lines[index]?.cost_center_id || ""
-    })
-    setAccountQueries((current) => ({ ...current, [index]: `${account.code} — ${account.name}` }))
+    const patch = selectedAccountLinePatch(account, form.lines[index])
+    updateLine(index, patch)
+    setAccountQueries((current) => ({ ...current, [index]: patch.account_label }))
   }
 
   async function runAction(actionName, fn) {
