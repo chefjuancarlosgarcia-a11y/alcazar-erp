@@ -731,3 +731,114 @@
     grid-column: span 1;
   }
 }
+
+.finance-general-ledger-table-wrap {
+  overflow-x: auto;
+  margin-top: var(--erp-space-16);
+}
+
+.finance-general-ledger-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.finance-general-ledger-table th,
+.finance-general-ledger-table td {
+  padding: var(--erp-space-8) var(--erp-space-16);
+  border-bottom: 1px solid #334155;
+  vertical-align: top;
+  text-align: left;
+}
+
+.finance-general-ledger-table thead th {
+  position: sticky;
+  top: 0;
+  background: #0f172a;
+  z-index: 1;
+}
+
+.finance-general-ledger-num {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.finance-general-ledger-row--reversal td {
+  background: rgba(120, 53, 15, 0.18);
+}
+
+.finance-general-ledger-status {
+  margin-top: var(--erp-space-16);
+}
+
+.finance-ledger-scope {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--erp-space-8);
+  align-items: center;
+  margin-top: var(--erp-space-16);
+  padding: var(--erp-space-16);
+  border: 1px solid #334155;
+  border-radius: var(--erp-radius-card);
+}
+
+.finance-ledger-totals {
+  margin-top: var(--erp-space-16);
+}
+
+.finance-ledger-totals em {
+  display: block;
+  margin-top: var(--erp-space-4);
+  color: #fde68a;
+  font-style: normal;
+}
+
+.finance-ledger-account-option {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--erp-space-8);
+  align-items: center;
+  min-height: var(--erp-touch-min);
+}
+
+.finance-ledger-account-marks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--erp-space-8);
+}
+
+.finance-ledger-account-mark {
+  background: #854d0e;
+  color: #fef3c7;
+}
+
+@media (max-width: 767px) {
+  .finance-general-ledger-table thead {
+    display: none;
+  }
+
+  .finance-general-ledger-table tr {
+    display: block;
+    margin-bottom: var(--erp-space-16);
+    border: 1px solid #334155;
+    border-radius: var(--erp-radius-card);
+    padding: var(--erp-space-8);
+  }
+
+  .finance-general-ledger-table td {
+    display: block;
+    border: 0;
+    padding: var(--erp-space-8);
+  }
+
+  .finance-general-ledger-table td::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: var(--erp-space-4);
+    color: #94a3b8;
+  }
+
+  .finance-general-ledger-num {
+    text-align: left;
+  }
+}
