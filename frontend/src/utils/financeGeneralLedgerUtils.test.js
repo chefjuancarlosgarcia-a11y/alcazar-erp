@@ -320,6 +320,141 @@ test("la exportación multipágina reutiliza el snapshot y concatena páginas", 
   assert.equal(outcome.rows[1].runningBalance, 30)
 })
 
+function ledgerPayload(overrides = {}) {
+  return {
+    account: {
+      id: "acct",
+      code: "STAGE_UI_SMOKE-CASH",
+      name: "STAGE UI Smoke - Caja",
+      natural_balance: "debit",
+      is_active: true,
+      accepts_entries: true,
+      account_kind: "detail"
+    },
+    scope: "global",
+    effective_from: "2026-09-01",
+    effective_to: "2026-09-26",
+    opening_balance: 0,
+    opening_balance_side: "zero",
+    opening_contrary: false,
+    period_debit: 0,
+    period_credit: 100,
+    closing_balance: -100,
+    closing_balance_side: "credit",
+    closing_contrary: true,
+    movement_count: 1,
+    match_count: 1,
+    search_applied: false,
+    rows: [{
+      line_id: "line-1",
+      entry_id: "entry-1",
+      entry_date: "2026-09-25",
+      entry_number: "JE-1",
+      entry_reference: "",
+      entry_description: "smoke",
+      line_number: 1,
+      line_description: "",
+      line_reference: "",
+      debit: 0,
+      credit: 100,
+      running_balance: -100,
+      balance_side: "credit",
+      balance_side_label: "Acreedor",
+      contrary_to_nature: true,
+      is_reversal: false,
+      reversal_of_entry_number: null
+    }],
+    page: 1,
+    page_size: 50,
+    total_pages: 1,
+    snapshot_at: "2026-09-26T01:50:36.561863+00:00",
+    ...overrides
+  }
+}
+
+test("acepta el saldo contrario que devuelve el RPC", () => {
+  const mapped = mapGeneralLedgerResponse(ledgerPayload())
+  assert.equal(mapped.ok, true)
+  assert.equal(mapped.report.closingBalance, -100)
+  assert.equal(mapped.report.openingBalance, 0)
+  assert.equal(mapped.report.periodDebit, 0)
+  assert.equal(mapped.report.periodCredit, 100)
+  assert.equal(mapped.report.rows[0].runningBalance, -100)
+  assert.equal(mapped.report.rows[0].debit, 0)
+  assert.equal(mapped.report.rows[0].credit, 100)
+  assert.equal(mapped.report.closingContrary, true)
+})
+
+test("acepta importes firmados cuando llegan como texto", () => {
+  const mapped = mapGeneralLedgerResponse(ledgerPayload({
+    opening_balance: "0.00",
+    period_debit: "0.00",
+    period_credit: "100.00",
+    closing_balance: "-100.00",
+    movement_count: "1",
+    match_count: "1",
+    page: "1",
+    page_size: "50",
+    total_pages: "1",
+    rows: [{
+      ...ledgerPayload().rows[0],
+      debit: "0.00",
+      credit: "100.00",
+      running_balance: "-100.00"
+    }]
+  }))
+  assert.equal(mapped.ok, true)
+  assert.equal(mapped.report.closingBalance, -100)
+  assert.equal(mapped.report.rows[0].runningBalance, -100)
+})
+
+test("acepta página 1 sin movimientos y búsqueda sin coincidencias", () => {
+  const empty = mapGeneralLedgerResponse(ledgerPayload({
+    opening_balance: 0,
+    period_debit: 0,
+    period_credit: 0,
+    closing_balance: 0,
+    closing_contrary: false,
+    movement_count: 0,
+    match_count: 0,
+    total_pages: 0,
+    rows: []
+  }))
+  assert.equal(empty.ok, true)
+  assert.equal(empty.report.totalPages, 0)
+  assert.equal(empty.report.rows.length, 0)
+
+  const searchMiss = mapGeneralLedgerResponse(ledgerPayload({
+    movement_count: 2,
+    match_count: 0,
+    total_pages: 0,
+    search_applied: true,
+    rows: []
+  }))
+  assert.equal(searchMiss.ok, true)
+  assert.equal(searchMiss.report.movementCount, 2)
+  assert.equal(searchMiss.report.matchCount, 0)
+})
+
+test("rechaza metadatos incoherentes del mayor", () => {
+  assert.equal(mapGeneralLedgerResponse(ledgerPayload({ page: -1 })).ok, false)
+  assert.equal(mapGeneralLedgerResponse(ledgerPayload({ page: 0 })).ok, false)
+  assert.equal(mapGeneralLedgerResponse(ledgerPayload({ page_size: 0 })).ok, false)
+  assert.equal(mapGeneralLedgerResponse(ledgerPayload({ page_size: 501 })).ok, false)
+  assert.equal(mapGeneralLedgerResponse(ledgerPayload({ page: 2, total_pages: 1 })).ok, false)
+  assert.equal(mapGeneralLedgerResponse(ledgerPayload({ movement_count: -1 })).ok, false)
+  assert.equal(mapGeneralLedgerResponse(ledgerPayload({ match_count: 2, movement_count: 1, total_pages: 1 })).ok, false)
+  assert.equal(mapGeneralLedgerResponse(ledgerPayload({ snapshot_at: "" })).ok, false)
+  assert.equal(mapGeneralLedgerResponse(ledgerPayload({ snapshot_at: "t" })).ok, false)
+  assert.equal(mapGeneralLedgerResponse(ledgerPayload({ period_debit: -1 })).ok, false)
+  assert.equal(mapGeneralLedgerResponse(ledgerPayload({
+    rows: [{ ...ledgerPayload().rows[0], debit: -5 }]
+  })).ok, false)
+  assert.equal(mapGeneralLedgerResponse(ledgerPayload({
+    rows: [{ ...ledgerPayload().rows[0], line_id: "" }]
+  })).ok, false)
+})
+
 test("metadatos inválidos cierran el reporte", () => {
   const mapped = mapGeneralLedgerResponse({ rows: [], opening_balance: "no", closing_balance: 0, period_debit: 0, period_credit: 0, page: 1, page_size: 50, total_pages: 0, match_count: 0, movement_count: 0, snapshot_at: "t" })
   assert.equal(mapped.ok, false)

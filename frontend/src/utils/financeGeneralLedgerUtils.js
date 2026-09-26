@@ -66,6 +66,42 @@ function moneyCents(value) {
   return parsed.cents
 }
 
+function readLedgerAmount(value, { allowNegative = false } = {}) {
+  if (value === null || value === undefined || value === "") return null
+  if (typeof value === "boolean") return null
+  if (typeof value === "number" && !Number.isFinite(value)) return null
+  const normalized = String(value).trim().replace(/,/g, "")
+  const negative = normalized.startsWith("-")
+  if (negative && !allowNegative) return null
+  const magnitude = negative ? normalized.slice(1) : normalized
+  if (!magnitude) return null
+  const parsed = parseAmountToCents(magnitude)
+  if (!parsed.ok) return null
+  const cents = negative ? -parsed.cents : parsed.cents
+  return centsToDecimalNumber(cents)
+}
+
+function readLedgerCount(value) {
+  if (typeof value === "boolean" || value === null || value === undefined || value === "") return null
+  if (typeof value === "number") {
+    if (!Number.isInteger(value) || value < 0 || !Number.isSafeInteger(value)) return null
+    return value
+  }
+  if (typeof value === "string" && /^\d+$/.test(value.trim())) {
+    const number = Number(value.trim())
+    if (!Number.isSafeInteger(number)) return null
+    return number
+  }
+  return null
+}
+
+function readLedgerSnapshot(value) {
+  if (typeof value !== "string") return null
+  const text = value.trim()
+  if (!text || !Number.isFinite(Date.parse(text))) return null
+  return text
+}
+
 export function signedLedgerCents(naturalBalance, debit, credit) {
   const debitCents = moneyCents(debit)
   const creditCents = moneyCents(credit)
@@ -211,18 +247,11 @@ export function resolveLedgerScreen({ canView, accountId, loading, error, report
   return { state: "ready", showReport: true, showBalances: true }
 }
 
-function readMoney(value) {
-  if (value === null || value === undefined || value === "") return null
-  const cents = moneyCents(value)
-  if (cents === null) return null
-  return centsToDecimalNumber(cents)
-}
-
 export function mapGeneralLedgerRow(row) {
   if (!row || typeof row !== "object") return null
-  const runningBalance = readMoney(row.running_balance)
-  const debit = readMoney(row.debit)
-  const credit = readMoney(row.credit)
+  const runningBalance = readLedgerAmount(row.running_balance, { allowNegative: true })
+  const debit = readLedgerAmount(row.debit)
+  const credit = readLedgerAmount(row.credit)
   if (runningBalance === null || debit === null || credit === null || !row.entry_id || !row.line_id) {
     return null
   }
@@ -253,27 +282,37 @@ export function mapGeneralLedgerRow(row) {
   }
 }
 
+function invalidLedgerMetadata() {
+  return { ok: false, message: GENERAL_LEDGER_INVALID_METADATA_MESSAGE }
+}
+
 export function mapGeneralLedgerResponse(data) {
   const payload = data && typeof data === "object" ? data : null
-  if (!payload) return { ok: false, message: GENERAL_LEDGER_INVALID_METADATA_MESSAGE }
-  const openingBalance = readMoney(payload.opening_balance)
-  const closingBalance = readMoney(payload.closing_balance)
-  const periodDebit = readMoney(payload.period_debit)
-  const periodCredit = readMoney(payload.period_credit)
-  const page = Number(payload.page)
-  const pageSize = Number(payload.page_size)
-  const totalPages = Number(payload.total_pages)
-  const matchCount = Number(payload.match_count)
-  const movementCount = Number(payload.movement_count)
-  if ([openingBalance, closingBalance, periodDebit, periodCredit].some((value) => value === null)) {
-    return { ok: false, message: GENERAL_LEDGER_INVALID_METADATA_MESSAGE }
+  if (!payload) return invalidLedgerMetadata()
+  const openingBalance = readLedgerAmount(payload.opening_balance, { allowNegative: true })
+  const closingBalance = readLedgerAmount(payload.closing_balance, { allowNegative: true })
+  const periodDebit = readLedgerAmount(payload.period_debit)
+  const periodCredit = readLedgerAmount(payload.period_credit)
+  const page = readLedgerCount(payload.page)
+  const pageSize = readLedgerCount(payload.page_size)
+  const totalPages = readLedgerCount(payload.total_pages)
+  const matchCount = readLedgerCount(payload.match_count)
+  const movementCount = readLedgerCount(payload.movement_count)
+  const snapshotAt = readLedgerSnapshot(payload.snapshot_at)
+  if ([openingBalance, closingBalance, periodDebit, periodCredit, page, pageSize, totalPages, matchCount, movementCount, snapshotAt].some((value) => value === null)) {
+    return invalidLedgerMetadata()
   }
-  if (![page, pageSize, totalPages, matchCount, movementCount].every((value) => Number.isFinite(value) && value >= 0)) {
-    return { ok: false, message: GENERAL_LEDGER_INVALID_METADATA_MESSAGE }
-  }
-  if (!payload.snapshot_at) return { ok: false, message: GENERAL_LEDGER_INVALID_METADATA_MESSAGE }
+  if (page < 1 || pageSize < 1 || pageSize > GENERAL_LEDGER_MAX_PAGE_SIZE) return invalidLedgerMetadata()
+  if (matchCount > movementCount) return invalidLedgerMetadata()
   const rows = Array.isArray(payload.rows) ? payload.rows.map(mapGeneralLedgerRow) : [null]
-  if (rows.some((row) => !row)) return { ok: false, message: GENERAL_LEDGER_INVALID_METADATA_MESSAGE }
+  if (rows.some((row) => !row)) return invalidLedgerMetadata()
+  const expectedPages = matchCount === 0 ? 0 : Math.ceil(matchCount / pageSize)
+  if (totalPages !== expectedPages) return invalidLedgerMetadata()
+  if (matchCount === 0) {
+    if (page !== 1 || rows.length !== 0) return invalidLedgerMetadata()
+  } else if (page > totalPages || rows.length === 0 || rows.length > pageSize) {
+    return invalidLedgerMetadata()
+  }
   return {
     ok: true,
     report: {
@@ -296,7 +335,7 @@ export function mapGeneralLedgerResponse(data) {
       page,
       pageSize,
       totalPages,
-      snapshotAt: payload.snapshot_at
+      snapshotAt
     }
   }
 }

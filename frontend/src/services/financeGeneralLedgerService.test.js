@@ -39,6 +39,49 @@ test("el servicio rechaza a quien el RPC declara sin permiso", async () => {
   }
 })
 
+test("el servicio acepta un saldo contrario devuelto por el RPC", async () => {
+  const { service: ledger } = await getModules()
+  ledger.__setGeneralLedgerRpcClientForTests(async () => ({
+    data: {
+      opening_balance: 0,
+      period_debit: 0,
+      period_credit: 100,
+      closing_balance: -100,
+      closing_balance_side: "credit",
+      closing_contrary: true,
+      movement_count: 1,
+      match_count: 1,
+      search_applied: false,
+      page: 1,
+      page_size: 50,
+      total_pages: 1,
+      snapshot_at: "2026-09-26T01:50:36.561863+00:00",
+      scope: "global",
+      rows: [{
+        line_id: "line-1",
+        entry_id: "entry-1",
+        entry_date: "2026-09-25",
+        entry_number: "JE-1",
+        debit: 0,
+        credit: 100,
+        running_balance: -100,
+        balance_side: "credit",
+        contrary_to_nature: true,
+        is_reversal: false
+      }]
+    },
+    error: null
+  }))
+  try {
+    const result = await ledger.getFinanceGeneralLedger({ accountId: "account-1" })
+    assert.equal(result.error, "")
+    assert.equal(result.data.closingBalance, -100)
+    assert.equal(result.data.rows[0].runningBalance, -100)
+  } finally {
+    ledger.__resetGeneralLedgerRpcClientForTests()
+  }
+})
+
 test("el servicio no publica un reporte con metadatos inválidos", async () => {
   const { service: ledger } = await getModules()
   ledger.__setGeneralLedgerRpcClientForTests(async () => ({ data: { rows: [] }, error: null }))
