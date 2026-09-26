@@ -842,3 +842,94 @@
     text-align: left;
   }
 }
+
+.finance-trial-balance-zero {
+  display: flex;
+  align-items: center;
+  gap: var(--erp-space-8);
+  min-height: var(--erp-btn-height);
+}
+
+.finance-trial-balance-status,
+.finance-trial-balance-warning {
+  margin-top: var(--erp-space-16);
+}
+
+.finance-trial-balance-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--erp-space-8);
+  align-items: center;
+  margin-top: var(--erp-space-16);
+}
+
+.finance-trial-balance-square {
+  background: #115e59;
+  color: #ccfbf1;
+}
+
+.finance-trial-balance-unbalanced {
+  background: #7f1d1d;
+  color: #fecaca;
+}
+
+.finance-trial-balance-warning {
+  padding: var(--erp-space-16);
+  border: 1px solid #854d0e;
+  border-radius: var(--erp-radius-card);
+  color: #fde68a;
+}
+
+.finance-trial-balance-table-wrap {
+  margin-top: var(--erp-space-16);
+  overflow-x: auto;
+}
+
+.finance-trial-balance-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.finance-trial-balance-table th,
+.finance-trial-balance-table td {
+  padding: var(--erp-space-8);
+  border-bottom: 1px solid #334155;
+  text-align: left;
+  vertical-align: top;
+}
+
+.finance-trial-balance-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 767px) {
+  .finance-trial-balance-table thead {
+    display: none;
+  }
+
+  .finance-trial-balance-table tr {
+    display: block;
+    margin-bottom: var(--erp-space-16);
+    border: 1px solid #334155;
+    border-radius: var(--erp-radius-card);
+    padding: var(--erp-space-8);
+  }
+
+  .finance-trial-balance-table td {
+    display: block;
+    border: 0;
+    padding: var(--erp-space-8);
+  }
+
+  .finance-trial-balance-table td::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: var(--erp-space-4);
+    color: #94a3b8;
+  }
+
+  .finance-trial-balance-num {
+    text-align: left;
+  }
+}
