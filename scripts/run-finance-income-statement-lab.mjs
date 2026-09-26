@@ -53,7 +53,13 @@ const requiredScenarios = [
   "26_dimension_scope",
   "27_incomplete",
   "28_limit",
-  "29_reports_remain"
+  "29_reports_remain",
+  "30_omit_keeps_section",
+  "31_assign_section",
+  "32_null_clears_section",
+  "32b_blank_clears_section",
+  "33_cleared_movement_incomplete",
+  "34_reclassify_restores_complete"
 ]
 const rollbackVerifyPrefix = "0|1|1|1|0|"
 

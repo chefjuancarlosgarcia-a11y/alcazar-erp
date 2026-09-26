@@ -27,6 +27,7 @@ import {
   defaultBranchDimensionRule,
   defaultCostCenterDimensionRule
 } from "../../utils/financeAccountingFoundationValidation"
+import { buildFinanceChartAccountWritePayload } from "../../utils/financeChartAccountsValidation"
 
 function Field({ label, className = "", children }) {
   return (
@@ -146,18 +147,8 @@ export default function FinanceChartAccountsTab({ user, notify }) {
     if (!canManage) return notify("No tienes permiso para administrar el catálogo contable.", "error")
 
     const sectionChoices = incomeStatementSectionsFor(form.financial_type, form.account_kind)
-    const payload = {
-      name: form.name,
-      parent_id: form.parent_id || null,
-      financial_type: form.financial_type,
-      natural_balance: form.natural_balance,
-      account_kind: form.account_kind,
-      accepts_entries: form.account_kind === "header" ? false : form.accepts_entries,
-      description: form.description,
-      branch_dimension_rule: form.branch_dimension_rule,
-      cost_center_dimension_rule: form.cost_center_dimension_rule,
-      income_statement_section: sectionChoices.length ? (form.income_statement_section || null) : null
-    }
+    const payload = buildFinanceChartAccountWritePayload(form)
+    const wantedClear = sectionChoices.length > 0 && payload.income_statement_section === ""
 
     const result = editingId
       ? await updateFinanceChartAccount(editingId, payload)
@@ -165,6 +156,18 @@ export default function FinanceChartAccountsTab({ user, notify }) {
 
     if (result.error) notify(result.error, "error")
     else {
+      const saved = result.data && typeof result.data === "object" ? result.data : null
+      if (saved?.id) {
+        setAccounts((rows) => rows.some((row) => row.id === saved.id)
+          ? rows.map((row) => row.id === saved.id ? saved : row)
+          : [saved, ...rows])
+      }
+      if (wantedClear && saved?.income_statement_section) {
+        notify("La sección no se eliminó. Se muestra la clasificación guardada en el servidor.", "error")
+        openEdit(saved)
+        await loadAccounts()
+        return
+      }
       notify(editingId ? "Cuenta actualizada." : "Cuenta creada.", "success")
       setShowForm(false)
       setEditingId(null)

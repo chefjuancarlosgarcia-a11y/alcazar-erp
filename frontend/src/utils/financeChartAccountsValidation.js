@@ -46,6 +46,23 @@ export function wouldImportCycle(code, parentCode, rows) {
   return false
 }
 
+export function buildFinanceChartAccountWritePayload(form) {
+  const sectionChoices = incomeStatementSectionsFor(form.financial_type, form.account_kind)
+  const selected = sectionChoices.length ? String(form.income_statement_section ?? "").trim() : ""
+  return {
+    name: form.name,
+    parent_id: form.parent_id || null,
+    financial_type: form.financial_type,
+    natural_balance: form.natural_balance,
+    account_kind: form.account_kind,
+    accepts_entries: form.account_kind === "header" ? false : Boolean(form.accepts_entries),
+    description: form.description ?? "",
+    branch_dimension_rule: form.branch_dimension_rule,
+    cost_center_dimension_rule: form.cost_center_dimension_rule,
+    income_statement_section: selected
+  }
+}
+
 export function resolveIncomeStatementSection({ raw, financialType, accountKind }) {
   const text = String(raw ?? "").trim()
   const kind = String(accountKind || "").trim().toLowerCase()

@@ -515,6 +515,71 @@ begin
     ),
     coalesce(v_report ->> 'net_income', 'json-null') || ' ' || coalesce(v_report ->> 'classified_net_result', '');
 
+  v_unc := (public.create_finance_chart_account(jsonb_build_object(
+    'code', 'IS-KEEP', 'name', 'Gasto conservar', 'financial_type', 'expense',
+    'natural_balance', 'debit', 'account_kind', 'detail', 'accepts_entries', true,
+    'income_statement_section', 'operating_expense_admin'
+  )) ->> 'id')::uuid;
+  v_created := public.update_finance_chart_account(v_unc, jsonb_build_object('name', 'Gasto renombrado'));
+  return query select '30_omit_keeps_section'::text,
+    v_created ->> 'income_statement_section' = 'operating_expense_admin'
+    and v_created ->> 'name' = 'Gasto renombrado',
+    coalesce(v_created ->> 'income_statement_section', 'null');
+
+  v_created := public.update_finance_chart_account(v_unc, jsonb_build_object(
+    'income_statement_section', 'other_expense'
+  ));
+  return query select '31_assign_section'::text,
+    v_created ->> 'income_statement_section' = 'other_expense',
+    coalesce(v_created ->> 'income_statement_section', 'null');
+
+  v_created := public.update_finance_chart_account(v_unc, jsonb_build_object(
+    'income_statement_section', ''
+  ));
+  return query select '32b_blank_clears_section'::text,
+    v_created ->> 'income_statement_section' is null,
+    coalesce(v_created ->> 'income_statement_section', 'null');
+
+  perform public.update_finance_chart_account(v_unc, jsonb_build_object(
+    'income_statement_section', 'operating_expense_admin'
+  ));
+  v_created := public.update_finance_chart_account(
+    v_unc,
+    jsonb_build_object('name', 'Gasto limpio') || jsonb_build_object('income_statement_section', null)
+  );
+  return query select '32_null_clears_section'::text,
+    (v_created -> 'income_statement_section') = 'null'::jsonb
+    and v_created ->> 'name' = 'Gasto limpio',
+    coalesce(v_created ->> 'income_statement_section', 'json-null');
+
+  perform public.create_finance_accounting_period(2098, 6);
+  perform public.is_lab_post('2098-06-15', 'QA sin seccion', jsonb_build_array(
+    jsonb_build_object('line_number', 1, 'account_id', v_unc::text, 'debit', 5, 'credit', 0),
+    jsonb_build_object('line_number', 2, 'account_id', v_cash::text, 'debit', 0, 'credit', 5)
+  ));
+  v_report := public.get_finance_income_statement('2098-06-01', '2098-06-30', null, null, null, false, null);
+  return query select '33_cleared_movement_incomplete'::text,
+    (v_report ->> 'report_complete')::boolean = false
+    and v_report -> 'net_income' = 'null'::jsonb
+    and (v_report ->> 'unclassified_debit')::numeric = 5
+    and (v_report ->> 'unclassified_account_count')::int = 1
+    and exists (
+      select 1 from jsonb_array_elements(v_report -> 'unclassified_accounts') account
+      where account ->> 'code' = 'IS-KEEP'
+    ),
+    coalesce(v_report ->> 'net_result_label', 'null');
+
+  perform public.update_finance_chart_account(v_unc, jsonb_build_object(
+    'income_statement_section', 'operating_expense_admin'
+  ));
+  v_report := public.get_finance_income_statement('2098-06-01', '2098-06-30', null, null, null, false, null);
+  return query select '34_reclassify_restores_complete'::text,
+    (v_report ->> 'report_complete')::boolean
+    and (v_report ->> 'net_income')::numeric = -5
+    and (v_report ->> 'administrative_expenses_total')::numeric = 5
+    and (v_report ->> 'unclassified_account_count')::int = 0,
+    coalesce(v_report ->> 'net_income', 'null') || ' ' || coalesce(v_report ->> 'net_result_label', '');
+
   insert into public.finance_chart_accounts (
     code, name, level, financial_type, natural_balance, account_kind, accepts_entries,
     branch_dimension_rule, cost_center_dimension_rule, income_statement_section, description
