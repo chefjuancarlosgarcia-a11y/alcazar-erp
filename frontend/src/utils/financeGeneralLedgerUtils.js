@@ -364,6 +364,24 @@ function formatLedgerMoney(value) {
   return Number(value).toFixed(2)
 }
 
+function ledgerSignedCents(value) {
+  if (value === null || value === undefined || value === "") return 0n
+  if (typeof value === "number" && !Number.isFinite(value)) return null
+  const normalized = String(value).trim().replace(/,/g, "")
+  const negative = normalized.startsWith("-")
+  const magnitude = negative ? normalized.slice(1) : normalized
+  if (!magnitude) return null
+  const parsed = parseAmountToCents(magnitude)
+  if (!parsed.ok) return null
+  return negative ? -parsed.cents : parsed.cents
+}
+
+function ledgerCsvSideLabel(naturalBalance, signedAmount) {
+  const cents = ledgerSignedCents(signedAmount)
+  if (cents === null) return ""
+  return presentLedgerBalance(naturalBalance, cents).label
+}
+
 function ledgerCsvRow(values) {
   return values.map((value) => escapeCsvCell(value)).join(",")
 }
@@ -387,7 +405,7 @@ export function buildGeneralLedgerCsv({ rows, report, searchApplied }) {
     "",
     formatLedgerMoney(report.openingBalance),
     account.natural_balance === "credit" ? "Acreedora" : "Deudora",
-    report.openingSide || "",
+    ledgerCsvSideLabel(account.natural_balance, report.openingBalance),
     ""
   ]))
   for (const row of rows) {
@@ -440,7 +458,7 @@ export function buildGeneralLedgerCsv({ rows, report, searchApplied }) {
     "",
     formatLedgerMoney(report.closingBalance),
     account.natural_balance === "credit" ? "Acreedora" : "Deudora",
-    report.closingSide || "",
+    ledgerCsvSideLabel(account.natural_balance, report.closingBalance),
     ""
   ]))
   if (searchApplied) {

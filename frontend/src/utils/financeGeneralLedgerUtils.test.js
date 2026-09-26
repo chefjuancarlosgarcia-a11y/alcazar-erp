@@ -273,6 +273,91 @@ test("sucursal y centro de costo cambian la etiqueta de alcance", () => {
   assert.equal(ledgerScopeLabel({ branchId: "b", costCenterId: "c" }), "Mayor por sucursal y centro de costo")
 })
 
+function csvCells(line) {
+  const cells = []
+  let current = ""
+  let quoted = false
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index]
+    if (char === "\"") {
+      if (quoted && line[index + 1] === "\"") {
+        current += "\""
+        index += 1
+      } else {
+        quoted = !quoted
+      }
+    } else if (char === "," && !quoted) {
+      cells.push(current)
+      current = ""
+    } else {
+      current += char
+    }
+  }
+  cells.push(current)
+  return cells
+}
+
+function ledgerCsvTable(csv) {
+  const lines = csv.replace(/^\uFEFF/, "").split("\n").filter(Boolean)
+  const headers = csvCells(lines[0].startsWith("Filas filtradas") ? lines[1] : lines[0])
+  const sideIndex = headers.indexOf("Tipo de saldo")
+  return lines
+    .filter((line) => !line.startsWith("Filas filtradas"))
+    .map((line) => csvCells(line))
+    .map((cells) => ({ marker: cells[0], side: cells[sideIndex] }))
+}
+
+function closingCsv({ naturalBalance, closingBalance, rows = [] }) {
+  return buildGeneralLedgerCsv({
+    rows,
+    report: {
+      account: { code: "1.01", name: "Caja", natural_balance: naturalBalance },
+      openingBalance: 0,
+      periodDebit: 0,
+      periodCredit: closingBalance < 0 ? 100 : 0,
+      closingBalance,
+      closingSide: "credit",
+      openingSide: "zero",
+      matchCount: rows.length
+    },
+    searchApplied: false
+  })
+}
+
+test("el saldo final del CSV usa la etiqueta en español", () => {
+  const cases = [
+    ["debit", 100, "Deudor"],
+    ["debit", -100, "Acreedor"],
+    ["credit", 100, "Acreedor"],
+    ["credit", -100, "Deudor"],
+    ["debit", 0, "Cero"]
+  ]
+  for (const [naturalBalance, closingBalance, label] of cases) {
+    const table = ledgerCsvTable(closingCsv({ naturalBalance, closingBalance }))
+    const closing = table.find((row) => row.marker === "Saldo final")
+    assert.equal(closing.side, label)
+    assert.ok(table.every((row) => !["debit", "credit", "zero"].includes(row.side)))
+    if (closingBalance < 0) assert.match(closingCsv({ naturalBalance, closingBalance }), /-100\.00/)
+  }
+
+  const withMovement = ledgerCsvTable(closingCsv({
+    naturalBalance: "debit",
+    closingBalance: -100,
+    rows: [{
+      entryDate: "2026-09-25",
+      entryNumber: "JE-2026-000001",
+      debit: 0,
+      credit: 100,
+      runningBalance: -100,
+      balanceSideLabel: "Acreedor",
+      isReversal: false
+    }]
+  }))
+  assert.equal(withMovement.find((row) => row.marker === "2026-09-25").side, "Acreedor")
+  assert.equal(withMovement.find((row) => row.marker === "Saldo final").side, "Acreedor")
+  assert.ok(withMovement.every((row) => !["debit", "credit", "zero"].includes(row.side)))
+})
+
 test("el CSV conserva el saldo real, el BOM y no usa las coincidencias como saldo final", () => {
   const book = buildLedgerBook({
     naturalBalance: "debit",
