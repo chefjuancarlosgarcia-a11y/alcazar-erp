@@ -2,7 +2,11 @@ import {
   ACCOUNT_KINDS,
   FINANCIAL_TYPES,
   IMPORT_FIELD_ALIASES,
-  NATURAL_BALANCES
+  INCOME_STATEMENT_SECTION_LABELS,
+  INCOME_STATEMENT_SECTION_ORDER,
+  INCOME_STATEMENT_UNCLASSIFIED_ACCOUNT_WARNING,
+  NATURAL_BALANCES,
+  incomeStatementSectionsFor
 } from "./financeChartAccountsConstants.js"
 
 export function normalizeChartAccountCode(value) {
@@ -42,8 +46,54 @@ export function wouldImportCycle(code, parentCode, rows) {
   return false
 }
 
+export function buildFinanceChartAccountWritePayload(form) {
+  const sectionChoices = incomeStatementSectionsFor(form.financial_type, form.account_kind)
+  const selected = sectionChoices.length ? String(form.income_statement_section ?? "").trim() : ""
+  return {
+    name: form.name,
+    parent_id: form.parent_id || null,
+    financial_type: form.financial_type,
+    natural_balance: form.natural_balance,
+    account_kind: form.account_kind,
+    accepts_entries: form.account_kind === "header" ? false : Boolean(form.accepts_entries),
+    description: form.description ?? "",
+    branch_dimension_rule: form.branch_dimension_rule,
+    cost_center_dimension_rule: form.cost_center_dimension_rule,
+    income_statement_section: selected
+  }
+}
+
+export function resolveIncomeStatementSection({ raw, financialType, accountKind }) {
+  const text = String(raw ?? "").trim()
+  const kind = String(accountKind || "").trim().toLowerCase()
+  const type = String(financialType || "").trim().toLowerCase()
+  if (!text) {
+    if (incomeStatementSectionsFor(type, kind).length) {
+      return { section: null, error: null, warning: INCOME_STATEMENT_UNCLASSIFIED_ACCOUNT_WARNING }
+    }
+    return { section: null, error: null, warning: null }
+  }
+  const lower = text.toLowerCase()
+  const byLabel = Object.entries(INCOME_STATEMENT_SECTION_LABELS).find(([, label]) => label.toLowerCase() === lower)
+  const section = INCOME_STATEMENT_SECTION_ORDER.includes(lower) ? lower : (byLabel ? byLabel[0] : null)
+  if (!section) {
+    return { section: null, error: "Sección del Estado de Resultados desconocida.", warning: null }
+  }
+  if (kind === "header") {
+    return { section: null, error: "Las cuentas acumuladoras no llevan sección del Estado de Resultados.", warning: null }
+  }
+  if (["asset", "liability", "equity"].includes(type)) {
+    return { section: null, error: "Las cuentas de balance no llevan sección del Estado de Resultados.", warning: null }
+  }
+  if (!incomeStatementSectionsFor(type, kind).includes(section)) {
+    return { section: null, error: "La sección del Estado de Resultados no corresponde al tipo financiero.", warning: null }
+  }
+  return { section, error: null, warning: null }
+}
+
 export function validateChartAccountImportRows(rows, existingCodes = []) {
   const errors = []
+  const warnings = []
   const seen = new Set()
   const codesInFile = rows
     .map((row) => normalizeChartAccountCode(row.codigo))
@@ -93,6 +143,19 @@ export function validateChartAccountImportRows(rows, existingCodes = []) {
       }
     }
 
+    if (FINANCIAL_TYPES.includes(financialType) && ACCOUNT_KINDS.includes(accountKind)) {
+      const classified = resolveIncomeStatementSection({
+        raw: row.seccion_resultados,
+        financialType,
+        accountKind
+      })
+      if (classified.error) {
+        rowErrors.push({ field: "seccion_resultados", message: classified.error })
+      } else if (classified.warning && rowErrors.length === 0) {
+        warnings.push({ row_number: rowNumber, field: "seccion_resultados", message: classified.warning })
+      }
+    }
+
     rowErrors.forEach((entry) => {
       errors.push({ row_number: rowNumber, ...entry })
     })
@@ -109,7 +172,9 @@ export function validateChartAccountImportRows(rows, existingCodes = []) {
     new_accounts: errors.length ? 0 : rowsRead,
     duplicates: errors.filter((entry) => /duplicado|ya existe/i.test(entry.message)).length,
     blocking_errors: errors.length > 0,
-    errors
+    errors,
+    warnings,
+    warning_rows: new Set(warnings.map((entry) => entry.row_number)).size
   }
 }
 

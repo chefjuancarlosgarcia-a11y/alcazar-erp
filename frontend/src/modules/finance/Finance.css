@@ -933,3 +933,89 @@
     text-align: left;
   }
 }
+
+.finance-message.warning {
+  background: #422006;
+  color: #fde68a;
+}
+
+.finance-income-statement-zero {
+  display: flex;
+  align-items: center;
+  gap: var(--erp-space-8);
+  min-height: var(--erp-btn-height);
+}
+
+.finance-income-statement-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--erp-space-16);
+  margin: var(--erp-space-16) 0;
+}
+
+.finance-income-statement-section {
+  margin-top: var(--erp-space-8);
+}
+
+.finance-income-statement-section__head {
+  width: 100%;
+  min-height: var(--erp-btn-height);
+  display: flex;
+  justify-content: space-between;
+  gap: var(--erp-space-16);
+  padding: var(--erp-space-8) var(--erp-space-16);
+  border: 1px solid #334155;
+  border-radius: var(--erp-radius-card);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.finance-income-statement-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.finance-income-statement-totals {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--erp-space-8);
+  margin-top: var(--erp-space-16);
+}
+
+.finance-income-statement-totals div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--erp-space-16);
+  padding: var(--erp-space-8);
+  border-bottom: 1px solid #334155;
+}
+
+.finance-income-statement-unclassified {
+  margin-top: var(--erp-space-16);
+}
+
+@media (max-width: 767px) {
+  .finance-income-statement-totals {
+    grid-template-columns: 1fr;
+  }
+
+  .finance-income-statement-table thead {
+    display: none;
+  }
+
+  .finance-income-statement-table tr {
+    display: block;
+    margin-bottom: var(--erp-space-16);
+    border: 1px solid #334155;
+    border-radius: var(--erp-radius-card);
+    padding: var(--erp-space-8);
+  }
+
+  .finance-income-statement-table td {
+    display: block;
+    border: 0;
+    padding: var(--erp-space-8);
+    text-align: left;
+  }
+}

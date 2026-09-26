@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import {
+  buildFinanceChartAccountWritePayload,
   normalizeChartAccountCode,
   sortImportRowsTopologically,
   validateChartAccountImportRows
@@ -112,4 +113,93 @@ test("deactivation is modeled separately from deletion (no delete helper exporte
   const preview = validateChartAccountImportRows([row()])
   assert.equal(preview.blocking_errors, false)
   assert.equal(typeof preview.errors, "object")
+})
+
+test("una cuenta de resultados sin sección se importa con advertencia", () => {
+  const preview = validateChartAccountImportRows([
+    row({ codigo: "5.01", nombre: "Gasto", tipo_financiero: "expense", tipo_cuenta: "detail", acepta_movimientos: "true" })
+  ])
+  assert.equal(preview.blocking_errors, false)
+  assert.equal(preview.warning_rows, 1)
+  assert.match(preview.warnings[0].message, /incompleto/)
+})
+
+test("una sección desconocida, de encabezado o incompatible rechaza la fila", () => {
+  const unknown = validateChartAccountImportRows([
+    row({ codigo: "5.02", nombre: "Gasto", tipo_financiero: "expense", tipo_cuenta: "detail", acepta_movimientos: "true", seccion_resultados: "no-existe" })
+  ])
+  const header = validateChartAccountImportRows([
+    row({ codigo: "4", nombre: "Ingresos", tipo_financiero: "income", tipo_cuenta: "header", seccion_resultados: "operating_income" })
+  ])
+  const combo = validateChartAccountImportRows([
+    row({ codigo: "4.01", nombre: "Ventas", tipo_financiero: "income", naturaleza: "credit", tipo_cuenta: "detail", acepta_movimientos: "true", seccion_resultados: "Costo de ventas" })
+  ])
+  assert.equal(unknown.blocking_errors, true)
+  assert.match(unknown.errors[0].message, /desconocida/)
+  assert.equal(header.blocking_errors, true)
+  assert.match(header.errors[0].message, /acumuladoras/)
+  assert.equal(combo.blocking_errors, true)
+  assert.match(combo.errors[0].message, /no corresponde/)
+})
+
+function accountForm(overrides = {}) {
+  return {
+    name: "Gasto sin clasificar QA",
+    parent_id: "",
+    financial_type: "expense",
+    natural_balance: "debit",
+    account_kind: "detail",
+    accepts_entries: true,
+    description: "QA",
+    branch_dimension_rule: "required",
+    cost_center_dimension_rule: "optional",
+    income_statement_section: "operating_expense_admin",
+    ...overrides
+  }
+}
+
+test("Sin clasificar envía la clave presente y vacía, no JSON null", () => {
+  const payload = buildFinanceChartAccountWritePayload(accountForm({
+    name: "Gasto renombrado",
+    income_statement_section: ""
+  }))
+  assert.equal(Object.hasOwn(payload, "income_statement_section"), true)
+  assert.equal(payload.income_statement_section, "")
+  assert.equal(payload.name, "Gasto renombrado")
+  const encoded = JSON.stringify(payload)
+  assert.match(encoded, /"income_statement_section":""/)
+  assert.equal(JSON.parse(encoded).income_statement_section, "")
+})
+
+test("una sección válida viaja en el payload de edición", () => {
+  const payload = buildFinanceChartAccountWritePayload(accountForm({
+    income_statement_section: "other_expense"
+  }))
+  assert.equal(payload.income_statement_section, "other_expense")
+})
+
+test("encabezados y cuentas de balance envían sección vacía", () => {
+  const header = buildFinanceChartAccountWritePayload(accountForm({
+    account_kind: "header",
+    accepts_entries: false,
+    income_statement_section: "operating_expense_admin"
+  }))
+  const asset = buildFinanceChartAccountWritePayload(accountForm({
+    financial_type: "asset",
+    income_statement_section: "operating_income"
+  }))
+  assert.equal(header.income_statement_section, "")
+  assert.equal(header.accepts_entries, false)
+  assert.equal(asset.income_statement_section, "")
+})
+
+test("la etiqueta española exacta se acepta y el balance sin sección es normal", () => {
+  const labeled = validateChartAccountImportRows([
+    row({ codigo: "5.03", nombre: "Costo", tipo_financiero: "cost", tipo_cuenta: "detail", acepta_movimientos: "true", seccion_resultados: "Costo de ventas" })
+  ])
+  const balance = validateChartAccountImportRows([row()])
+  assert.equal(labeled.blocking_errors, false)
+  assert.equal(labeled.warning_rows, 0)
+  assert.equal(balance.blocking_errors, false)
+  assert.equal(balance.warning_rows, 0)
 })

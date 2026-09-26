@@ -9,10 +9,15 @@ import { canManageAccountingCatalog } from "../../utils/financePermissions"
 import {
   ACCOUNT_KIND_LABELS,
   ACCOUNT_KINDS,
+  CSV_TEMPLATE_HEADERS,
+  CSV_TEMPLATE_SAMPLE,
   FINANCIAL_TYPE_LABELS,
   FINANCIAL_TYPES,
+  INCOME_STATEMENT_SECTION_LABELS,
+  INCOME_STATEMENT_UNCLASSIFIED_ACCOUNT_WARNING,
   NATURAL_BALANCE_LABELS,
-  NATURAL_BALANCES
+  NATURAL_BALANCES,
+  incomeStatementSectionsFor
 } from "../../utils/financeChartAccountsConstants"
 import {
   DIMENSION_RULE_LABELS,
@@ -22,6 +27,7 @@ import {
   defaultBranchDimensionRule,
   defaultCostCenterDimensionRule
 } from "../../utils/financeAccountingFoundationValidation"
+import { buildFinanceChartAccountWritePayload } from "../../utils/financeChartAccountsValidation"
 
 function Field({ label, className = "", children }) {
   return (
@@ -43,7 +49,8 @@ function emptyForm() {
     accepts_entries: true,
     description: "",
     branch_dimension_rule: "optional",
-    cost_center_dimension_rule: "optional"
+    cost_center_dimension_rule: "optional",
+    income_statement_section: ""
   }
 }
 
@@ -69,6 +76,7 @@ export default function FinanceChartAccountsTab({ user, notify }) {
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [form, setForm] = useState(emptyForm())
+  const [sectionNotice, setSectionNotice] = useState("")
   const [importOpen, setImportOpen] = useState(false)
 
   const parentOptions = useMemo(
@@ -101,7 +109,18 @@ export default function FinanceChartAccountsTab({ user, notify }) {
   function openCreate() {
     setEditingId(null)
     setForm(emptyForm())
+    setSectionNotice("")
     setShowForm(true)
+  }
+
+  function retainSection(financialType, accountKind, currentSection) {
+    const allowed = incomeStatementSectionsFor(financialType, accountKind)
+    if (currentSection && !allowed.includes(currentSection)) {
+      setSectionNotice("La sección del Estado de Resultados se limpió porque ya no corresponde al tipo de cuenta.")
+      return ""
+    }
+    setSectionNotice("")
+    return currentSection
   }
 
   function openEdit(account) {
@@ -116,8 +135,10 @@ export default function FinanceChartAccountsTab({ user, notify }) {
       accepts_entries: account.accepts_entries,
       description: account.description || "",
       branch_dimension_rule: account.branch_dimension_rule || defaultBranchDimensionRule(account.financial_type),
-      cost_center_dimension_rule: account.cost_center_dimension_rule || defaultCostCenterDimensionRule(account.financial_type)
+      cost_center_dimension_rule: account.cost_center_dimension_rule || defaultCostCenterDimensionRule(account.financial_type),
+      income_statement_section: account.income_statement_section || ""
     })
+    setSectionNotice("")
     setShowForm(true)
   }
 
@@ -125,17 +146,9 @@ export default function FinanceChartAccountsTab({ user, notify }) {
     event.preventDefault()
     if (!canManage) return notify("No tienes permiso para administrar el catálogo contable.", "error")
 
-    const payload = {
-      name: form.name,
-      parent_id: form.parent_id || null,
-      financial_type: form.financial_type,
-      natural_balance: form.natural_balance,
-      account_kind: form.account_kind,
-      accepts_entries: form.account_kind === "header" ? false : form.accepts_entries,
-      description: form.description,
-      branch_dimension_rule: form.branch_dimension_rule,
-      cost_center_dimension_rule: form.cost_center_dimension_rule
-    }
+    const sectionChoices = incomeStatementSectionsFor(form.financial_type, form.account_kind)
+    const payload = buildFinanceChartAccountWritePayload(form)
+    const wantedClear = sectionChoices.length > 0 && payload.income_statement_section === ""
 
     const result = editingId
       ? await updateFinanceChartAccount(editingId, payload)
@@ -143,6 +156,18 @@ export default function FinanceChartAccountsTab({ user, notify }) {
 
     if (result.error) notify(result.error, "error")
     else {
+      const saved = result.data && typeof result.data === "object" ? result.data : null
+      if (saved?.id) {
+        setAccounts((rows) => rows.some((row) => row.id === saved.id)
+          ? rows.map((row) => row.id === saved.id ? saved : row)
+          : [saved, ...rows])
+      }
+      if (wantedClear && saved?.income_statement_section) {
+        notify("La sección no se eliminó. Se muestra la clasificación guardada en el servidor.", "error")
+        openEdit(saved)
+        await loadAccounts()
+        return
+      }
       notify(editingId ? "Cuenta actualizada." : "Cuenta creada.", "success")
       setShowForm(false)
       setEditingId(null)
@@ -162,12 +187,7 @@ export default function FinanceChartAccountsTab({ user, notify }) {
   }
 
   function downloadTemplate() {
-    const headers = ["codigo", "nombre", "codigo_padre", "tipo_financiero", "naturaleza", "tipo_cuenta", "acepta_movimientos", "descripcion"]
-    const sample = [
-      ["1", "Activos", "", "asset", "debit", "header", "false", "Grupo principal"],
-      ["1.01", "Caja", "1", "asset", "debit", "detail", "true", "Caja general"]
-    ]
-    const lines = [headers.join(","), ...sample.map((row) => row.map((cell) => `"${cell}"`).join(","))]
+    const lines = [CSV_TEMPLATE_HEADERS.join(","), ...CSV_TEMPLATE_SAMPLE.map((row) => row.map((cell) => `"${cell}"`).join(","))]
     const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" })
     const url = URL.createObjectURL(blob)
     const link = document.createElement("a")
@@ -273,7 +293,8 @@ export default function FinanceChartAccountsTab({ user, notify }) {
                     ...form,
                     financial_type: financialType,
                     branch_dimension_rule: defaultBranchDimensionRule(financialType),
-                    cost_center_dimension_rule: defaultCostCenterDimensionRule(financialType)
+                    cost_center_dimension_rule: defaultCostCenterDimensionRule(financialType),
+                    income_statement_section: retainSection(financialType, form.account_kind, form.income_statement_section)
                   })
                 }}
               >
@@ -297,7 +318,8 @@ export default function FinanceChartAccountsTab({ user, notify }) {
                   setForm({
                     ...form,
                     account_kind: accountKind,
-                    accepts_entries: accountKind === "header" ? false : form.accepts_entries
+                    accepts_entries: accountKind === "header" ? false : form.accepts_entries,
+                    income_statement_section: retainSection(form.financial_type, accountKind, form.income_statement_section)
                   })
                 }}
               >
@@ -339,6 +361,23 @@ export default function FinanceChartAccountsTab({ user, notify }) {
             <Field label="Descripción" className="finance-field--full">
               <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} />
             </Field>
+            {incomeStatementSectionsFor(form.financial_type, form.account_kind).length ? (
+              <Field label="Sección del Estado de Resultados" className="finance-field--full">
+                <select
+                  value={form.income_statement_section}
+                  onChange={(e) => setForm({ ...form, income_statement_section: e.target.value })}
+                >
+                  <option value="">Sin clasificar</option>
+                  {incomeStatementSectionsFor(form.financial_type, form.account_kind).map((value) => (
+                    <option key={value} value={value}>{INCOME_STATEMENT_SECTION_LABELS[value]}</option>
+                  ))}
+                </select>
+              </Field>
+            ) : null}
+            {incomeStatementSectionsFor(form.financial_type, form.account_kind).length && !form.income_statement_section ? (
+              <p className="finance-message warning finance-field--full">{INCOME_STATEMENT_UNCLASSIFIED_ACCOUNT_WARNING}</p>
+            ) : null}
+            {sectionNotice ? <p className="finance-message warning finance-field--full">{sectionNotice}</p> : null}
             <div className="finance-actions finance-field--full">
               <button type="submit" className="tasks-primary">{editingId ? "Guardar cambios" : "Crear cuenta"}</button>
               <button type="button" className="tasks-secondary" onClick={() => { setShowForm(false); setEditingId(null) }}>
@@ -359,6 +398,7 @@ export default function FinanceChartAccountsTab({ user, notify }) {
                 <th>Cuenta</th>
                 <th>Sucursal</th>
                 <th>Centro</th>
+                <th>Sección</th>
                 <th>Estado</th>
                 {canManage ? <th>Acciones</th> : null}
               </tr>
@@ -381,6 +421,7 @@ export default function FinanceChartAccountsTab({ user, notify }) {
                   <td>{ACCOUNT_KIND_LABELS[row.account_kind] || row.account_kind}</td>
                   <td>{DIMENSION_RULE_LABELS[row.branch_dimension_rule] || row.branch_dimension_rule || "—"}</td>
                   <td>{DIMENSION_RULE_LABELS[row.cost_center_dimension_rule] || row.cost_center_dimension_rule || "—"}</td>
+                  <td>{INCOME_STATEMENT_SECTION_LABELS[row.income_statement_section] || (incomeStatementSectionsFor(row.financial_type, row.account_kind).length ? "Sin clasificar" : "—")}</td>
                   <td>
                     <span className={`finance-badge ${row.is_active ? "finance-badge--paid" : "finance-badge--cancelled"}`}>
                       {row.is_active ? "Activa" : "Inactiva"}
@@ -400,7 +441,7 @@ export default function FinanceChartAccountsTab({ user, notify }) {
               ))}
               {!accounts.length && !loading ? (
                 <tr>
-                  <td colSpan={canManage ? 9 : 8} className="tasks-muted">
+                  <td colSpan={canManage ? 10 : 9} className="tasks-muted">
                     No hay cuentas en el catálogo. {canManage ? "Crea una cuenta o importa un archivo CSV." : ""}
                   </td>
                 </tr>
