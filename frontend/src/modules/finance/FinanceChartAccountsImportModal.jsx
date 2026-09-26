@@ -19,7 +19,8 @@ function mapRowsForServer(rows) {
       naturaleza: row.naturaleza ?? "",
       tipo_cuenta: row.tipo_cuenta ?? "",
       acepta_movimientos: row.acepta_movimientos ?? "",
-      descripcion: row.descripcion ?? ""
+      descripcion: row.descripcion ?? "",
+      seccion_resultados: row.seccion_resultados ?? ""
     }
   })
 }
@@ -147,6 +148,7 @@ export default function FinanceChartAccountsImportModal({ existingCodes, onClose
               <article className="finance-kpi-card"><span>Con errores</span><strong>{activePreview.error_rows}</strong></article>
               <article className="finance-kpi-card"><span>Nuevas cuentas</span><strong>{activePreview.new_accounts}</strong></article>
               <article className="finance-kpi-card"><span>Duplicados</span><strong>{activePreview.duplicates}</strong></article>
+              <article className="finance-kpi-card"><span>Advertencias</span><strong>{activePreview.warning_rows || 0}</strong></article>
             </div>
 
             {activePreview.errors?.length ? (
@@ -170,6 +172,25 @@ export default function FinanceChartAccountsImportModal({ existingCodes, onClose
               <p className="finance-message success">Todas las filas pasaron la validación.</p>
             )}
 
+            {activePreview.warnings?.length ? (
+              <div className="finance-table-wrap">
+                <table className="finance-table">
+                  <thead>
+                    <tr><th>Fila</th><th>Campo</th><th>Advertencia</th></tr>
+                  </thead>
+                  <tbody>
+                    {activePreview.warnings.map((entry, index) => (
+                      <tr key={`warn-${entry.row_number}-${entry.field}-${index}`}>
+                        <td>{entry.row_number}</td>
+                        <td>{entry.field}</td>
+                        <td>{entry.message}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+
             {parseError ? <p className="finance-message error">{parseError}</p> : null}
 
             <div className="finance-actions">
@@ -191,6 +212,11 @@ export default function FinanceChartAccountsImportModal({ existingCodes, onClose
             <p className="finance-message success">
               Importación completada: {importResult?.imported ?? 0} cuentas creadas.
             </p>
+            {importResult?.preview?.warnings?.length ? (
+              <p className="finance-message warning">
+                {importResult.preview.warnings.length} advertencia(s). Las cuentas sin sección quedan fuera del resultado definitivo.
+              </p>
+            ) : null}
             <div className="finance-actions">
               <button type="button" className="tasks-primary" onClick={onImported}>Cerrar y actualizar</button>
             </div>

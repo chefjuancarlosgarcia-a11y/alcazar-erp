@@ -2,6 +2,7 @@ import { useSearchParams } from "react-router-dom"
 import FinanceGeneralJournalTab from "./FinanceGeneralJournalTab"
 import FinanceGeneralLedgerTab from "./FinanceGeneralLedgerTab"
 import FinanceTrialBalanceTab from "./FinanceTrialBalanceTab"
+import FinanceIncomeStatementTab from "./FinanceIncomeStatementTab"
 import { GENERAL_JOURNAL_COMING_SOON_REPORTS } from "../../utils/financeGeneralJournalConstants"
 import "./Finance.css"
 
@@ -9,8 +10,9 @@ const REPORTS = [
   { key: "libro-diario", label: "Libro Diario", available: true },
   { key: "libro-mayor", label: "Libro Mayor", available: true },
   { key: "balanza", label: "Balanza de Comprobación", available: true },
+  { key: "estado-resultados", label: "Estado de Resultados", available: true },
   ...GENERAL_JOURNAL_COMING_SOON_REPORTS
-    .filter((item) => item.key !== "libro-mayor" && item.key !== "balanza")
+    .filter((item) => item.key !== "libro-mayor" && item.key !== "balanza" && item.key !== "estado-resultados")
     .map((item) => ({ ...item, available: false }))
 ]
 
@@ -49,6 +51,8 @@ export default function FinanceAccountingReportsTab({ user, notify }) {
         <FinanceGeneralLedgerTab user={user} notify={notify} />
       ) : report === "balanza" ? (
         <FinanceTrialBalanceTab user={user} notify={notify} />
+      ) : report === "estado-resultados" ? (
+        <FinanceIncomeStatementTab user={user} notify={notify} />
       ) : (
         <article className="finance-panel">
           <p className="tasks-muted">Este reporte estará disponible en una fase posterior.</p>

@@ -113,3 +113,41 @@ test("deactivation is modeled separately from deletion (no delete helper exporte
   assert.equal(preview.blocking_errors, false)
   assert.equal(typeof preview.errors, "object")
 })
+
+test("una cuenta de resultados sin sección se importa con advertencia", () => {
+  const preview = validateChartAccountImportRows([
+    row({ codigo: "5.01", nombre: "Gasto", tipo_financiero: "expense", tipo_cuenta: "detail", acepta_movimientos: "true" })
+  ])
+  assert.equal(preview.blocking_errors, false)
+  assert.equal(preview.warning_rows, 1)
+  assert.match(preview.warnings[0].message, /incompleto/)
+})
+
+test("una sección desconocida, de encabezado o incompatible rechaza la fila", () => {
+  const unknown = validateChartAccountImportRows([
+    row({ codigo: "5.02", nombre: "Gasto", tipo_financiero: "expense", tipo_cuenta: "detail", acepta_movimientos: "true", seccion_resultados: "no-existe" })
+  ])
+  const header = validateChartAccountImportRows([
+    row({ codigo: "4", nombre: "Ingresos", tipo_financiero: "income", tipo_cuenta: "header", seccion_resultados: "operating_income" })
+  ])
+  const combo = validateChartAccountImportRows([
+    row({ codigo: "4.01", nombre: "Ventas", tipo_financiero: "income", naturaleza: "credit", tipo_cuenta: "detail", acepta_movimientos: "true", seccion_resultados: "Costo de ventas" })
+  ])
+  assert.equal(unknown.blocking_errors, true)
+  assert.match(unknown.errors[0].message, /desconocida/)
+  assert.equal(header.blocking_errors, true)
+  assert.match(header.errors[0].message, /acumuladoras/)
+  assert.equal(combo.blocking_errors, true)
+  assert.match(combo.errors[0].message, /no corresponde/)
+})
+
+test("la etiqueta española exacta se acepta y el balance sin sección es normal", () => {
+  const labeled = validateChartAccountImportRows([
+    row({ codigo: "5.03", nombre: "Costo", tipo_financiero: "cost", tipo_cuenta: "detail", acepta_movimientos: "true", seccion_resultados: "Costo de ventas" })
+  ])
+  const balance = validateChartAccountImportRows([row()])
+  assert.equal(labeled.blocking_errors, false)
+  assert.equal(labeled.warning_rows, 0)
+  assert.equal(balance.blocking_errors, false)
+  assert.equal(balance.warning_rows, 0)
+})
