@@ -30,6 +30,13 @@ export {
   incomeStatementSectionsFor
 } from "./financeIncomeStatementConstants.js"
 
+export {
+  BALANCE_SHEET_SECTION_LABELS,
+  BALANCE_SHEET_SECTION_ORDER,
+  BALANCE_SHEET_UNCLASSIFIED_ACCOUNT_WARNING,
+  balanceSheetSectionsFor
+} from "./financeBalanceSheetConstants.js"
+
 export const CSV_TEMPLATE_HEADERS = [
   "codigo",
   "nombre",
@@ -39,12 +46,13 @@ export const CSV_TEMPLATE_HEADERS = [
   "tipo_cuenta",
   "acepta_movimientos",
   "descripcion",
-  "seccion_resultados"
+  "seccion_resultados",
+  "seccion_balance"
 ]
 
 export const CSV_TEMPLATE_SAMPLE = [
-  ["1", "Activos", "", "asset", "debit", "header", "false", "Grupo principal", ""],
-  ["1.01", "Caja", "1", "asset", "debit", "detail", "true", "Caja general", ""]
+  ["1", "Activos", "", "asset", "debit", "header", "false", "Grupo principal", "", ""],
+  ["1.01", "Caja", "1", "asset", "debit", "detail", "true", "Caja general", "", "Activo corriente"]
 ]
 
 export const IMPORT_FIELD_ALIASES = {
@@ -56,5 +64,6 @@ export const IMPORT_FIELD_ALIASES = {
   tipo_cuenta: ["tipo_cuenta", "tipo cuenta", "account_kind"],
   acepta_movimientos: ["acepta_movimientos", "acepta movimientos", "accepts_entries"],
   descripcion: ["descripcion", "descripción", "description"],
-  seccion_resultados: ["seccion_resultados", "seccion resultados", "sección resultados", "income_statement_section"]
+  seccion_resultados: ["seccion_resultados", "seccion resultados", "sección resultados", "income_statement_section"],
+  seccion_balance: ["seccion_balance", "seccion balance", "sección balance", "balance_sheet_section"]
 }

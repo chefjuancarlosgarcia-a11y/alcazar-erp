@@ -20,7 +20,8 @@ function mapRowsForServer(rows) {
       tipo_cuenta: row.tipo_cuenta ?? "",
       acepta_movimientos: row.acepta_movimientos ?? "",
       descripcion: row.descripcion ?? "",
-      seccion_resultados: row.seccion_resultados ?? ""
+      seccion_resultados: row.seccion_resultados ?? "",
+      seccion_balance: row.seccion_balance ?? ""
     }
   })
 }
