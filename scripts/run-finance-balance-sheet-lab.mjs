@@ -261,7 +261,126 @@ try {
 
   psqlFile(migration, "reapply_218")
   assertScenarios(psqlFile(migrationTest, "test_218_second", ["-At", "-F", "|"]), "second")
-  console.log("218 apply, test, rollback twice, reapply, retest complete")
+
+  psqlSql(`
+    set session_replication_role = replica;
+    insert into public.profiles (id, full_name, username, role, status)
+    values (
+      '33333333-3333-3333-3333-333333333333',
+      'Admin precontaminacion',
+      'admin_pre_bs_218',
+      'admin',
+      'active'
+    )
+    on conflict (id) do update set role = excluded.role, status = excluded.status;
+    set session_replication_role = default;
+
+    do $$
+    declare
+      v_admin uuid := '33333333-3333-3333-3333-333333333333';
+      v_branch uuid;
+      v_asset uuid;
+      v_liability uuid;
+      v_equity uuid;
+      v_expense uuid;
+      v_entry uuid;
+      v_report jsonb;
+    begin
+      perform set_config('request.jwt.claim.sub', v_admin::text, true);
+      v_branch := (public.create_branch(jsonb_build_object(
+        'code', 'PRE-OTHER',
+        'name', 'Sucursal ajena de precontaminacion'
+      )) ->> 'id')::uuid;
+      perform public.create_finance_accounting_period(2024, 6);
+      v_asset := (public.create_finance_chart_account(jsonb_build_object(
+        'code', 'PRE-UNCA', 'name', 'Activo ajeno sin seccion', 'financial_type', 'asset',
+        'natural_balance', 'debit', 'account_kind', 'detail', 'accepts_entries', true
+      )) ->> 'id')::uuid;
+      v_liability := (public.create_finance_chart_account(jsonb_build_object(
+        'code', 'PRE-UNCL', 'name', 'Pasivo ajeno sin seccion', 'financial_type', 'liability',
+        'natural_balance', 'credit', 'account_kind', 'detail', 'accepts_entries', true
+      )) ->> 'id')::uuid;
+      v_equity := (public.create_finance_chart_account(jsonb_build_object(
+        'code', 'PRE-UNCE', 'name', 'Patrimonio ajeno sin seccion', 'financial_type', 'equity',
+        'natural_balance', 'credit', 'account_kind', 'detail', 'accepts_entries', true
+      )) ->> 'id')::uuid;
+      v_expense := (public.create_finance_chart_account(jsonb_build_object(
+        'code', 'PRE-EXP', 'name', 'Gasto ajeno sin seccion', 'financial_type', 'expense',
+        'natural_balance', 'debit', 'account_kind', 'detail', 'accepts_entries', true
+      )) ->> 'id')::uuid;
+
+      v_entry := (public.create_finance_journal_draft(jsonb_build_object(
+        'entry_date', '2024-06-15',
+        'description', 'Precontaminacion de balance',
+        'reference', 'PRE-BAL'
+      )) ->> 'id')::uuid;
+      perform public.replace_finance_journal_lines(v_entry, jsonb_build_array(
+        jsonb_build_object('line_number', 1, 'account_id', v_asset::text, 'branch_id', v_branch::text, 'debit', 700, 'credit', 0),
+        jsonb_build_object('line_number', 2, 'account_id', v_liability::text, 'branch_id', v_branch::text, 'debit', 0, 'credit', 200),
+        jsonb_build_object('line_number', 3, 'account_id', v_equity::text, 'debit', 0, 'credit', 500)
+      ));
+      perform public.submit_finance_journal_entry(v_entry);
+      perform public.approve_finance_journal_entry(v_entry);
+      perform public.post_finance_journal_entry(v_entry);
+
+      v_entry := (public.create_finance_journal_draft(jsonb_build_object(
+        'entry_date', '2024-06-16',
+        'description', 'Precontaminacion de resultados',
+        'reference', 'PRE-PNL'
+      )) ->> 'id')::uuid;
+      perform public.replace_finance_journal_lines(v_entry, jsonb_build_array(
+        jsonb_build_object('line_number', 1, 'account_id', v_expense::text, 'branch_id', v_branch::text, 'debit', 77, 'credit', 0),
+        jsonb_build_object('line_number', 2, 'account_id', v_asset::text, 'branch_id', v_branch::text, 'debit', 0, 'credit', 77)
+      ));
+      perform public.submit_finance_journal_entry(v_entry);
+      perform public.approve_finance_journal_entry(v_entry);
+      perform public.post_finance_journal_entry(v_entry);
+
+      v_report := public.get_finance_balance_sheet('2097-04-30', null, null, false, null);
+      if (v_report ->> 'report_label') is distinct from 'Balance provisional'
+         or (v_report ->> 'unclassified_asset_amount')::numeric is distinct from 623
+         or (v_report ->> 'unclassified_liability_amount')::numeric is distinct from 200
+         or (v_report ->> 'accumulated_result')::numeric is distinct from -77
+      then
+        raise exception 'precontamination_not_visible label=% asset=% liability=% result=%',
+          v_report ->> 'report_label',
+          v_report ->> 'unclassified_asset_amount',
+          v_report ->> 'unclassified_liability_amount',
+          v_report ->> 'accumulated_result';
+      end if;
+
+      v_report := public.get_finance_balance_sheet(
+        '2097-04-30', '00000000-0000-0000-0000-000000000099', null, false, null
+      );
+      if (v_report ->> 'report_complete')::boolean is distinct from true
+         or (v_report ->> 'unclassified_asset_amount')::numeric is distinct from 0
+         or (v_report ->> 'accumulated_result')::numeric is distinct from 0
+         or (v_report ->> 'control_total_assets')::numeric is distinct from 0
+      then
+        raise exception 'branch_filter_did_not_exclude_precontamination label=% asset=% result=% assets=%',
+          v_report ->> 'report_label',
+          v_report ->> 'unclassified_asset_amount',
+          v_report ->> 'accumulated_result',
+          v_report ->> 'control_total_assets';
+      end if;
+    end $$;
+  `, "precontaminate_before_isolated_test", ["-At"])
+  assertScenarios(psqlFile(migrationTest, "test_218_contaminated", ["-At", "-F", "|"]), "contaminated")
+  const isolation = psqlSql(`
+    select
+      (select count(*) from public.branches where code in ('BS-LAB-218-ISO', 'BS-LAB-218-DIM'))::text
+      || '|' ||
+      (select count(*) from public.branches where code = 'PRE-OTHER')::text
+      || '|' ||
+      (select count(*) from public.finance_chart_accounts where code like 'BS-%' or code like 'BSL%')::text
+      || '|' ||
+      (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'public' and p.proname in ('is_lab_post', 'bs_lab_account', 'test_finance_balance_sheet'))::text;
+  `, "confirm_lab_fixtures_rolled_back", ["-At"])
+  if (!isolation.includes("0|1|0|0")) {
+    throw new Error(`Lab fixtures survived or precontamination disappeared: ${isolation}`)
+  }
+  console.log("218 apply, test, rollback twice, reapply, retest, and contaminated isolation complete")
 } catch (error) {
   console.error(error.message)
   exitCode = 1

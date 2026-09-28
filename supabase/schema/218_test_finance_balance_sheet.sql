@@ -10,18 +10,43 @@ set search_path = ''
 as $$
 declare
   v_id uuid;
+  v_branch uuid := nullif(current_setting('alcazar.bs_lab_branch', true), '')::uuid;
+  v_lines jsonb;
 begin
+  if v_branch is null then
+    raise exception 'La sucursal del laboratorio no está configurada.';
+  end if;
+
   update public.finance_chart_accounts
-  set branch_dimension_rule = 'optional',
-      cost_center_dimension_rule = 'optional'
-  where financial_type in ('income', 'cost', 'expense');
+  set branch_dimension_rule = case
+        when branch_dimension_rule = 'prohibited' then 'optional'
+        else branch_dimension_rule
+      end,
+      cost_center_dimension_rule = case
+        when cost_center_dimension_rule = 'prohibited' then 'optional'
+        else cost_center_dimension_rule
+      end
+  where id in (
+    select (elem ->> 'account_id')::uuid
+    from jsonb_array_elements(p_lines) elem
+  );
+
+  select coalesce(jsonb_agg(
+    case
+      when nullif(elem ->> 'branch_id', '') is not null then elem
+      else elem || jsonb_build_object('branch_id', v_branch::text)
+    end
+    order by (elem ->> 'line_number')::int
+  ), '[]'::jsonb)
+  into v_lines
+  from jsonb_array_elements(p_lines) elem;
 
   v_id := (public.create_finance_journal_draft(jsonb_build_object(
     'entry_date', to_char(p_date, 'YYYY-MM-DD'),
     'description', p_description,
     'reference', left(p_description, 40)
   )) ->> 'id')::uuid;
-  perform public.replace_finance_journal_lines(v_id, p_lines);
+  perform public.replace_finance_journal_lines(v_id, v_lines);
   perform public.submit_finance_journal_entry(v_id);
   perform public.approve_finance_journal_entry(v_id);
   perform public.post_finance_journal_entry(v_id);
@@ -60,6 +85,7 @@ declare
   v_fn oid;
   v_classifier oid;
   v_branch uuid;
+  v_dim_branch uuid;
   v_cc uuid;
   v_cash uuid;
   v_equip uuid;
@@ -298,9 +324,19 @@ begin
 
   perform public.create_finance_accounting_period(2097, 4);
   perform public.create_finance_accounting_period(2097, 5);
-  select id into v_branch from public.branches where code = 'PRINCIPAL';
+  v_branch := (public.create_branch(jsonb_build_object(
+    'code', 'BS-LAB-218-ISO',
+    'name', 'Sucursal laboratorio balance'
+  )) ->> 'id')::uuid;
+  v_dim_branch := (public.create_branch(jsonb_build_object(
+    'code', 'BS-LAB-218-DIM',
+    'name', 'Sucursal laboratorio dimension'
+  )) ->> 'id')::uuid;
+  perform set_config('alcazar.bs_lab_branch', v_branch::text, true);
   v_cc := (public.create_finance_cost_center(jsonb_build_object(
-    'code', 'BS-CC', 'name', 'Centro balance', 'branch_id', v_branch::text
+    'code', 'BS-LAB-218-CC',
+    'name', 'Centro laboratorio dimension',
+    'branch_id', v_dim_branch::text
   )) ->> 'id')::uuid;
 
   v_cash := (public.create_finance_chart_account(jsonb_build_object(
@@ -350,7 +386,7 @@ begin
     'balance_sheet_section', 'current_asset'
   )) ->> 'id')::uuid;
 
-  v_report := public.get_finance_balance_sheet('2097-04-30', null, null, false, null);
+  v_report := public.get_finance_balance_sheet('2097-04-30', v_branch, null, false, null);
   return query select '25_unclassified_without_balance_complete'::text,
     (v_report ->> 'report_complete')::boolean
     and public.bs_lab_account(v_report, 'BS-ZEROU') is null
@@ -359,7 +395,7 @@ begin
   return query select '29_zero_hidden'::text,
     public.bs_lab_account(v_report, 'BS-ZEROC') is null,
     'hidden';
-  v_report := public.get_finance_balance_sheet('2097-04-30', null, null, true, null);
+  v_report := public.get_finance_balance_sheet('2097-04-30', v_branch, null, true, null);
   return query select '29b_zero_included'::text,
     (public.bs_lab_account(v_report, 'BS-ZEROC') ->> 'amount')::numeric = 0,
     coalesce(public.bs_lab_account(v_report, 'BS-ZEROC') ->> 'amount', 'missing');
@@ -368,7 +404,7 @@ begin
     jsonb_build_object('line_number', 1, 'account_id', v_future::text, 'debit', 8, 'credit', 0),
     jsonb_build_object('line_number', 2, 'account_id', v_cap::text, 'debit', 0, 'credit', 8)
   ));
-  v_report := public.get_finance_balance_sheet('2097-04-30', null, null, false, null);
+  v_report := public.get_finance_balance_sheet('2097-04-30', v_branch, null, false, null);
   return query select '32_cutoff_excludes'::text,
     public.bs_lab_account(v_report, 'BS-FUT') is null
     and (v_report ->> 'classified_total_assets')::numeric = 0,
@@ -383,7 +419,7 @@ begin
     jsonb_build_object('line_number', 1, 'account_id', v_expense::text, 'debit', 10, 'credit', 0),
     jsonb_build_object('line_number', 2, 'account_id', v_cash::text, 'debit', 0, 'credit', 10)
   ));
-  v_report := public.get_finance_balance_sheet('2097-04-30', null, null, false, null);
+  v_report := public.get_finance_balance_sheet('2097-04-30', v_branch, null, false, null);
   return query select '19_square'::text,
     (v_report ->> 'report_complete')::boolean
     and v_report ->> 'report_label' = 'Balance General'
@@ -405,7 +441,7 @@ begin
     jsonb_build_object('line_number', 1, 'account_id', v_expense::text, 'debit', 30, 'credit', 0),
     jsonb_build_object('line_number', 2, 'account_id', v_dep::text, 'debit', 0, 'credit', 30)
   ));
-  v_report := public.get_finance_balance_sheet('2097-04-30', null, null, false, null);
+  v_report := public.get_finance_balance_sheet('2097-04-30', v_branch, null, false, null);
   v_row := public.bs_lab_account(v_report, 'BS-DEP');
   return query select '20_depreciation_reduces_assets'::text,
     (v_row ->> 'amount')::numeric = -30
@@ -422,7 +458,7 @@ begin
     jsonb_build_object('line_number', 1, 'account_id', v_expense::text, 'debit', 20, 'credit', 0),
     jsonb_build_object('line_number', 2, 'account_id', v_cash::text, 'debit', 0, 'credit', 20)
   ));
-  v_report := public.get_finance_balance_sheet('2097-04-30', null, null, false, null);
+  v_report := public.get_finance_balance_sheet('2097-04-30', v_branch, null, false, null);
   v_row := public.bs_lab_account(v_report, 'BS-CASH');
   return query select '21_loss_reduces_equity'::text,
     (v_report ->> 'accumulated_result')::numeric = -20
@@ -443,7 +479,7 @@ begin
     jsonb_build_object('line_number', 2, 'account_id', v_re::text, 'debit', 20, 'credit', 0),
     jsonb_build_object('line_number', 3, 'account_id', v_expense::text, 'debit', 0, 'credit', 60)
   ));
-  v_report := public.get_finance_balance_sheet('2097-04-30', null, null, false, null);
+  v_report := public.get_finance_balance_sheet('2097-04-30', v_branch, null, false, null);
   return query select '22_close_does_not_duplicate'::text,
     (v_report ->> 'accumulated_result')::numeric = 0
     and (public.bs_lab_account(v_report, 'BS-RE') ->> 'amount')::numeric = -20
@@ -457,7 +493,7 @@ begin
     jsonb_build_object('line_number', 1, 'account_id', v_unc_pnl::text, 'debit', 5, 'credit', 0),
     jsonb_build_object('line_number', 2, 'account_id', v_cash::text, 'debit', 0, 'credit', 5)
   ));
-  v_report := public.get_finance_balance_sheet('2097-04-30', null, null, false, null);
+  v_report := public.get_finance_balance_sheet('2097-04-30', v_branch, null, false, null);
   return query select '23_unclassified_pnl_in_result'::text,
     (select income_statement_section from public.finance_chart_accounts where id = v_unc_pnl) is null
     and (v_report ->> 'accumulated_result')::numeric = -5
@@ -474,7 +510,7 @@ begin
     jsonb_build_object('line_number', 1, 'account_id', v_unc_asset::text, 'debit', 12, 'credit', 0),
     jsonb_build_object('line_number', 2, 'account_id', v_cash::text, 'debit', 0, 'credit', 12)
   ));
-  v_report := public.get_finance_balance_sheet('2097-04-30', null, null, false, null);
+  v_report := public.get_finance_balance_sheet('2097-04-30', v_branch, null, false, null);
   return query select '24_unclassified_asset_incomplete'::text,
     (v_report ->> 'report_complete')::boolean = false
     and v_report ->> 'report_label' = 'Balance provisional'
@@ -504,7 +540,7 @@ begin
     jsonb_build_object('line_number', 2, 'account_id', v_cash::text, 'debit', 0, 'credit', 6)
   ));
   perform public.set_finance_chart_account_active(v_old, false);
-  v_report := public.get_finance_balance_sheet('2097-04-30', null, null, false, null);
+  v_report := public.get_finance_balance_sheet('2097-04-30', v_branch, null, false, null);
   v_row := public.bs_lab_account(v_report, 'BS-OLD');
   return query select '28_inactive_history'::text,
     v_row is not null
@@ -522,7 +558,7 @@ begin
     jsonb_build_object('line_number', 2, 'account_id', v_cash::text, 'debit', 0, 'credit', 4)
   ));
   perform public.reverse_finance_journal_entry(v_entry, 'Reversion de laboratorio', '2097-04-18');
-  v_report := public.get_finance_balance_sheet('2097-04-30', null, null, false, null);
+  v_report := public.get_finance_balance_sheet('2097-04-30', v_branch, null, false, null);
   return query select '30_reversal'::text,
     public.bs_lab_account(v_report, 'BS-REV') is null,
     'net zero';
@@ -537,7 +573,7 @@ begin
     jsonb_build_object('line_number', 2, 'account_id', v_cash::text, 'debit', 0, 'credit', 3)
   ));
   select posted_at into v_posted_at from public.finance_journal_entries where id = v_entry;
-  v_report := public.get_finance_balance_sheet('2097-04-30', null, null, false, v_posted_at - interval '1 second');
+  v_report := public.get_finance_balance_sheet('2097-04-30', v_branch, null, false, v_posted_at - interval '1 second');
   return query select '31_snapshot'::text,
     public.bs_lab_account(v_report, 'BS-SNAP') is null,
     'excluded';
@@ -553,10 +589,10 @@ begin
     'entry_date', '2097-04-20', 'description', 'Borrador', 'reference', 'BORRADOR'
   )) ->> 'id')::uuid;
   perform public.replace_finance_journal_lines(v_entry, jsonb_build_array(
-    jsonb_build_object('line_number', 1, 'account_id', v_cash::text, 'debit', 50, 'credit', 0),
-    jsonb_build_object('line_number', 2, 'account_id', v_cap::text, 'debit', 0, 'credit', 50)
+    jsonb_build_object('line_number', 1, 'account_id', v_cash::text, 'branch_id', v_branch::text, 'debit', 50, 'credit', 0),
+    jsonb_build_object('line_number', 2, 'account_id', v_cap::text, 'branch_id', v_branch::text, 'debit', 0, 'credit', 50)
   ));
-  v_report := public.get_finance_balance_sheet('2097-04-30', null, null, false, null);
+  v_report := public.get_finance_balance_sheet('2097-04-30', v_branch, null, false, null);
   return query select '34_posted_only'::text,
     public.bs_lab_account(v_report, 'BS-SNAP') is not null
     and (public.bs_lab_account(v_report, 'BS-CAP') ->> 'amount')::numeric = 60,
@@ -574,10 +610,10 @@ begin
     'balance_sheet_section', 'equity'
   )) ->> 'id')::uuid;
   perform public.is_lab_post('2097-04-21', 'Dimension', jsonb_build_array(
-    jsonb_build_object('line_number', 1, 'account_id', v_dim_asset::text, 'branch_id', v_branch::text, 'cost_center_id', v_cc::text, 'debit', 9, 'credit', 0),
+    jsonb_build_object('line_number', 1, 'account_id', v_dim_asset::text, 'branch_id', v_dim_branch::text, 'cost_center_id', v_cc::text, 'debit', 9, 'credit', 0),
     jsonb_build_object('line_number', 2, 'account_id', v_dim_equity::text, 'debit', 0, 'credit', 9)
   ));
-  v_report := public.get_finance_balance_sheet('2097-04-30', v_branch, v_cc, false, null);
+  v_report := public.get_finance_balance_sheet('2097-04-30', v_dim_branch, v_cc, false, null);
   return query select '35_dimension_warning'::text,
     v_report ->> 'scope' = 'branch_and_cost_center'
     and (v_report ->> 'dimensional_filter')::boolean
@@ -601,13 +637,13 @@ begin
     ));
   end loop;
   begin
-    perform public.get_finance_balance_sheet('2097-04-30', null, null, true, null);
+    perform public.get_finance_balance_sheet('2097-04-30', v_branch, null, true, null);
     return query select '36_limit'::text, false, 'limit succeeded'::text;
   exception when others then
     return query select '36_limit'::text, sqlerrm like '%2000%', sqlerrm;
   end;
 
-  v_report := public.get_finance_income_statement('2097-04-01', '2097-04-30', null, null, null, false, null);
+  v_report := public.get_finance_income_statement('2097-04-01', '2097-04-30', null, v_branch, null, false, null);
   return query select '37_reports_remain'::text,
     to_regprocedure('public.get_finance_general_journal(date,date,uuid,uuid,uuid,uuid,text,integer,integer,timestamptz)') is not null
     and to_regprocedure('public.get_finance_general_ledger(uuid,date,date,uuid,uuid,uuid,text,integer,integer,timestamptz)') is not null
