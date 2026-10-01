@@ -9,6 +9,8 @@ import { canManageAccountingCatalog } from "../../utils/financePermissions"
 import {
   ACCOUNT_KIND_LABELS,
   ACCOUNT_KINDS,
+  BALANCE_SHEET_SECTION_LABELS,
+  BALANCE_SHEET_UNCLASSIFIED_ACCOUNT_WARNING,
   CSV_TEMPLATE_HEADERS,
   CSV_TEMPLATE_SAMPLE,
   FINANCIAL_TYPE_LABELS,
@@ -17,6 +19,7 @@ import {
   INCOME_STATEMENT_UNCLASSIFIED_ACCOUNT_WARNING,
   NATURAL_BALANCE_LABELS,
   NATURAL_BALANCES,
+  balanceSheetSectionsFor,
   incomeStatementSectionsFor
 } from "../../utils/financeChartAccountsConstants"
 import {
@@ -50,7 +53,8 @@ function emptyForm() {
     description: "",
     branch_dimension_rule: "optional",
     cost_center_dimension_rule: "optional",
-    income_statement_section: ""
+    income_statement_section: "",
+    balance_sheet_section: ""
   }
 }
 
@@ -113,14 +117,22 @@ export default function FinanceChartAccountsTab({ user, notify }) {
     setShowForm(true)
   }
 
-  function retainSection(financialType, accountKind, currentSection) {
-    const allowed = incomeStatementSectionsFor(financialType, accountKind)
-    if (currentSection && !allowed.includes(currentSection)) {
-      setSectionNotice("La sección del Estado de Resultados se limpió porque ya no corresponde al tipo de cuenta.")
-      return ""
+  function retainSections(financialType, accountKind, incomeSection, balanceSection) {
+    const incomeAllowed = incomeStatementSectionsFor(financialType, accountKind)
+    const balanceAllowed = balanceSheetSectionsFor(financialType, accountKind)
+    const notices = []
+    let nextIncome = incomeSection
+    let nextBalance = balanceSection
+    if (incomeSection && !incomeAllowed.includes(incomeSection)) {
+      nextIncome = ""
+      notices.push("La sección del Estado de Resultados se limpió porque ya no corresponde al tipo de cuenta.")
     }
-    setSectionNotice("")
-    return currentSection
+    if (balanceSection && !balanceAllowed.includes(balanceSection)) {
+      nextBalance = ""
+      notices.push("La sección del Balance General se limpió porque ya no corresponde al tipo de cuenta.")
+    }
+    setSectionNotice(notices.join(" "))
+    return { income: nextIncome, balance: nextBalance }
   }
 
   function openEdit(account) {
@@ -136,7 +148,8 @@ export default function FinanceChartAccountsTab({ user, notify }) {
       description: account.description || "",
       branch_dimension_rule: account.branch_dimension_rule || defaultBranchDimensionRule(account.financial_type),
       cost_center_dimension_rule: account.cost_center_dimension_rule || defaultCostCenterDimensionRule(account.financial_type),
-      income_statement_section: account.income_statement_section || ""
+      income_statement_section: account.income_statement_section || "",
+      balance_sheet_section: account.balance_sheet_section || ""
     })
     setSectionNotice("")
     setShowForm(true)
@@ -147,8 +160,10 @@ export default function FinanceChartAccountsTab({ user, notify }) {
     if (!canManage) return notify("No tienes permiso para administrar el catálogo contable.", "error")
 
     const sectionChoices = incomeStatementSectionsFor(form.financial_type, form.account_kind)
+    const balanceChoices = balanceSheetSectionsFor(form.financial_type, form.account_kind)
     const payload = buildFinanceChartAccountWritePayload(form)
-    const wantedClear = sectionChoices.length > 0 && payload.income_statement_section === ""
+    const wantedIncomeClear = sectionChoices.length > 0 && payload.income_statement_section === ""
+    const wantedBalanceClear = balanceChoices.length > 0 && payload.balance_sheet_section === ""
 
     const result = editingId
       ? await updateFinanceChartAccount(editingId, payload)
@@ -162,7 +177,7 @@ export default function FinanceChartAccountsTab({ user, notify }) {
           ? rows.map((row) => row.id === saved.id ? saved : row)
           : [saved, ...rows])
       }
-      if (wantedClear && saved?.income_statement_section) {
+      if ((wantedIncomeClear && saved?.income_statement_section) || (wantedBalanceClear && saved?.balance_sheet_section)) {
         notify("La sección no se eliminó. Se muestra la clasificación guardada en el servidor.", "error")
         openEdit(saved)
         await loadAccounts()
@@ -289,12 +304,14 @@ export default function FinanceChartAccountsTab({ user, notify }) {
                 value={form.financial_type}
                 onChange={(e) => {
                   const financialType = e.target.value
+                  const retained = retainSections(financialType, form.account_kind, form.income_statement_section, form.balance_sheet_section)
                   setForm({
                     ...form,
                     financial_type: financialType,
                     branch_dimension_rule: defaultBranchDimensionRule(financialType),
                     cost_center_dimension_rule: defaultCostCenterDimensionRule(financialType),
-                    income_statement_section: retainSection(financialType, form.account_kind, form.income_statement_section)
+                    income_statement_section: retained.income,
+                    balance_sheet_section: retained.balance
                   })
                 }}
               >
@@ -315,11 +332,13 @@ export default function FinanceChartAccountsTab({ user, notify }) {
                 value={form.account_kind}
                 onChange={(e) => {
                   const accountKind = e.target.value
+                  const retained = retainSections(form.financial_type, accountKind, form.income_statement_section, form.balance_sheet_section)
                   setForm({
                     ...form,
                     account_kind: accountKind,
                     accepts_entries: accountKind === "header" ? false : form.accepts_entries,
-                    income_statement_section: retainSection(form.financial_type, accountKind, form.income_statement_section)
+                    income_statement_section: retained.income,
+                    balance_sheet_section: retained.balance
                   })
                 }}
               >
@@ -377,6 +396,22 @@ export default function FinanceChartAccountsTab({ user, notify }) {
             {incomeStatementSectionsFor(form.financial_type, form.account_kind).length && !form.income_statement_section ? (
               <p className="finance-message warning finance-field--full">{INCOME_STATEMENT_UNCLASSIFIED_ACCOUNT_WARNING}</p>
             ) : null}
+            {balanceSheetSectionsFor(form.financial_type, form.account_kind).length ? (
+              <Field label="Sección del Balance General" className="finance-field--full">
+                <select
+                  value={form.balance_sheet_section}
+                  onChange={(e) => setForm({ ...form, balance_sheet_section: e.target.value })}
+                >
+                  <option value="">Sin clasificar</option>
+                  {balanceSheetSectionsFor(form.financial_type, form.account_kind).map((value) => (
+                    <option key={value} value={value}>{BALANCE_SHEET_SECTION_LABELS[value]}</option>
+                  ))}
+                </select>
+              </Field>
+            ) : null}
+            {balanceSheetSectionsFor(form.financial_type, form.account_kind).length && !form.balance_sheet_section ? (
+              <p className="finance-message warning finance-field--full">{BALANCE_SHEET_UNCLASSIFIED_ACCOUNT_WARNING}</p>
+            ) : null}
             {sectionNotice ? <p className="finance-message warning finance-field--full">{sectionNotice}</p> : null}
             <div className="finance-actions finance-field--full">
               <button type="submit" className="tasks-primary">{editingId ? "Guardar cambios" : "Crear cuenta"}</button>
@@ -398,7 +433,8 @@ export default function FinanceChartAccountsTab({ user, notify }) {
                 <th>Cuenta</th>
                 <th>Sucursal</th>
                 <th>Centro</th>
-                <th>Sección</th>
+                <th>Resultados</th>
+                <th>Balance</th>
                 <th>Estado</th>
                 {canManage ? <th>Acciones</th> : null}
               </tr>
@@ -422,6 +458,7 @@ export default function FinanceChartAccountsTab({ user, notify }) {
                   <td>{DIMENSION_RULE_LABELS[row.branch_dimension_rule] || row.branch_dimension_rule || "—"}</td>
                   <td>{DIMENSION_RULE_LABELS[row.cost_center_dimension_rule] || row.cost_center_dimension_rule || "—"}</td>
                   <td>{INCOME_STATEMENT_SECTION_LABELS[row.income_statement_section] || (incomeStatementSectionsFor(row.financial_type, row.account_kind).length ? "Sin clasificar" : "—")}</td>
+                  <td>{BALANCE_SHEET_SECTION_LABELS[row.balance_sheet_section] || (balanceSheetSectionsFor(row.financial_type, row.account_kind).length ? "Sin clasificar" : "—")}</td>
                   <td>
                     <span className={`finance-badge ${row.is_active ? "finance-badge--paid" : "finance-badge--cancelled"}`}>
                       {row.is_active ? "Activa" : "Inactiva"}

@@ -3,6 +3,7 @@ import FinanceGeneralJournalTab from "./FinanceGeneralJournalTab"
 import FinanceGeneralLedgerTab from "./FinanceGeneralLedgerTab"
 import FinanceTrialBalanceTab from "./FinanceTrialBalanceTab"
 import FinanceIncomeStatementTab from "./FinanceIncomeStatementTab"
+import FinanceBalanceSheetTab from "./FinanceBalanceSheetTab"
 import { GENERAL_JOURNAL_COMING_SOON_REPORTS } from "../../utils/financeGeneralJournalConstants"
 import "./Finance.css"
 
@@ -11,8 +12,9 @@ const REPORTS = [
   { key: "libro-mayor", label: "Libro Mayor", available: true },
   { key: "balanza", label: "Balanza de Comprobación", available: true },
   { key: "estado-resultados", label: "Estado de Resultados", available: true },
+  { key: "balance-general", label: "Balance General", available: true },
   ...GENERAL_JOURNAL_COMING_SOON_REPORTS
-    .filter((item) => item.key !== "libro-mayor" && item.key !== "balanza" && item.key !== "estado-resultados")
+    .filter((item) => item.key !== "libro-mayor" && item.key !== "balanza" && item.key !== "estado-resultados" && item.key !== "balance-general")
     .map((item) => ({ ...item, available: false }))
 ]
 
@@ -53,6 +55,8 @@ export default function FinanceAccountingReportsTab({ user, notify }) {
         <FinanceTrialBalanceTab user={user} notify={notify} />
       ) : report === "estado-resultados" ? (
         <FinanceIncomeStatementTab user={user} notify={notify} />
+      ) : report === "balance-general" ? (
+        <FinanceBalanceSheetTab user={user} notify={notify} />
       ) : (
         <article className="finance-panel">
           <p className="tasks-muted">Este reporte estará disponible en una fase posterior.</p>
