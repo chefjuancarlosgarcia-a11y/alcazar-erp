@@ -200,7 +200,7 @@ export async function certifyInvoice(
       httpStatus: transportResult.httpStatus ?? null,
       errorKind: transportResult.errorKind ?? "transport_error",
       providerValid: false,
-      safeCode: transportResult.errorKind ?? "transport_error",
+      safeCode: transportResult.safeCode ?? transportResult.errorKind ?? "transport_error",
       safeMessage: transportResult.sanitizedMessage,
     })
 

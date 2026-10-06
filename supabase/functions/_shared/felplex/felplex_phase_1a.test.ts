@@ -865,19 +865,7 @@ Deno.test("1A.3-02 failed + payload historico reclama attempt 2 y un transport",
   const transport = mockTransport(async () => ({
     ok: true,
     httpStatus: 200,
-    body: {
-      valid: true,
-      uuid: "71916AF3-73F6-480B-B3B3-6F6E3DABC334",
-      sat: {
-        authorization: "AUTH-RETRY",
-        serie: "A",
-        no: "1",
-        certification_date: "2024-06-20T15:15:39",
-      },
-      errors: [],
-      invoice_url: "https://felplex-gt.stage.plex.lat/pdf/71916AF3-73F6-480B-B3B3-6F6E3DABC334",
-      invoice_xml: "https://felplex-gt.stage.plex.lat/xml/71916AF3-73F6-480B-B3B3-6F6E3DABC334",
-    },
+    body: SANITIZED_CERTIFY_SUCCESS_RESPONSE,
     sanitizedMessage: "ok",
   }))
   const result = await runCertify(

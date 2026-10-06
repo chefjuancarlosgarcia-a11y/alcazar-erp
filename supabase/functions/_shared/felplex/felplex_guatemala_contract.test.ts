@@ -13,12 +13,15 @@ import {
 } from "./payloadBuilder.ts"
 import { extractVatIncluded, roundMoney } from "./money.ts"
 import { parseFelplexCertifyResponse, normalizeSatDocumentNumber, parseSatCertificationDate } from "./responseParser.ts"
-import { classifyTransportFailure } from "./responseAdapter.ts"
+import { adaptFelplexResponse, classifyTransportFailure } from "./responseAdapter.ts"
+import { interpretFelplexProviderStatus, classifyDocumentedProviderCodes } from "./providerStatus.ts"
+import { isSafeProviderPayload } from "./safePayload.ts"
 import { createFetchFelplexTransport, defaultTransportRequest, buildFelplexCertifyUrl } from "./transport.ts"
 import {
   buildFelplexCancelInvoiceUrl,
   buildFelplexGetInvoiceTextUrl,
   buildFelplexGetInvoiceUrl,
+  isAllowedFelplexStagePath,
   validateFelplexStageUrl,
 } from "./urlAllowlist.ts"
 import {
@@ -266,7 +269,7 @@ Deno.test("GT-16 valid=true parseado estrictamente", () => {
   assertEquals(parsed.ok, true)
   if (parsed.ok) {
     assertEquals(parsed.data.satDocumentNumber, "123")
-    assertEquals(parsed.data.felUuid, SANITIZED_CERTIFY_SUCCESS_RESPONSE.uuid)
+    assertEquals(parsed.data.felUuid, SANITIZED_CERTIFY_SUCCESS_RESPONSE.data.uuid)
     assertEquals(parsed.data.certifiedAt, "2026-08-08T20:00:00-06:00")
   }
 })
@@ -275,7 +278,7 @@ Deno.test("GT-16b certification_date obligatoria en valid=true", () => {
   const present = parseFelplexCertifyResponse(FELPLEX_GT_STAGE_SUCCESS_CONTRACT, 200)
   assertEquals(present.ok, true)
   if (present.ok) {
-    assertEquals(present.data.certifiedAt, "2024-06-20T15:15:39-06:00")
+    assertEquals(present.data.certifiedAt, "2026-07-22T15:15:39-06:00")
   }
   assertEquals(parseSatCertificationDate("2024-06-20T15:15:39"), "2024-06-20T15:15:39-06:00")
   assertEquals(parseSatCertificationDate("2024-06-20T15:15:39Z"), "2024-06-20T15:15:39Z")
@@ -296,43 +299,62 @@ Deno.test("GT-16b certification_date obligatoria en valid=true", () => {
   assertEquals(parseSatCertificationDate("2024-02-31T15:15:39"), null)
 
   const rejected = [
-    ["ausente", { ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT.sat, certification_date: undefined }],
-    ["null", { ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT.sat, certification_date: null }],
-    ["vacia", { ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT.sat, certification_date: "" }],
-    ["blanco", { ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT.sat, certification_date: "   " }],
-    ["invalida", { ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT.sat, certification_date: "no-es-fecha" }],
-    ["calendario", { ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT.sat, certification_date: "2024-02-31T15:15:39" }],
+    ["ausente", { ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT.data.sat, certification_date: undefined }],
+    ["null", { ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT.data.sat, certification_date: null }],
+    ["vacia", { ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT.data.sat, certification_date: "" }],
+    ["blanco", { ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT.data.sat, certification_date: "   " }],
+    ["invalida", { ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT.data.sat, certification_date: "no-es-fecha" }],
+    ["calendario", { ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT.data.sat, certification_date: "2024-02-31T15:15:39" }],
   ] as const
 
   for (const [label, sat] of rejected) {
     const parsed = parseFelplexCertifyResponse({
-      ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT,
-      sat,
+      data: { ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT.data, sat },
     }, 200)
     assertEquals(parsed.ok, false, label)
     if (!parsed.ok) assertEquals(parsed.kind, "incomplete", label)
   }
 })
 
-const OFFICIAL_GT_STAGE_UUID = "71916AF3-73F6-480B-B3B3-6F6E3DABC334"
+const OFFICIAL_GT_STAGE_UUID = "DD34F4A1-7588-44E3-B609-1DDDA27AD3E0"
 
-/** Contrato de éxito FELplex GT Stage, sin comentarios. Host oficial, no el del extracto legacy. */
+/** Contrato de éxito FELplex GT Stage: campos solo bajo data. */
 const FELPLEX_GT_STAGE_SUCCESS_CONTRACT = {
-  valid: true,
-  uuid: OFFICIAL_GT_STAGE_UUID,
-  sat: {
-    serie: "DD34F4A1",
-    no: 1971864803,
-    authorization: "DD34F4A1-7588-44E3-B609-1DDDA27AD3E0",
-    certification_date: "2024-06-20T15:15:39",
+  data: {
+    valid: true,
+    uuid: OFFICIAL_GT_STAGE_UUID,
+    sat: {
+      serie: "DD34F4A1",
+      no: 1971864803,
+      authorization: OFFICIAL_GT_STAGE_UUID,
+      certification_date: "2026-07-22T15:15:39",
+    },
+    certifier: {
+      name: "CARI LATINOAMERICA, S.A.",
+      tax_code: "96941243",
+    },
+    errors: [],
+    error_codes: [],
+    invoice_url: `https://felplex-gt.stage.plex.lat/pdf/${OFFICIAL_GT_STAGE_UUID}`,
+    invoice_xml: `https://felplex-gt.stage.plex.lat/xml/${OFFICIAL_GT_STAGE_UUID}`,
   },
-  certifier: {
-    name: "Certificador de ejemplo",
-    tax_code: "00000000",
-  },
-  errors: [],
-  invoice_url: `https://felplex-gt.stage.plex.lat/pdf/${OFFICIAL_GT_STAGE_UUID}`,
-  invoice_xml: `https://felplex-gt.stage.plex.lat/xml/${OFFICIAL_GT_STAGE_UUID}`,
+}
+
+function officialDataBody(patch: {
+  valid?: unknown
+  uuid?: string
+  sat?: unknown
+  invoice_url?: unknown
+  invoice_xml?: unknown
+} = {}) {
+  const base = FELPLEX_GT_STAGE_SUCCESS_CONTRACT.data
+  return {
+    data: {
+      ...base,
+      ...patch,
+      sat: Object.prototype.hasOwnProperty.call(patch, "sat") ? patch.sat : base.sat,
+    },
+  }
 }
 
 Deno.test("GT-26 contrato oficial GT Stage pasa", () => {
@@ -342,10 +364,10 @@ Deno.test("GT-26 contrato oficial GT Stage pasa", () => {
     assertEquals(parsed.data.felUuid, OFFICIAL_GT_STAGE_UUID)
     assertEquals(parsed.data.satSeries, "DD34F4A1")
     assertEquals(parsed.data.satDocumentNumber, "1971864803")
-    assertEquals(parsed.data.satAuthorization, "DD34F4A1-7588-44E3-B609-1DDDA27AD3E0")
-    assertEquals(parsed.data.certifiedAt, "2024-06-20T15:15:39-06:00")
-    assertEquals(parsed.data.invoiceUrl, FELPLEX_GT_STAGE_SUCCESS_CONTRACT.invoice_url)
-    assertEquals(parsed.data.invoiceXml, FELPLEX_GT_STAGE_SUCCESS_CONTRACT.invoice_xml)
+    assertEquals(parsed.data.satAuthorization, OFFICIAL_GT_STAGE_UUID)
+    assertEquals(parsed.data.certifiedAt, "2026-07-22T15:15:39-06:00")
+    assertEquals(parsed.data.invoiceUrl, FELPLEX_GT_STAGE_SUCCESS_CONTRACT.data.invoice_url)
+    assertEquals(parsed.data.invoiceXml, FELPLEX_GT_STAGE_SUCCESS_CONTRACT.data.invoice_xml)
   }
 })
 
@@ -360,13 +382,12 @@ Deno.test("GT-26b fecha ausente no finaliza certificacion ni usa now()", async (
           return {
             ok: true,
             httpStatus: 200,
-            body: {
-              ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT,
+            body: officialDataBody({
               sat: {
-                ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT.sat,
+                ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT.data.sat,
                 certification_date: undefined,
               },
-            },
+            }),
             sanitizedMessage: "ok",
           }
         },
@@ -397,10 +418,9 @@ Deno.test("GT-27 host legacy y parecidos fallan en invoice_url e invoice_xml", (
   for (const host of badHosts) {
     for (const field of ["invoice_url", "invoice_xml"] as const) {
       const resource = field === "invoice_url" ? "pdf" : "xml"
-      const parsed = parseFelplexCertifyResponse({
-        ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT,
+      const parsed = parseFelplexCertifyResponse(officialDataBody({
         [field]: `https://${host}/${resource}/${OFFICIAL_GT_STAGE_UUID}`,
-      }, 200)
+      }), 200)
       assertEquals(parsed.ok, false, `${field} ${host}`)
       if (!parsed.ok) assertEquals(parsed.kind, "unsafe_url")
     }
@@ -419,10 +439,9 @@ Deno.test("GT-28 HTTP sin TLS y rutas incorrectas fallan", () => {
     `https://felplex-gt.stage.plex.lat/PDF/${uuid}`,
   ]
   for (const invoiceUrl of badUrls) {
-    const parsed = parseFelplexCertifyResponse({
-      ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT,
+    const parsed = parseFelplexCertifyResponse(officialDataBody({
       invoice_url: invoiceUrl,
-    }, 200)
+    }), 200)
     assertEquals(parsed.ok, false, invoiceUrl)
     if (!parsed.ok) assertEquals(parsed.kind, "unsafe_url")
   }
@@ -430,25 +449,22 @@ Deno.test("GT-28 HTTP sin TLS y rutas incorrectas fallan", () => {
 
 Deno.test("GT-29 UUID de invoice_url e invoice_xml debe coincidir", () => {
   const other = "6558823E-E710-40B5-A227-658784945C08"
-  const urlMismatch = parseFelplexCertifyResponse({
-    ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT,
+  const urlMismatch = parseFelplexCertifyResponse(officialDataBody({
     invoice_url: `https://felplex-gt.stage.plex.lat/pdf/${other}`,
-  }, 200)
+  }), 200)
   assertEquals(urlMismatch.ok, false)
   if (!urlMismatch.ok) assertEquals(urlMismatch.kind, "incomplete")
 
-  const xmlMismatch = parseFelplexCertifyResponse({
-    ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT,
+  const xmlMismatch = parseFelplexCertifyResponse(officialDataBody({
     invoice_xml: `https://felplex-gt.stage.plex.lat/xml/${other}`,
-  }, 200)
+  }), 200)
   assertEquals(xmlMismatch.ok, false)
   if (!xmlMismatch.ok) assertEquals(xmlMismatch.kind, "incomplete")
 
-  const swapped = parseFelplexCertifyResponse({
-    ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT,
+  const swapped = parseFelplexCertifyResponse(officialDataBody({
     invoice_url: `https://felplex-gt.stage.plex.lat/xml/${OFFICIAL_GT_STAGE_UUID}`,
     invoice_xml: `https://felplex-gt.stage.plex.lat/pdf/${OFFICIAL_GT_STAGE_UUID}`,
-  }, 200)
+  }), 200)
   assertEquals(swapped.ok, false)
 })
 
@@ -460,19 +476,17 @@ Deno.test("GT-30 datos SAT necesarios exigidos", () => {
     { serie: "DD34F4A1", no: null, authorization: "DD34F4A1-7588-44E3-B609-1DDDA27AD3E0" },
   ]
   for (const sat of cases) {
-    const parsed = parseFelplexCertifyResponse({
-      ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT,
-      sat: { ...sat, certification_date: "2024-06-20T15:15:39" },
-    }, 200)
+    const parsed = parseFelplexCertifyResponse(officialDataBody({
+      sat: { ...sat, certification_date: "2026-07-22T15:15:39" },
+    }), 200)
     assertEquals(parsed.ok, false)
     if (!parsed.ok) assertEquals(parsed.kind, "incomplete")
   }
 
-  const missingUrls = parseFelplexCertifyResponse({
-    ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT,
+  const missingUrls = parseFelplexCertifyResponse(officialDataBody({
     invoice_url: null,
     invoice_xml: null,
-  }, 200)
+  }), 200)
   assertEquals(missingUrls.ok, false)
   if (!missingUrls.ok) assertEquals(missingUrls.kind, "incomplete")
 })
@@ -498,8 +512,10 @@ Deno.test("GT-19 respuesta malformada rechazada", () => {
 
 Deno.test("GT-20 URLs PDF/XML de host extraño rechazadas", () => {
   const parsed = parseFelplexCertifyResponse({
-    ...SANITIZED_CERTIFY_SUCCESS_RESPONSE,
-    invoice_url: "https://evil.example.com/doc.pdf",
+    data: {
+      ...SANITIZED_CERTIFY_SUCCESS_RESPONSE.data,
+      invoice_url: "https://evil.example.com/doc.pdf",
+    },
   }, 200)
   assertEquals(parsed.ok, false)
   if (!parsed.ok) assertEquals(parsed.kind, "unsafe_url")
@@ -558,6 +574,172 @@ Deno.test("GT-25 ambiguedades contractuales siguen UNCONFIRMED documentadas", ()
   assertEquals(externalIdFromDocument(makeQ297Document()), makeQ297Document().external_id)
 })
 
+Deno.test("GT-31 contrato anidado certifica; el plano y data invalida no", async () => {
+  const nested = parseFelplexCertifyResponse(FELPLEX_GT_STAGE_SUCCESS_CONTRACT, 200)
+  assertEquals(nested.ok, true)
+
+  const flat = parseFelplexCertifyResponse({ ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT.data }, 200)
+  assertEquals(flat.ok, false)
+  if (!flat.ok) assertEquals(flat.message, "Respuesta FELplex sin data.")
+
+  for (const body of [{}, { data: null }, { data: [] }]) {
+    const parsed = parseFelplexCertifyResponse(body, 200)
+    assertEquals(parsed.ok, false)
+  }
+
+  for (const valid of [undefined, null, "true", false]) {
+    const parsed = parseFelplexCertifyResponse(officialDataBody({ valid }), 200)
+    assertEquals(parsed.ok, false, String(valid))
+  }
+
+  const repo = makeRepo()
+  const rejected = await certifyInvoice(
+    { document_id: Q297_DOCUMENT_ID },
+    {
+      repository: repo,
+      transport: {
+        async send() {
+          return {
+            ok: true,
+            httpStatus: 200,
+            body: { ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT.data },
+            sanitizedMessage: "ok",
+          }
+        },
+      },
+      env: envGetter(makeHttpTestEnv()),
+      nowIso: FIXED_DATETIME,
+      actor: makeCashActor(),
+      buildPayloadOverride: () =>
+        buildFelplexPayload(makeQ297Document(), { datetimeIssue: FIXED_DATETIME }),
+    },
+  )
+  assertEquals(rejected.body.error_code, "FELPLEX_INVALID_RESPONSE")
+  assertEquals(repo.finalizations.some((entry) => entry.outcome === "success"), false)
+})
+
+Deno.test("GT-32 uuid, serie, numero y autorizacion", () => {
+  const other = "6558823E-E710-40B5-A227-658784945C08"
+  const mismatch = parseFelplexCertifyResponse(officialDataBody({
+    sat: {
+      ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT.data.sat,
+      authorization: other,
+    },
+  }), 200)
+  assertEquals(mismatch.ok, false)
+
+  const sameIgnoringCase = parseFelplexCertifyResponse(officialDataBody({
+    sat: {
+      ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT.data.sat,
+      authorization: OFFICIAL_GT_STAGE_UUID.toLowerCase(),
+    },
+  }), 200)
+  assertEquals(sameIgnoringCase.ok, true)
+
+  const missingSerie = parseFelplexCertifyResponse(officialDataBody({
+    sat: {
+      ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT.data.sat,
+      serie: undefined,
+    },
+  }), 200)
+  assertEquals(missingSerie.ok, false)
+
+  const missingAuthorization = parseFelplexCertifyResponse(officialDataBody({
+    sat: {
+      ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT.data.sat,
+      authorization: undefined,
+    },
+  }), 200)
+  assertEquals(missingAuthorization.ok, false)
+
+  assertEquals(normalizeSatDocumentNumber(4294967295), "4294967295")
+  assertEquals(normalizeSatDocumentNumber("4294967295"), "4294967295")
+  for (const invalid of [null, "", "   ", -1, 1.5, "1.5", "abc"]) {
+    assertEquals(normalizeSatDocumentNumber(invalid), null, String(invalid))
+  }
+  const huge = parseFelplexCertifyResponse(officialDataBody({
+    sat: {
+      ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT.data.sat,
+      no: 4294967295,
+    },
+  }), 200)
+  assertEquals(huge.ok, true)
+  if (huge.ok) assertEquals(huge.data.satDocumentNumber, "4294967295")
+
+  for (const no of [undefined, null, "", -1, 1.2, "no"]) {
+    const parsed = parseFelplexCertifyResponse(officialDataBody({
+      sat: {
+        ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT.data.sat,
+        no,
+      },
+    }), 200)
+    assertEquals(parsed.ok, false, String(no))
+  }
+})
+
+Deno.test("GT-33 fecha anidada conserva zona o aplica -06:00", () => {
+  const zoned = parseFelplexCertifyResponse(officialDataBody({
+    sat: {
+      ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT.data.sat,
+      certification_date: "2026-07-22T21:15:39Z",
+    },
+  }), 200)
+  assertEquals(zoned.ok, true)
+  if (zoned.ok) assertEquals(zoned.data.certifiedAt, "2026-07-22T21:15:39Z")
+
+  const offset = parseFelplexCertifyResponse(officialDataBody({
+    sat: {
+      ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT.data.sat,
+      certification_date: "2026-07-22T17:15:39-04:00",
+    },
+  }), 200)
+  assertEquals(offset.ok, true)
+  if (offset.ok) assertEquals(offset.data.certifiedAt, "2026-07-22T17:15:39-04:00")
+  assertEquals(
+    certificationInstantUtcMillis("2026-07-22T17:15:39-04:00"),
+    certificationInstantUtcMillis("2026-07-22T21:15:39Z"),
+  )
+})
+
+Deno.test("GT-34 exito envia al finalize serie, numero, autorizacion y fecha", async () => {
+  const body = officialDataBody({
+    sat: {
+      ...FELPLEX_GT_STAGE_SUCCESS_CONTRACT.data.sat,
+      no: 4294967295,
+    },
+  })
+  const repo = makeRepo()
+  const result = await certifyInvoice(
+    { document_id: Q297_DOCUMENT_ID },
+    {
+      repository: repo,
+      transport: {
+        async send() {
+          return { ok: true, httpStatus: 200, body, sanitizedMessage: "ok" }
+        },
+      },
+      env: envGetter(makeHttpTestEnv()),
+      nowIso: FIXED_DATETIME,
+      actor: makeCashActor(),
+      buildPayloadOverride: () =>
+        buildFelplexPayload(makeQ297Document(), { datetimeIssue: FIXED_DATETIME }),
+    },
+  )
+  assertEquals(result.status, 200)
+  assertEquals(repo.finalizations.length, 1)
+  const finalized = repo.finalizations[0]
+  assertEquals(finalized?.outcome, "success")
+  assertEquals(finalized?.satSeries, "DD34F4A1")
+  assertEquals(finalized?.satDocumentNumber, "4294967295")
+  assertEquals(finalized?.satAuthorization, OFFICIAL_GT_STAGE_UUID)
+  assertEquals(finalized?.certifiedAt, "2026-07-22T15:15:39-06:00")
+  assertEquals(JSON.stringify(finalized).includes("invoice_url"), false)
+  const adapted = adaptFelplexResponse(body, 200)
+  assertEquals(adapted.success, true)
+  assertEquals(adapted.invoiceUrl, FELPLEX_GT_STAGE_SUCCESS_CONTRACT.data.invoice_url)
+  assertEquals(adapted.invoiceXml, FELPLEX_GT_STAGE_SUCCESS_CONTRACT.data.invoice_xml)
+})
+
 Deno.test("GT-24 redirect bloqueado en transporte", async () => {
   const transport = createFetchFelplexTransport(async () =>
     Response.redirect("https://evil.example.com", 302)
@@ -569,4 +751,165 @@ Deno.test("GT-24 redirect bloqueado en transporte", async () => {
   ))
   assertEquals(result.ok, false)
   assertNotEquals(result.sanitizedMessage.toLowerCase().includes("api"), true)
+})
+
+const AWAIT_URL = `${FELPLEX_STAGE_BASE_URL}/api/entity/stage-entity/invoices/await`
+
+function providerResponse(status: number, body: string): Response {
+  const response = new Response(body, { status })
+  Object.defineProperty(response, "url", { value: AWAIT_URL })
+  return response
+}
+
+async function certifyProviderHttp(status: number, body: string) {
+  const repo = makeRepo()
+  let calls = 0
+  const transport = createFetchFelplexTransport(async () => {
+    calls += 1
+    return providerResponse(status, body)
+  })
+  const result = await certifyInvoice(
+    { document_id: Q297_DOCUMENT_ID },
+    {
+      repository: repo,
+      transport,
+      env: envGetter(makeHttpTestEnv()),
+      nowIso: FIXED_DATETIME,
+      actor: makeCashActor(),
+      buildPayloadOverride: () =>
+        buildFelplexPayload(makeQ297Document(), { datetimeIssue: FIXED_DATETIME }),
+    },
+  )
+  return { repo, result, calls }
+}
+
+Deno.test("GT-35 HTTP 200 anidado certifica y data.valid false no", async () => {
+  const success = await certifyProviderHttp(200, JSON.stringify(SANITIZED_CERTIFY_SUCCESS_RESPONSE))
+  assertEquals(success.result.status, 200)
+  assertEquals(success.repo.finalizations.some((entry) => entry.outcome === "success"), true)
+
+  const rejected = await certifyProviderHttp(200, JSON.stringify({
+    data: { valid: false, errors: [["No emitido"]], error_codes: ["FEL_NO"] },
+  }))
+  assertEquals(rejected.result.body.error_code, "FELPLEX_INVALID_RESPONSE")
+  assertEquals(rejected.repo.finalizations.some((entry) => entry.outcome === "success"), false)
+
+  const flat = parseFelplexCertifyResponse({
+    valid: true,
+    uuid: OFFICIAL_GT_STAGE_UUID,
+    sat: {
+      serie: "DD34F4A1",
+      no: 1,
+      authorization: OFFICIAL_GT_STAGE_UUID,
+      certification_date: "2026-07-22T15:15:39",
+    },
+    invoice_url: `https://felplex-gt.stage.plex.lat/pdf/${OFFICIAL_GT_STAGE_UUID}`,
+    invoice_xml: `https://felplex-gt.stage.plex.lat/xml/${OFFICIAL_GT_STAGE_UUID}`,
+  }, 200)
+  assertEquals(flat.ok, false)
+})
+
+Deno.test("GT-36 422, 502, 402 y 403 no certifican y sanitizan", async () => {
+  const functional = interpretFelplexProviderStatus(422, JSON.stringify({
+    data: {
+      valid: false,
+      errors: [["NIT de ejemplo rechazado"]],
+      error_codes: ["FEL_NIT"],
+    },
+  }))
+  assertEquals(functional.ok, false)
+  assertEquals(functional.errorKind, "functional_failure")
+  assertEquals(functional.body == null, false)
+  assertEquals(functional.safeCode, "FEL_NIT")
+  assertEquals(functional.sanitizedMessage.includes("NIT de ejemplo rechazado"), true)
+  assertNotEquals(classifyTransportFailure(functional.errorKind), "transient")
+
+  const viaService = await certifyProviderHttp(422, JSON.stringify({
+    data: {
+      valid: false,
+      errors: [["NIT de ejemplo rechazado"]],
+      error_codes: ["FEL_NIT"],
+    },
+  }))
+  assertEquals(viaService.calls, 1)
+  assertEquals(viaService.repo.finalizations.some((entry) => entry.outcome === "success"), false)
+  const saved = viaService.repo.finalizations[0]?.safeResponsePayload
+  assertEquals(isSafeProviderPayload(saved), true)
+  assertEquals(saved?.error_kind, "functional_failure")
+  assertEquals(saved?.safe_code, "FEL_NIT")
+  assertEquals(saved?.safe_message?.includes("NIT de ejemplo rechazado"), true)
+  assertEquals(JSON.stringify(saved).includes("invoice_url"), false)
+
+  const gateway = interpretFelplexProviderStatus(502, JSON.stringify({
+    data: {
+      valid: false,
+      errors: ["Comunicacion de ejemplo"],
+      error_codes: ["FEL_UNDOCUMENTED"],
+    },
+  }))
+  assertEquals(gateway.body == null, false)
+  assertEquals(gateway.errorKind, "provider_unclassified")
+  assertEquals(gateway.safeCode, "FEL_UNDOCUMENTED")
+  assertEquals(gateway.sanitizedMessage.includes("Comunicacion de ejemplo"), true)
+  assertEquals(classifyDocumentedProviderCodes(["FEL_UNDOCUMENTED"]), "unclassified")
+  assertEquals(classifyTransportFailure("provider_unclassified"), "permanent")
+  assertEquals(classifyTransportFailure("provider_communication"), "permanent")
+  const gatewayService = await certifyProviderHttp(502, JSON.stringify({
+    data: { errors: ["Comunicacion de ejemplo"], error_codes: ["FEL_UNDOCUMENTED"] },
+  }))
+  assertEquals(gatewayService.calls, 1)
+  assertEquals(gatewayService.repo.finalizations.some((entry) => entry.outcome === "success"), false)
+  assertEquals(gatewayService.repo.finalizations[0]?.safeResponsePayload?.safe_code, "FEL_UNDOCUMENTED")
+
+  for (const status of [402, 403] as const) {
+    const subscription = await certifyProviderHttp(status, JSON.stringify({
+      errors: ["Suscripcion de ejemplo vencida"],
+    }))
+    assertEquals(subscription.calls, 1)
+    assertEquals(subscription.result.body.error_code, "subscription")
+    assertEquals(subscription.repo.finalizations.some((entry) => entry.outcome === "success"), false)
+    assertEquals(subscription.repo.finalizations[0]?.safeResponsePayload?.error_kind, "subscription")
+    assertEquals(
+      subscription.repo.finalizations[0]?.safeResponsePayload?.safe_message?.includes("Suscripcion de ejemplo vencida"),
+      true,
+    )
+  }
+})
+
+Deno.test("GT-37 cuerpos inseguros quedan genericos y acotados", async () => {
+  const html = await certifyProviderHttp(422, "<html><script>alert(1)</script></html>")
+  assertEquals(html.repo.finalizations[0]?.safeResponsePayload?.safe_message?.includes("<"), false)
+  assertEquals(html.repo.finalizations[0]?.safeResponsePayload?.safe_message?.includes("script"), false)
+  assertEquals(html.result.body.message.includes("<html>"), false)
+
+  const longItem = "L".repeat(500)
+  const many = Array.from({ length: 12 }, (_, index) => index === 8 ? "NOT_PERSISTED_NINE" : `item-${index}`)
+  many[0] = longItem
+  const bounded = interpretFelplexProviderStatus(422, JSON.stringify({
+    data: { valid: false, errors: many, error_codes: ["FEL_OK"] },
+  }))
+  assertEquals((bounded.sanitizedMessage ?? "").length <= 240, true)
+  assertEquals(bounded.sanitizedMessage.includes("NOT_PERSISTED_NINE"), false)
+  assertEquals(bounded.sanitizedMessage.includes(longItem), false)
+
+  const dirty = interpretFelplexProviderStatus(422, JSON.stringify({
+    data: {
+      valid: false,
+      errors: [{ leak: "OBJETO_CRUDO" }, "<b>html</b>", "api_key=super-secret"],
+      error_codes: [{ raw: true }, "token-secret"],
+    },
+  }))
+  assertEquals(dirty.sanitizedMessage.includes("OBJETO_CRUDO"), false)
+  assertEquals(dirty.sanitizedMessage.includes("html"), false)
+  assertEquals(dirty.sanitizedMessage.includes("super-secret"), false)
+  assertEquals(dirty.safeCode?.includes("token-secret"), false)
+  assertEquals(dirty.sanitizedMessage, "Certificacion rechazada.")
+
+  assertEquals(isAllowedFelplexStagePath("/api/tenant/v1/gt-legacy/invoices/byexternalid"), false)
+  assertEquals(
+    validateFelplexStageUrl(
+      `${FELPLEX_STAGE_BASE_URL}/api/tenant/v1/gt-legacy/invoices/${OFFICIAL_GT_STAGE_UUID}`,
+    ) == null,
+    false,
+  )
 })

@@ -1,4 +1,5 @@
 import { FELPLEX_HTTP_TIMEOUT_MS } from "./constants.ts"
+import { interpretFelplexProviderStatus } from "./providerStatus.ts"
 import { sanitizePublicMessage } from "./sanitize.ts"
 import { validateFelplexStageUrl } from "./urlAllowlist.ts"
 import type { FelplexTransport, FelplexTransportRequest, FelplexTransportResult } from "./types.ts"
@@ -44,6 +45,15 @@ export function createFetchFelplexTransport(
 
         const text = await response.text()
         let body: unknown = null
+
+        if (
+          response.status === 402
+          || response.status === 403
+          || response.status === 422
+          || response.status === 502
+        ) {
+          return interpretFelplexProviderStatus(response.status, text)
+        }
 
         if (response.status >= 500) {
           return {

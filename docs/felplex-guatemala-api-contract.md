@@ -120,12 +120,22 @@ Implementación: `supabase/functions/_shared/felplex/payloadBuilder.ts`
 
 ## Respuesta sanitizada
 
-### Éxito funcional (`valid: true`)
+### Éxito funcional (HTTP 200, `data.valid === true`)
 
-Campos mínimos exigidos por parser en `valid: true`: `uuid`, `sat.serie`, `sat.no`, `sat.authorization`, `sat.certification_date`, `invoice_url`, `invoice_xml`.
+El parser certifica solo leyendo `response.data`. No hay fallback al contrato plano en la raíz. Una respuesta con `valid`, `uuid` y `sat` únicamente en la raíz se rechaza.
+
+Campos obligatorios bajo `data`: `valid` (`true`), `uuid`, `sat.serie`, `sat.no`, `sat.authorization`, `sat.certification_date`, `invoice_url`, `invoice_xml`.
+`data.uuid` debe ser igual a `data.sat.authorization`, sin distinguir mayúsculas.
+`data.sat.no` se conserva como texto. Se acepta el entero `4294967295` (`"4294967295"`). Se rechazan vacíos, negativos, no enteros e inválidos. La columna SQL sigue siendo `text`.
 `sat.certification_date` es **obligatoria**. Texto no vacío `YYYY-MM-DDTHH:mm:ss`, con fracción de segundo opcional. Fecha inexistente o formato inválido se rechaza antes del RPC de éxito; no se sustituye con `now()`.
-Zona: sin `Z` ni offset es hora civil de Guatemala y se normaliza al mismo reloj con `-06:00` fijo (sin horario de verano; no usa la zona de PostgreSQL, Deno ni la sesión). Ejemplo FELplex: `2024-06-20T15:15:39` → `2024-06-20T15:15:39-06:00`. Con `Z` u offset ISO se conserva ese instante.
-`invoice_url` e `invoice_xml` son obligatorias en el host `felplex-gt.stage.plex.lat`, rutas `/pdf/{uuid}` y `/xml/{uuid}`, con el mismo UUID.
+Zona: sin `Z` ni offset es hora civil de Guatemala y se normaliza al mismo reloj con `-06:00` fijo (sin horario de verano; no usa la zona de PostgreSQL, Deno ni la sesión). Ejemplo FELplex: `2026-07-22T15:15:39` → `2026-07-22T15:15:39-06:00`. Con `Z` u offset ISO se conserva ese instante.
+`invoice_url` e `invoice_xml` son obligatorias en el host `felplex-gt.stage.plex.lat`, rutas `/pdf/{uuid}` y `/xml/{uuid}`, con el mismo UUID, HTTPS, sin credenciales, puerto, query ni fragment.
+
+HTTP 200 solo certifica con `data.valid === true`. Un 200 inválido o incompleto es `FELPLEX_INVALID_RESPONSE`.
+
+HTTP 422 es fallo funcional: se leen y sanitizan `data.errors` y `data.error_codes`. No certifica y no es un 4xx genérico.
+HTTP 402 y 403 son suscripción. `data` puede faltar; el motivo se lee de `errors` en la raíz. No hay reintento automático.
+HTTP 502 nunca certifica. El cuerpo se parsea antes de clasificar. Los `error_codes` concretos de rechazo SAT frente a fallo de comunicación siguen sin documentar; un código no reconocido queda `provider_unclassified` y no abre reintento automático. Otros 5xx siguen como error temporal.
 
 **Confirmado (Postman Variables generales, export 2026-09-10):** `without_iva` es bandera **0** (con IVA) / **1** (sin IVA); el IVA monetario va en `total_tax`. Base imponible **no** se envía en `without_iva`.
 **Confirmado:** `emails` / `emails_cc` como arreglos de `{ "email": "…" }`.
@@ -136,9 +146,10 @@ Zona: sin `Z` ni offset es hora civil de Guatemala y se normaliza al mismo reloj
 
 **HTTP:** NOT EXECUTED. `FELPLEX_CONTRACT_HTTP_CONFIRMED` permanece apagado.
 
-### Fallo funcional (`valid: false`)
+### Fallo funcional
 
-HTTP 200 con `valid: false` **no** es certificación. Se preservan `errors` (anidados) y `error_codes`.
+HTTP 200 con `data.valid === false` no certifica.
+HTTP 422 con `data.valid === false` es fallo funcional del proveedor. Se persisten solo `http_status`, `error_kind`, `provider_valid`, `safe_code` y `safe_message`. `safe_code` admite hasta 64 caracteres; `safe_message`, hasta 240. Como máximo se consideran 8 mensajes y 8 códigos. Objetos, HTML, secretos y formas no previstas se sustituyen por un mensaje genérico.
 
 ---
 
@@ -167,10 +178,13 @@ HTTP 200 con `valid: false` **no** es certificación. Se preservan `errors` (ani
 | `emails` objeto `{ email }` | ✓ | | |
 | `datetime_issue` GT `YYYY-MM-DDTHH:mm:ss` | ✓ | | |
 | `sat.certification_date` obligatoria; sin zona = `-06:00` | ✓ | | |
+| Éxito solo bajo `data`; `uuid` = `authorization` | ✓ | | |
 | IVA incluido 12/112 (`total_tax`) por ítem v1 | ✓ | | |
 | Piloto v1 canales `dine_in`/`takeout` | ✓ | | |
 | Delivery / online en piloto v1 | | | ✓ (bloqueado en gates) |
-| Parser `valid` true/false | ✓ | | |
+| Parser `data.valid === true` | ✓ | | |
+| HTTP 422 fallo funcional; 402/403 suscripción | ✓ | | |
+| HTTP 502 `error_codes` SAT vs comunicación | | | ✓ (códigos aún no documentados) |
 | Timeout → resultado ambiguo (cat. B) | ✓ | | |
 | GET / DELETE operativos | | | ✓ (no habilitados) |
 | Secretos Stage (nombre presente; valor no en repo) | ✓ | | |

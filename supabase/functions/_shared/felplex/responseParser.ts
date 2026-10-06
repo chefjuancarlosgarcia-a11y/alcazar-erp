@@ -1,7 +1,7 @@
 import { FELPLEX_STAGE_HOST } from "./constants.ts"
 import { sanitizeFelplexErrors } from "./sanitize.ts"
 import { validateFelplexStageUrl } from "./urlAllowlist.ts"
-import type { FelplexCertifyResponse } from "./types.ts"
+import type { FelplexCertifyData, FelplexCertifyResponse } from "./types.ts"
 
 export type FelplexParsedCertification = {
   felUuid: string
@@ -29,15 +29,17 @@ export type ParseFelplexResponseResult =
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
+const SAT_DOCUMENT_NUMBER_PATTERN = /^(?:0|[1-9]\d*)$/
+
 export function normalizeSatDocumentNumber(value: unknown): string | null {
-  if (value == null) return null
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return String(Math.trunc(value))
+  if (typeof value === "number") {
+    if (!Number.isSafeInteger(value) || value < 0) return null
+    return String(value)
   }
-  if (typeof value === "string" && value.trim()) {
-    return value.trim()
-  }
-  return null
+  if (typeof value !== "string") return null
+  const trimmed = value.trim()
+  if (!SAT_DOCUMENT_NUMBER_PATTERN.test(trimmed)) return null
+  return trimmed
 }
 
 export function extractFelplexErrorCodes(body: FelplexCertifyResponse): string[] {
@@ -169,7 +171,17 @@ export function parseFelplexCertifyResponse(
     }
   }
 
-  if (parsed.valid !== true) {
+  const envelope = readSuccessEnvelope(parsed.data)
+  if (!envelope) {
+    return {
+      ok: false,
+      kind: "malformed",
+      message: "Respuesta FELplex sin data.",
+      raw: parsed,
+    }
+  }
+
+  if (envelope.valid !== true) {
     return {
       ok: false,
       kind: "malformed",
@@ -178,7 +190,7 @@ export function parseFelplexCertifyResponse(
     }
   }
 
-  const felUuid = typeof parsed.uuid === "string" ? parsed.uuid.trim() : ""
+  const felUuid = typeof envelope.uuid === "string" ? envelope.uuid.trim() : ""
   if (!UUID_PATTERN.test(felUuid)) {
     return {
       ok: false,
@@ -188,12 +200,12 @@ export function parseFelplexCertifyResponse(
     }
   }
 
-  const satAuthorization = typeof parsed.sat?.authorization === "string"
-    ? parsed.sat.authorization.trim()
+  const satAuthorization = typeof envelope.sat?.authorization === "string"
+    ? envelope.sat.authorization.trim()
     : ""
-  const satSeries = typeof parsed.sat?.serie === "string" ? parsed.sat.serie.trim() : ""
-  const satNo = normalizeSatDocumentNumber(parsed.sat?.no)
-  const certifiedAt = parseSatCertificationDate(parsed.sat?.certification_date)
+  const satSeries = typeof envelope.sat?.serie === "string" ? envelope.sat.serie.trim() : ""
+  const satNo = normalizeSatDocumentNumber(envelope.sat?.no)
+  const certifiedAt = parseSatCertificationDate(envelope.sat?.certification_date)
 
   if (!satAuthorization || !satSeries || !satNo || !certifiedAt) {
     return {
@@ -204,7 +216,16 @@ export function parseFelplexCertifyResponse(
     }
   }
 
-  const invoiceUrlError = validateStageResourceUrl(parsed.invoice_url, "pdf", felUuid, "invoice_url")
+  if (satAuthorization.toLowerCase() !== felUuid.toLowerCase()) {
+    return {
+      ok: false,
+      kind: "incomplete",
+      message: "uuid no coincide con sat.authorization.",
+      raw: parsed,
+    }
+  }
+
+  const invoiceUrlError = validateStageResourceUrl(envelope.invoice_url, "pdf", felUuid, "invoice_url")
   if (invoiceUrlError) {
     return {
       ok: false,
@@ -216,7 +237,7 @@ export function parseFelplexCertifyResponse(
     }
   }
 
-  const invoiceXmlError = validateStageResourceUrl(parsed.invoice_xml, "xml", felUuid, "invoice_xml")
+  const invoiceXmlError = validateStageResourceUrl(envelope.invoice_xml, "xml", felUuid, "invoice_xml")
   if (invoiceXmlError) {
     return {
       ok: false,
@@ -237,6 +258,9 @@ export function parseFelplexCertifyResponse(
     }
   }
 
+  const invoiceUrl = typeof envelope.invoice_url === "string" ? envelope.invoice_url : undefined
+  const invoiceXml = typeof envelope.invoice_xml === "string" ? envelope.invoice_xml : undefined
+
   return {
     ok: true,
     kind: "certified",
@@ -247,10 +271,15 @@ export function parseFelplexCertifyResponse(
       satDocumentNumber: satNo,
       satAuthorization,
       certifiedAt,
-      invoiceUrl: typeof parsed.invoice_url === "string" ? parsed.invoice_url : undefined,
-      invoiceXml: typeof parsed.invoice_xml === "string" ? parsed.invoice_xml : undefined,
-      certifierName: typeof parsed.certifier?.name === "string" ? parsed.certifier.name : undefined,
-      certifierTaxCode: typeof parsed.certifier?.tax_code === "string" ? parsed.certifier.tax_code : undefined,
+      invoiceUrl,
+      invoiceXml,
+      certifierName: typeof envelope.certifier?.name === "string" ? envelope.certifier.name : undefined,
+      certifierTaxCode: typeof envelope.certifier?.tax_code === "string" ? envelope.certifier.tax_code : undefined,
     },
   }
+}
+
+function readSuccessEnvelope(value: unknown): FelplexCertifyData | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null
+  return value as FelplexCertifyData
 }

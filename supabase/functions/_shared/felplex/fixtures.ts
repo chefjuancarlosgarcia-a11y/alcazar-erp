@@ -85,22 +85,24 @@ export function makeNitDocument(overrides: Partial<FelDocumentRow> = {}): FelDoc
 }
 
 export const SANITIZED_CERTIFY_SUCCESS_RESPONSE = {
-  valid: true,
-  uuid: "71916AF3-73F6-480B-B3B3-6F6E3DABC334",
-  sat: {
-    serie: "A",
-    no: 123,
-    authorization: "AUTH-FIXTURE-0001",
-    certification_date: "2026-08-08T20:00:00",
+  data: {
+    valid: true,
+    uuid: "71916AF3-73F6-480B-B3B3-6F6E3DABC334",
+    sat: {
+      serie: "A",
+      no: 123,
+      authorization: "71916AF3-73F6-480B-B3B3-6F6E3DABC334",
+      certification_date: "2026-08-08T20:00:00",
+    },
+    certifier: {
+      name: "Certificador Ficticio",
+      tax_code: "000000-0",
+    },
+    errors: [],
+    error_codes: [],
+    invoice_url: "https://felplex-gt.stage.plex.lat/pdf/71916AF3-73F6-480B-B3B3-6F6E3DABC334",
+    invoice_xml: "https://felplex-gt.stage.plex.lat/xml/71916AF3-73F6-480B-B3B3-6F6E3DABC334",
   },
-  certifier: {
-    name: "Certificador Ficticio",
-    tax_code: "000000-0",
-  },
-  errors: [],
-  error_codes: [],
-  invoice_url: "https://felplex-gt.stage.plex.lat/pdf/71916AF3-73F6-480B-B3B3-6F6E3DABC334",
-  invoice_xml: "https://felplex-gt.stage.plex.lat/xml/71916AF3-73F6-480B-B3B3-6F6E3DABC334",
 } as const
 
 export const SANITIZED_CERTIFY_FAILURE_RESPONSE = {

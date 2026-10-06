@@ -8,6 +8,8 @@ export interface AdaptedFelplexResult {
   satSeries?: string
   satDocumentNumber?: string
   certifiedAt?: string
+  invoiceUrl?: string
+  invoiceXml?: string
   publicMessage: string
   errorClassification: "transient" | "permanent" | "ambiguous"
   errorCodes?: string[]
@@ -34,6 +36,8 @@ export function adaptFelplexResponse(body: unknown, httpStatus: number): Adapted
     satSeries: parsed.data.satSeries,
     satDocumentNumber: parsed.data.satDocumentNumber,
     certifiedAt: parsed.data.certifiedAt,
+    invoiceUrl: parsed.data.invoiceUrl,
+    invoiceXml: parsed.data.invoiceXml,
     publicMessage: "Documento certificado.",
     errorClassification: "permanent",
     raw: parsed.raw,
@@ -49,5 +53,6 @@ export function classifyTransportFailure(
   if (errorKind === "network" || errorKind === "http_5xx") {
     return "transient"
   }
+  // 402/403/422 and unclassified 502 stay permanent: no automatic POST retry.
   return "permanent"
 }

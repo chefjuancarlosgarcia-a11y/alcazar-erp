@@ -206,6 +206,11 @@ export type TransportErrorKind =
   | "network"
   | "http_4xx"
   | "http_5xx"
+  | "functional_failure"
+  | "subscription"
+  | "sat_rejection"
+  | "provider_communication"
+  | "provider_unclassified"
   | "malformed"
   | "blocked"
 
@@ -214,6 +219,8 @@ export interface FelplexTransportResult {
   httpStatus?: number
   body?: unknown
   errorKind?: TransportErrorKind
+  /** Bounded provider code list, or the classification token. Never the raw body. */
+  safeCode?: string
   sanitizedMessage: string
 }
 
@@ -221,23 +228,36 @@ export interface FelplexTransport {
   send(request: FelplexTransportRequest): Promise<FelplexTransportResult>
 }
 
-export interface FelplexCertifyResponse {
+export interface FelplexCertifySat {
+  serie?: string | null
+  no?: string | number | null
+  authorization?: string | null
+  certification_date?: string | null
+}
+
+/** Official success envelope. Certification fields are read only from here. */
+export interface FelplexCertifyData {
   valid?: boolean
   uuid?: string
-  sat?: {
-    serie?: string | null
-    no?: string | number | null
-    authorization?: string | null
-    certification_date?: string | null
-  }
+  sat?: FelplexCertifySat | null
   certifier?: {
     name?: string
     tax_code?: string
-  }
+  } | null
   errors?: unknown
   error_codes?: string[]
   invoice_url?: string | null
   invoice_xml?: string | null
+}
+
+export interface FelplexCertifyResponse {
+  /** Root `valid: false` remains the current HTTP 200 functional-failure shape. */
+  valid?: boolean
+  uuid?: string
+  sat?: FelplexCertifySat | null
+  errors?: unknown
+  error_codes?: string[]
+  data?: FelplexCertifyData | null
 }
 
 export interface AttemptRecord {
