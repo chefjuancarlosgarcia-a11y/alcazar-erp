@@ -19,6 +19,8 @@ export function normalizeChecklistAssignmentPayload(payload = {}) {
   }
 }
 
+export { checklistAssignmentMatchesRun, checklistDueTimeKey } from "./checklistAssignmentMatch.js"
+
 export function isSameChecklistAssignee(run, payload = {}) {
   const leftProfile = run?.assigned_profile_id || null
   const rightProfile = payload.assigned_profile_id || null
