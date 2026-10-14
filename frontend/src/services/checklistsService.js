@@ -9,7 +9,8 @@ import {
 } from "../utils/checklistOperationalStatus"
 import {
   canForceCancelCompletedTodayRun,
-  canManageChecklistAssignmentDirectly
+  canManageChecklistAssignmentDirectly,
+  checklistAssignmentMatchesRun
 } from "../utils/checklistAssignment"
 import { buildChecklistModuleAudit } from "../utils/checklistModuleAudit"
 
@@ -731,11 +732,23 @@ export async function getChecklistRunSessionAudit(runId) {
   return { data: data || [], error }
 }
 
+function blankToNull(value) {
+  const text = String(value ?? "").trim()
+  return text || null
+}
+
+async function reloadChecklistRun(runId) {
+  const extended = await supabase.from("checklist_runs").select(RUN_SELECT_EXTENDED).eq("id", runId).single()
+  if (!extended.error) return { data: orderRun(extended.data), error: null }
+  const core = await supabase.from("checklist_runs").select(RUN_SELECT_CORE).eq("id", runId).single()
+  if (core.error) return { data: null, error: core.error }
+  return { data: orderRun(core.data), error: null }
+}
+
 export async function reassignTodayChecklistRun({
   run,
   assignmentPayload,
-  reason = "",
-  requestedByProfileId = null
+  reason = ""
 }) {
   if (!run?.id || !run?.template_id) {
     return { data: null, error: { message: "Corrida invalida para reasignar." } }
@@ -753,8 +766,7 @@ export async function reassignTodayChecklistRun({
     payload,
     conflictingRuns: [run],
     mode: "replace",
-    reason,
-    requestedByProfileId
+    reason
   })
 }
 
@@ -762,60 +774,57 @@ export async function executeChecklistAssignmentResolution({
   payload,
   conflictingRuns = [],
   mode = "replace",
-  reason = "",
-  requestedByProfileId = null,
-  approvedByProfileId = null
+  reason = ""
 }) {
-  const actorId = approvedByProfileId || requestedByProfileId
-  const auditBase = {
-    reason: reason || null,
-    requested_by: requestedByProfileId || null,
-    approved_by: approvedByProfileId || null,
-    mode
-  }
-
-  if (mode === "replace") {
-    for (const run of conflictingRuns) {
-      const cancelResult = await cancelChecklistRun(run.id)
-      if (cancelResult.error) return { data: null, error: cancelResult.error }
-      await logChecklistSessionAudit({
-        profileId: actorId,
-        runId: run.id,
-        eventType: "assignment_replaced_cancelled",
-        details: {
-          ...auditBase,
-          previous_assigned_profile_id: run.assigned_profile_id || null,
-          previous_assigned_role: run.assigned_role || null,
-          previous_area: run.area || null,
-          new_assigned_profile_id: payload.assigned_profile_id || null,
-          new_assigned_role: payload.assigned_role || null,
-          new_area: payload.area || null
-        }
-      })
+  if (mode === "additional") {
+    return {
+      data: null,
+      error: { message: "Solo se puede reemplazar al responsable. Esta checklist ya tiene una corrida activa para esa fecha." }
     }
   }
 
-  const createResult = await createChecklistRunFromTemplate(payload.template_id, {
-    ...payload,
-    assignment_source: mode === "additional" ? "manual_additional" : "reassignment"
-  })
-  if (createResult.error) return createResult
+  if (mode !== "replace") {
+    return { data: null, error: { message: "Modo de asignacion no soportado." } }
+  }
 
-  await logChecklistSessionAudit({
-    profileId: actorId,
-    runId: createResult.data?.id || null,
-    eventType: mode === "additional" ? "assignment_additional_created" : "assignment_replacement_created",
-    details: {
-      ...auditBase,
-      conflicting_run_ids: conflictingRuns.map((run) => run.id),
-      assigned_profile_id: payload.assigned_profile_id || null,
-      assigned_role: payload.assigned_role || null,
-      area: payload.area || null,
-      run_date: payload.run_date || null
+  const reasonText = String(reason || "").trim()
+  if (!reasonText) {
+    return { data: null, error: { message: "Indica el motivo del cambio de responsable." } }
+  }
+  if (!conflictingRuns.length) {
+    return { data: null, error: { message: "No hay una corrida activa para reemplazar." } }
+  }
+
+  const assignment = {
+    assigned_profile_id: blankToNull(payload.assigned_profile_id),
+    assigned_role: blankToNull(payload.assigned_role),
+    area: blankToNull(payload.area),
+    due_time: blankToNull(payload.due_time)
+  }
+
+  for (const run of conflictingRuns) {
+    const { error } = await supabase.rpc("reassign_checklist_run_inplace", {
+      p_run_id: run.id,
+      p_assigned_profile_id: assignment.assigned_profile_id,
+      p_assigned_role: assignment.assigned_role,
+      p_area: assignment.area,
+      p_due_time: assignment.due_time,
+      p_reason: reasonText
+    })
+    if (error) return { data: null, error }
+  }
+
+  const reloaded = await reloadChecklistRun(conflictingRuns[0].id)
+  if (reloaded.error) return { data: null, error: reloaded.error }
+  if (!checklistAssignmentMatchesRun(reloaded.data, assignment)) {
+    return {
+      data: null,
+      error: { message: "La corrida no quedo con el responsable indicado." }
     }
-  })
+  }
 
-  return createResult
+  window.dispatchEvent(new CustomEvent("notifications-updated"))
+  return { data: { ...reloaded.data, existedAlready: true }, error: null }
 }
 
 export async function submitChecklistAssignmentChangeRequest({
@@ -908,9 +917,7 @@ export async function approveChecklistAssignmentChangeRequest(request, {
     payload,
     conflictingRuns,
     mode: meta.action || "replace",
-    reason: meta.reason || reviewNotes,
-    requestedByProfileId: request.submitted_by || null,
-    approvedByProfileId
+    reason: meta.reason || reviewNotes
   })
   if (resolution.error) return resolution
 
@@ -1136,12 +1143,13 @@ export async function logChecklistSessionAudit({
   return { error }
 }
 
-export async function getChecklistProfiles() {
-  const { data, error } = await supabase
+export async function getChecklistProfiles({ includeInactive = false } = {}) {
+  let query = supabase
     .from("profiles")
     .select("id, full_name, username, role, area_name, status, supervisor_profile_id")
-    .eq("status", "active")
     .order("full_name", { ascending: true })
+  if (!includeInactive) query = query.eq("status", "active")
+  const { data, error } = await query
   return { data: data || [], error }
 }
 
