@@ -1,7 +1,7 @@
 // Default roles for backward compatibility
 // These should be kept in sync with the user_roles table
-import { CACHE_KEYS } from "../services/cacheConfig"
-import { invalidateQueryCache } from "../services/queryCache"
+import { CACHE_KEYS } from "../services/cacheConfig.js"
+import { invalidateQueryCache } from "../services/queryCache.js"
 
 export const PROFILE_ROLES = [
   "admin",

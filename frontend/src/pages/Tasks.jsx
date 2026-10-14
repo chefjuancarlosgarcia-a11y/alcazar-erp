@@ -1904,16 +1904,16 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
       const alertResult = alertRequests.length ? results[resultIndex++] : null
       const profileRows = profileResult.data || []
 
-      try {
-        const genResult = await generateDueChecklistRuns(operationalToday)
-        const hasTodayWorkRuns = (runsList = []) => (runsList || []).some((run) => isChecklistRunTodayWork(run))
+      if (canViewChecklistLibrary) {
+        try {
+          const genResult = await generateDueChecklistRuns(operationalToday)
+          const hasTodayWorkRuns = (runsList = []) => (runsList || []).some((run) => isChecklistRunTodayWork(run))
 
-        if (genResult.error) {
-          generationWarning = genResult.error.message || "No se pudieron generar checklists recurrentes."
-        }
+          if (genResult.error) {
+            generationWarning = genResult.error.message || "No se pudieron generar checklists recurrentes."
+          }
 
-        if (!hasTodayWorkRuns(runResult.data)) {
-          if (canViewChecklistLibrary) {
+          if (!hasTodayWorkRuns(runResult.data)) {
             const fallback = await ensureDueChecklistRunsFromTemplates(
               templateResult.data || [],
               operationalToday,
@@ -1930,14 +1930,14 @@ function ChecklistsModule({ user, initialRunId = "", initialChecklistView = "" }
             } else if (fallback.attempted > 0) {
               generationWarning = `No se pudieron crear checklists para hoy (${fallback.attempted} intento(s)). Revisa permisos o migracion 112.`
             }
+          } else if (Number(genResult.data || 0) > 0) {
+            const reload = await loadModuleChecklistRuns()
+            if (!reload.error) runResult = reload
           }
-        } else if (Number(genResult.data || 0) > 0) {
-          const reload = await loadModuleChecklistRuns()
-          if (!reload.error) runResult = reload
+        } catch (generationError) {
+          console.error("Checklist generation error:", generationError)
+          generationWarning = generationError?.message || "No se pudieron generar checklists recurrentes."
         }
-      } catch (generationError) {
-        console.error("Checklist generation error:", generationError)
-        generationWarning = generationError?.message || "No se pudieron generar checklists recurrentes."
       }
 
       if (canViewOperationalProcessGroups) {

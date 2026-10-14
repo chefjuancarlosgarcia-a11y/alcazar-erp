@@ -1,4 +1,4 @@
-import { normalizeRole } from "./profilePermissions"
+import { normalizeRole } from "./profilePermissions.js"
 import {
   filterRunsWithoutCompletedDuplicate,
   getChecklistOperationalDate,
@@ -10,7 +10,7 @@ import {
   normalizeChecklistRunDate,
   normalizeChecklistRunStatus,
   hasChecklistReplacement
-} from "./checklistOperationalStatus"
+} from "./checklistOperationalStatus.js"
 
 export { filterRunsWithoutCompletedDuplicate }
 
