@@ -1,6 +1,6 @@
-import { CACHE_TTL } from "./cacheConfig"
-import { cacheKeyPrefix, logPerformanceEvent } from "../utils/performanceLogger"
-import { isErpPerfDebugEnabled, logErpPerfCacheEvent } from "../utils/erpPerf"
+import { CACHE_TTL } from "./cacheConfig.js"
+import { cacheKeyPrefix, logPerformanceEvent } from "../utils/performanceLogger.js"
+import { isErpPerfDebugEnabled, logErpPerfCacheEvent } from "../utils/erpPerf.js"
 
 const entries = new Map()
 
