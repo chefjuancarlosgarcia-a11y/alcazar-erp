@@ -2,10 +2,14 @@ import {
   ACCOUNT_KINDS,
   FINANCIAL_TYPES,
   IMPORT_FIELD_ALIASES,
+  BALANCE_SHEET_SECTION_LABELS,
+  BALANCE_SHEET_SECTION_ORDER,
+  BALANCE_SHEET_UNCLASSIFIED_ACCOUNT_WARNING,
   INCOME_STATEMENT_SECTION_LABELS,
   INCOME_STATEMENT_SECTION_ORDER,
   INCOME_STATEMENT_UNCLASSIFIED_ACCOUNT_WARNING,
   NATURAL_BALANCES,
+  balanceSheetSectionsFor,
   incomeStatementSectionsFor
 } from "./financeChartAccountsConstants.js"
 
@@ -49,6 +53,8 @@ export function wouldImportCycle(code, parentCode, rows) {
 export function buildFinanceChartAccountWritePayload(form) {
   const sectionChoices = incomeStatementSectionsFor(form.financial_type, form.account_kind)
   const selected = sectionChoices.length ? String(form.income_statement_section ?? "").trim() : ""
+  const balanceChoices = balanceSheetSectionsFor(form.financial_type, form.account_kind)
+  const balanceSelected = balanceChoices.length ? String(form.balance_sheet_section ?? "").trim() : ""
   return {
     name: form.name,
     parent_id: form.parent_id || null,
@@ -59,7 +65,8 @@ export function buildFinanceChartAccountWritePayload(form) {
     description: form.description ?? "",
     branch_dimension_rule: form.branch_dimension_rule,
     cost_center_dimension_rule: form.cost_center_dimension_rule,
-    income_statement_section: selected
+    income_statement_section: selected,
+    balance_sheet_section: balanceSelected
   }
 }
 
@@ -87,6 +94,34 @@ export function resolveIncomeStatementSection({ raw, financialType, accountKind 
   }
   if (!incomeStatementSectionsFor(type, kind).includes(section)) {
     return { section: null, error: "La sección del Estado de Resultados no corresponde al tipo financiero.", warning: null }
+  }
+  return { section, error: null, warning: null }
+}
+
+export function resolveBalanceSheetSection({ raw, financialType, accountKind }) {
+  const text = String(raw ?? "").trim()
+  const kind = String(accountKind || "").trim().toLowerCase()
+  const type = String(financialType || "").trim().toLowerCase()
+  if (!text) {
+    if (balanceSheetSectionsFor(type, kind).length) {
+      return { section: null, error: null, warning: BALANCE_SHEET_UNCLASSIFIED_ACCOUNT_WARNING }
+    }
+    return { section: null, error: null, warning: null }
+  }
+  const lower = text.toLowerCase()
+  const byLabel = Object.entries(BALANCE_SHEET_SECTION_LABELS).find(([, label]) => label.toLowerCase() === lower)
+  const section = BALANCE_SHEET_SECTION_ORDER.includes(lower) ? lower : (byLabel ? byLabel[0] : null)
+  if (!section) {
+    return { section: null, error: "Sección del Balance General desconocida.", warning: null }
+  }
+  if (kind === "header") {
+    return { section: null, error: "Las cuentas acumuladoras no llevan sección del Balance General.", warning: null }
+  }
+  if (["income", "cost", "expense"].includes(type)) {
+    return { section: null, error: "Las cuentas de resultados no llevan sección del Balance General.", warning: null }
+  }
+  if (!balanceSheetSectionsFor(type, kind).includes(section)) {
+    return { section: null, error: "La sección del Balance General no corresponde al tipo financiero.", warning: null }
   }
   return { section, error: null, warning: null }
 }
@@ -153,6 +188,16 @@ export function validateChartAccountImportRows(rows, existingCodes = []) {
         rowErrors.push({ field: "seccion_resultados", message: classified.error })
       } else if (classified.warning && rowErrors.length === 0) {
         warnings.push({ row_number: rowNumber, field: "seccion_resultados", message: classified.warning })
+      }
+      const balanceClassified = resolveBalanceSheetSection({
+        raw: row.seccion_balance,
+        financialType,
+        accountKind
+      })
+      if (balanceClassified.error) {
+        rowErrors.push({ field: "seccion_balance", message: balanceClassified.error })
+      } else if (balanceClassified.warning && rowErrors.length === 0) {
+        warnings.push({ row_number: rowNumber, field: "seccion_balance", message: balanceClassified.warning })
       }
     }
 

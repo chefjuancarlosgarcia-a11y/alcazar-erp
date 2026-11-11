@@ -182,15 +182,56 @@ test("encabezados y cuentas de balance envían sección vacía", () => {
   const header = buildFinanceChartAccountWritePayload(accountForm({
     account_kind: "header",
     accepts_entries: false,
-    income_statement_section: "operating_expense_admin"
+    income_statement_section: "operating_expense_admin",
+    balance_sheet_section: "current_asset"
   }))
   const asset = buildFinanceChartAccountWritePayload(accountForm({
     financial_type: "asset",
-    income_statement_section: "operating_income"
+    income_statement_section: "operating_income",
+    balance_sheet_section: ""
   }))
   assert.equal(header.income_statement_section, "")
+  assert.equal(header.balance_sheet_section, "")
   assert.equal(header.accepts_entries, false)
   assert.equal(asset.income_statement_section, "")
+  assert.equal(asset.balance_sheet_section, "")
+})
+
+test("Sin clasificar del Balance General envía cadena vacía", () => {
+  const payload = buildFinanceChartAccountWritePayload(accountForm({
+    financial_type: "asset",
+    natural_balance: "debit",
+    income_statement_section: "",
+    balance_sheet_section: ""
+  }))
+  assert.equal(payload.balance_sheet_section, "")
+  assert.match(JSON.stringify(payload), /"balance_sheet_section":""/)
+  const classified = buildFinanceChartAccountWritePayload(accountForm({
+    financial_type: "liability",
+    natural_balance: "credit",
+    balance_sheet_section: "current_liability"
+  }))
+  assert.equal(classified.balance_sheet_section, "current_liability")
+  assert.equal(classified.income_statement_section, "")
+})
+
+test("un activo detalle sin sección de balance advierte y una combinación inválida se rechaza", () => {
+  const warning = validateChartAccountImportRows([
+    row({ codigo: "1.01", nombre: "Caja", tipo_cuenta: "detail", acepta_movimientos: "true" })
+  ])
+  const rejected = validateChartAccountImportRows([
+    row({ codigo: "1.02", nombre: "Mala", tipo_cuenta: "detail", acepta_movimientos: "true", seccion_balance: "Patrimonio" })
+  ])
+  const labeled = validateChartAccountImportRows([
+    row({ codigo: "1.03", nombre: "Caja ok", tipo_cuenta: "detail", acepta_movimientos: "true", seccion_balance: "Activo corriente" })
+  ])
+  assert.equal(warning.blocking_errors, false)
+  assert.equal(warning.warning_rows, 1)
+  assert.match(warning.warnings[0].message, /Balance General/)
+  assert.equal(rejected.blocking_errors, true)
+  assert.match(rejected.errors[0].message, /no corresponde/)
+  assert.equal(labeled.blocking_errors, false)
+  assert.equal(labeled.warning_rows, 0)
 })
 
 test("la etiqueta española exacta se acepta y el balance sin sección es normal", () => {
