@@ -2,6 +2,7 @@ import { supabase } from "../lib/supabase"
 import { formatSupabaseError, withTimeout } from "./productionTicketsService"
 
 const orderSelect = `*, items:pos_order_items(*), customer:customers(*), customer_address:customer_addresses(*)`
+const floorOrderSelect = `id, table_id, status, sales_channel, total, created_at, waiter_name, items:pos_order_items(id, status)`
 
 function mapOrderItem(row) {
   if (!row) return null
@@ -207,7 +208,7 @@ export async function getActiveOrdersForTables(tableIds = []) {
   const ids = [...new Set((tableIds || []).map((id) => String(id)).filter(Boolean))]
   if (!ids.length) return { data: [], error: null, message: "" }
   const { data, error } = await withTimeout(
-    supabase.from("pos_orders").select(orderSelect).in("table_id", ids).in("status", POS_TABLE_SERVICE_ACTIVE_STATUSES).order("created_at", { ascending: false }),
+    supabase.from("pos_orders").select(floorOrderSelect).in("table_id", ids).in("status", POS_TABLE_SERVICE_ACTIVE_STATUSES).order("created_at", { ascending: false }),
     15000,
     "cargar ordenes activas por mesa"
   )
@@ -220,6 +221,18 @@ export async function getActiveOrdersForTables(tableIds = []) {
     return true
   }).map(mapOrder)
   return { data: deduped, error: null, message: "" }
+}
+
+const cashierPendingSelect = `id, status, total, subtotal, sales_channel, table_id, table_name, area_id, area_name, waiter_id, waiter_name, delivery_notes, created_at, updated_at, customer:customers(id, full_name, phone, email, notes), customer_address:customer_addresses(id, address, reference, notes, google_maps_url), items:pos_order_items(id, product_id, product_name, quantity, unit_price, status, quantity_paid, notes)`
+
+export async function listCashierPendingOrders() {
+  const { data, error } = await withTimeout(
+    supabase.from("pos_orders").select(cashierPendingSelect).in("status", ["sent_to_cashier", "partially_paid"]).order("updated_at", { ascending: false }),
+    10000,
+    "cargar cuentas pendientes de caja"
+  )
+  if (error) return { data: [], error, message: formatSupabaseError(error) }
+  return { data: (data || []).map(mapOrder), error: null, message: "" }
 }
 
 export async function getTableOrderHistory(tableId) {
