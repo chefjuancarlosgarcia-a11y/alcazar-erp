@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { createPosSplitPayment, getPosOrderPaymentStatus } from "../services/posOrdersService"
+import { isServerSessionId } from "../utils/cashierSession"
 import { printSubCheck } from "../services/posPrintService"
 
 const PAYMENT_METHODS = [
@@ -102,6 +103,10 @@ export default function SplitPaymentModal({ bill, user, onClose, onPaid, cashSes
       return
     }
 
+    if (!isServerSessionId(cashSessionId)) {
+      setMessage("No hay caja abierta para esta sesion.")
+      return
+    }
     setProcessing(true)
     setMessage("Procesando subcuenta...")
     try {

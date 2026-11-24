@@ -7,6 +7,8 @@ import {
   LOCAL_RECONCILE_MESSAGE,
   UNVERIFIED_CASH_MESSAGE,
   applyAuthorizedAdjustment,
+  cashChargeTarget,
+  cashDrawerAmount,
   firstConfirmedOpening,
   openingAmountToSubmit,
   paymentBinding,
@@ -55,6 +57,23 @@ test("the first confirmed opening amount is kept when two tablets race", () => {
   ])
   assert.equal(winner.amount, 350)
   assert.equal(openingAmountToSubmit({ canOpen: false, typedAmount: "500" }), null)
+  assert.equal(openingAmountToSubmit({ canOpen: true, typedAmount: "" }), null)
+  assert.equal(openingAmountToSubmit({ canOpen: true, typedAmount: "180" }), 180)
+})
+
+test("a closed shift is rejected and a second open register is not selected", () => {
+  const principal = { id: "11111111-1111-4111-8111-111111111111", status: "closed", registerId: "caja-principal" }
+  const barra = { id: "22222222-2222-4222-8222-222222222222", status: "open", registerId: "caja-barra" }
+  const closed = cashChargeTarget([principal, barra], principal.id)
+  assert.equal(closed.ok, false)
+  assert.equal(closed.message, "No hay caja abierta para esta sesion.")
+  const other = cashChargeTarget([principal, barra], barra.id)
+  assert.equal(other.ok, true)
+  assert.equal(other.cashSessionId, barra.id)
+  assert.equal(other.registerId, "caja-barra")
+  assert.equal(cashDrawerAmount([{ method: "card", amount: 80 }, { method: "cash", amount: 30 }], 100), 20)
+  assert.equal(cashDrawerAmount([{ method: "card", amount: 100 }], 100), 0)
+  assert.equal(cashDrawerAmount([{ method: "cash", amount: 120 }], 100), 100)
 })
 
 test("an authorized cash correction keeps the original opening amount", () => {
@@ -137,4 +156,28 @@ test("the server migration locks one open session and freezes the opening", () =
   assert.match(sql, /p_cash_session_id uuid default null/)
   assert.match(sql, /where id = p_cash_session_id and status = 'open'/)
   assert.match(sql, /cash_sessions_one_open_per_register_idx/)
+  assert.doesNotMatch(sql, /order by opened_at desc/)
+  const paymentStart = sql.indexOf("function public.create_pos_split_payment")
+  const paymentBlock = sql.slice(paymentStart, sql.indexOf("revoke all on function public.create_pos_split_payment", paymentStart))
+  const raiseAt = paymentBlock.indexOf("No hay caja abierta para esta sesion.")
+  const insertAt = paymentBlock.indexOf("insert into public.pos_order_payments")
+  assert.ok(raiseAt >= 0 && insertAt > raiseAt)
+  assert.match(paymentBlock, /drawer_cash > 0/)
+  assert.match(paymentBlock, /cash_session_id/)
+  assert.match(paymentBlock, /auth\.uid\(\)/)
+  const saleStart = sql.indexOf("function public.record_cash_sale")
+  const saleBlock = sql.slice(saleStart, sql.indexOf("revoke all on function public.record_cash_sale", saleStart))
+  assert.match(saleBlock, /p_cash_session_id uuid/)
+  assert.match(saleBlock, /where id = p_cash_session_id and status = 'open'/)
+  assert.match(saleBlock, /for update/)
+  assert.doesNotMatch(saleBlock, /order by opened_at desc/)
+  const closeSql = readFileSync(resolve(root, "supabase/scripts/caja_principal_cierre_junio.sql"), "utf8")
+  assert.match(closeSql, /e30a26a2-fa2a-45aa-a081-4b988a644548/)
+  assert.match(closeSql, /Cierre de sesión de pruebas de junio sin conteo físico histórico/)
+  assert.match(closeSql, /counted_cash = null/)
+  assert.match(closeSql, /difference = null/)
+  assert.match(closeSql, /sale_cash'\) <> 40/)
+  assert.match(closeSql, /shift_open'\) <> 1/)
+  assert.doesNotMatch(closeSql, /close_cash_session/)
+  assert.match(closeSql, /El cierre ya estaba registrado/)
 })

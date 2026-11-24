@@ -108,9 +108,31 @@ export function resolveCashSessionView({ remoteAvailable = false, remoteSession 
 
 export function openingAmountToSubmit({ canOpen, typedAmount }) {
   if (!canOpen) return null
+  if (String(typedAmount ?? "").trim() === "") return null
   const amount = Number(typedAmount)
   if (!Number.isFinite(amount) || amount < 0) return null
   return Math.round(amount * 100) / 100
+}
+
+export function cashChargeTarget(sessions = [], requestedSessionId = "") {
+  const requested = (sessions || []).find((item) => String(item.id) === String(requestedSessionId))
+  if (!requested || requested.status !== "open") {
+    return { ok: false, message: "No hay caja abierta para esta sesion." }
+  }
+  return { ok: true, cashSessionId: requested.id, registerId: requested.registerId || "" }
+}
+
+export function cashDrawerAmount(methods = [], billTotal = 0) {
+  const active = (methods || []).filter((method) => Number(method.amount) > 0)
+  const paid = active.reduce((sum, method) => sum + Number(method.amount), 0)
+  const cash = active
+    .filter((method) => method.method === "cash")
+    .reduce((sum, method) => sum + Number(method.amount), 0)
+  const total = Number(billTotal)
+  if (!Number.isFinite(total) || total < 0 || paid + 0.001 < total) return null
+  const change = Math.max(0, Math.round((paid - total) * 100) / 100)
+  if (change > cash) return null
+  return Math.round((cash - change) * 100) / 100
 }
 
 export function paymentBinding(session, actor) {

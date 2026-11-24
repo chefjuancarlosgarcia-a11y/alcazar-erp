@@ -104,6 +104,15 @@ exception
 end;
 $$;
 
+alter table public.pos_order_payments
+  add column if not exists cash_session_id uuid references public.cash_sessions(id);
+
+comment on column public.pos_order_payments.cash_session_id is
+  'Sesion abierta validada al cobrar. Los pagos anteriores quedan sin sesion.';
+
+create index if not exists pos_order_payments_cash_session_idx
+  on public.pos_order_payments (cash_session_id);
+
 drop function if exists public.create_pos_split_payment(uuid, jsonb, jsonb, text);
 
 create or replace function public.create_pos_split_payment(
@@ -135,6 +144,8 @@ declare
   session_row public.cash_sessions;
   amount_paid_so_far numeric(12,2);
   balance_after numeric(12,2);
+  change_amount numeric(12,2) := 0;
+  drawer_cash numeric(12,2) := 0;
 begin
   if not public.is_cash_operator() then
     raise exception 'No tienes permiso para registrar pagos POS.';
@@ -204,6 +215,25 @@ begin
     raise exception 'El pago esta incompleto para esta subcuenta.';
   end if;
 
+  change_amount := greatest(0, round(paid_total, 2) - round(subtotal, 2));
+  if change_amount > round(cash_total, 2) then
+    raise exception 'Solo el pago en efectivo puede generar vuelto.';
+  end if;
+  drawer_cash := round(cash_total - change_amount, 2);
+
+  if p_cash_session_id is null then
+    raise exception 'No hay caja abierta para esta sesion.';
+  end if;
+
+  select * into session_row
+  from public.cash_sessions
+  where id = p_cash_session_id and status = 'open'
+  for update;
+
+  if session_row.id is null then
+    raise exception 'No hay caja abierta para esta sesion.';
+  end if;
+
   select coalesce(max(p.payment_number), 0) + 1 into payment_number
   from public.pos_order_payments p
   where p.order_id = p_order_id;
@@ -226,7 +256,7 @@ begin
   );
 
   insert into public.pos_order_payments (
-    order_id, payment_number, payment_method, amount, paid_by_label, methods, created_by
+    order_id, payment_number, payment_method, amount, paid_by_label, methods, created_by, cash_session_id
   ) values (
     p_order_id,
     payment_number,
@@ -234,7 +264,8 @@ begin
     subtotal,
     method_label,
     p_methods,
-    auth.uid()
+    auth.uid(),
+    session_row.id
   ) returning * into payment_row;
 
   for line in select * from jsonb_array_elements(p_items)
@@ -273,33 +304,15 @@ begin
       updated_at = now()
   where id = p_order_id;
 
-  if cash_total > 0 then
-    if p_cash_session_id is not null then
-      select * into session_row
-      from public.cash_sessions
-      where id = p_cash_session_id and status = 'open'
-      for update;
-      if session_row.id is null then
-        raise exception 'No hay caja abierta para esta sesion.';
-      end if;
-    else
-      select * into session_row
-      from public.cash_sessions
-      where status = 'open'
-      order by opened_at desc
-      limit 1;
-    end if;
-
-    if session_row.id is not null then
-      perform public.create_cash_movement(
-        session_row.id,
-        'sale_cash',
-        cash_total,
-        'Subcuenta POS #' || payment_number::text,
-        payment_row.id::text,
-        p_order_id
-      );
-    end if;
+  if drawer_cash > 0 then
+    perform public.create_cash_movement(
+      session_row.id,
+      'sale_cash',
+      drawer_cash,
+      'Subcuenta POS #' || payment_number::text,
+      payment_row.id::text,
+      p_order_id
+    );
   end if;
 
   perform public.record_pos_order_event(
@@ -323,3 +336,51 @@ $$;
 
 revoke all on function public.create_pos_split_payment(uuid, jsonb, jsonb, text, uuid) from public;
 grant execute on function public.create_pos_split_payment(uuid, jsonb, jsonb, text, uuid) to authenticated;
+
+drop function if exists public.record_cash_sale(uuid, numeric);
+
+create or replace function public.record_cash_sale(
+  p_order_id uuid,
+  p_amount numeric,
+  p_cash_session_id uuid
+)
+returns public.cash_movements
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  session_row public.cash_sessions;
+begin
+  if not public.is_cash_operator() then
+    raise exception 'No tienes permiso para registrar ventas en efectivo.';
+  end if;
+  if p_cash_session_id is null then
+    raise exception 'No hay caja abierta para esta sesion.';
+  end if;
+
+  select * into session_row
+  from public.cash_sessions
+  where id = p_cash_session_id and status = 'open'
+  for update;
+
+  if session_row.id is null then
+    raise exception 'No hay caja abierta para esta sesion.';
+  end if;
+  if coalesce(p_amount, 0) <= 0 then
+    raise exception 'El efectivo debe ser mayor a cero.';
+  end if;
+
+  return public.create_cash_movement(
+    session_row.id,
+    'sale_cash',
+    p_amount,
+    'Venta en efectivo POS',
+    p_order_id::text,
+    p_order_id
+  );
+end;
+$$;
+
+revoke all on function public.record_cash_sale(uuid, numeric, uuid) from public;
+grant execute on function public.record_cash_sale(uuid, numeric, uuid) to authenticated;

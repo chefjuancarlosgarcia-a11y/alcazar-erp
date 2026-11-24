@@ -1,4 +1,5 @@
 import { cashierAmountsFromOrder, reconcileStoredPreBills } from "./cashierPendingBills"
+import { isServerSessionId } from "./cashierSession"
 
 export const PRE_BILLS_KEY = "preBills"
 export const PAYMENTS_KEY = "payments"
@@ -508,6 +509,9 @@ export function registerSplitPaymentLocal({ preBillId, amount, methods, user, or
 }
 
 export async function syncSupabaseFullPayment(orderId, methods, paidByLabel = "Cuenta completa", cashSessionId = "") {
+  if (!isServerSessionId(cashSessionId)) {
+    return { ok: false, message: "No hay caja abierta para esta sesion." }
+  }
   const { getPosOrderPaymentStatus, createPosSplitPayment } = await import("../services/posOrdersService")
   const statusResult = await getPosOrderPaymentStatus(orderId)
   if (statusResult.error) return { ok: false, message: statusResult.message || "No se pudo consultar el saldo de la orden." }

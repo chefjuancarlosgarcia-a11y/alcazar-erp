@@ -53,7 +53,7 @@ function CashManagement({ cashPort: cashPortProp, uiConfig = {} }) {
   const [sessionKnown, setSessionKnown] = useState(false)
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
-  const [openingForm, setOpeningForm] = useState({ amount: "500", notes: "" })
+  const [openingForm, setOpeningForm] = useState({ amount: "", notes: "" })
   const [movementForm, setMovementForm] = useState(null)
   const [closeForm, setCloseForm] = useState({ counted: "", notes: "" })
   const summary = useMemo(
@@ -142,7 +142,7 @@ function CashManagement({ cashPort: cashPortProp, uiConfig = {} }) {
         return
       }
       setMessage("Caja abierta correctamente.")
-      setOpeningForm({ amount: "500", notes: "" })
+      setOpeningForm({ amount: "", notes: "" })
       await loadData()
     })
   }

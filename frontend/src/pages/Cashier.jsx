@@ -503,7 +503,7 @@ function Cashier() {
 }
 
 function CashierDashboard({ cashView, summary, requests, payments, onOpenCharge, highlightedIds, openingBusy, onOpenCash, onSelectRegister }) {
-  const [openingAmount, setOpeningAmount] = useState("500")
+  const [openingAmount, setOpeningAmount] = useState("")
   const session = cashView.session
   const completed = payments.filter((payment) => payment.status === "completed")
   const registerValue = cashView.registerId || session?.registerId || ""
@@ -548,8 +548,8 @@ function CashierDashboard({ cashView, summary, requests, payments, onOpenCharge,
       {cashView.showOpeningForm && (
         <article className="cashier-open-card">
           <h2>Apertura de caja</h2>
-          <p>Debes abrir una caja antes de procesar pagos.</p>
-          <label>Fondo inicial<input type="number" min="0" step="0.01" value={openingAmount} onChange={(event) => setOpeningAmount(event.target.value)} /></label>
+          <p>Escribí el efectivo contado para este turno.</p>
+          <label>Fondo inicial<input type="number" min="0" step="0.01" value={openingAmount} onChange={(event) => setOpeningAmount(event.target.value)} placeholder="0.00" /></label>
           <button type="button" disabled={openingBusy} onClick={() => onOpenCash(openingAmount)}>
             {openingBusy ? "Abriendo..." : "Abrir caja"}
           </button>
