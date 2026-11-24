@@ -3,13 +3,15 @@
 -- No usa el cierre normal de la aplicacion: ese convierte un conteo vacio en cero y graba diferencia.
 -- No modifica pedidos, pagos, KDS ni inventario.
 --
--- Historial revisado que debe seguir igual antes del cierre:
+-- Historial revisado que debe coincidir antes de escribir el primer cierre:
 --   sesión e30a26a2-fa2a-45aa-a081-4b988a644548
 --   caja llamada Caja Principal
+--   estado open
 --   fondo inicial 500.00
 --   1 movimiento shift_open
---   40 movimientos sale_cash
---   ningún otro tipo de movimiento
+--   40 movimientos sale_cash por 5800.00 en total
+--   cero movimientos de otros tipos
+--   calculate_cash_expected = 6300.00
 --
 -- El registro local de Emy no está en esta base. Se contrasta con el archivo
 -- caja-local-respaldo.json de su navegador: la fila local con status "open"
@@ -27,6 +29,10 @@ select
   s.opening_amount as fondo_inicial,
   s.expected_cash as saldo_guardado,
   public.calculate_cash_expected(s.id) as saldo_calculado,
+  (select count(*) from public.cash_movements m where m.cash_session_id = s.id and m.movement_type = 'shift_open') as shift_open,
+  (select count(*) from public.cash_movements m where m.cash_session_id = s.id and m.movement_type = 'sale_cash') as sale_cash,
+  (select coalesce(sum(m.amount), 0)::numeric(12,2) from public.cash_movements m where m.cash_session_id = s.id and m.movement_type = 'sale_cash') as total_sale_cash,
+  (select count(*) from public.cash_movements m where m.cash_session_id = s.id and m.movement_type not in ('sale_cash', 'shift_open')) as otros,
   s.counted_cash,
   s.difference,
   s.opened_at,
@@ -64,9 +70,11 @@ declare
   v_session public.cash_sessions;
   v_register_name text;
   v_expected numeric(12,2);
-  v_sale_cash integer;
+  v_sale_count integer;
+  v_sale_total numeric(12,2);
   v_shift_open integer;
   v_other integer;
+  v_other_open integer;
   v_shift_close integer;
 begin
   if v_authorizer = '00000000-0000-0000-0000-000000000000' then
@@ -100,50 +108,81 @@ begin
     raise exception 'La sesion no corresponde a Caja Principal.';
   end if;
 
-  select count(*) into v_shift_close
-  from public.cash_movements
-  where cash_session_id = v_session_id
-    and movement_type = 'shift_close';
-
-  if v_session.status = 'closed'
-     and v_session.counted_cash is null
-     and v_session.difference is null
-     and coalesce(v_session.notes, '') like '%' || v_note || '%'
-     and v_shift_close = 1
-     and v_session.closed_by = v_authorizer then
-    raise notice 'El cierre ya estaba registrado';
-    return;
-  end if;
-
-  if v_session.status <> 'open' then
-    raise exception 'La sesion no esta abierta y no coincide con el cierre ya documentado.';
-  end if;
-
-  if v_session.opening_amount <> 500.00 then
-    raise exception 'El fondo revisado ya no es Q500. Cierre detenido.';
-  end if;
-
-  select count(*) into v_sale_cash
-  from public.cash_movements
-  where cash_session_id = v_session_id
-    and movement_type = 'sale_cash';
-
   select count(*) into v_shift_open
   from public.cash_movements
   where cash_session_id = v_session_id
     and movement_type = 'shift_open';
 
+  select count(*), coalesce(sum(amount), 0)::numeric(12,2)
+  into v_sale_count, v_sale_total
+  from public.cash_movements
+  where cash_session_id = v_session_id
+    and movement_type = 'sale_cash';
+
   select count(*) into v_other
+  from public.cash_movements
+  where cash_session_id = v_session_id
+    and movement_type not in ('sale_cash', 'shift_open', 'shift_close');
+
+  select count(*) into v_other_open
   from public.cash_movements
   where cash_session_id = v_session_id
     and movement_type not in ('sale_cash', 'shift_open');
 
-  if v_sale_cash <> 40 or v_shift_open <> 1 or v_other <> 0 then
-    raise exception 'El historial revisado cambio. Cierre detenido. sale_cash=%, shift_open=%, otros=%',
-      v_sale_cash, v_shift_open, v_other;
-  end if;
+  select count(*) into v_shift_close
+  from public.cash_movements
+  where cash_session_id = v_session_id
+    and movement_type = 'shift_close'
+    and amount = 0
+    and reason = v_note
+    and created_by = v_authorizer;
 
   v_expected := public.calculate_cash_expected(v_session_id);
+
+  if v_session.status = 'closed'
+     and v_session.opening_amount = 500.00
+     and v_session.expected_cash = 6300.00
+     and v_session.counted_cash is null
+     and v_session.difference is null
+     and v_session.closed_by = v_authorizer
+     and coalesce(v_session.notes, '') like '%' || v_note || '%'
+     and v_shift_open = 1
+     and v_sale_count = 40
+     and v_sale_total = 5800.00
+     and v_other = 0
+     and v_shift_close = 1
+     and v_expected = 6300.00 then
+    raise notice 'El cierre ya estaba registrado';
+    return;
+  end if;
+
+  if v_session.status <> 'open' then
+    raise exception 'El valor revisado difiere: estado esperado open, encontrado %.', v_session.status;
+  end if;
+
+  if v_session.opening_amount <> 500.00 then
+    raise exception 'El valor revisado difiere: fondo esperado 500.00, encontrado %.', v_session.opening_amount;
+  end if;
+
+  if v_shift_open <> 1 then
+    raise exception 'El valor revisado difiere: shift_open esperado 1, encontrado %.', v_shift_open;
+  end if;
+
+  if v_sale_count <> 40 then
+    raise exception 'El valor revisado difiere: sale_cash esperado 40, encontrado %.', v_sale_count;
+  end if;
+
+  if v_sale_total <> 5800.00 then
+    raise exception 'El valor revisado difiere: total sale_cash esperado 5800.00, encontrado %.', v_sale_total;
+  end if;
+
+  if v_other_open <> 0 then
+    raise exception 'El valor revisado difiere: otros movimientos esperado 0, encontrado %.', v_other_open;
+  end if;
+
+  if v_expected <> 6300.00 then
+    raise exception 'El valor revisado difiere: saldo esperado 6300.00, encontrado %.', v_expected;
+  end if;
 
   insert into public.cash_movements (
     cash_session_id, cash_register_id, created_by, movement_type, amount, reason
@@ -152,7 +191,7 @@ begin
   );
 
   update public.cash_sessions
-  set expected_cash = v_expected,
+  set expected_cash = 6300.00,
       counted_cash = null,
       difference = null,
       status = 'closed',
@@ -173,16 +212,17 @@ begin
       and status = 'closed'
       and counted_cash is null
       and difference is null
-      and expected_cash = v_expected
+      and expected_cash = 6300.00
       and closed_by = v_authorizer
       and opening_amount = 500.00
   ) then
-    raise exception 'El cierre no dejo el conteo vacio ni el saldo esperado.';
+    raise exception 'El cierre no dejo el conteo vacio ni el saldo esperado 6300.00.';
   end if;
 
   if (select count(*) from public.cash_movements where cash_session_id = v_session.id and movement_type = 'sale_cash') <> 40
+     or (select coalesce(sum(amount), 0)::numeric(12,2) from public.cash_movements where cash_session_id = v_session.id and movement_type = 'sale_cash') <> 5800.00
      or (select count(*) from public.cash_movements where cash_session_id = v_session.id and movement_type = 'shift_open') <> 1
-     or (select count(*) from public.cash_movements where cash_session_id = v_session.id and movement_type = 'shift_close') <> 1 then
+     or (select count(*) from public.cash_movements where cash_session_id = v_session.id and movement_type = 'shift_close' and amount = 0 and reason = v_note and created_by = v_authorizer) <> 1 then
     raise exception 'El cierre altero el historial revisado.';
   end if;
 end;
