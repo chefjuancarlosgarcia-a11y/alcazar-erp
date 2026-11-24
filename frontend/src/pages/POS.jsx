@@ -326,9 +326,25 @@ function posOrderHasActiveItems(order) {
   return (order?.items || []).some((item) => item.status !== "cancelled")
 }
 
+function posOrderSalesChannel(order) {
+  return String(order?.salesChannel || order?.sales_channel || "dine_in").trim() || "dine_in"
+}
+
+function posOrderIsDineIn(order) {
+  return posOrderSalesChannel(order) === "dine_in"
+}
+
 function posOrderIsZombieOpen(order) {
   if (!order) return false
   if (["paid", "cancelled"].includes(order.status)) return false
+  if (!posOrderIsDineIn(order)) return false
+  return !posOrderHasActiveItems(order)
+}
+
+function posOrderIsNewChannelDraft(order) {
+  if (!order) return false
+  if (["paid", "cancelled"].includes(order.status)) return false
+  if (posOrderIsDineIn(order)) return false
   return !posOrderHasActiveItems(order)
 }
 
@@ -1096,6 +1112,8 @@ function POS({ stationMode = false, stationPosPort = null, onStationTerminalActi
     ? "Agrega productos para iniciar el servicio."
     : posOrderIsZombieOpen(currentOrder)
       ? "Servicio pendiente de cierre. Libera la mesa o contacta a un supervisor."
+      : posOrderIsNewChannelDraft(currentOrder)
+        ? "Agrega productos para iniciar el pedido."
       : readyItemsCount > 0
       ? "Hay productos listos: entrégalos y marca servido."
       : draftItems.length > 0
@@ -2142,13 +2160,15 @@ function POS({ stationMode = false, stationPosPort = null, onStationTerminalActi
       return "disponible"
     }
     if (posOrderIsZombieOpen(order)) return "pendiente_cierre"
+    if (posOrderIsNewChannelDraft(order)) return "pedido_nuevo"
     if (order.status === "partially_paid") return "pago_en_proceso"
     if (order.status === "sent_to_cashier") return "pago_en_proceso"
     if (order.status === "awaiting_bill") return "esperando_cuenta"
-    if (order.items.some((item) => item.status === "error")) return "problema"
-    if (order.items.some((item) => item.status === "ready")) return "lista_para_servir"
-    if (order.items.some((item) => ["sent_to_production", "in_production"].includes(item.status))) return "en_produccion"
-    if (order.items.some((item) => item.status === "draft")) return "nuevos_sin_enviar"
+    const items = order.items || []
+    if (items.some((item) => item.status === "error")) return "problema"
+    if (items.some((item) => item.status === "ready")) return "lista_para_servir"
+    if (items.some((item) => ["sent_to_production", "in_production"].includes(item.status))) return "en_produccion"
+    if (items.some((item) => item.status === "draft")) return "nuevos_sin_enviar"
     return "en_servicio"
   }
 
@@ -2230,6 +2250,7 @@ function POS({ stationMode = false, stationPosPort = null, onStationTerminalActi
       pago_en_proceso: "Pago en proceso",
       pagada: "Pagada",
       pendiente_cierre: "Pendiente de cierre",
+      pedido_nuevo: "Pedido nuevo",
       problema: "Problema",
       en_produccion: "En producción",
       lista_para_servir: "Lista para servir"
@@ -5714,6 +5735,7 @@ const tableStatusStyles = {
   en_produccion: { background: "#9a3412", borderColor: "#fb923c" },
   lista_para_servir: { background: "#0f766e", borderColor: "#2dd4bf", boxShadow: "0 0 16px rgba(45,212,191,.45)" },
   pendiente_cierre: { background: "#854d0e", borderColor: "#facc15" },
+  pedido_nuevo: { background: "#0f766e", borderColor: "#2dd4bf" },
   reservada: { background: "#78350f", borderColor: "#fbbf24" },
   limpieza: { background: "#1e3a8a", borderColor: "#60a5fa" },
   inactiva: { background: "#374151", borderColor: "#94a3b8" }

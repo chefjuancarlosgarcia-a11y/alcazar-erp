@@ -2781,14 +2781,20 @@
 .pos-classic-ticket {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   max-height: calc(100vh - 220px);
-  padding: 12px;
+  padding: 16px;
   border: 2px solid color-mix(in srgb, var(--erp-primary) 55%, #334155);
   border-radius: 16px;
   background: linear-gradient(180deg, #1a2332 0%, #121a27 100%);
-  overflow: hidden;
+  overflow: auto;
   min-height: 0;
+}
+
+.pos-classic-ticket > .pos-service-activity {
+  flex-shrink: 0;
+  max-height: 160px;
+  overflow-y: auto;
 }
 
 .pos-classic-ticket.has-order {
@@ -2804,9 +2810,14 @@
 .pos-ticket-panel {
   display: flex;
   flex-direction: column;
-  flex: 1;
-  gap: 10px;
+  flex: 1 0 auto;
+  gap: 8px;
   min-height: 0;
+  overflow: visible;
+}
+
+.pos-ticket-panel > :not(.pos-ticket-lines) {
+  flex-shrink: 0;
 }
 
 .pos-ticket-mesa-hero {
@@ -2880,6 +2891,10 @@
   display: grid;
   grid-template-columns: 1fr 1fr auto;
   gap: 8px;
+}
+
+.pos-ticket-meta-grid.is-sales-channel {
+  grid-template-columns: 1fr auto;
 }
 
 .pos-ticket-meta-grid small,
@@ -2960,9 +2975,9 @@
 .pos-ticket-lines {
   display: grid;
   gap: 8px;
-  flex: 1;
-  min-height: 120px;
-  max-height: 42vh;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 32vh;
   overflow-y: auto;
   padding-right: 4px;
 }
@@ -3123,14 +3138,13 @@
 }
 
 .pos-ticket-actions-sticky {
-  position: sticky;
-  bottom: 0;
-  z-index: 2;
+  position: static;
+  z-index: 1;
   display: grid;
   gap: 8px;
-  padding-top: 10px;
+  padding-top: 8px;
   border-top: 1px solid #334155;
-  background: linear-gradient(180deg, rgba(18, 26, 39, 0) 0%, #121a27 18%, #121a27 100%);
+  background: #121a27;
 }
 
 .pos-ticket-actions-primary {
@@ -3142,18 +3156,26 @@
 .pos-ticket-actions-utilities {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
+  gap: 8px;
 }
 
 .pos-ticket-actions-danger {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  margin-top: 2px;
-  padding: 10px;
+  gap: 8px;
+  margin-top: 0;
+  padding: 8px;
   border: 1px dashed #64748b;
   border-radius: 12px;
   background: rgba(15, 23, 42, 0.55);
+}
+
+.pos-ticket-panel.is-sales-channel .pos-ticket-actions-danger {
+  grid-template-columns: 1fr 1fr;
+}
+
+.pos-ticket-actions-danger > :last-child:nth-child(odd) {
+  grid-column: 1 / -1;
 }
 
 .pos-ticket-actions {
@@ -3229,7 +3251,7 @@
 }
 
 .pos-action-btn.utility {
-  min-height: 42px;
+  min-height: 48px;
   border-width: 1px;
   background: #0f172a;
   color: #cbd5e1;
@@ -3349,11 +3371,12 @@
 
   .pos-classic-ticket {
     max-height: none;
-    min-height: 420px;
+    min-height: 0;
   }
 
   .pos-ticket-lines {
     max-height: 36vh;
+    min-height: 120px;
   }
 
   .pos-classic-footer {

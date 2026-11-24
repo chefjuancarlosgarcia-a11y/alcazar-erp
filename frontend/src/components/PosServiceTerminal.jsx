@@ -119,7 +119,7 @@ export default function PosServiceTerminal({
           </div>
         </section>
 
-        <aside className={`pos-classic-ticket pos-current-order${ordenMesa ? " has-order" : ""}${ordenMesa && !ordenMesa.isSalesChannel ? " is-dine-in" : ""}`}>
+        <aside className={`pos-classic-ticket${ordenMesa ? " has-order" : ""}${ordenMesa && !ordenMesa.isSalesChannel ? " is-dine-in" : ""}`}>
           {ticketContent}
         </aside>
       </div>
