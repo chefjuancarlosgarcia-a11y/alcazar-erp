@@ -56,8 +56,9 @@ export function PosTicketPanel({
   waiterName,
   billingBusy = false
 }) {
+  const isSalesChannel = Boolean(ordenMesa?.isSalesChannel)
   const mesaLabel = ordenMesa
-    ? (ordenMesa.isSalesChannel ? ordenMesa.mesaNumero : `Mesa ${ordenMesa.mesaNumero}`)
+    ? (isSalesChannel ? ordenMesa.mesaNumero : `Mesa ${ordenMesa.mesaNumero}`)
     : null
   const sillaLabel = selectedAssignment || "Mesa completa"
   const comandaNo = currentOrder?.id ? String(currentOrder.id).slice(0, 8).toUpperCase() : "—"
@@ -65,7 +66,7 @@ export function PosTicketPanel({
   const draftCount = draftItems.length
 
   return (
-    <div className={`pos-ticket-panel${ordenMesa ? " is-active" : ""}${ordenMesa && !ordenMesa.isSalesChannel ? " is-dine-in" : ""}`}>
+    <div className={`pos-ticket-panel${ordenMesa ? " is-active" : ""}${ordenMesa && !isSalesChannel ? " is-dine-in" : ""}${isSalesChannel ? " is-sales-channel" : ""}`}>
       {mesaCargando && (
         <div className="pos-mesa-loading">
           <strong>Cargando mesa...</strong>
@@ -81,7 +82,7 @@ export function PosTicketPanel({
             {ordenMesa.areaNombre && !ordenMesa.isSalesChannel && (
               <span className="pos-ticket-mesa-area">{ordenMesa.areaNombre}</span>
             )}
-            {ordenMesa.isSalesChannel && (
+            {isSalesChannel && (
               <span className="pos-ticket-mesa-area">{salesChannelLabel}</span>
             )}
           </div>
@@ -93,25 +94,29 @@ export function PosTicketPanel({
       )}
 
       <div className="pos-ticket-header">
-        <div className="pos-ticket-meta-grid">
-          <div><small>{ordenMesa?.isSalesChannel ? "Pedido" : "Mesa"}</small><strong>{mesaLabel || "—"}</strong></div>
-          <div><small>Silla / asignación</small><strong>{sillaLabel}</strong></div>
+        <div className={`pos-ticket-meta-grid${isSalesChannel ? " is-sales-channel" : ""}`}>
+          <div><small>{isSalesChannel ? "Pedido" : "Mesa"}</small><strong>{mesaLabel || "—"}</strong></div>
+          {!isSalesChannel && (
+            <div><small>Silla / asignación</small><strong>{sillaLabel}</strong></div>
+          )}
           <div className="pos-ticket-total"><small>Total</small><strong>Q{totalOrden.toFixed(2)}</strong></div>
         </div>
         <div className="pos-ticket-meta-row">
           <span><small>Comanda No.</small> {comandaNo}</span>
-          <span><small>Reservación</small> Sin reservación</span>
-          <label className="pos-ticket-people">
-            <small>Personas</small>
-            <input
-              type="number"
-              min="1"
-              max="30"
-              value={personasOrden}
-              disabled={!ordenMesa}
-              onChange={(event) => onPersonasChange(event.target.value)}
-            />
-          </label>
+          {!isSalesChannel && <span><small>Reservación</small> Sin reservación</span>}
+          {!isSalesChannel && (
+            <label className="pos-ticket-people">
+              <small>Personas</small>
+              <input
+                type="number"
+                min="1"
+                max="30"
+                value={personasOrden}
+                disabled={!ordenMesa}
+                onChange={(event) => onPersonasChange(event.target.value)}
+              />
+            </label>
+          )}
         </div>
         {ordenMesa && (
           <div className="pos-ticket-status-row">
@@ -126,7 +131,7 @@ export function PosTicketPanel({
         )}
       </div>
 
-      {ordenMesa && seatNames.length > 1 && (
+      {ordenMesa && !isSalesChannel && seatNames.length > 1 && (
         <div className="pos-ticket-seat-select">
           <label>
             <small>Asignar próximo platillo a</small>
@@ -317,15 +322,17 @@ export function PosTicketPanel({
           >
             Anular pendientes
           </button>
-          <button
-            type="button"
-            className="pos-action-btn danger"
-            onClick={onReleaseTable}
-            disabled={!canReleaseTable || releasingTable || !ordenMesa || ordenMesa.isSalesChannel}
-            title={releaseTableHint || "Libera el servicio de mesa de forma auditada"}
-          >
-            {releasingTable ? "Liberando..." : "Liberar mesa"}
-          </button>
+          {!isSalesChannel && (
+            <button
+              type="button"
+              className="pos-action-btn danger"
+              onClick={onReleaseTable}
+              disabled={!canReleaseTable || releasingTable || !ordenMesa}
+              title={releaseTableHint || "Libera el servicio de mesa de forma auditada"}
+            >
+              {releasingTable ? "Liberando..." : "Liberar mesa"}
+            </button>
+          )}
           <button
             type="button"
             className="pos-action-btn exit"
