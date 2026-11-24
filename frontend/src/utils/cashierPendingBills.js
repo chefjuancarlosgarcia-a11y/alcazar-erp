@@ -23,6 +23,24 @@ function firstRelation(value) {
   return value || {}
 }
 
+export function deliveryPaymentMethodFromText(text) {
+  const match = String(text || "").match(/(?:^|\n)\s*Forma de pago:\s*(.+)\s*$/im)
+  return match?.[1]?.trim() || ""
+}
+
+export function deliveryPaymentLabel(method) {
+  const value = String(method || "").trim()
+  return value || "Sin especificar"
+}
+
+function paymentMethodFromOrder(order) {
+  const explicit = order.delivery?.paymentMethod || order.paymentMethod || ""
+  if (String(explicit).trim()) return String(explicit).trim()
+  return deliveryPaymentMethodFromText(order.delivery_notes || order.deliveryNotes)
+    || deliveryPaymentMethodFromText(order.notes)
+    || ""
+}
+
 function deliveryFromOrder(order, channel) {
   if (channel !== "delivery") return null
   const customer = firstRelation(order.customer)
@@ -37,7 +55,7 @@ function deliveryFromOrder(order, channel) {
     address2: address.notes || "",
     reference: address.reference || "",
     mapsLink: address.google_maps_url || address.googleMapsUrl || "",
-    paymentMethod: "",
+    paymentMethod: deliveryPaymentLabel(paymentMethodFromOrder(order)),
     deliveryNotes: order.delivery_notes || order.deliveryNotes || "",
     deliveryStatus: order.delivery_status || order.deliveryStatus || "pending"
   }
@@ -49,15 +67,26 @@ function tableLabel(order, channel, delivery) {
   return order.table_name || order.tableName || "Mesa"
 }
 
+export function cashierAmountsFromOrder(order, items) {
+  const itemGross = money(items.reduce((sum, item) => sum + (item.precio * item.cantidad), 0))
+  const hasTotal = order?.total !== undefined && order?.total !== null && order?.total !== ""
+  const hasSubtotal = order?.subtotal !== undefined && order?.subtotal !== null && order?.subtotal !== ""
+  const total = hasTotal ? money(order.total) : itemGross
+  const subtotal = hasSubtotal ? money(order.subtotal) : total
+  const paid = money(items.reduce((sum, item) => sum + (item.quantity_paid * item.precio), 0))
+  return {
+    subtotal,
+    total,
+    paid,
+    balanceDue: money(Math.max(0, total - paid))
+  }
+}
+
 export function preBillFromSupabaseOrder(order) {
   if (!order?.id) return null
   const channel = String(order.salesChannel || order.sales_channel || "dine_in").trim() || "dine_in"
   const items = cashierItems(order)
-  const subtotal = money(items.reduce((sum, item) => sum + (item.precio * item.cantidad), 0))
-  const balanceDue = money(items.reduce((sum, item) => {
-    const remaining = Math.max(0, item.cantidad - item.quantity_paid)
-    return sum + (remaining * item.precio)
-  }, 0))
+  const amounts = cashierAmountsFromOrder(order, items)
   const delivery = deliveryFromOrder(order, channel)
   const status = PENDING_STATUSES.has(order.status) ? order.status : "sent_to_cashier"
   return {
@@ -68,12 +97,12 @@ export function preBillFromSupabaseOrder(order) {
     waiterId: order.waiterId || order.waiter_id || "",
     waiterName: order.waiter_name || order.usuarioNombre || order.waiterName || "POS",
     items,
-    subtotal,
+    subtotal: amounts.subtotal,
     discounts: 0,
     taxes: 0,
-    tipSuggested: money(subtotal * 0.1),
-    total: subtotal,
-    balanceDue: status === "partially_paid" ? balanceDue : subtotal,
+    tipSuggested: money(amounts.subtotal * 0.1),
+    total: amounts.total,
+    balanceDue: amounts.balanceDue,
     status,
     peopleCount: "",
     salesChannel: channel,
@@ -95,7 +124,7 @@ function preferDelivery(localDelivery, remoteDelivery) {
     customerName: localDelivery?.customerName || remoteDelivery?.customerName || "",
     phone: localDelivery?.phone || remoteDelivery?.phone || "",
     address: localDelivery?.address || remoteDelivery?.address || "",
-    paymentMethod: localDelivery?.paymentMethod || remoteDelivery?.paymentMethod || "",
+    paymentMethod: deliveryPaymentLabel(localDelivery?.paymentMethod || remoteDelivery?.paymentMethod),
     deliveryNotes: localDelivery?.deliveryNotes || remoteDelivery?.deliveryNotes || ""
   }
 }
@@ -122,7 +151,6 @@ export function mergePendingPreBills(localBills = [], remoteOrders = [], { remot
       id: local.id,
       billingCustomer: local.billingCustomer || null,
       peopleCount: local.peopleCount || "",
-      discounts: Number(local.discounts || 0),
       tipSuggested: local.tipSuggested ?? remote.tipSuggested,
       delivery: preferDelivery(local.delivery, remote.delivery),
       printedAt: local.printedAt || "",

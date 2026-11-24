@@ -4096,10 +4096,27 @@ function POS({ stationMode = false, stationPosPort = null, onStationTerminalActi
     return bridge.preBill
   }
 
+  async function persistDeliveryPaymentIntent(orderId) {
+    const channel = currentOrder?.sales_channel || salesChannel
+    if (channel !== "delivery" || !orderId) return
+    const customerData = await ensureCustomerForSalesChannel()
+    const deliveryNotes = buildDeliveryInfoText()
+    const result = await updateOrderSalesChannel(orderId, {
+      salesChannel: "delivery",
+      customerId: customerData.customer?.id || null,
+      customerAddressId: customerData.address?.id || null,
+      deliveryNotes,
+      notes: deliveryNotes
+    })
+    if (result.error) throw new Error(result.message || result.error.message)
+    if (result.data) setCurrentOrder(result.data)
+  }
+
   async function enviarCuentaACajaInterno(order, options = {}) {
     const { skipDraftCheck = false } = options
     if (!skipDraftCheck && draftItems.length) throw new Error("Envía o quita los productos nuevos antes de enviar a caja.")
     if (!deliveryDataReady) throw new Error("Completa los datos obligatorios de delivery antes de enviar a caja.")
+    await persistDeliveryPaymentIntent(order.id)
     if (stationMode) {
       if (order.status === "open") {
         const requested = await requestOrderBill(order.id)

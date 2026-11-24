@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import test from "node:test"
 import { fileURLToPath } from "node:url"
-import { mergePendingPreBills, preBillFromSupabaseOrder, reconcileStoredPreBills } from "./cashierPendingBills.js"
+import { cashierAmountsFromOrder, mergePendingPreBills, preBillFromSupabaseOrder, reconcileStoredPreBills } from "./cashierPendingBills.js"
 
 const deliveryOrder = {
   id: "order-delivery",
@@ -43,6 +43,7 @@ test("a remote delivery pending bill is visible without a local prebill", () => 
   assert.equal(merged[0].tableName, "Delivery - Shelby Urizar")
   assert.equal(merged[0].total, 65)
   assert.equal(merged[0].delivery.phone, "56228377")
+  assert.equal(merged[0].delivery.paymentMethod, "Sin especificar")
   assert.equal(merged[0].source, "supabase_pos")
 })
 
@@ -129,6 +130,87 @@ test("a partial payment keeps the remaining balance and one row", () => {
   assert.equal(merged[0].status, "partially_paid")
 })
 
+test("a delivery payment method stored in the order notes reaches the other device", () => {
+  const remote = {
+    ...deliveryOrder,
+    total: 65,
+    subtotal: 65,
+    delivery_notes: "Canal: Domicilio\nNombre: Shelby Urizar\nForma de pago: Transferencia\nNotas: puerta gris"
+  }
+  const merged = mergePendingPreBills([], [remote], { remoteAvailable: true })
+  assert.equal(merged.length, 1)
+  assert.equal(merged[0].delivery.paymentMethod, "Transferencia")
+  assert.equal(merged[0].status, "sent_to_cashier")
+  assert.notEqual(merged[0].status, "paid")
+})
+
+test("an older delivery without a payment line shows Sin especificar", () => {
+  const bill = preBillFromSupabaseOrder({ ...deliveryOrder, delivery_notes: "puerta gris", notes: "" })
+  assert.equal(bill.delivery.paymentMethod, "Sin especificar")
+  assert.equal(bill.status, "sent_to_cashier")
+})
+
+test("the tray uses the official order total and does not apply a discount twice", () => {
+  const discounted = {
+    ...deliveryOrder,
+    id: "order-discount",
+    subtotal: 100,
+    total: 90,
+    items: [
+      { id: "line-d", product_name: "Pepperoni", quantity: 1, unit_price: 100, status: "sent", quantity_paid: 0 }
+    ]
+  }
+  const local = [{
+    id: "prebill-discount",
+    orderId: "order-discount",
+    status: "sent_to_cashier",
+    source: "supabase_pos",
+    subtotal: 100,
+    total: 90,
+    discounts: 10,
+    balanceDue: 80,
+    delivery: { paymentMethod: "Transferencia" }
+  }]
+  const merged = mergePendingPreBills(local, [discounted], { remoteAvailable: true })
+  assert.equal(merged.length, 1)
+  assert.equal(merged[0].total, 90)
+  assert.equal(merged[0].balanceDue, 90)
+  assert.equal(merged[0].discounts, 0)
+  assert.equal(merged[0].delivery.paymentMethod, "Transferencia")
+})
+
+test("a partial payment uses the official remaining balance once", () => {
+  const partial = {
+    ...tableOrder,
+    id: "order-partial-official",
+    status: "partially_paid",
+    subtotal: 140,
+    total: 140,
+    items: [
+      { id: "line-a", product_name: "Caprichosa", quantity: 2, unit_price: 70, status: "served", quantity_paid: 1 }
+    ]
+  }
+  const amounts = cashierAmountsFromOrder(partial, [
+    { precio: 70, cantidad: 2, quantity_paid: 1 }
+  ])
+  assert.equal(amounts.total, 140)
+  assert.equal(amounts.paid, 70)
+  assert.equal(amounts.balanceDue, 70)
+  const local = [{
+    id: "prebill-partial-official",
+    orderId: "order-partial-official",
+    status: "partially_paid",
+    source: "supabase_pos",
+    total: 140,
+    discounts: 10,
+    balanceDue: 60
+  }]
+  const merged = mergePendingPreBills(local, [partial], { remoteAvailable: true })
+  assert.equal(merged.length, 1)
+  assert.equal(merged[0].balanceDue, 70)
+  assert.equal(merged[0].total, 140)
+})
+
 test("the server payment function rejects a second charge of the same balance", () => {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..")
   const sql = readFileSync(resolve(root, "supabase/schema/064_pos_split_payments.sql"), "utf8")
@@ -138,4 +220,7 @@ test("the server payment function rejects a second charge of the same balance", 
   assert.match(block, /quantity - item_row\.quantity_paid/)
   assert.match(block, /No puedes cobrar mas unidades/)
   assert.match(block, /status not in \('awaiting_bill', 'sent_to_cashier', 'partially_paid'\)/)
+  const statusStart = sql.indexOf("function public.get_pos_order_payment_status")
+  const statusBlock = sql.slice(statusStart, sql.indexOf("$$;", statusStart))
+  assert.match(statusBlock, /order_row\.total - coalesce\(\(result ->> 'amount_paid'\)::numeric, 0\)/)
 })

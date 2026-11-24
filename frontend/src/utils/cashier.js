@@ -1,4 +1,4 @@
-import { reconcileStoredPreBills } from "./cashierPendingBills"
+import { cashierAmountsFromOrder, reconcileStoredPreBills } from "./cashierPendingBills"
 
 export const PRE_BILLS_KEY = "preBills"
 export const PAYMENTS_KEY = "payments"
@@ -239,7 +239,7 @@ function notifyCashiers(preBill) {
     .forEach((user) => ids.add(user.id || user.username))
   const title = preBill.salesChannel === "delivery" ? "Nuevo delivery por cobrar" : "Nueva solicitud de cobro"
   const message = preBill.salesChannel === "delivery"
-    ? `${preBill.delivery?.customerName || preBill.tableName} · ${preBill.delivery?.paymentMethod || "Pago pendiente"} · Q${Number(preBill.total || 0).toFixed(2)}`
+    ? `${preBill.delivery?.customerName || preBill.tableName} · ${preBill.delivery?.paymentMethod || "Sin especificar"} · Q${Number(preBill.balanceDue ?? preBill.total ?? 0).toFixed(2)}`
     : `${preBill.tableName} lista para cobro.`
   ids.forEach((userId) => addNotification(userId, "payment_request", title, message, preBill.id))
 }
@@ -345,7 +345,7 @@ export function createPreBillFromPOSOrder(order, waiter, options = {}) {
   const normalizedOrder = normalizePOSOrderForCashier(order, waiter)
   const existing = getOrderPreBill(normalizedOrder.id)
   const items = nonCancelledItems(normalizedOrder)
-  const subtotal = money(items.reduce((total, item) => total + Number(item.precio) * Number(item.cantidad), 0))
+  const amounts = cashierAmountsFromOrder(normalizedOrder, items)
   const base = {
     orderId: normalizedOrder.id,
     tableId: normalizedOrder.mesaId,
@@ -353,11 +353,12 @@ export function createPreBillFromPOSOrder(order, waiter, options = {}) {
     waiterId: normalizedOrder.usuario,
     waiterName: normalizedOrder.usuarioNombre,
     items,
-    subtotal,
+    subtotal: amounts.subtotal,
     discounts: 0,
     taxes: 0,
-    tipSuggested: money(subtotal * 0.1),
-    total: subtotal,
+    tipSuggested: money(amounts.subtotal * 0.1),
+    total: amounts.total,
+    balanceDue: amounts.balanceDue,
     peopleCount: options.peopleCount || "",
     salesChannel: normalizedOrder.salesChannel,
     delivery: normalizedOrder.delivery,

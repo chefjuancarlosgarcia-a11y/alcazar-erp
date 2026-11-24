@@ -467,7 +467,7 @@ function PaymentRequests({ bills, onOpenCharge, onRefresh, user, highlightedIds 
 function RequestRow({ bill, isNew = false, onCharge }) {
   return (
     <div className={`cashier-row ${isNew ? "new-alert" : ""}`}>
-      <div><strong>{bill.tableName}</strong><span>{bill.salesChannel === "delivery" ? `${bill.delivery?.phone || "Sin telefono"} · ${bill.delivery?.paymentMethod || "Pago pendiente"}` : bill.waiterName} · {waitingMinutes(bill)} min esperando</span></div>
+      <div><strong>{bill.tableName}</strong><span>{bill.salesChannel === "delivery" ? `${bill.delivery?.phone || "Sin telefono"} · ${bill.delivery?.paymentMethod || "Sin especificar"}` : bill.waiterName} · {waitingMinutes(bill)} min esperando</span></div>
       <strong>Q{amountDue(bill).toFixed(2)}</strong>
       <button type="button" onClick={onCharge}>Cobrar</button>
     </div>
@@ -491,7 +491,7 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
   const isSupabaseBill = Boolean(bill?.source === "supabase_pos" && bill?.orderId)
   const splitBill = splitBills.find((split) => String(split.preBillId) === String(bill?.id))
   const split = splitBill?.splits.find((part) => part.id === splitId)
-  const productSubtotal = Number(split?.subtotal ?? (paymentStatus ? paymentStatus.balance_due : null) ?? bill?.subtotal ?? 0)
+  const productSubtotal = Number(split?.subtotal ?? (paymentStatus ? paymentStatus.balance_due : null) ?? bill?.balanceDue ?? bill?.subtotal ?? 0)
   const total = Math.max(0, productSubtotal - Number(discount || 0) + Number(tip || 0))
   const paid = methods.reduce((sum, method) => sum + Number(method.amount || 0), 0)
   const change = Math.max(0, paid - total)
@@ -1105,7 +1105,7 @@ function DeliveryBillSummary({ bill, compact = false }) {
       <span><strong>Direccion</strong>{delivery.address || "-"}</span>
       {!compact && delivery.reference && <span><strong>Referencia</strong>{delivery.reference}</span>}
       {!compact && delivery.mapsLink && <span><strong>Maps</strong>{delivery.mapsLink}</span>}
-      <span><strong>Pago</strong>{delivery.paymentMethod || "-"}</span>
+      <span><strong>Pago</strong>{delivery.paymentMethod || "Sin especificar"}</span>
       {!compact && delivery.deliveryNotes && <span><strong>Notas</strong>{delivery.deliveryNotes}</span>}
     </div>
   )
@@ -1120,7 +1120,7 @@ function loadStore() {
 }
 
 function amountDue(bill) {
-  if (bill?.status === "partially_paid" && bill.balanceDue != null) return Number(bill.balanceDue)
+  if (bill?.balanceDue != null) return Number(bill.balanceDue)
   return Number(bill?.total || 0)
 }
 
