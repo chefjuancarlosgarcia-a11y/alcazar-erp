@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { useAuth } from "../context/AuthContext"
+import useSupabaseRealtime from "../hooks/useSupabaseRealtime"
 import {
   PAYMENT_METHODS,
   PRE_BILLS_KEY,
@@ -19,6 +20,8 @@ import {
   loadFinancialAudit,
   loadPayments,
   loadPreBills,
+  mergePendingPreBills,
+  persistMergedPendingPreBills,
   loadSplitBills,
   loadTipRecords,
   markPreBillProblem,
@@ -30,7 +33,7 @@ import {
   syncSupabaseFullPayment,
   savePreBillBillingCustomer
 } from "../utils/cashier"
-import { getPosOrderPaymentStatus, getOrderWithItems, linkOrderBillingCustomer } from "../services/posOrdersService"
+import { getPosOrderPaymentStatus, getOrderWithItems, linkOrderBillingCustomer, listCashierPendingOrders } from "../services/posOrdersService"
 import { printFinalCheck } from "../services/posPrintService"
 import { queueReceiptPrintJob } from "../services/printingService"
 import SplitPaymentModal from "../components/SplitPaymentModal"
@@ -203,6 +206,10 @@ function Cashier() {
   const [store, setStore] = useState(loadStore)
   const [selectedBillId, setSelectedBillId] = useState("")
   const [feedback, setFeedback] = useState("")
+  const [contingency, setContingency] = useState(false)
+  const refreshRequest = useRef(0)
+  const refreshTimer = useRef(null)
+  const refreshRef = useRef(async () => {})
   const canSeeAllFinance = canAuthorizeFinance(user)
   const currentCashierId = user?.id || user?.username
   const visibleSessionIds = new Set(store.sessions.filter((entry) => canSeeAllFinance || String(entry.cashierId) === String(currentCashierId)).map((entry) => String(entry.id)))
@@ -222,25 +229,56 @@ function Cashier() {
     ? store.preBills.find((bill) => String(bill.id) === String(selectedBillId) && bill.status !== "paid")
     : requests[0]
 
+  async function refresh(message = "") {
+    const requestId = refreshRequest.current + 1
+    refreshRequest.current = requestId
+    if (message) setFeedback(message)
+    const local = loadStore()
+    let remote = { data: [], error: null }
+    try {
+      remote = await listCashierPendingOrders()
+    } catch (error) {
+      remote = { data: [], error }
+    }
+    if (requestId !== refreshRequest.current) return
+    if (remote.error) {
+      setContingency(true)
+      setStore(local)
+      return
+    }
+    setContingency(false)
+    const merged = mergePendingPreBills(local.preBills, remote.data, { remoteAvailable: true })
+    persistMergedPendingPreBills(merged)
+    setStore({ ...loadStore(), preBills: loadPreBills() })
+  }
+
+  refreshRef.current = refresh
+
   useEffect(() => {
-    function refresh() {
-      setStore(loadStore())
-    }
+    const run = () => refreshRef.current()
     function refreshFromStorage(event) {
-      if (!event.key || event.key === PRE_BILLS_KEY) refresh()
+      if (!event.key || event.key === PRE_BILLS_KEY) run()
     }
-    window.addEventListener("cashier-updated", refresh)
+    run()
+    window.addEventListener("cashier-updated", run)
     window.addEventListener("storage", refreshFromStorage)
     return () => {
-      window.removeEventListener("cashier-updated", refresh)
+      window.removeEventListener("cashier-updated", run)
       window.removeEventListener("storage", refreshFromStorage)
     }
   }, [])
 
-  function refresh(message = "") {
-    setStore(loadStore())
-    setFeedback(message)
-  }
+  useSupabaseRealtime({
+    table: "pos_orders",
+    event: "*",
+    enabled: canAccessCashier(user),
+    onChange: () => {
+      window.clearTimeout(refreshTimer.current)
+      refreshTimer.current = window.setTimeout(() => refreshRef.current(), 400)
+    }
+  })
+
+  useEffect(() => () => window.clearTimeout(refreshTimer.current), [])
 
   function openCharge(bill) {
     cashierDebug("[Cashier] openCharge", { preBillId: bill?.id, tableName: bill?.tableName })
@@ -294,7 +332,7 @@ function Cashier() {
     getAlert: (bill) => ({
       icon: "$",
       title: `${bill.tableName} solicita cobro`,
-      message: `${bill.waiterName || "Mesero"} · Q${Number(bill.total || 0).toFixed(2)} · ${waitingMinutes(bill)} min esperando`,
+      message: `${bill.waiterName || "Mesero"} · Q${amountDue(bill).toFixed(2)} · ${waitingMinutes(bill)} min esperando`,
       soundType: "cashier",
       onView: () => {
         setSelectedBillId(bill.id)
@@ -329,6 +367,7 @@ function Cashier() {
           </button>
         ))}
       </nav>
+      {contingency && <div className="cashier-contingency">Sin conexión con el servidor. Se muestran las cuentas guardadas en este dispositivo.</div>}
       {feedback && <div className="cashier-feedback">{feedback}</div>}
       <OperationalAlertToast
         alerts={cashierAlerts.toasts}
@@ -393,11 +432,11 @@ function PaymentRequests({ bills, onOpenCharge, onRefresh, user, highlightedIds 
       <div className="cashier-request-grid">
         {bills.map((bill) => (
           <article id={`cashier-request-${bill.id}`} className={`cashier-request ${bill.problem ? "problem" : ""} ${highlightedIds?.has(String(bill.id)) ? "new-alert" : ""}`} key={bill.id}>
-            <header><h3>{bill.tableName}</h3><span>{highlightedIds?.has(String(bill.id)) ? "Nuevo" : bill.status === "sent_to_cashier" ? "En caja" : "Precuenta"}</span></header>
+            <header><h3>{bill.tableName}</h3><span>{highlightedIds?.has(String(bill.id)) ? "Nuevo" : bill.status === "partially_paid" ? "Pago parcial" : bill.status === "sent_to_cashier" ? "En caja" : "Precuenta"}</span></header>
             <p>Mesero: {bill.waiterName}</p>
             {bill.salesChannel === "delivery" && <DeliveryBillSummary bill={bill} compact />}
             <small>{billItemSummary(bill)}</small>
-            <strong>Q{Number(bill.total).toFixed(2)}</strong>
+            <strong>Q{amountDue(bill).toFixed(2)}</strong>
             <small>Solicitada: {formatDate(bill.sentAt || bill.createdAt)} · {waitingMinutes(bill)} min</small>
             {bill.problem && <p className="cashier-alert">{bill.problemReason}</p>}
             <div className="cashier-actions">
@@ -429,7 +468,7 @@ function RequestRow({ bill, isNew = false, onCharge }) {
   return (
     <div className={`cashier-row ${isNew ? "new-alert" : ""}`}>
       <div><strong>{bill.tableName}</strong><span>{bill.salesChannel === "delivery" ? `${bill.delivery?.phone || "Sin telefono"} · ${bill.delivery?.paymentMethod || "Pago pendiente"}` : bill.waiterName} · {waitingMinutes(bill)} min esperando</span></div>
-      <strong>Q{Number(bill.total).toFixed(2)}</strong>
+      <strong>Q{amountDue(bill).toFixed(2)}</strong>
       <button type="button" onClick={onCharge}>Cobrar</button>
     </div>
   )
@@ -439,7 +478,7 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
   const submitLockRef = useRef(false)
   const [tip, setTip] = useState(bill ? String(bill.tipSuggested || 0) : "0")
   const [discount, setDiscount] = useState("0")
-  const [methods, setMethods] = useState([{ method: "cash", amount: bill ? String(bill.total) : "", reference: "" }])
+  const [methods, setMethods] = useState([{ method: "cash", amount: bill ? String(amountDue(bill)) : "", reference: "" }])
   const [splitMode, setSplitMode] = useState("")
   const [splitConfig, setSplitConfig] = useState("2")
   const [splitId, setSplitId] = useState("")
@@ -500,9 +539,10 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
 
   useEffect(() => {
     if (!bill) return
-    const baseTotal = Number(paymentStatus?.balance_due ?? bill.total ?? 0)
+    const baseTotal = Number(paymentStatus?.balance_due ?? amountDue(bill))
+    const defaults = [Number(bill.total), bill.balanceDue == null ? null : Number(bill.balanceDue)].filter((value) => value != null)
     setMethods((current) => {
-      if (current.length === 1 && (!current[0].amount || Number(current[0].amount) === Number(bill.total))) {
+      if (current.length === 1 && (!current[0].amount || defaults.includes(Number(current[0].amount)))) {
         return [{ ...current[0], amount: String(baseTotal) }]
       }
       return current
@@ -625,7 +665,11 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
           return
         }
         if (!syncResult.ok) {
-          setMessage(`Error en Caja > Cobrar mesa > Supabase: ${syncResult.message}`)
+          const text = syncResult.alreadyPaid
+            ? syncResult.message
+            : `Error en Caja > Cobrar mesa > Supabase: ${syncResult.message}`
+          setMessage(text)
+          onRefresh(text)
           return
         }
       }
@@ -1073,6 +1117,11 @@ function Empty({ text }) {
 
 function loadStore() {
   return { preBills: loadPreBills(), payments: loadPayments(), splitBills: loadSplitBills(), sessions: loadCashSessions(), movements: loadCashMovements(), tips: loadTipRecords(), authorizations: loadAuthorizationRequests(), audit: loadFinancialAudit() }
+}
+
+function amountDue(bill) {
+  if (bill?.status === "partially_paid" && bill.balanceDue != null) return Number(bill.balanceDue)
+  return Number(bill?.total || 0)
 }
 
 function waitingMinutes(bill) {

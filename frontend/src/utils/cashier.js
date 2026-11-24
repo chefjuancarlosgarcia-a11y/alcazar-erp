@@ -1,3 +1,5 @@
+import { reconcileStoredPreBills } from "./cashierPendingBills"
+
 export const PRE_BILLS_KEY = "preBills"
 export const PAYMENTS_KEY = "payments"
 export const SPLIT_BILLS_KEY = "splitBills"
@@ -156,6 +158,16 @@ export function loadOrders() {
 export function loadPreBills() {
   return parseArray(PRE_BILLS_KEY)
 }
+
+export function persistMergedPendingPreBills(mergedPending) {
+  const current = loadPreBills()
+  const next = reconcileStoredPreBills(current, mergedPending)
+  if (JSON.stringify(current) === JSON.stringify(next)) return current
+  saveArray(PRE_BILLS_KEY, next)
+  return next
+}
+
+export { mergePendingPreBills, preBillFromSupabaseOrder } from "./cashierPendingBills"
 
 export function loadPayments() {
   return parseArray(PAYMENTS_KEY)
@@ -504,7 +516,7 @@ export async function syncSupabaseFullPayment(orderId, methods, paidByLabel = "C
     .map((item) => ({ order_item_id: item.order_item_id, quantity_paid: Number(item.quantity_remaining) }))
 
   if (!remainingItems.length) {
-    return { ok: true, orderFullyPaid: true, balanceDue: 0, data: statusResult.data }
+    return { ok: false, alreadyPaid: true, message: "Esta cuenta ya fue cobrada. No se registró un segundo cobro." }
   }
 
   const productTotal = money((statusResult.data?.items || [])

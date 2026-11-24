@@ -101,6 +101,15 @@
   font-size: 12px;
 }
 
+.cashier-contingency {
+  padding: var(--erp-space-16);
+  border: 1px solid #a16207;
+  border-radius: var(--erp-radius-card);
+  background: #422006;
+  color: #fde68a;
+  font-weight: 700;
+}
+
 .cashier-feedback,
 .cashier-approved {
   padding: var(--erp-space-16);
