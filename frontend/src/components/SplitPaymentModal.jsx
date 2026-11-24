@@ -13,7 +13,7 @@ function money(value) {
   return Math.round(Number(value || 0) * 100) / 100
 }
 
-export default function SplitPaymentModal({ bill, user, onClose, onPaid }) {
+export default function SplitPaymentModal({ bill, user, onClose, onPaid, cashSessionId = "" }) {
   const [status, setStatus] = useState(null)
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState(false)
@@ -109,7 +109,8 @@ export default function SplitPaymentModal({ bill, user, onClose, onPaid }) {
         orderId,
         items: selectedLines.map(({ order_item_id, quantity_paid }) => ({ order_item_id, quantity_paid })),
         methods: paymentMethods,
-        paidByLabel
+        paidByLabel,
+        cashSessionId
       })
       if (result.error) {
         setMessage(result.message || "No se pudo registrar la subcuenta.")

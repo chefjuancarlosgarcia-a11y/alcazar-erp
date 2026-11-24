@@ -60,6 +60,31 @@
   color: #99f6e4;
 }
 
+.cashier-session-chip.unverified {
+  border-color: #a16207;
+  background: #422006;
+  color: #fde68a;
+}
+
+.cashier-session-facts dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--erp-space-16);
+  margin: 0;
+}
+
+.cashier-session-facts dt {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.cashier-session-facts dd {
+  margin: var(--erp-space-4) 0 0;
+  color: #f8fafc;
+  font-size: 18px;
+  font-weight: 700;
+}
+
 .cashier-tabs {
   display: flex;
   flex-wrap: wrap;

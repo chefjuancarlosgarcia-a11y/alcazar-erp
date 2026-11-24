@@ -430,8 +430,8 @@ export function beginPayment(preBillId, user) {
   return { ok: true, order }
 }
 
-export function registerSplitPaymentLocal({ preBillId, amount, methods, user, orderFullyPaid, paidByLabel = "", paymentNumber = null }) {
-  const session = getOpenCashSession(user)
+export function registerSplitPaymentLocal({ preBillId, amount, methods, user, orderFullyPaid, paidByLabel = "", paymentNumber = null, cashSessionId = "" }) {
+  const session = cashSessionId ? { id: cashSessionId, status: "open" } : getOpenCashSession(user)
   if (!session) return { ok: false, message: "Debes abrir caja antes de cobrar." }
   const preBill = loadPreBills().find((bill) => String(bill.id) === String(preBillId))
   if (!preBill) return { ok: false, message: "Precuenta no encontrada." }
@@ -507,7 +507,7 @@ export function registerSplitPaymentLocal({ preBillId, amount, methods, user, or
   return { ok: true, payment, orderFullyPaid }
 }
 
-export async function syncSupabaseFullPayment(orderId, methods, paidByLabel = "Cuenta completa") {
+export async function syncSupabaseFullPayment(orderId, methods, paidByLabel = "Cuenta completa", cashSessionId = "") {
   const { getPosOrderPaymentStatus, createPosSplitPayment } = await import("../services/posOrdersService")
   const statusResult = await getPosOrderPaymentStatus(orderId)
   if (statusResult.error) return { ok: false, message: statusResult.message || "No se pudo consultar el saldo de la orden." }
@@ -529,7 +529,7 @@ export async function syncSupabaseFullPayment(orderId, methods, paidByLabel = "C
     return { ok: false, message: "Indica el monto del pago para los productos pendientes." }
   }
 
-  const result = await createPosSplitPayment({ orderId, items: remainingItems, methods: paymentMethods, paidByLabel })
+  const result = await createPosSplitPayment({ orderId, items: remainingItems, methods: paymentMethods, paidByLabel, cashSessionId })
   if (result.error) return { ok: false, message: result.message || "No se pudo registrar el pago en Supabase." }
 
   return {
@@ -777,7 +777,7 @@ function releaseTable(order) {
 }
 
 export function confirmPayment(data, user) {
-  const session = getOpenCashSession(user)
+  const session = data.cashSessionId ? { id: data.cashSessionId, status: "open" } : getOpenCashSession(user)
   if (!session) return { ok: false, message: "Debes abrir caja antes de cobrar." }
   const preBill = loadPreBills().find((bill) => String(bill.id) === String(data.preBillId))
   if (!preBill || preBill.status === "paid") return { ok: false, message: "La precuenta no está disponible para cobro." }
