@@ -144,6 +144,60 @@ test("a delivery payment method stored in the order notes reaches the other devi
   assert.notEqual(merged[0].status, "paid")
 })
 
+test("both tablets show the supabase payment method when it is concrete", () => {
+  const remote = {
+    ...deliveryOrder,
+    delivery_notes: "Canal: Domicilio\nForma de pago: Transferencia"
+  }
+  const tabletA = [{
+    id: "prebill-a",
+    orderId: "order-delivery",
+    status: "sent_to_cashier",
+    source: "supabase_pos",
+    delivery: { customerName: "Shelby Urizar", paymentMethod: "Efectivo" }
+  }]
+  const onA = mergePendingPreBills(tabletA, [remote], { remoteAvailable: true })
+  const onB = mergePendingPreBills([], [remote], { remoteAvailable: true })
+  assert.equal(onA.length, 1)
+  assert.equal(onB.length, 1)
+  assert.equal(onA[0].orderId, onB[0].orderId)
+  assert.equal(onA[0].delivery.paymentMethod, "Transferencia")
+  assert.equal(onB[0].delivery.paymentMethod, "Transferencia")
+  assert.equal(onA[0].status, "sent_to_cashier")
+  assert.equal(onB[0].status, "sent_to_cashier")
+})
+
+test("Sin especificar is treated as missing and an old local method is kept", () => {
+  const withRemoteMethod = {
+    ...deliveryOrder,
+    delivery_notes: "Forma de pago: Transferencia"
+  }
+  const unspecifiedLocal = [{
+    id: "prebill-unspecified",
+    orderId: "order-delivery",
+    status: "sent_to_cashier",
+    source: "supabase_pos",
+    delivery: { paymentMethod: "Sin especificar" }
+  }]
+  const replaced = mergePendingPreBills(unspecifiedLocal, [withRemoteMethod], { remoteAvailable: true })
+  assert.equal(replaced[0].delivery.paymentMethod, "Transferencia")
+  assert.equal(replaced[0].status, "sent_to_cashier")
+
+  const onlyLocal = [{
+    id: "prebill-old",
+    orderId: "order-delivery",
+    status: "sent_to_cashier",
+    source: "supabase_pos",
+    delivery: { paymentMethod: "Efectivo" }
+  }]
+  const kept = mergePendingPreBills(onlyLocal, [deliveryOrder], { remoteAvailable: true })
+  assert.equal(kept[0].delivery.paymentMethod, "Efectivo")
+  assert.equal(kept[0].status, "sent_to_cashier")
+
+  const neither = mergePendingPreBills(unspecifiedLocal, [deliveryOrder], { remoteAvailable: true })
+  assert.equal(neither[0].delivery.paymentMethod, "Sin especificar")
+})
+
 test("an older delivery without a payment line shows Sin especificar", () => {
   const bill = preBillFromSupabaseOrder({ ...deliveryOrder, delivery_notes: "puerta gris", notes: "" })
   assert.equal(bill.delivery.paymentMethod, "Sin especificar")

@@ -33,6 +33,16 @@ export function deliveryPaymentLabel(method) {
   return value || "Sin especificar"
 }
 
+function concretePaymentMethod(method) {
+  const value = String(method || "").trim()
+  if (!value || value === "Sin especificar") return ""
+  return value
+}
+
+export function chooseDeliveryPaymentMethod(localMethod, remoteMethod) {
+  return deliveryPaymentLabel(concretePaymentMethod(remoteMethod) || concretePaymentMethod(localMethod))
+}
+
 function paymentMethodFromOrder(order) {
   const explicit = order.delivery?.paymentMethod || order.paymentMethod || ""
   if (String(explicit).trim()) return String(explicit).trim()
@@ -124,7 +134,7 @@ function preferDelivery(localDelivery, remoteDelivery) {
     customerName: localDelivery?.customerName || remoteDelivery?.customerName || "",
     phone: localDelivery?.phone || remoteDelivery?.phone || "",
     address: localDelivery?.address || remoteDelivery?.address || "",
-    paymentMethod: deliveryPaymentLabel(localDelivery?.paymentMethod || remoteDelivery?.paymentMethod),
+    paymentMethod: chooseDeliveryPaymentMethod(localDelivery?.paymentMethod, remoteDelivery?.paymentMethod),
     deliveryNotes: localDelivery?.deliveryNotes || remoteDelivery?.deliveryNotes || ""
   }
 }
