@@ -75,7 +75,8 @@ declare
   v_shift_open integer;
   v_other integer;
   v_other_open integer;
-  v_shift_close integer;
+  v_shift_close_total integer;
+  v_shift_close_match integer;
 begin
   if v_authorizer = '00000000-0000-0000-0000-000000000000' then
     raise exception 'Indicá el id verificable de quien autoriza el cierre.';
@@ -129,7 +130,12 @@ begin
   where cash_session_id = v_session_id
     and movement_type not in ('sale_cash', 'shift_open');
 
-  select count(*) into v_shift_close
+  select count(*) into v_shift_close_total
+  from public.cash_movements
+  where cash_session_id = v_session_id
+    and movement_type = 'shift_close';
+
+  select count(*) into v_shift_close_match
   from public.cash_movements
   where cash_session_id = v_session_id
     and movement_type = 'shift_close'
@@ -150,17 +156,24 @@ begin
      and v_sale_count = 40
      and v_sale_total = 5800.00
      and v_other = 0
-     and v_shift_close = 1
+     and v_shift_close_total = 1
+     and v_shift_close_match = 1
      and v_expected = 6300.00 then
     raise notice 'El cierre ya estaba registrado';
     return;
   end if;
 
-  if v_session.status <> 'open' then
+  if v_session.status = 'closed'
+     and (v_shift_close_total is distinct from 1 or v_shift_close_match is distinct from 1) then
+    raise exception 'El cierre adicional no coincide: shift_close encontrados %, coincidentes %.',
+      v_shift_close_total, v_shift_close_match;
+  end if;
+
+  if v_session.status is distinct from 'open' then
     raise exception 'El valor revisado difiere: estado esperado open, encontrado %.', v_session.status;
   end if;
 
-  if v_session.opening_amount <> 500.00 then
+  if v_session.opening_amount is distinct from 500.00 then
     raise exception 'El valor revisado difiere: fondo esperado 500.00, encontrado %.', v_session.opening_amount;
   end if;
 
@@ -180,7 +193,7 @@ begin
     raise exception 'El valor revisado difiere: otros movimientos esperado 0, encontrado %.', v_other_open;
   end if;
 
-  if v_expected <> 6300.00 then
+  if v_expected is distinct from 6300.00 then
     raise exception 'El valor revisado difiere: saldo esperado 6300.00, encontrado %.', v_expected;
   end if;
 
@@ -219,11 +232,26 @@ begin
     raise exception 'El cierre no dejo el conteo vacio ni el saldo esperado 6300.00.';
   end if;
 
+  select count(*) into v_shift_close_total
+  from public.cash_movements
+  where cash_session_id = v_session.id
+    and movement_type = 'shift_close';
+
+  select count(*) into v_shift_close_match
+  from public.cash_movements
+  where cash_session_id = v_session.id
+    and movement_type = 'shift_close'
+    and amount = 0
+    and reason = v_note
+    and created_by = v_authorizer;
+
   if (select count(*) from public.cash_movements where cash_session_id = v_session.id and movement_type = 'sale_cash') <> 40
      or (select coalesce(sum(amount), 0)::numeric(12,2) from public.cash_movements where cash_session_id = v_session.id and movement_type = 'sale_cash') <> 5800.00
      or (select count(*) from public.cash_movements where cash_session_id = v_session.id and movement_type = 'shift_open') <> 1
-     or (select count(*) from public.cash_movements where cash_session_id = v_session.id and movement_type = 'shift_close' and amount = 0 and reason = v_note and created_by = v_authorizer) <> 1 then
-    raise exception 'El cierre altero el historial revisado.';
+     or v_shift_close_total is distinct from 1
+     or v_shift_close_match is distinct from 1 then
+    raise exception 'El cierre adicional no coincide: shift_close encontrados %, coincidentes %.',
+      v_shift_close_total, v_shift_close_match;
   end if;
 end;
 $$;

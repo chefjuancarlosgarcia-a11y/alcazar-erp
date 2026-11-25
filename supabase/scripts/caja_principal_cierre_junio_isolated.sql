@@ -143,3 +143,33 @@ begin
   from generate_series(1, 40) as g;
 end;
 $$;
+
+create or replace function public.seed_caja_principal_junio_cierre_extra()
+returns void
+language plpgsql
+as $$
+declare
+  v_session uuid := 'e30a26a2-fa2a-45aa-a081-4b988a644548';
+  v_register uuid := 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  v_authorizer uuid := 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  v_note text := 'Cierre de sesión de pruebas de junio sin conteo físico histórico';
+begin
+  perform public.seed_caja_principal_junio(0);
+
+  update public.cash_sessions
+  set status = 'closed',
+      expected_cash = 6300.00,
+      counted_cash = null,
+      difference = null,
+      closed_by = v_authorizer,
+      closed_at = '2026-11-24 18:00:00+00',
+      notes = v_note
+  where id = v_session;
+
+  insert into public.cash_movements (
+    cash_session_id, cash_register_id, created_by, movement_type, amount, reason
+  ) values
+    (v_session, v_register, v_authorizer, 'shift_close', 0, v_note),
+    (v_session, v_register, v_authorizer, 'shift_close', 0, 'Otro motivo');
+end;
+$$;
