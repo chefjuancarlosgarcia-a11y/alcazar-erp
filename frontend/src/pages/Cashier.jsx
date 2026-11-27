@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useAuth } from "../context/AuthContext"
 import useSupabaseRealtime from "../hooks/useSupabaseRealtime"
 import {
@@ -25,7 +25,6 @@ import {
   loadSplitBills,
   loadTipRecords,
   markPreBillProblem,
-  openCashSession,
   refundPayment,
   registerCashMovement,
   registerSplitPaymentLocal,
@@ -34,6 +33,20 @@ import {
   savePreBillBillingCustomer
 } from "../utils/cashier"
 import { getPosOrderPaymentStatus, getOrderWithItems, linkOrderBillingCustomer, listCashierPendingOrders } from "../services/posOrdersService"
+import {
+  closeCashSession as closeRemoteCashSession,
+  createCashMovement,
+  getCashRegisters as getRemoteCashRegisters,
+  getOpenCashSession as getRemoteOpenCashSession,
+  openCashSession as openRemoteCashSession
+} from "../services/cashService"
+import {
+  UNVERIFIED_CASH_MESSAGE,
+  isServerSessionId,
+  openingAmountToSubmit,
+  preferredRegisterId,
+  resolveCashSessionView
+} from "../utils/cashierSession"
 import { printFinalCheck } from "../services/posPrintService"
 import { queueReceiptPrintJob } from "../services/printingService"
 import SplitPaymentModal from "../components/SplitPaymentModal"
@@ -207,7 +220,21 @@ function Cashier() {
   const [selectedBillId, setSelectedBillId] = useState("")
   const [feedback, setFeedback] = useState("")
   const [contingency, setContingency] = useState(false)
+  const [cashView, setCashView] = useState({
+    status: "loading",
+    message: "",
+    canOpen: false,
+    canCharge: false,
+    showOpeningForm: false,
+    session: null,
+    reconciliation: null,
+    registers: [],
+    registerId: ""
+  })
+  const [openingBusy, setOpeningBusy] = useState(false)
   const refreshRequest = useRef(0)
+  const cashRegisterIdRef = useRef("")
+  const cashViewRequest = useRef(0)
   const refreshTimer = useRef(null)
   const refreshRef = useRef(async () => {})
   const canSeeAllFinance = canAuthorizeFinance(user)
@@ -222,8 +249,9 @@ function Cashier() {
     authorizations: store.authorizations.filter((entry) => String(entry.requestedById) === String(currentCashierId)),
     audit: store.audit.filter((entry) => entry.performedBy === user?.name || entry.performedBy === user?.username)
   }
-  const session = getOpenCashSession(user)
+  const session = cashView.session
   const summary = getCashSummary(session)
+  const sharedSessionId = session?.shared && isServerSessionId(session.id) ? session.id : ""
   const requests = store.preBills.filter((bill) => ["sent_to_cashier", "partially_paid"].includes(bill.status))
   const selectedBill = selectedBillId
     ? store.preBills.find((bill) => String(bill.id) === String(selectedBillId) && bill.status !== "paid")
@@ -254,6 +282,65 @@ function Cashier() {
 
   refreshRef.current = refresh
 
+  const loadCashView = useCallback(async () => {
+    const requestId = cashViewRequest.current + 1
+    cashViewRequest.current = requestId
+    const local = getOpenCashSession(user)
+    try {
+      const registersResult = await getRemoteCashRegisters()
+      if (registersResult.error) throw registersResult.error
+      const registers = registersResult.data || []
+      const registerId = preferredRegisterId(registers, cashRegisterIdRef.current)
+      cashRegisterIdRef.current = registerId
+      const register = registers.find((item) => String(item.id) === String(registerId)) || null
+      let remoteSession = null
+      if (registerId) {
+        const sessionResult = await getRemoteOpenCashSession(registerId)
+        if (sessionResult.error) throw sessionResult.error
+        remoteSession = sessionResult.data
+      }
+      if (requestId !== cashViewRequest.current) return
+      setCashView({
+        ...resolveCashSessionView({
+          remoteAvailable: true,
+          remoteSession,
+          localSession: local,
+          register
+        }),
+        registers,
+        registerId
+      })
+    } catch {
+      if (requestId !== cashViewRequest.current) return
+      setCashView((current) => ({
+        ...resolveCashSessionView({
+          remoteAvailable: false,
+          remoteSession: null,
+          localSession: local,
+          register: null
+        }),
+        registers: current.registers || [],
+        registerId: current.registerId || ""
+      }))
+    }
+  }, [user])
+
+  useEffect(() => {
+    if (!canAccessCashier(user)) return undefined
+    loadCashView()
+    const timer = window.setInterval(loadCashView, 8000)
+    function onFocus() {
+      if (document.visibilityState !== "hidden") loadCashView()
+    }
+    window.addEventListener("focus", onFocus)
+    document.addEventListener("visibilitychange", onFocus)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener("focus", onFocus)
+      document.removeEventListener("visibilitychange", onFocus)
+    }
+  }, [loadCashView, user])
+
   useEffect(() => {
     const run = () => refreshRef.current()
     function refreshFromStorage(event) {
@@ -280,10 +367,37 @@ function Cashier() {
 
   useEffect(() => () => window.clearTimeout(refreshTimer.current), [])
 
+  async function openSharedCash(typedAmount) {
+    const amount = openingAmountToSubmit({ canOpen: cashView.canOpen, typedAmount })
+    if (amount == null || !cashRegisterIdRef.current) {
+      refresh(cashView.message || UNVERIFIED_CASH_MESSAGE)
+      return
+    }
+    setOpeningBusy(true)
+    try {
+      const result = await openRemoteCashSession(cashRegisterIdRef.current, amount, "")
+      const text = result.error?.message || ""
+      if (result.error) {
+        if (text.includes("Ya existe una caja abierta")) await loadCashView()
+        refresh(text || "No se pudo abrir caja.")
+        return
+      }
+      await loadCashView()
+      refresh("Caja abierta correctamente.")
+    } finally {
+      setOpeningBusy(false)
+    }
+  }
+
+  function selectRegister(registerId) {
+    cashRegisterIdRef.current = registerId
+    loadCashView()
+  }
+
   function openCharge(bill) {
     cashierDebug("[Cashier] openCharge", { preBillId: bill?.id, tableName: bill?.tableName })
-    if (!session) {
-      refresh("Abre la caja en Dashboard Caja antes de cobrar mesas.")
+    if (!cashView.canCharge) {
+      refresh(cashView.status === "unverified" ? UNVERIFIED_CASH_MESSAGE : "Abre la caja en Dashboard Caja antes de cobrar mesas.")
       setTab("dashboard")
       return
     }
@@ -305,8 +419,8 @@ function Cashier() {
 
   function selectTab(nextTab) {
     if (nextTab === "charge") {
-      if (!session) {
-        refresh("Abre la caja en Dashboard Caja antes de cobrar mesas.")
+      if (!cashView.canCharge) {
+        refresh(cashView.status === "unverified" ? UNVERIFIED_CASH_MESSAGE : "Abre la caja en Dashboard Caja antes de cobrar mesas.")
         setTab("dashboard")
         return
       }
@@ -354,8 +468,11 @@ function Cashier() {
           <h1>Caja</h1>
           <p className="cashier-muted">Cobros, propinas, arqueos y auditoría de mesas.</p>
         </div>
-        <div className={`cashier-session-chip ${session ? "open" : ""}`}>
-          {session ? `Caja abierta · ${session.cashierName}` : "Caja cerrada"}
+        <div className={`cashier-session-chip ${cashView.status === "open" || cashView.status === "local_only" ? "open" : ""} ${cashView.status === "unverified" ? "unverified" : ""}`}>
+          {cashView.status === "loading" && "Verificando caja"}
+          {cashView.status === "unverified" && "Caja sin verificar"}
+          {(cashView.status === "open" || cashView.status === "local_only") && `Caja abierta · ${session.registerName}`}
+          {cashView.status === "closed" && "Caja cerrada"}
         </div>
       </header>
 
@@ -374,33 +491,22 @@ function Cashier() {
         onDismiss={cashierAlerts.dismissToast}
       />
 
-      {tab === "dashboard" && <CashierDashboard session={session} summary={summary} requests={requests} payments={visibleStore.payments} onOpenCharge={openCharge} onRefresh={refresh} user={user} highlightedIds={cashierAlerts.highlightedIds} />}
+      {tab === "dashboard" && <CashierDashboard cashView={cashView} summary={summary} requests={requests} payments={visibleStore.payments} onOpenCharge={openCharge} highlightedIds={cashierAlerts.highlightedIds} openingBusy={openingBusy} onOpenCash={openSharedCash} onSelectRegister={selectRegister} />}
       {tab === "requests" && <PaymentRequests bills={requests} onOpenCharge={openCharge} onRefresh={refresh} user={user} highlightedIds={cashierAlerts.highlightedIds} />}
-      {tab === "charge" && <ChargePanel key={selectedBill?.id || "empty"} bill={selectedBill} splitBills={store.splitBills} session={session} requests={visibleStore.authorizations} user={user} onRefresh={refresh} onPaymentComplete={completeCharge} />}
-      {tab === "register" && <CashRegister session={session} summary={summary} user={user} onRefresh={refresh} />}
-      {tab === "movements" && <MovementsPanel session={session} movements={visibleStore.movements} authorizations={visibleStore.authorizations} user={user} onRefresh={refresh} />}
+      {tab === "charge" && <ChargePanel key={selectedBill?.id || "empty"} bill={selectedBill} splitBills={store.splitBills} session={session} sharedSessionId={sharedSessionId} requests={visibleStore.authorizations} user={user} onRefresh={refresh} onPaymentComplete={completeCharge} />}
+      {tab === "register" && <CashRegister session={session} summary={summary} user={user} onRefresh={refresh} onSessionChanged={loadCashView} />}
+      {tab === "movements" && <MovementsPanel session={session} movements={visibleStore.movements} authorizations={visibleStore.authorizations} user={user} onRefresh={refresh} onSessionChanged={loadCashView} />}
       {tab === "closures" && <Closures sessions={visibleStore.sessions} />}
       {tab === "reports" && <CashReports payments={visibleStore.payments} tips={visibleStore.tips} movements={visibleStore.movements} sessions={visibleStore.sessions} audit={visibleStore.audit} />}
     </section>
   )
 }
 
-function CashierDashboard({ session, summary, requests, payments, onOpenCharge, onRefresh, user, highlightedIds }) {
-  const [openingAmount, setOpeningAmount] = useState("500")
+function CashierDashboard({ cashView, summary, requests, payments, onOpenCharge, highlightedIds, openingBusy, onOpenCash, onSelectRegister }) {
+  const [openingAmount, setOpeningAmount] = useState("")
+  const session = cashView.session
   const completed = payments.filter((payment) => payment.status === "completed")
-  if (!session) {
-    return (
-      <article className="cashier-open-card">
-        <h2>Apertura de caja</h2>
-        <p>Debes abrir una caja antes de procesar pagos.</p>
-        <label>Fondo inicial<input type="number" min="0" step="0.01" value={openingAmount} onChange={(event) => setOpeningAmount(event.target.value)} /></label>
-        <button type="button" onClick={() => {
-          const result = openCashSession(user, openingAmount)
-          onRefresh(result.ok ? "Caja abierta correctamente." : result.message)
-        }}>Abrir caja</button>
-      </article>
-    )
-  }
+  const registerValue = cashView.registerId || session?.registerId || ""
   const cards = [
     ["Ventas del turno", `Q${summary.sales.toFixed(2)}`],
     ["Efectivo esperado", `Q${summary.expectedCash.toFixed(2)}`],
@@ -410,7 +516,46 @@ function CashierDashboard({ session, summary, requests, payments, onOpenCharge, 
   ]
   return (
     <div className="cashier-dashboard">
-      <div className="cashier-metrics erp-kpi-grid">{cards.map(([label, value]) => <article className="erp-kpi-card" key={label}><span>{label}</span><strong>{value}</strong></article>)}</div>
+      {cashView.registers.length > 1 && (
+        <label className="cashier-field">Caja
+          <select value={registerValue} onChange={(event) => onSelectRegister(event.target.value)}>
+            {cashView.registers.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+          </select>
+        </label>
+      )}
+      {cashView.status === "unverified" && (
+        <article className="cashier-open-card">
+          <h2>{UNVERIFIED_CASH_MESSAGE}</h2>
+        </article>
+      )}
+      {session && (
+        <article className="cashier-open-card cashier-session-facts">
+          <h2>Turno de caja</h2>
+          <dl>
+            <div><dt>Caja</dt><dd>{session.registerName}</dd></div>
+            <div><dt>Responsable</dt><dd>{session.openerName}</dd></div>
+            <div><dt>Apertura</dt><dd>{formatDate(session.openedAt)}</dd></div>
+            <div><dt>Fondo</dt><dd>Q{Number(session.openingAmount).toFixed(2)}</dd></div>
+          </dl>
+          {!session.shared && <p className="cashier-muted">Este turno solo está en este dispositivo y no se comparte.</p>}
+        </article>
+      )}
+      {cashView.reconciliation?.preserved && cashView.status !== "unverified" && (
+        <div className="cashier-contingency">
+          {cashView.reconciliation.message} Conservado: Q{Number(cashView.reconciliation.openingAmount).toFixed(2)} · {cashView.reconciliation.cashierName} · {formatDate(cashView.reconciliation.openedAt)}
+        </div>
+      )}
+      {cashView.showOpeningForm && (
+        <article className="cashier-open-card">
+          <h2>Apertura de caja</h2>
+          <p>Escribí el efectivo contado para este turno.</p>
+          <label>Fondo inicial<input type="number" min="0" step="0.01" value={openingAmount} onChange={(event) => setOpeningAmount(event.target.value)} placeholder="0.00" /></label>
+          <button type="button" disabled={openingBusy} onClick={() => onOpenCash(openingAmount)}>
+            {openingBusy ? "Abriendo..." : "Abrir caja"}
+          </button>
+        </article>
+      )}
+      {session && <div className="cashier-metrics erp-kpi-grid">{cards.map(([label, value]) => <article className="erp-kpi-card" key={label}><span>{label}</span><strong>{value}</strong></article>)}</div>}
       <article className="cashier-panel">
         <div className="cashier-panel-title"><h2>Pagos pendientes</h2><span>{requests.length} solicitudes</span></div>
         {requests.slice(0, 5).map((bill) => <RequestRow bill={bill} key={bill.id} isNew={highlightedIds?.has(String(bill.id))} onCharge={() => onOpenCharge(bill)} />)}
@@ -474,7 +619,7 @@ function RequestRow({ bill, isNew = false, onCharge }) {
   )
 }
 
-function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onPaymentComplete }) {
+function ChargePanel({ bill, splitBills, session, sharedSessionId = "", requests, user, onRefresh, onPaymentComplete }) {
   const submitLockRef = useRef(false)
   const [tip, setTip] = useState(bill ? String(bill.tipSuggested || 0) : "0")
   const [discount, setDiscount] = useState("0")
@@ -599,7 +744,8 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
       user,
       orderFullyPaid: result.orderFullyPaid,
       paidByLabel: result.paid_by_label || result.paidByLabel || "",
-      paymentNumber: result.payment_number
+      paymentNumber: result.payment_number,
+      cashSessionId: session?.id || ""
     })
     if (!local.ok) {
       setMessage(`Subcuenta registrada en sistema, pero caja local fallo: ${local.message}`)
@@ -657,7 +803,7 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
         let syncResult
         try {
           syncResult = await withPostPaymentTimeout(
-            syncSupabaseFullPayment(bill.orderId, methods, "Cuenta completa"),
+            syncSupabaseFullPayment(bill.orderId, methods, "Cuenta completa", sharedSessionId),
             "sync Supabase"
           )
         } catch (error) {
@@ -683,7 +829,8 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
         authorizationId: approvedAuthorization?.id || "",
         authorizedBy: approvedAuthorization?.approvedBy || "",
         productSubtotalOverride: isSupabaseBill ? productSubtotal : undefined,
-        billingCustomer: normalizedBilling
+        billingCustomer: normalizedBilling,
+        cashSessionId: session?.id || ""
       }, user)
       cashierDebug("[Cashier] confirmPayment result", {
         ok: result.ok,
@@ -933,7 +1080,7 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
       </details>
 
       <footer className="cashier-charge-footer">
-        <div><strong>{user?.name || user?.email || "Cajero"}</strong><span>{session.cashierName ? `Turno · ${session.cashierName}` : "Caja activa"}</span></div>
+        <div><strong>{user?.name || user?.email || "Cajero"}</strong><span>{session?.openerName ? `Turno · ${session.openerName}` : "Caja activa"}</span></div>
         <div><strong>{bill.tableName}</strong><span>Comanda {comandaNo}</span></div>
         <div className="cashier-charge-footer-time">{new Date().toLocaleString()}</div>
       </footer>
@@ -947,13 +1094,14 @@ function ChargePanel({ bill, splitBills, session, requests, user, onRefresh, onP
             setPaymentMode("full")
           }}
           onPaid={handleSplitPaid}
+          cashSessionId={sharedSessionId}
         />
       )}
     </div>
   )
 }
 
-function CashRegister({ session, summary, user, onRefresh }) {
+function CashRegister({ session, summary, user, onRefresh, onSessionChanged }) {
   const [cashCount, setCashCount] = useState(CASH_DENOMINATION_DEFAULTS)
   const [notes, setNotes] = useState("")
   if (!session) return <article className="cashier-panel"><Empty text="No existe una caja abierta para arquear." /></article>
@@ -987,8 +1135,22 @@ function CashRegister({ session, summary, user, onRefresh }) {
         <p className={difference === 0 ? "balance" : "difference"}>Diferencia <strong>Q{difference.toFixed(2)}</strong></p>
       </div>
       <label>Observaciones<textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder={difference !== 0 ? "Motivo obligatorio de la diferencia" : "Notas del cierre"} /></label>
-      <button type="button" onClick={() => {
+      <button type="button" onClick={async () => {
         const detail = Object.fromEntries(Object.entries(cashCount).map(([key, value]) => [key, Number(value || 0)]))
+        if (session.shared) {
+          if (String(session.openerId) !== String(user?.id) && !canAuthorizeFinance(user)) {
+            onRefresh("Solo puedes cerrar tu propia caja.")
+            return
+          }
+          const result = await closeRemoteCashSession(session.id, counted, notes)
+          if (result.error) {
+            onRefresh(result.error.message || "No se pudo cerrar caja.")
+            return
+          }
+          await onSessionChanged?.()
+          onRefresh("Caja cerrada correctamente.")
+          return
+        }
         const result = closeCashSession(session.id, {
           total: counted,
           billsSubtotal,
@@ -1001,7 +1163,7 @@ function CashRegister({ session, summary, user, onRefresh }) {
   )
 }
 
-function MovementsPanel({ session, movements, authorizations, user, onRefresh }) {
+function MovementsPanel({ session, movements, authorizations, user, onRefresh, onSessionChanged }) {
   const [form, setForm] = useState({ type: "cash_out", amount: "", method: "cash", reason: "" })
   const [refundId, setRefundId] = useState("")
   const payments = loadPayments().filter((payment) => payment.status === "completed")
@@ -1015,7 +1177,32 @@ function MovementsPanel({ session, movements, authorizations, user, onRefresh })
             <label className="cashier-field">Tipo<select value={form.type} onChange={(event) => setForm((current) => ({ ...current, type: event.target.value }))}><option value="cash_in">Ingreso</option><option value="cash_out">Salida</option><option value="expense">Gasto</option><option value="tip_withdrawal">Retiro propinas</option><option value="adjustment">Ajuste</option></select></label>
             <label className="cashier-field">Monto<input type="number" min="0" step="0.01" value={form.amount} onChange={(event) => setForm((current) => ({ ...current, amount: event.target.value }))} /></label>
             <label className="cashier-field">Motivo<textarea value={form.reason} onChange={(event) => setForm((current) => ({ ...current, reason: event.target.value }))} /></label>
-            <button type="button" onClick={() => {
+            <button type="button" onClick={async () => {
+              if (Number(form.amount) <= 0 || !String(form.reason || "").trim()) {
+                onRefresh("Ingresa monto y motivo del movimiento.")
+                return
+              }
+              if (form.type === "adjustment" && !canAuthorizeFinance(user)) {
+                createAuthorizationRequest("Ajuste de caja", form.reason, form.amount, user)
+                onRefresh("Ajuste enviado para autorización.")
+                return
+              }
+              if (session.shared) {
+                const remoteType = { cash_in: "deposit", cash_out: "withdrawal", expense: "withdrawal", tip_withdrawal: "withdrawal", adjustment: "adjustment" }[form.type]
+                if (!remoteType) {
+                  onRefresh("Ese movimiento no se comparte con la caja del servidor.")
+                  return
+                }
+                const result = await createCashMovement({
+                  sessionId: session.id,
+                  movementType: remoteType,
+                  amount: form.amount,
+                  reason: form.reason
+                })
+                if (!result.error) await onSessionChanged?.()
+                onRefresh(result.error ? (result.error.message || "No se pudo registrar el movimiento.") : "Movimiento registrado.")
+                return
+              }
               const result = registerCashMovement(session.id, form, user)
               if (result.requiresAuthorization) {
                 createAuthorizationRequest("Ajuste de caja", form.reason, form.amount, user)

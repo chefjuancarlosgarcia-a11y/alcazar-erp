@@ -4,6 +4,7 @@ import FinanceIntegrationPanel from "../components/FinanceIntegrationPanel"
 import { useAuth } from "../context/AuthContext"
 import { useActionGuard } from "../hooks/useActionGuard"
 import { cashSummary } from "../services/cashService"
+import { UNVERIFIED_CASH_MESSAGE } from "../utils/cashierSession"
 import { createHumanCashPort } from "../services/cashManagementPort"
 import { listFinanceBankAccounts } from "../services/financeService"
 import "./CashManagement.css"
@@ -49,9 +50,10 @@ function CashManagement({ cashPort: cashPortProp, uiConfig = {} }) {
   const [movements, setMovements] = useState([])
   const [bankAccounts, setBankAccounts] = useState([])
   const [loading, setLoading] = useState(true)
+  const [sessionKnown, setSessionKnown] = useState(false)
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
-  const [openingForm, setOpeningForm] = useState({ amount: "500", notes: "" })
+  const [openingForm, setOpeningForm] = useState({ amount: "", notes: "" })
   const [movementForm, setMovementForm] = useState(null)
   const [closeForm, setCloseForm] = useState({ counted: "", notes: "" })
   const summary = useMemo(
@@ -78,7 +80,8 @@ function CashManagement({ cashPort: cashPortProp, uiConfig = {} }) {
       setError("")
       const loaded = await cashPort.load(selectedRegisterIdRef.current)
       if (loaded.error) {
-        setError(loaded.error.message || "No se pudo cargar caja.")
+        setSessionKnown(false)
+        setError(UNVERIFIED_CASH_MESSAGE)
         setLoading(false)
         return
       }
@@ -110,6 +113,7 @@ function CashManagement({ cashPort: cashPortProp, uiConfig = {} }) {
         setMovements(payload.movements || [])
       }
 
+      setSessionKnown(true)
       const bankResult = await listFinanceBankAccounts()
       if (!bankResult.error) setBankAccounts(bankResult.data || [])
 
@@ -138,7 +142,7 @@ function CashManagement({ cashPort: cashPortProp, uiConfig = {} }) {
         return
       }
       setMessage("Caja abierta correctamente.")
-      setOpeningForm({ amount: "500", notes: "" })
+      setOpeningForm({ amount: "", notes: "" })
       await loadData()
     })
   }
@@ -227,7 +231,7 @@ function CashManagement({ cashPort: cashPortProp, uiConfig = {} }) {
           </p>
           {isStationMode && stationBanner && <p className="cash-muted">{stationBanner}</p>}
         </div>
-        <div className={`cash-state ${session ? "open" : "closed"}`}>{session ? "Abierta" : "Cerrada"}</div>
+        <div className={`cash-state ${sessionKnown && session ? "open" : "closed"}`}>{loading ? "Verificando" : !sessionKnown ? "Sin verificar" : session ? "Abierta" : "Cerrada"}</div>
       </header>
 
       {message && <div className="cash-success">{message}</div>}
@@ -262,7 +266,9 @@ function CashManagement({ cashPort: cashPortProp, uiConfig = {} }) {
         <Metric label="Efectivo esperado" value={money(summary.expected)} highlight />
       </section>
 
-      {loading ? <div className="cash-panel">Cargando caja...</div> : !session ? (
+      {loading ? <div className="cash-panel">Cargando caja...</div> : !sessionKnown ? (
+        <article className="cash-panel"><h2>{UNVERIFIED_CASH_MESSAGE}</h2></article>
+      ) : !session ? (
         <form className="cash-panel cash-open-form" onSubmit={handleOpenCash}>
           <div><h2>Abrir caja</h2><p className="cash-muted">No hay caja abierta para este registro.</p></div>
           <label>Fondo inicial<input type="number" min="0" step="0.01" value={openingForm.amount} onChange={(event) => { notifyHumanActivity(); setOpeningForm({ ...openingForm, amount: event.target.value }) }} required /></label>

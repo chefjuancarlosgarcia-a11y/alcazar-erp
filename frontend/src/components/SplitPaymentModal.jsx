@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { createPosSplitPayment, getPosOrderPaymentStatus } from "../services/posOrdersService"
+import { isServerSessionId } from "../utils/cashierSession"
 import { printSubCheck } from "../services/posPrintService"
 
 const PAYMENT_METHODS = [
@@ -13,7 +14,7 @@ function money(value) {
   return Math.round(Number(value || 0) * 100) / 100
 }
 
-export default function SplitPaymentModal({ bill, user, onClose, onPaid }) {
+export default function SplitPaymentModal({ bill, user, onClose, onPaid, cashSessionId = "" }) {
   const [status, setStatus] = useState(null)
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState(false)
@@ -102,6 +103,10 @@ export default function SplitPaymentModal({ bill, user, onClose, onPaid }) {
       return
     }
 
+    if (!isServerSessionId(cashSessionId)) {
+      setMessage("No hay caja abierta para esta sesion.")
+      return
+    }
     setProcessing(true)
     setMessage("Procesando subcuenta...")
     try {
@@ -109,7 +114,8 @@ export default function SplitPaymentModal({ bill, user, onClose, onPaid }) {
         orderId,
         items: selectedLines.map(({ order_item_id, quantity_paid }) => ({ order_item_id, quantity_paid })),
         methods: paymentMethods,
-        paidByLabel
+        paidByLabel,
+        cashSessionId
       })
       if (result.error) {
         setMessage(result.message || "No se pudo registrar la subcuenta.")

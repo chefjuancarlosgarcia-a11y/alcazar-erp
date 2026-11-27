@@ -1,4 +1,5 @@
 import { supabase } from "../lib/supabase"
+import { isServerSessionId } from "../utils/cashierSession"
 
 const CASH_REGISTER_SELECT = "*"
 const CASH_SESSION_SELECT = "*, register:cash_registers(name, location), opener:profiles!cash_sessions_opened_by_fkey(full_name, username), closer:profiles!cash_sessions_closed_by_fkey(full_name, username)"
@@ -67,10 +68,14 @@ export function closeCashSession(sessionId, countedCash, notes) {
   })
 }
 
-export function recordCashSale(orderId, amount) {
+export function recordCashSale(orderId, amount, cashSessionId) {
+  if (!isServerSessionId(cashSessionId)) {
+    return Promise.resolve({ data: null, error: { message: "No hay caja abierta para esta sesion." } })
+  }
   return supabase.rpc("record_cash_sale", {
     p_order_id: orderId,
-    p_amount: Number(amount || 0)
+    p_amount: Number(amount || 0),
+    p_cash_session_id: cashSessionId
   })
 }
 

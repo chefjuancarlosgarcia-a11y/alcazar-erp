@@ -1,4 +1,5 @@
 import { supabase } from "../lib/supabase"
+import { isServerSessionId } from "../utils/cashierSession"
 import { formatSupabaseError, withTimeout } from "./productionTicketsService"
 
 const orderSelect = `*, items:pos_order_items(*), customer:customers(*), customer_address:customer_addresses(*)`
@@ -571,14 +572,16 @@ export async function getPosOrderPaymentStatus(orderId) {
   return { data: data || null, error, message: error ? formatSupabaseError(error) : "" }
 }
 
-export async function createPosSplitPayment({ orderId, items, methods, paidByLabel = "" }) {
+export async function createPosSplitPayment({ orderId, items, methods, paidByLabel = "", cashSessionId = "" }) {
+  const payload = {
+    p_order_id: orderId,
+    p_items: items,
+    p_methods: methods,
+    p_paid_by_label: paidByLabel || null
+  }
+  if (isServerSessionId(cashSessionId)) payload.p_cash_session_id = cashSessionId
   const { data, error } = await withTimeout(
-    supabase.rpc("create_pos_split_payment", {
-      p_order_id: orderId,
-      p_items: items,
-      p_methods: methods,
-      p_paid_by_label: paidByLabel || null
-    }),
+    supabase.rpc("create_pos_split_payment", payload),
     15000,
     "registrar subcuenta POS"
   )
